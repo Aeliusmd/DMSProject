@@ -1,0 +1,1 @@
+export const TWO_FACTOR_AUTH_COUNTDOWN_SECONDS = 5;
