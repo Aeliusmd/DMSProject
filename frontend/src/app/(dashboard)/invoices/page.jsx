@@ -563,11 +563,12 @@ function ResendInvoicesPanel({ invoices }) {
         </div>
       </section>
 
-      <CreateInvoiceModal
-        isOpen={Boolean(selectedInvoiceOrder)}
-        order={selectedInvoiceOrder}
-        onClose={() => setSelectedInvoiceOrder(null)}
-      />
+     <CreateInvoiceModal
+  isOpen={Boolean(selectedInvoiceOrder)}
+  mode="edit"
+  order={selectedInvoiceOrder}
+  onClose={() => setSelectedInvoiceOrder(null)}
+/>
     </>
   );
 }

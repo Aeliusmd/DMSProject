@@ -240,26 +240,44 @@ const filters = [
 
 export default function ActivityLogPage() {
   const [activeFilter, setActiveFilter] = useState("All Modules");
-  const [searchValue, setSearchValue] = useState("");
+  const [dateFilters, setDateFilters] = useState({
+    fromDate: "",
+    toDate: "",
+  });
 
   const filteredLogs = useMemo(() => {
     return activityLogs.filter((log) => {
       const matchesFilter =
         activeFilter === "All Modules" || log.module === activeFilter;
 
-      const search = searchValue.trim().toLowerCase();
+      const logDate = parseDate(log.date);
+      const fromDate = dateFilters.fromDate
+        ? parseDate(dateFilters.fromDate)
+        : null;
+      const toDate = dateFilters.toDate ? parseDate(dateFilters.toDate) : null;
 
-      const matchesSearch =
-        !search ||
-        log.action.toLowerCase().includes(search) ||
-        log.company.toLowerCase().includes(search) ||
-        log.module.toLowerCase().includes(search) ||
-        log.performedBy.toLowerCase().includes(search) ||
-        log.details.toLowerCase().includes(search);
+      const matchesFromDate = fromDate ? logDate >= fromDate : true;
+      const matchesToDate = toDate ? logDate <= toDate : true;
 
-      return matchesFilter && matchesSearch;
+      return matchesFilter && matchesFromDate && matchesToDate;
     });
-  }, [activeFilter, searchValue]);
+  }, [activeFilter, dateFilters]);
+
+  const handleDateFilterChange = (e) => {
+    const { name, value } = e.target;
+
+    setDateFilters((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleResetDateFilters = () => {
+    setDateFilters({
+      fromDate: "",
+      toDate: "",
+    });
+  };
 
   return (
     <DashboardShell>
@@ -284,19 +302,29 @@ export default function ActivityLogPage() {
           </Link>
         </div>
 
-        <div className="grid w-full grid-cols-1 items-center gap-4 2xl:grid-cols-[390px_auto_1fr]">
-          <div className="relative w-full max-w-[390px]">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex w-[36px] items-center justify-center text-[#94A3B8]">
-              <SearchIcon />
-            </div>
-
-            <input
-              type="text"
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              placeholder="Search activities..."
-              className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white pl-[38px] pr-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+        <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[430px_auto_1fr]">
+          <div className="grid w-full max-w-[430px] grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
+            <DateFilter
+              label="From"
+              name="fromDate"
+              value={dateFilters.fromDate}
+              onChange={handleDateFilterChange}
             />
+
+            <DateFilter
+              label="To"
+              name="toDate"
+              value={dateFilters.toDate}
+              onChange={handleDateFilterChange}
+            />
+
+            <button
+              type="button"
+              onClick={handleResetDateFilters}
+              className="h-[36px] self-end rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
+            >
+              Reset
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -333,6 +361,28 @@ export default function ActivityLogPage() {
   );
 }
 
+function DateFilter({ label, name, value, onChange }) {
+  return (
+    <div>
+      <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
+        {label}
+      </label>
+
+      <input
+        type="date"
+        name={name}
+        value={value}
+        onChange={onChange}
+        className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+      />
+    </div>
+  );
+}
+
+function parseDate(dateValue) {
+  return new Date(`${dateValue}T00:00:00`);
+}
+
 function ArrowLeftIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -342,20 +392,6 @@ function ArrowLeftIcon() {
         strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="m20 20-3.5-3.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
       />
     </svg>
   );
