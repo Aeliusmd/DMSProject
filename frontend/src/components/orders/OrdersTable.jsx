@@ -8,6 +8,7 @@ import CoverSheetModal from "@/components/orders/CoverSheetModal";
 import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
+import OrderNotesModal from "@/components/orders/OrderNotesModal";
 
 const ORDERS_PER_PAGE = 6;
 
@@ -461,6 +462,7 @@ export default function OrdersTable() {
     useState(null);
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
+  const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
 
   const totalPages = Math.ceil(orders.length / ORDERS_PER_PAGE);
 
@@ -523,6 +525,7 @@ export default function OrdersTable() {
                     {order.note && (
                       <button
                         type="button"
+                        onClick={() => setSelectedNoteOrder(order)}
                         className="mt-1 block text-[10px] text-[#007F96] underline"
                       >
                         Note
@@ -687,6 +690,12 @@ export default function OrdersTable() {
         order={selectedLogOrder}
         logs={orderActivityLogs}
         onClose={() => setSelectedLogOrder(null)}
+      />
+
+      <OrderNotesModal
+        isOpen={Boolean(selectedNoteOrder)}
+        order={selectedNoteOrder}
+        onClose={() => setSelectedNoteOrder(null)}
       />
     </>
   );

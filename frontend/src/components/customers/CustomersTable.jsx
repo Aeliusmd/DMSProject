@@ -3,14 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
 
-export default function CustomersTable({
-  customers,
-  onUpload,
-  onUsers,
-  onDelete,
-}) {
+export default function CustomersTable({ customers, onDelete }) {
   const [deleteModal, setDeleteModal] = useState({
+    open: false,
+    customer: null,
+  });
+
+  const [uploadModal, setUploadModal] = useState({
     open: false,
     customer: null,
   });
@@ -36,20 +37,38 @@ export default function CustomersTable({
     closeDeleteModal();
   };
 
+  const openUploadModal = (customer) => {
+    setUploadModal({
+      open: true,
+      customer,
+    });
+  };
+
+  const closeUploadModal = () => {
+    setUploadModal({
+      open: false,
+      customer: null,
+    });
+  };
+
+  const handleUploadDocuments = (uploadData) => {
+    console.log("Facility upload:", uploadModal.customer);
+    console.log("Upload data:", uploadData);
+  };
+
   return (
     <>
       <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="h-full overflow-auto">
-          <table className="w-full min-w-[980px] border-collapse">
+          <table className="w-full min-w-[860px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
                 <th className="w-[60px] px-5 py-3">ID</th>
-                <th className="w-[260px] px-5 py-3">Facility</th>
+                <th className="w-[300px] px-5 py-3">Facility</th>
                 <th className="w-[180px] px-5 py-3">City</th>
                 <th className="w-[110px] px-5 py-3">Zip</th>
                 <th className="w-[110px] px-5 py-3 text-center">Notes</th>
                 <th className="w-[110px] px-5 py-3 text-center">Upload</th>
-                <th className="w-[110px] px-5 py-3 text-center">Users</th>
                 <th className="w-[110px] px-5 py-3 text-center">Delete</th>
               </tr>
             </thead>
@@ -65,12 +84,12 @@ export default function CustomersTable({
                   </td>
 
                   <td className="px-5 py-4">
-                    <button
-                      type="button"
+                    <Link
+                      href={`/customers/${customer.id}/info`}
                       className="text-left text-[12px] font-semibold text-[#007F96] hover:underline"
                     >
                       {customer.customer}
-                    </button>
+                    </Link>
                   </td>
 
                   <td className="px-5 py-4 text-[12px] text-[#475569]">
@@ -94,22 +113,12 @@ export default function CustomersTable({
                   <td className="px-5 py-4 text-center">
                     <button
                       type="button"
-                      onClick={() => onUpload(customer)}
+                      onClick={() => openUploadModal(customer)}
                       className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#93C5FD] bg-[#EFF6FF] px-3 text-[11px] font-semibold text-[#2563EB] hover:bg-[#DBEAFE]"
                     >
                       <UploadIcon />
                       Upload
                     </button>
-                  </td>
-
-                  <td className="px-5 py-4 text-center">
-                    <Link
-                      href={`/customers/${customer.id}/users`}
-                      className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[11px] font-semibold text-[#334155] hover:bg-[#F1F5F9]"
-                    >
-                      <UsersIcon />
-                      Users
-                    </Link>
                   </td>
 
                   <td className="px-5 py-4 text-center">
@@ -128,7 +137,7 @@ export default function CustomersTable({
               {customers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={7}
                     className="px-5 py-12 text-center text-[13px] text-[#94A3B8]"
                   >
                     No facilities found.
@@ -151,6 +160,13 @@ export default function CustomersTable({
         cancelLabel="Cancel"
         onCancel={closeDeleteModal}
         onConfirm={handleConfirmDelete}
+      />
+
+      <UploadDocumentsModal
+        open={uploadModal.open}
+        title="Upload Documents"
+        onClose={closeUploadModal}
+        onUpload={handleUploadDocuments}
       />
     </>
   );
@@ -177,26 +193,6 @@ function UploadIcon() {
       />
       <path
         d="M5 19h14"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function UsersIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"

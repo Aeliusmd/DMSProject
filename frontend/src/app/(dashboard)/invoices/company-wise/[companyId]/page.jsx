@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
+import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 
 const companyDetails = {
   1: {
@@ -74,6 +75,8 @@ export default function CompanyInvoiceDetailsPage() {
 
   const [invoices] = useState(invoiceSeed);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+
   const [filters, setFilters] = useState({
     search: "",
     fromDate: "",
@@ -172,6 +175,24 @@ export default function CompanyInvoiceDetailsPage() {
     console.log("Write off invoice:", invoice);
   };
 
+  const handleOpenCreateInvoice = (invoice) => {
+    setSelectedInvoiceOrder({
+      id: invoice.invoiceId,
+      applicant: invoice.invoiceId,
+      court: "N/A",
+      company: {
+        name: company.name,
+      },
+      invoice: {
+        date: invoice.invoiceDate,
+        invoiced: invoice.invoiced,
+        paid: invoice.paid,
+        due: invoice.due,
+        status: invoice.status,
+      },
+    });
+  };
+
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
@@ -242,8 +263,15 @@ export default function CompanyInvoiceDetailsPage() {
           onToggleAll={handleToggleAll}
           onToggleInvoice={handleToggleInvoice}
           onWriteOffSingle={handleWriteOffSingle}
+          onOpenCreateInvoice={handleOpenCreateInvoice}
         />
       </div>
+
+      <CreateInvoiceModal
+        isOpen={Boolean(selectedInvoiceOrder)}
+        order={selectedInvoiceOrder}
+        onClose={() => setSelectedInvoiceOrder(null)}
+      />
     </DashboardShell>
   );
 }
@@ -372,6 +400,7 @@ function CompanyInvoiceTable({
   onToggleAll,
   onToggleInvoice,
   onWriteOffSingle,
+  onOpenCreateInvoice,
 }) {
   return (
     <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
@@ -384,7 +413,7 @@ function CompanyInvoiceTable({
                   type="checkbox"
                   checked={allSelected}
                   onChange={onToggleAll}
-                  className="h-[13px] w-[13px]"
+                  className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
                 />
               </th>
               <th className="w-[160px] px-4 py-3">Invoice ID</th>
@@ -411,23 +440,29 @@ function CompanyInvoiceTable({
                       type="checkbox"
                       checked={selected}
                       onChange={() => onToggleInvoice(invoice.id)}
-                      className="h-[13px] w-[13px]"
+                      className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
                     />
+                  </td>
+
+                  <td className="px-4 py-4 align-middle">
+                    <Link
+                      href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                        invoice.invoiceId
+                      )}`}
+                      className="text-[12px] font-semibold text-[#007F96] hover:underline"
+                    >
+                      {invoice.invoiceId}
+                    </Link>
                   </td>
 
                   <td className="px-4 py-4 align-middle">
                     <button
                       type="button"
-                      className="text-[12px] font-semibold text-[#007F96] hover:underline"
+                      onClick={() => onOpenCreateInvoice(invoice)}
+                      className="text-left text-[12px] font-semibold text-red-500 hover:underline"
                     >
-                      {invoice.invoiceId}
-                    </button>
-                  </td>
-
-                  <td className="px-4 py-4 align-middle">
-                    <p className="text-[12px] font-semibold text-red-500">
                       {invoice.invoiceDate}
-                    </p>
+                    </button>
 
                     <p className="mt-1 text-[10px] text-[#64748B]">
                       ({invoice.days} days)

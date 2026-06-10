@@ -88,13 +88,13 @@ const quickActions = [
     href: "/orders/unprocessed",
     icon: <DocumentIcon />,
   },
+{
+  label: "Batch Scan",
+  href: "/orders/batch-scan",
+  icon: <ScanIcon />,
+},,
   {
-    label: "Batch Scan",
-    href: "/orders",
-    icon: <ScanIcon />,
-  },
-  {
-    label: "Customers",
+    label: "Facilities",
     href: "/customers",
     icon: <CustomerIcon />,
   },
@@ -544,14 +544,15 @@ function RushBadge({ rush }) {
   }
 
   const styles = {
-    "Rush 1": "border-[#FCD34D] bg-[#FFFBEB] text-[#B45309]",
-    "Rush 2": "border-[#FDBA74] bg-[#FFF7ED] text-[#EA580C]",
+    "Rush 1": "border-[#FDBA74] bg-[#FFF7ED] text-[#EA580C]",
+    "Rush 2": "border-[#FB923C] bg-[#FFEDD5] text-[#C2410C]",
+    "Rush 3": "border-red-300 bg-red-50 text-red-600",
   };
 
   return (
     <span
       className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
-        styles[rush] || styles["Rush 1"]
+        styles[rush] || "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
       }`}
     >
       {rush}
