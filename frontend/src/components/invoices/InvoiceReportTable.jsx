@@ -260,6 +260,7 @@ export default function InvoiceReportTable() {
 
       <CreateInvoiceModal
         isOpen={Boolean(selectedInvoiceOrder)}
+        mode="edit"
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
       />
@@ -282,12 +283,7 @@ function InvoiceGroup({
   return (
     <>
       <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-        <td className="px-4 py-4 align-top">
-          <InvoiceCheckbox
-            checked={allSelected}
-            onChange={() => onToggleGroup(group)}
-          />
-        </td>
+        <td className="px-4 py-4 align-top"></td>
 
         <td className="px-4 py-4 align-top">
           <p className="max-w-[170px] text-[12px] font-semibold leading-[20px] text-[#111827]">
@@ -395,11 +391,13 @@ function InvoiceRow({
       <td className="px-4 py-4 align-top">
         <div className="max-w-[190px] text-[12px] leading-[20px]">
           <Link
-  href={`/orders/new?mode=edit&orderId=${encodeURIComponent(row.caseNo)}`}
-  className="whitespace-nowrap font-semibold text-[#007F96] hover:underline"
->
-  {row.caseNo}
-</Link>
+            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+              row.caseNo
+            )}`}
+            className="whitespace-nowrap font-semibold text-[#007F96] hover:underline"
+          >
+            {row.caseNo}
+          </Link>
 
           <span className="ml-2 text-[#94A3B8]">invoice sent</span>
 

@@ -1,6 +1,49 @@
 "use client";
 
+import { useRef, useState } from "react";
+import NotificationsModal from "@/components/layout/NotificationsModal";
+
+const notifications = [
+  {
+    id: 1,
+    type: "order",
+    title: "New Order Added — ORD-2026-012",
+    description: "Taylor Bankruptcy Filing",
+    time: "5 min ago",
+    read: false,
+  },
+  {
+    id: 2,
+    type: "invoice",
+    title: "Invoice Generated — INV-019",
+    description: "Thompson Industries",
+    time: "18 min ago",
+    read: false,
+  },
+  {
+    id: 3,
+    type: "reminder",
+    title: "Reminder Alert — Smith vs. Johnson",
+    description: "forms due in 2 days",
+    time: "1 hour ago",
+    read: false,
+  },
+  {
+    id: 4,
+    type: "employee",
+    title: "Employee Activity — Sarah J. updated",
+    description: "case notes for ORD-2026-009",
+    time: "2 hours ago",
+    read: false,
+  },
+];
+
 export default function Topbar({ onToggleSidebar }) {
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const notificationButtonRef = useRef(null);
+
+  const unreadCount = notifications.filter((item) => !item.read).length;
+
   return (
     <header className="sticky top-0 z-30 flex min-h-[52px] items-center gap-2 border-b border-[#E2E8F0] bg-white px-2 py-2 sm:gap-3 sm:px-[18px]">
       <button
@@ -14,13 +57,30 @@ export default function Topbar({ onToggleSidebar }) {
       <div className="min-w-0 flex-1" />
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-[18px]">
-        <button
-          type="button"
-          className="relative flex h-[30px] w-[30px] items-center justify-center rounded-[6px] text-[#64748B] hover:bg-[#F8FAFC]"
-        >
-          <BellIcon />
-          <span className="absolute right-[7px] top-[6px] h-[6px] w-[6px] rounded-full bg-[#EF4444]" />
-        </button>
+        <div className="relative">
+          <button
+            ref={notificationButtonRef}
+            type="button"
+            onClick={() => setIsNotificationsOpen((prev) => !prev)}
+            className={`relative flex h-[30px] w-[30px] items-center justify-center rounded-[6px] text-[#64748B] hover:bg-[#F8FAFC] ${
+              isNotificationsOpen ? "bg-[#F8FAFC] text-[#0097B2]" : ""
+            }`}
+            aria-label="Open notifications"
+          >
+            <BellIcon />
+
+            {unreadCount > 0 && (
+              <span className="absolute right-[7px] top-[6px] h-[6px] w-[6px] rounded-full bg-[#EF4444]" />
+            )}
+          </button>
+
+          <NotificationsModal
+            open={isNotificationsOpen}
+            notifications={notifications}
+            triggerRef={notificationButtonRef}
+            onClose={() => setIsNotificationsOpen(false)}
+          />
+        </div>
 
         <button
           type="button"
