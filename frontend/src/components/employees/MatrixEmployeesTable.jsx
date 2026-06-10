@@ -198,6 +198,7 @@ export default function MatrixEmployeesTable({
                 <th className="w-[190px] px-5 py-3">Employee</th>
                 <th className="w-[170px] px-5 py-3">Logon</th>
                 <th className="w-[260px] px-5 py-3">Email</th>
+                <th className="w-[150px] px-5 py-3">Role</th>
                 <th className="w-[170px] px-5 py-3">Last Login</th>
                 <th className="w-[120px] px-5 py-3 text-center">
                   Terminate
@@ -220,11 +221,10 @@ export default function MatrixEmployeesTable({
                     <button
                       type="button"
                       onClick={() => setSelectedLogEmployee(employee)}
-                      className={`text-left text-[12px] font-semibold ${
-                        employee.terminated
+                      className={`text-left text-[12px] font-semibold ${employee.terminated
                           ? "text-red-500 line-through hover:underline"
                           : "text-[#007F96] hover:underline"
-                      }`}
+                        }`}
                     >
                       {employee.name}
                     </button>
@@ -243,7 +243,9 @@ export default function MatrixEmployeesTable({
                   <td className="px-5 py-4 text-[12px] text-[#475569]">
                     {employee.email}
                   </td>
-
+                  <td className="px-5 py-4 text-[12px] text-[#475569]">
+                    {employee.role}
+                  </td>
                   <td className="px-5 py-4 text-[12px] text-[#64748B]">
                     {employee.lastLogin}
                   </td>
@@ -284,7 +286,7 @@ export default function MatrixEmployeesTable({
               {employees.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-5 py-12 text-center text-[13px] text-[#94A3B8]"
                   >
                     No employees found.

@@ -7,6 +7,7 @@ const emptyForm = {
   userName: "",
   password: "",
   email: "",
+  role: "Employee",
 };
 
 export default function EmployeeFormModal({ open, onClose, onCreate }) {
@@ -63,6 +64,7 @@ export default function EmployeeFormModal({ open, onClose, onCreate }) {
       logon: formData.userName.trim(),
       password: formData.password,
       email: formData.email.trim(),
+      role: formData.role,
     });
   };
 
@@ -95,7 +97,7 @@ export default function EmployeeFormModal({ open, onClose, onCreate }) {
         </header>
 
         <div className="px-5 py-5">
-          
+
 
           <div className="space-y-4">
             <EmployeeInput
@@ -137,7 +139,14 @@ export default function EmployeeFormModal({ open, onClose, onCreate }) {
               error={getError("email")}
               required
             />
-
+            <EmployeeSelect
+              label="Role"
+              name="role"
+              value={formData.role}
+              onChange={handleChange}
+              error={getError("role")}
+              required
+            />
             {submitAttempted && Object.keys(errors).length > 0 && (
               <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
                 Please fill out all required fields correctly.
@@ -190,12 +199,45 @@ function EmployeeInput({
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
-          error
+        className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${error
+          ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+          : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+          }`}
+      />
+
+      {error && (
+        <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>
+      )}
+    </div>
+  );
+}
+function EmployeeSelect({
+  label,
+  name,
+  value,
+  onChange,
+  error,
+  required = false,
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-[12px] font-semibold text-[#64748B]">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+
+      <select
+        name={name}
+        value={value}
+        onChange={onChange}
+        className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${error
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
             : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-        }`}
-      />
+          }`}
+      >
+       
+        <option value="Manager">Manager</option>
+        <option value="Employee">Employee</option>
+      </select>
 
       {error && (
         <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>
@@ -226,7 +268,9 @@ function validateEmployeeForm(data) {
   } else if (!isValidEmail(data.email)) {
     errors.email = "Enter a valid email address";
   }
-
+  if (!data.role) {
+    errors.role = "Role is required";
+  }
   return errors;
 }
 
@@ -236,6 +280,8 @@ function validateField(field, value) {
     if (field === "userName") return "User name is required";
     if (field === "password") return "Password is required";
     if (field === "email") return "Email is required";
+    if (field === "role") return "Role is required";
+
   }
 
   if (field === "password" && value.length < 8) {
