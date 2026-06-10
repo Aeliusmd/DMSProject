@@ -304,7 +304,7 @@ export default function FacilityDetailsPage() {
               hint="Please leave blank spaces between numbers, names or words"
             />
 
-            <SelectField
+            {/*<SelectField
               label="Parent Company"
               name="parentCompany"
               value={formData.parentCompany}
@@ -315,7 +315,7 @@ export default function FacilityDetailsPage() {
                 "Pacific Law Partners",
                 "Williams & Co.",
               ]}
-            />
+            />*/} 
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
