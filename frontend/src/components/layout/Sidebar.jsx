@@ -9,7 +9,7 @@ const navItems = [
   { label: "Orders", href: "/orders", icon: <OrdersIcon /> },
   { label: "Invoices", href: "/invoices", icon: <InvoicesIcon /> },
   { label: "Employees", href: "/employees", icon: <EmployeesIcon /> },
-  { label: "Facilities", href: "/customers", icon: <CustomersIcon /> },
+  { label: "Facilities", href: "/facilities", icon: <CustomersIcon /> },
   { label: "Activity Log", href: "/activity-log", icon: <ActivityIcon /> },
   { label: "Reports", href: "/reports", icon: <ReportsIcon /> },
   { label: "Settings", href: "/settings", icon: <SettingsIcon /> },

@@ -135,7 +135,7 @@ export default function FacilityDetailsPage() {
   const params = useParams();
 
   const facilityId = String(
-    params?.CustomerId || params?.customerId || params?.id || "1"
+    params?.facilityId || params?.FacilityId || params?.id || "1"
   );
 
   const facility = facilitiesSeed[facilityId] || facilitiesSeed[1];
@@ -272,7 +272,7 @@ export default function FacilityDetailsPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href="/customers"
+              href="/facilities"
               className="inline-flex h-[36px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
             >
               <ArrowLeftIcon />
@@ -280,7 +280,7 @@ export default function FacilityDetailsPage() {
             </Link>
 
             <Link
-              href={`/customers/${facilityId}/users`}
+              href={`/facilities/${facilityId}/users`}
               className="inline-flex h-[36px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
             >
               <UsersIcon />
@@ -304,7 +304,7 @@ export default function FacilityDetailsPage() {
               hint="Please leave blank spaces between numbers, names or words"
             />
 
-            {/*<SelectField
+            {/* <SelectField
               label="Parent Company"
               name="parentCompany"
               value={formData.parentCompany}
@@ -315,7 +315,7 @@ export default function FacilityDetailsPage() {
                 "Pacific Law Partners",
                 "Williams & Co.",
               ]}
-            />*/} 
+            /> */}
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -790,7 +790,7 @@ function NotesCard({ facilityId }) {
         <h2 className="text-[13px] font-semibold text-[#111827]">Notes</h2>
 
         <Link
-          href={`/customers/${facilityId}/notes`}
+          href={`/facilities/${facilityId}/notes`}
           className="inline-flex h-[28px] items-center justify-center gap-1 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96]"
         >
           <PlusIcon />

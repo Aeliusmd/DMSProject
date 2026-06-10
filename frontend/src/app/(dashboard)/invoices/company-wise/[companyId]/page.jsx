@@ -175,7 +175,7 @@ export default function CompanyInvoiceDetailsPage() {
     console.log("Write off invoice:", invoice);
   };
 
-  const handleOpenCreateInvoice = (invoice) => {
+  const handleOpenEditInvoice = (invoice) => {
     setSelectedInvoiceOrder({
       id: invoice.invoiceId,
       applicant: invoice.invoiceId,
@@ -185,6 +185,7 @@ export default function CompanyInvoiceDetailsPage() {
       },
       invoice: {
         date: invoice.invoiceDate,
+        sentDate: invoice.invoiceDate,
         invoiced: invoice.invoiced,
         paid: invoice.paid,
         due: invoice.due,
@@ -263,12 +264,13 @@ export default function CompanyInvoiceDetailsPage() {
           onToggleAll={handleToggleAll}
           onToggleInvoice={handleToggleInvoice}
           onWriteOffSingle={handleWriteOffSingle}
-          onOpenCreateInvoice={handleOpenCreateInvoice}
+          onOpenEditInvoice={handleOpenEditInvoice}
         />
       </div>
 
       <CreateInvoiceModal
         isOpen={Boolean(selectedInvoiceOrder)}
+        mode="edit"
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
       />
@@ -400,7 +402,7 @@ function CompanyInvoiceTable({
   onToggleAll,
   onToggleInvoice,
   onWriteOffSingle,
-  onOpenCreateInvoice,
+  onOpenEditInvoice,
 }) {
   return (
     <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
@@ -458,7 +460,7 @@ function CompanyInvoiceTable({
                   <td className="px-4 py-4 align-middle">
                     <button
                       type="button"
-                      onClick={() => onOpenCreateInvoice(invoice)}
+                      onClick={() => onOpenEditInvoice(invoice)}
                       className="text-left text-[12px] font-semibold text-red-500 hover:underline"
                     >
                       {invoice.invoiceDate}

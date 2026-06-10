@@ -5,22 +5,22 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 
-const customers = [
-  { id: 1, customer: "Smith & Associates" },
-  { id: 2, customer: "Martinez Legal Group" },
-  { id: 3, customer: "Pacific Law Partners" },
-  { id: 4, customer: "Williams & Co." },
-  { id: 5, customer: "Brown Family Trust" },
-  { id: 6, customer: "Davis Law Firm" },
-  { id: 7, customer: "Rodriguez & Partners" },
-  { id: 8, customer: "Thompson Industries" },
-  { id: 9, customer: "Garcia Legal Services" },
-  { id: 10, customer: "Lee Tech Holdings" },
-  { id: 11, customer: "Anderson Accounting" },
-  { id: 12, customer: "Taylor Financial Group" },
-  { id: 13, customer: "Harrison Medical Group" },
-  { id: 14, customer: "O'Connor Legal" },
-  { id: 15, customer: "Nelson Healthcare" },
+const facilities = [
+  { id: 1, facility: "Smith & Associates" },
+  { id: 2, facility: "Martinez Legal Group" },
+  { id: 3, facility: "Pacific Law Partners" },
+  { id: 4, facility: "Williams & Co." },
+  { id: 5, facility: "Brown Family Trust" },
+  { id: 6, facility: "Davis Law Firm" },
+  { id: 7, facility: "Rodriguez & Partners" },
+  { id: 8, facility: "Thompson Industries" },
+  { id: 9, facility: "Garcia Legal Services" },
+  { id: 10, facility: "Lee Tech Holdings" },
+  { id: 11, facility: "Anderson Accounting" },
+  { id: 12, facility: "Taylor Financial Group" },
+  { id: 13, facility: "Harrison Medical Group" },
+  { id: 14, facility: "O'Connor Legal" },
+  { id: 15, facility: "Nelson Healthcare" },
 ];
 
 const initialNotes = [
@@ -28,7 +28,7 @@ const initialNotes = [
     id: 1,
     date: "2026-4-15",
     by: "John Doe",
-    note: "Initial setup completed. Customer verified all contact information.",
+    note: "Initial setup completed. Facility verified all contact information.",
   },
   {
     id: 2,
@@ -38,13 +38,13 @@ const initialNotes = [
   },
 ];
 
-export default function CustomerNotesPage() {
+export default function FacilityNotesPage() {
   const params = useParams();
-  const customerId = Number(params.customerId);
+  const facilityId = Number(params.facilityId || params.FacilityId || params.id);
 
-  const customer = useMemo(() => {
-    return customers.find((item) => item.id === customerId) || customers[0];
-  }, [customerId]);
+  const facility = useMemo(() => {
+    return facilities.find((item) => item.id === facilityId) || facilities[0];
+  }, [facilityId]);
 
   const [note, setNote] = useState("");
   const [notes, setNotes] = useState(initialNotes);
@@ -76,8 +76,8 @@ export default function CustomerNotesPage() {
     setNote("");
     setError("");
 
-    console.log("Saved customer note:", {
-      customer,
+    console.log("Saved facility note:", {
+      facility,
       note: newNote,
     });
   };
@@ -87,11 +87,11 @@ export default function CustomerNotesPage() {
       <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
         <div className="flex w-full items-center justify-between gap-4">
           <h1 className="text-[18px] font-semibold text-[#111827]">
-            {customer.customer} - Notes
+            {facility.facility} - Notes
           </h1>
 
           <Link
-            href="/customers"
+            href="/facilities"
             className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
           >
             <ArrowLeftIcon />
@@ -106,9 +106,9 @@ export default function CustomerNotesPage() {
             </h2>
 
             <div className="space-y-5">
-              <CustomerInput
+              <FacilityInput
                 label="Facility"
-                value={customer.customer}
+                value={facility.facility}
                 disabled
               />
 
@@ -139,14 +139,14 @@ export default function CustomerNotesPage() {
               </div>
 
               <div className="pt-3">
-  <button
-    type="button"
-    onClick={handleSave}
-    className="inline-flex h-[36px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
-  >
-    Save
-  </button>
-</div>
+                <button
+                  type="button"
+                  onClick={handleSave}
+                  className="inline-flex h-[36px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </section>
 
@@ -205,7 +205,7 @@ export default function CustomerNotesPage() {
   );
 }
 
-function CustomerInput({ label, value, disabled = false }) {
+function FacilityInput({ label, value, disabled = false }) {
   return (
     <div>
       <label className="mb-2 block text-[12px] font-semibold text-[#64748B]">

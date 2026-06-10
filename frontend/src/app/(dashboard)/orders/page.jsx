@@ -40,7 +40,7 @@ export default function OrdersPage() {
                Unprocessed
             </OrderActionButton>
 
-            <OrderActionButton icon={<BatchIcon />}>
+            <OrderActionButton href="/orders/batch-scan" icon={<BatchIcon />}>
               Batch Scan
             </OrderActionButton>
 

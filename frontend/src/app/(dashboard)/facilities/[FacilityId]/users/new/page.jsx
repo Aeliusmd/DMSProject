@@ -40,10 +40,10 @@ const initialFormData = {
 
 const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export default function NewCustomerUserPage() {
+export default function NewFacilityUserPage() {
   const router = useRouter();
   const params = useParams();
-  const customerId = getCustomerIdFromParams(params);
+  const facilityId = getFacilityIdFromParams(params);
 
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
@@ -126,8 +126,8 @@ export default function NewCustomerUserPage() {
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    console.log("New customer user:", {
-      customerId,
+    console.log("New facility user:", {
+      facilityId,
       firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(),
       email: formData.email.trim(),
@@ -141,7 +141,7 @@ export default function NewCustomerUserPage() {
       password: formData.password,
     });
 
-    router.push(`/customers/${customerId}/users`);
+    router.push(`/facilities/${facilityId}/users`);
   };
 
   const getError = (field) => {
@@ -158,7 +158,7 @@ export default function NewCustomerUserPage() {
           </h1>
 
           <Link
-            href={`/customers/${customerId}/users`}
+            href={`/facilities/${facilityId}/users`}
             className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
           >
             <ArrowLeftIcon />
@@ -522,12 +522,13 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 }
 
-function getCustomerIdFromParams(params) {
+function getFacilityIdFromParams(params) {
   const rawId =
-    params?.customerId ||
+    params?.facilityId ||
+    params?.FacilityId ||
     params?.id ||
-    params?.customer ||
-    params?.customerID ||
+    params?.facility ||
+    params?.facilityID ||
     "1";
 
   const value = Array.isArray(rawId) ? rawId[0] : rawId;

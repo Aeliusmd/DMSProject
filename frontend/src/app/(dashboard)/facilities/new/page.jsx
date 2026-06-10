@@ -119,7 +119,9 @@ export default function NewFacilityPage() {
   };
 
   const handleRemoveManager = (index) => {
-    setManagers((prev) => prev.filter((_, managerIndex) => managerIndex !== index));
+    setManagers((prev) =>
+      prev.filter((_, managerIndex) => managerIndex !== index)
+    );
 
     setErrors((prev) => {
       const nextErrors = {};
@@ -148,7 +150,7 @@ export default function NewFacilityPage() {
     });
 
     // Later: call create facility API here
-    router.push("/customers");
+    router.push("/facilities");
   };
 
   const getError = (field) => {
@@ -170,7 +172,7 @@ export default function NewFacilityPage() {
           </h1>
 
           <Link
-            href="/customers"
+            href="/facilities"
             className="text-[12px] font-semibold text-[#007F96] hover:underline"
           >
             Facilities
@@ -208,7 +210,7 @@ export default function NewFacilityPage() {
                     "Williams & Co.",
                     "Brown Family Trust",
                   ]}
-                />*/}
+                /> */}
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

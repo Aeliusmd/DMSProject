@@ -3,111 +3,111 @@
 import { useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
-import CustomersTable from "@/components/customers/CustomersTable";
+import FacilityTable from "@/components/facilities/FacilityTable";
 
-const customersSeed = [
+const facilitiesSeed = [
   {
     id: 1,
-    customer: "Smith & Associates",
+    facility: "Smith & Associates",
     city: "Beverly Hills",
     zip: "90210",
   },
   {
     id: 2,
-    customer: "Martinez Legal Group",
+    facility: "Martinez Legal Group",
     city: "Los Angeles",
     zip: "90017",
   },
   {
     id: 3,
-    customer: "Pacific Law Partners",
+    facility: "Pacific Law Partners",
     city: "San Francisco",
     zip: "94105",
   },
   {
     id: 4,
-    customer: "Williams & Co.",
+    facility: "Williams & Co.",
     city: "Houston",
     zip: "77002",
   },
   {
     id: 5,
-    customer: "Brown Family Trust",
+    facility: "Brown Family Trust",
     city: "New York",
     zip: "10001",
   },
   {
     id: 6,
-    customer: "Davis Law Firm",
+    facility: "Davis Law Firm",
     city: "Chicago",
     zip: "60601",
   },
   {
     id: 7,
-    customer: "Rodriguez & Partners",
+    facility: "Rodriguez & Partners",
     city: "Miami",
     zip: "33101",
   },
   {
     id: 8,
-    customer: "Thompson Industries",
+    facility: "Thompson Industries",
     city: "Atlanta",
     zip: "30309",
   },
   {
     id: 9,
-    customer: "Garcia Legal Services",
+    facility: "Garcia Legal Services",
     city: "Phoenix",
     zip: "85001",
   },
   {
     id: 10,
-    customer: "Lee Tech Holdings",
+    facility: "Lee Tech Holdings",
     city: "Seattle",
     zip: "98101",
   },
   {
     id: 11,
-    customer: "Anderson Accounting",
+    facility: "Anderson Accounting",
     city: "Dallas",
     zip: "75201",
   },
   {
     id: 12,
-    customer: "Taylor Financial Group",
+    facility: "Taylor Financial Group",
     city: "Chicago",
     zip: "60606",
   },
   {
     id: 13,
-    customer: "Harrison Medical Group",
+    facility: "Harrison Medical Group",
     city: "Houston",
     zip: "77030",
   },
   {
     id: 14,
-    customer: "O'Connor Legal",
+    facility: "O'Connor Legal",
     city: "Boston",
     zip: "02101",
   },
   {
     id: 15,
-    customer: "Nelson Healthcare",
+    facility: "Nelson Healthcare",
     city: "Orlando",
     zip: "32801",
   },
 ];
 
-export default function CustomersPage() {
-  const [customers, setCustomers] = useState(customersSeed);
+export default function FacilitiesPage() {
+  const [facilities, setFacilities] = useState(facilitiesSeed);
 
-  const handleDeleteCustomer = (customer) => {
-    setCustomers((prev) => prev.filter((item) => item.id !== customer.id));
-    console.log("Deleted facility:", customer);
+  const handleDeleteFacility = (facility) => {
+    setFacilities((prev) => prev.filter((item) => item.id !== facility.id));
+    console.log("Deleted facility:", facility);
   };
 
-  const handleUpload = (customer) => {
-    console.log("Open facility upload:", customer);
+  const handleUpload = (facility) => {
+    console.log("Open facility upload:", facility);
   };
 
   return (
@@ -128,7 +128,7 @@ export default function CustomersPage() {
             </Link>
 
             <Link
-              href="/customers/new"
+              href="/facilities/new"
               className="inline-flex h-[36px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-[#0086A0]"
             >
               <UserPlusIcon />
@@ -137,10 +137,10 @@ export default function CustomersPage() {
           </div>
         </div>
 
-        <CustomersTable
-          customers={customers}
+        <FacilityTable
+          facilities={facilities}
           onUpload={handleUpload}
-          onDelete={handleDeleteCustomer}
+          onDelete={handleDeleteFacility}
         />
       </div>
     </DashboardShell>

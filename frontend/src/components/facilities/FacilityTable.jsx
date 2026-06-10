@@ -5,54 +5,54 @@ import Link from "next/link";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
 
-export default function CustomersTable({ customers, onDelete }) {
+export default function FacilitiesTable({ facilities, onDelete }) {
   const [deleteModal, setDeleteModal] = useState({
     open: false,
-    customer: null,
+    facility: null,
   });
 
   const [uploadModal, setUploadModal] = useState({
     open: false,
-    customer: null,
+    facility: null,
   });
 
-  const openDeleteModal = (customer) => {
+  const openDeleteModal = (facility) => {
     setDeleteModal({
       open: true,
-      customer,
+      facility,
     });
   };
 
   const closeDeleteModal = () => {
     setDeleteModal({
       open: false,
-      customer: null,
+      facility: null,
     });
   };
 
   const handleConfirmDelete = () => {
-    if (!deleteModal.customer) return;
+    if (!deleteModal.facility) return;
 
-    onDelete(deleteModal.customer);
+    onDelete(deleteModal.facility);
     closeDeleteModal();
   };
 
-  const openUploadModal = (customer) => {
+  const openUploadModal = (facility) => {
     setUploadModal({
       open: true,
-      customer,
+      facility,
     });
   };
 
   const closeUploadModal = () => {
     setUploadModal({
       open: false,
-      customer: null,
+      facility: null,
     });
   };
 
   const handleUploadDocuments = (uploadData) => {
-    console.log("Facility upload:", uploadModal.customer);
+    console.log("Facility upload:", uploadModal.facility);
     console.log("Upload data:", uploadData);
   };
 
@@ -74,35 +74,35 @@ export default function CustomersTable({ customers, onDelete }) {
             </thead>
 
             <tbody>
-              {customers.map((customer) => (
+              {facilities.map((facility) => (
                 <tr
-                  key={customer.id}
+                  key={facility.id}
                   className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC] hover:bg-[#F1F9FB]"
                 >
                   <td className="px-5 py-4 text-[12px] text-[#64748B]">
-                    {customer.id}
+                    {facility.id}
                   </td>
 
                   <td className="px-5 py-4">
                     <Link
-                      href={`/customers/${customer.id}/info`}
+                      href={`/facilities/${facility.id}/info`}
                       className="text-left text-[12px] font-semibold text-[#007F96] hover:underline"
                     >
-                      {customer.customer}
+                      {facility.facility}
                     </Link>
                   </td>
 
                   <td className="px-5 py-4 text-[12px] text-[#475569]">
-                    {customer.city}
+                    {facility.city}
                   </td>
 
                   <td className="px-5 py-4 text-[12px] text-[#475569]">
-                    {customer.zip}
+                    {facility.zip}
                   </td>
 
                   <td className="px-5 py-4 text-center">
                     <Link
-                      href={`/customers/${customer.id}/notes`}
+                      href={`/facilities/${facility.id}/notes`}
                       className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
                     >
                       <NotesIcon />
@@ -113,7 +113,7 @@ export default function CustomersTable({ customers, onDelete }) {
                   <td className="px-5 py-4 text-center">
                     <button
                       type="button"
-                      onClick={() => openUploadModal(customer)}
+                      onClick={() => openUploadModal(facility)}
                       className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#93C5FD] bg-[#EFF6FF] px-3 text-[11px] font-semibold text-[#2563EB] hover:bg-[#DBEAFE]"
                     >
                       <UploadIcon />
@@ -124,7 +124,7 @@ export default function CustomersTable({ customers, onDelete }) {
                   <td className="px-5 py-4 text-center">
                     <button
                       type="button"
-                      onClick={() => openDeleteModal(customer)}
+                      onClick={() => openDeleteModal(facility)}
                       className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
                     >
                       <TrashIcon />
@@ -134,7 +134,7 @@ export default function CustomersTable({ customers, onDelete }) {
                 </tr>
               ))}
 
-              {customers.length === 0 && (
+              {facilities.length === 0 && (
                 <tr>
                   <td
                     colSpan={7}
@@ -153,7 +153,7 @@ export default function CustomersTable({ customers, onDelete }) {
         open={deleteModal.open}
         title="Delete Facility"
         message={`Are you sure you want to delete ${
-          deleteModal.customer?.customer || "this facility"
+          deleteModal.facility?.facility || "this facility"
         }? This action cannot be undone.`}
         variant="danger"
         confirmLabel="Confirm"

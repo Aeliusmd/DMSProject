@@ -516,7 +516,9 @@ export default function OrdersTable() {
                 >
                   <td className="px-4 py-5 align-top">
                     <Link
-                      href="/orders/new"
+                      href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                        order.id
+                      )}`}
                       className="font-semibold text-[#007F96] hover:underline"
                     >
                       {order.id}

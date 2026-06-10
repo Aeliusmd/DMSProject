@@ -6,25 +6,25 @@ import { useParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 
-const customers = [
-  { id: 1, customer: "Smith & Associates" },
-  { id: 2, customer: "Martinez Legal Group" },
-  { id: 3, customer: "Pacific Law Partners" },
-  { id: 4, customer: "Williams & Co." },
-  { id: 5, customer: "Brown Family Trust" },
-  { id: 6, customer: "Davis Law Firm" },
-  { id: 7, customer: "Rodriguez & Partners" },
-  { id: 8, customer: "Thompson Industries" },
-  { id: 9, customer: "Garcia Legal Services" },
-  { id: 10, customer: "Lee Tech Holdings" },
-  { id: 11, customer: "Anderson Accounting" },
-  { id: 12, customer: "Taylor Financial Group" },
-  { id: 13, customer: "Harrison Medical Group" },
-  { id: 14, customer: "O'Connor Legal" },
-  { id: 15, customer: "Nelson Healthcare" },
+const facilities = [
+  { id: 1, facility: "Smith & Associates" },
+  { id: 2, facility: "Martinez Legal Group" },
+  { id: 3, facility: "Pacific Law Partners" },
+  { id: 4, facility: "Williams & Co." },
+  { id: 5, facility: "Brown Family Trust" },
+  { id: 6, facility: "Davis Law Firm" },
+  { id: 7, facility: "Rodriguez & Partners" },
+  { id: 8, facility: "Thompson Industries" },
+  { id: 9, facility: "Garcia Legal Services" },
+  { id: 10, facility: "Lee Tech Holdings" },
+  { id: 11, facility: "Anderson Accounting" },
+  { id: 12, facility: "Taylor Financial Group" },
+  { id: 13, facility: "Harrison Medical Group" },
+  { id: 14, facility: "O'Connor Legal" },
+  { id: 15, facility: "Nelson Healthcare" },
 ];
 
-const usersByCustomer = {
+const usersByFacility = {
   1: [
     {
       id: 1,
@@ -302,13 +302,13 @@ const usersByCustomer = {
   ],
 };
 
-export default function CustomerUsersPage() {
+export default function FacilityUsersPage() {
   const params = useParams();
-  const customerId = getCustomerIdFromParams(params);
+  const facilityId = getFacilityIdFromParams(params);
 
-  const customer = useMemo(() => {
-    return customers.find((item) => item.id === customerId) || customers[0];
-  }, [customerId]);
+  const facility = useMemo(() => {
+    return facilities.find((item) => item.id === facilityId) || facilities[0];
+  }, [facilityId]);
 
   const [users, setUsers] = useState([]);
   const [deleteModal, setDeleteModal] = useState({
@@ -317,8 +317,8 @@ export default function CustomerUsersPage() {
   });
 
   useEffect(() => {
-    setUsers(usersByCustomer[customerId] || usersByCustomer[1]);
-  }, [customerId]);
+    setUsers(usersByFacility[facilityId] || usersByFacility[1]);
+  }, [facilityId]);
 
   const openDeleteModal = (user) => {
     setDeleteModal({
@@ -339,8 +339,8 @@ export default function CustomerUsersPage() {
 
     setUsers((prev) => prev.filter((user) => user.id !== deleteModal.user.id));
 
-    console.log("Deleted customer user:", {
-      customer,
+    console.log("Deleted facility user:", {
+      facility,
       user: deleteModal.user,
     });
 
@@ -348,14 +348,14 @@ export default function CustomerUsersPage() {
   };
 
   const handleLogin = (user) => {
-    console.log("Login as customer user:", {
-      customer,
+    console.log("Login as facility user:", {
+      facility,
       user,
     });
   };
 
   const handleNewUser = () => {
-    console.log("Open new user form for customer:", customer);
+    console.log("Open new user form for facility:", facility);
   };
 
   return (
@@ -363,7 +363,7 @@ export default function CustomerUsersPage() {
       <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
         <div className="flex w-full flex-col gap-4 lg:flex-row lg:items-center">
           <h1 className="shrink-0 text-[18px] font-semibold text-[#111827]">
-            {customer.customer} - List of Users
+            {facility.facility} - List of Users
           </h1>
 
           <div className="flex w-full flex-wrap items-center gap-3 lg:ml-auto lg:w-auto lg:justify-end">
@@ -375,13 +375,14 @@ export default function CustomerUsersPage() {
               Orders
             </Link>
 
-     <Link
-  href={`/customers/${customerId}/users/new`}
-  className="inline-flex h-[36px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-[#0086A0]"
->
-  <UserPlusIcon />
-  New User
-</Link>
+            <Link
+              href={`/facilities/${facilityId}/users/new`}
+              onClick={handleNewUser}
+              className="inline-flex h-[36px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-[#0086A0]"
+            >
+              <UserPlusIcon />
+              New User
+            </Link>
           </div>
         </div>
 
@@ -403,7 +404,7 @@ export default function CustomerUsersPage() {
               <tbody>
                 {users.map((user) => (
                   <tr
-                    key={`${customerId}-${user.id}`}
+                    key={`${facilityId}-${user.id}`}
                     className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC] hover:bg-[#F1F9FB]"
                   >
                     <td className="px-5 py-4 text-[12px] text-[#64748B]">
@@ -461,7 +462,7 @@ export default function CustomerUsersPage() {
                       colSpan={7}
                       className="px-5 py-12 text-center text-[13px] text-[#94A3B8]"
                     >
-                      No users found for this customer.
+                      No users found for this facility.
                     </td>
                   </tr>
                 )}
@@ -487,12 +488,13 @@ export default function CustomerUsersPage() {
   );
 }
 
-function getCustomerIdFromParams(params) {
+function getFacilityIdFromParams(params) {
   const rawId =
-    params?.customerId ||
+    params?.facilityId ||
+    params?.FacilityId ||
     params?.id ||
-    params?.customer ||
-    params?.customerID ||
+    params?.facility ||
+    params?.facilityID ||
     "1";
 
   const value = Array.isArray(rawId) ? rawId[0] : rawId;
