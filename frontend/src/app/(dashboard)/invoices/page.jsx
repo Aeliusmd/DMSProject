@@ -5,6 +5,7 @@ import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
+import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 
 const resendInvoices = [
   {
@@ -386,111 +387,188 @@ function SummaryItem({ label, value, green = false, red = false }) {
 }
 
 function ResendInvoicesPanel({ invoices }) {
+  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
+
+  const allSelected =
+    invoices.length > 0 && selectedInvoiceIds.length === invoices.length;
+
+  const handleToggleAll = () => {
+    if (allSelected) {
+      setSelectedInvoiceIds([]);
+      return;
+    }
+
+    setSelectedInvoiceIds(invoices.map((invoice) => invoice.id));
+  };
+
+  const handleToggleInvoice = (invoiceId) => {
+    setSelectedInvoiceIds((prev) => {
+      if (prev.includes(invoiceId)) {
+        return prev.filter((id) => id !== invoiceId);
+      }
+
+      return [...prev, invoiceId];
+    });
+  };
+
+  const handleOpenInvoiceModal = (invoice) => {
+    setSelectedInvoiceOrder({
+      id: invoice.caseNo,
+      applicant: invoice.caseNo,
+      court: "N/A",
+      company: {
+        name: invoice.company,
+      },
+      invoice: {
+        date: invoice.invoiceDate,
+        sentDate: invoice.sentDate,
+        invoiced: invoice.invoiced,
+        paid: invoice.paid,
+        due: invoice.due,
+      },
+    });
+  };
+
   return (
-    <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-      <div className="h-full max-h-[calc(100vh-330px)] overflow-auto">
-        <table className="w-full min-w-[1150px] border-collapse">
-          <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
-            <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
-              <th className="w-[48px] px-4 py-3">
-                <input type="checkbox" className="h-[13px] w-[13px]" />
-              </th>
-              <th className="w-[230px] px-4 py-3">All Company</th>
-              <th className="w-[310px] px-4 py-3">Email</th>
-              <th className="w-[170px] px-4 py-3">Case</th>
-              <th className="w-[130px] px-4 py-3">Inv Date</th>
-              <th className="w-[130px] px-4 py-3">Invoiced</th>
-              <th className="w-[130px] px-4 py-3">Paid</th>
-              <th className="w-[130px] px-4 py-3">Due</th>
-              <th className="w-[120px] px-4 py-3 text-center">Action</th>
-            </tr>
-          </thead>
+    <>
+      <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
+        <div className="h-full max-h-[calc(100vh-330px)] overflow-auto">
+          <table className="w-full min-w-[1150px] border-collapse">
+            <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
+              <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
+                <th className="w-[48px] px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={handleToggleAll}
+                    className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
+                  />
+                </th>
+                <th className="w-[230px] px-4 py-3">All Company</th>
+                <th className="w-[310px] px-4 py-3">Email</th>
+                <th className="w-[170px] px-4 py-3">Case</th>
+                <th className="w-[130px] px-4 py-3">Inv Date</th>
+                <th className="w-[130px] px-4 py-3">Invoiced</th>
+                <th className="w-[130px] px-4 py-3">Paid</th>
+                <th className="w-[130px] px-4 py-3">Due</th>
+                <th className="w-[120px] px-4 py-3 text-center">Action</th>
+              </tr>
+            </thead>
 
-          <tbody>
-            {invoices.map((invoice) => (
-              <tr
-                key={invoice.id}
-                className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-              >
-                <td className="px-4 py-4 align-middle">
-                  <input type="checkbox" className="h-[13px] w-[13px]" />
-                </td>
+            <tbody>
+              {invoices.map((invoice) => {
+                const isSelected = selectedInvoiceIds.includes(invoice.id);
 
-                <td className="px-4 py-4 align-middle">
-                  <p className="text-[12px] font-semibold text-[#111827]">
-                    {invoice.company}
-                  </p>
-                </td>
-
-                <td className="px-4 py-4 align-middle">
-                  <p className="max-w-[270px] truncate text-[12px] text-[#475569]">
-                    {invoice.email}
-                  </p>
-                </td>
-
-                <td className="px-4 py-4 align-middle">
-                  <div className="flex flex-wrap items-center gap-1 text-[12px]">
-                    <button
-                      type="button"
-                      className="font-semibold text-[#007F96] hover:underline"
-                    >
-                      {invoice.caseNo}
-                    </button>
-
-                    <span className="text-[#94A3B8]">(invoice sent)</span>
-
-                    <span className="font-semibold text-red-500">
-                      {invoice.sentDate}
-                    </span>
-
-                    <span className="text-[#64748B]">
-                      ({invoice.days} days)
-                    </span>
-                  </div>
-                </td>
-
-                <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                  {invoice.invoiceDate}
-                </td>
-
-                <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                  {invoice.invoiced}
-                </td>
-
-                <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#059669]">
-                  {invoice.paid}
-                </td>
-
-                <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#111827]">
-                  {invoice.due}
-                </td>
-
-                <td className="px-4 py-4 text-center align-middle">
-                  <button
-                    type="button"
-                    onClick={() => console.log("Resend invoice:", invoice)}
-                    className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+                return (
+                  <tr
+                    key={invoice.id}
+                    className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
                   >
-                    Resend
-                  </button>
-                </td>
-              </tr>
-            ))}
+                    <td className="px-4 py-4 align-middle">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleInvoice(invoice.id)}
+                        className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
+                      />
+                    </td>
 
-            {invoices.length === 0 && (
-              <tr>
-                <td
-                  colSpan={9}
-                  className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
-                >
-                  No resend invoices found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+                    <td className="px-4 py-4 align-middle">
+                      <p className="text-[12px] font-semibold text-[#111827]">
+                        {invoice.company}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-4 align-middle">
+                      <p className="max-w-[270px] truncate text-[12px] text-[#475569]">
+                        {invoice.email}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-4 align-middle">
+                      <div className="flex flex-wrap items-center gap-1 text-[12px]">
+                        <Link
+                          href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                            invoice.caseNo
+                          )}`}
+                          className="font-semibold text-[#007F96] hover:underline"
+                        >
+                          {invoice.caseNo}
+                        </Link>
+
+                        <span className="text-[#94A3B8]">(invoice sent)</span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenInvoiceModal(invoice)}
+                          className="font-semibold text-red-500 hover:underline"
+                        >
+                          {invoice.sentDate}
+                        </button>
+
+                        <span className="text-[#64748B]">
+                          ({invoice.days} days)
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenInvoiceModal(invoice)}
+                        className="text-[#475569] hover:text-[#007F96] hover:underline"
+                      >
+                        {invoice.invoiceDate}
+                      </button>
+                    </td>
+
+                    <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
+                      {invoice.invoiced}
+                    </td>
+
+                    <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#059669]">
+                      {invoice.paid}
+                    </td>
+
+                    <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#111827]">
+                      {invoice.due}
+                    </td>
+
+                    <td className="px-4 py-4 text-center align-middle">
+                      <button
+                        type="button"
+                        onClick={() => console.log("Resend invoice:", invoice)}
+                        className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+                      >
+                        Resend
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {invoices.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                  >
+                    No resend invoices found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <CreateInvoiceModal
+        isOpen={Boolean(selectedInvoiceOrder)}
+        order={selectedInvoiceOrder}
+        onClose={() => setSelectedInvoiceOrder(null)}
+      />
+    </>
   );
 }
 

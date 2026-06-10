@@ -101,25 +101,13 @@ const customersSeed = [
 export default function CustomersPage() {
   const [customers, setCustomers] = useState(customersSeed);
 
-  const handleNewCustomer = () => {
-    console.log("Open new facility form");
-  };
-
   const handleDeleteCustomer = (customer) => {
     setCustomers((prev) => prev.filter((item) => item.id !== customer.id));
     console.log("Deleted facility:", customer);
   };
 
-  const handleNotes = (customer) => {
-    console.log("Open facility notes:", customer);
-  };
-
   const handleUpload = (customer) => {
     console.log("Open facility upload:", customer);
-  };
-
-  const handleUsers = (customer) => {
-    console.log("Open facility users:", customer);
   };
 
   return (
@@ -151,9 +139,7 @@ export default function CustomersPage() {
 
         <CustomersTable
           customers={customers}
-          onNotes={handleNotes}
           onUpload={handleUpload}
-          onUsers={handleUsers}
           onDelete={handleDeleteCustomer}
         />
       </div>

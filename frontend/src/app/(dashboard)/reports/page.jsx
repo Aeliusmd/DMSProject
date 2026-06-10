@@ -13,8 +13,8 @@ const baseOrders = [
     status: "Active",
     invoiced: false,
     invoiceAmount: "$0.00",
-    subpoenaDate: "2026-05-15",
-    dateServed: "2026-05-20",
+    subpoenaDate: "2026-04-15",
+    dateServed: "2026-04-20",
     applicant: "Astrid Ramirez",
     caseNumber: "ADJ 0821858",
     dob: "10/08/1988",
@@ -23,6 +23,7 @@ const baseOrders = [
     recordsRequested: "Medical Records 05/28/16-present",
     doctor: "Gabriel Rubanenko, MD",
     address: "4521 Medical Center Dr, Suite 300, Los Angeles, CA",
+    rushLevel: "Rush 1",
   },
   {
     orderNo: "75229-1",
@@ -40,6 +41,7 @@ const baseOrders = [
     recordsRequested: "Radiology Records 01/15/20-present",
     doctor: "Sarah Chen, MD",
     address: "8900 Sunset Blvd West Hollywood, CA 90069",
+    rushLevel: "Rush 2",
   },
   {
     orderNo: "75230-1",
@@ -57,6 +59,7 @@ const baseOrders = [
     recordsRequested: "Complete Medical Records 06/01/18-present",
     doctor: "David Park, DO",
     address: "12044 Ventura Blvd, Studio City, CA 91604",
+    rushLevel: "Rush 3",
   },
   {
     orderNo: "75231-1",
@@ -74,6 +77,7 @@ const baseOrders = [
     recordsRequested: "Surgical Records 03/10/19-present",
     doctor: "Amanda Foster, MD",
     address: "4900 W Sunset Blvd, Los Angeles, CA 90027",
+    rushLevel: "Rush 1",
   },
   {
     orderNo: "75231-2",
@@ -91,6 +95,7 @@ const baseOrders = [
     recordsRequested: "Surgical Records 03/10/19-present",
     doctor: "Amanda Foster, MD",
     address: "4900 W Sunset Blvd, Los Angeles, CA 90027",
+    rushLevel: "Rush 2",
   },
   {
     orderNo: "75232-1",
@@ -108,6 +113,7 @@ const baseOrders = [
     recordsRequested: "Oncology Records 02/10/17-present",
     doctor: "Elena Vasquez, MD",
     address: "200 Medical Plaza, Los Angeles, CA 90095",
+    rushLevel: "Rush 3",
   },
   {
     orderNo: "75234-1",
@@ -125,6 +131,7 @@ const baseOrders = [
     recordsRequested: "Pediatric Records 04/05/20-present",
     doctor: "Thomas Reed, MD",
     address: "4650 Sunset Blvd, Los Angeles, CA 90027",
+    rushLevel: "Rush 2",
   },
   {
     orderNo: "75235-1",
@@ -142,6 +149,7 @@ const baseOrders = [
     recordsRequested: "Cardiology Records 01/10/19-present",
     doctor: "Patricia O'Brien, MD",
     address: "1100 W Stewart Dr, Orange, CA 92868",
+    rushLevel: "Rush 1",
   },
   {
     orderNo: "75236-1",
@@ -159,6 +167,7 @@ const baseOrders = [
     recordsRequested: "OB/GYN Records 07/15/20-present",
     doctor: "Michelle Nguyen, MD",
     address: "1 Hoag Dr, Newport Beach, CA 92663",
+    rushLevel: "Rush 3",
   },
   {
     orderNo: "75237-1",
@@ -176,6 +185,7 @@ const baseOrders = [
     recordsRequested: "Orthopedic Records 09/01/18-present",
     doctor: "Steven Kim, MD",
     address: "18111 Brookhurst St, Fountain Valley, CA 92708",
+    rushLevel: "Rush 1",
   },
 ];
 

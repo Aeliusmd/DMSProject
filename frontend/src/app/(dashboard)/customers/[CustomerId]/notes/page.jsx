@@ -95,7 +95,7 @@ export default function CustomerNotesPage() {
             className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
           >
             <ArrowLeftIcon />
-            Customers
+            Facilities
           </Link>
         </div>
 
@@ -107,7 +107,7 @@ export default function CustomerNotesPage() {
 
             <div className="space-y-5">
               <CustomerInput
-                label="Customer"
+                label="Facility"
                 value={customer.customer}
                 disabled
               />

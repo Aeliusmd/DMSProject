@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CollapsibleOrderPanel from "@/components/orders/new-order/CollapsibleOrderPanel";
 import NewOrderField, {
@@ -111,7 +112,209 @@ const initialFormData = {
   xrayMemo: "",
 };
 
+const editOrdersSeed = {
+  "71956-4": {
+    customer: "smith",
+    type: "medical",
+    caseNumber: "71956-4",
+    orderNumber: "71956-4",
+    firstName: "Robert",
+    middleName: "",
+    lastName: "Smith",
+    aka: "",
+    defendant: "Johnson",
+    injuryType: "specific",
+    serveCompanyName: "Smith & Associates",
+    address: "123 Main Street Suite 400",
+    zip: "90210",
+    city: "Beverly Hills",
+    state: "CA",
+    phone: "(310) 555-1234",
+    fax: "(310) 555-1235",
+    email: "billing@smithassociates.com",
+    dateServed: "2026-03-18",
+    subpoenaDate: "2026-03-18",
+    medicalRecords: true,
+    specificRecord: "Medical Records",
+    specificDoctor: "David Paul Anderson",
+    fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
+  },
+  "71956-5": {
+    customer: "smith",
+    type: "medical",
+    caseNumber: "71956-5",
+    orderNumber: "71956-5",
+    firstName: "Robert",
+    middleName: "",
+    lastName: "Smith",
+    aka: "",
+    defendant: "Johnson",
+    injuryType: "specific",
+    serveCompanyName: "Smith & Associates",
+    address: "123 Main Street Suite 400",
+    zip: "90210",
+    city: "Beverly Hills",
+    state: "CA",
+    phone: "(310) 555-1234",
+    fax: "(310) 555-1235",
+    email: "billing@smithassociates.com",
+    dateServed: "2026-04-01",
+    subpoenaDate: "2026-04-01",
+    medicalRecords: true,
+    specificRecord: "Medical Records",
+    specificDoctor: "David Paul Anderson",
+    fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
+  },
+  "71956-6": {
+    customer: "smith",
+    type: "billing",
+    caseNumber: "71956-6",
+    orderNumber: "71956-6",
+    firstName: "Robert",
+    middleName: "",
+    lastName: "Smith",
+    aka: "",
+    defendant: "Johnson",
+    injuryType: "specific",
+    serveCompanyName: "Smith & Associates",
+    address: "123 Main Street Suite 400",
+    zip: "90210",
+    city: "Beverly Hills",
+    state: "CA",
+    phone: "(310) 555-1234",
+    fax: "(310) 555-1235",
+    email: "billing@smithassociates.com",
+    dateServed: "2026-04-15",
+    subpoenaDate: "2026-04-15",
+    billingRecords: true,
+    specificRecord: "Billing Records",
+    specificDoctor: "David Paul Anderson",
+    fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
+  },
+  "71956-7": {
+    customer: "smith",
+    type: "medical",
+    caseNumber: "71956-7",
+    orderNumber: "71956-7",
+    firstName: "Robert",
+    middleName: "",
+    lastName: "Smith",
+    aka: "",
+    defendant: "Johnson",
+    injuryType: "specific",
+    serveCompanyName: "Smith & Associates",
+    address: "123 Main Street Suite 400",
+    zip: "90210",
+    city: "Beverly Hills",
+    state: "CA",
+    phone: "(310) 555-1234",
+    fax: "(310) 555-1235",
+    email: "billing@smithassociates.com",
+    dateServed: "2026-05-02",
+    subpoenaDate: "2026-05-02",
+    medicalRecords: true,
+    specificRecord: "Medical Records",
+    specificDoctor: "David Paul Anderson",
+    fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
+  },
+  "72001-2": {
+    customer: "martinez",
+    type: "billing",
+    caseNumber: "72001-2",
+    orderNumber: "72001-2",
+    firstName: "Linda",
+    middleName: "",
+    lastName: "Martinez",
+    aka: "",
+    defendant: "Immigration Appeal",
+    injuryType: "specific",
+    serveCompanyName: "Martinez Legal Group",
+    address: "450 Legal Avenue",
+    zip: "90017",
+    city: "Los Angeles",
+    state: "CA",
+    phone: "(213) 555-2200",
+    fax: "(213) 555-2201",
+    email: "invoices@martinezlegal.com",
+    dateServed: "2026-03-25",
+    subpoenaDate: "2026-03-25",
+    billingRecords: true,
+    specificRecord: "Billing Records",
+    fullAddress: "450 Legal Avenue, Los Angeles, CA 90017",
+  },
+  "72012-2": {
+    customer: "pacific",
+    type: "medical",
+    caseNumber: "72012-2",
+    orderNumber: "72012-2",
+    firstName: "Pacific",
+    middleName: "",
+    lastName: "Client",
+    aka: "",
+    defendant: "Law Partners",
+    injuryType: "specific",
+    serveCompanyName: "Pacific Law Partners",
+    address: "500 Pacific Avenue",
+    zip: "94105",
+    city: "San Francisco",
+    state: "CA",
+    phone: "(415) 555-1900",
+    fax: "(415) 555-1901",
+    email: "billing@pacificlaw.com",
+    dateServed: "2026-02-28",
+    subpoenaDate: "2026-02-28",
+    medicalRecords: true,
+    specificRecord: "Medical Records",
+    fullAddress: "500 Pacific Avenue, San Francisco, CA 94105",
+  },
+};
+
+function getEditOrderData(orderId) {
+  const existingOrder = editOrdersSeed[orderId];
+
+  if (existingOrder) {
+    return {
+      ...initialFormData,
+      ...existingOrder,
+    };
+  }
+
+  return {
+    ...initialFormData,
+    customer: "smith",
+    type: "medical",
+    caseNumber: orderId,
+    orderNumber: orderId,
+    firstName: "Existing",
+    middleName: "",
+    lastName: "Order",
+    serveCompanyName: "Smith & Associates",
+    address: "123 Main Street Suite 400",
+    zip: "90210",
+    city: "Beverly Hills",
+    state: "CA",
+    phone: "(310) 555-1234",
+    fax: "(310) 555-1235",
+    email: "billing@smithassociates.com",
+    medicalRecords: true,
+    specificRecord: "Medical Records",
+    fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
+  };
+}
+
 export default function NewOrderPage() {
+  const searchParams = useSearchParams();
+
+  const mode = searchParams.get("mode");
+  const orderId = searchParams.get("orderId");
+
+  const isEditMode = mode === "edit" && Boolean(orderId);
+
+  const editOrderData = useMemo(() => {
+    if (!isEditMode || !orderId) return null;
+    return getEditOrderData(orderId);
+  }, [isEditMode, orderId]);
+
   const [expandedPanels, setExpandedPanels] = useState({
     subpoena: false,
     order: true,
@@ -119,10 +322,20 @@ export default function NewOrderPage() {
     payment: true,
   });
 
-  const [formData, setFormData] = useState(initialFormData);
+  const [formData, setFormData] = useState(() => {
+    return editOrderData || initialFormData;
+  });
+
   const [touched, setTouched] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [fileErrors, setFileErrors] = useState({});
+
+  useEffect(() => {
+    setFormData(editOrderData || initialFormData);
+    setTouched({});
+    setSubmitAttempted(false);
+    setFileErrors({});
+  }, [editOrderData]);
 
   const errors = useMemo(
     () => validateNewOrderForm(formData, fileErrors),
@@ -252,6 +465,15 @@ export default function NewOrderPage() {
       return;
     }
 
+    if (isEditMode) {
+      console.log("Updated order:", {
+        orderId,
+        formData,
+      });
+
+      return;
+    }
+
     console.log("New order form data:", formData);
   };
 
@@ -261,17 +483,25 @@ export default function NewOrderPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-[20px] font-semibold text-[#111827]">
-              New Order
+              {isEditMode ? "Edit Order" : "New Order"}
             </h1>
 
             <p className="mt-[4px] text-[13px] text-[#64748B]">
-              {formData.subpoenaFile
+              {isEditMode
+                ? `Editing existing order ${orderId}`
+                : formData.subpoenaFile
                 ? "Create a new DMS order with attached subpoena"
                 : "Create a new DMS order with all required information"}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {isEditMode && (
+              <span className="inline-flex items-center gap-2 rounded-full bg-[#FFF7ED] px-4 py-2 text-[12px] font-semibold text-[#EA580C]">
+                Editing Order #{orderId}
+              </span>
+            )}
+
             {formData.subpoenaFile && (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#E6F7FA] px-4 py-2 text-[12px] font-semibold text-[#007F96]">
                 <SubpoenaIcon />
@@ -333,6 +563,7 @@ export default function NewOrderPage() {
               getError={getError}
               onSave={handleSaveOrder}
               disableSave={hasImmediateRequiredErrors}
+              saveLabel={isEditMode ? "Update Order" : "Save Order"}
             />
           </CollapsibleOrderPanel>
 
@@ -379,7 +610,7 @@ function OrderDetailsForm({
 
       <div className="space-y-4">
         <NewOrderField
-          label="Customer"
+          label="Facility"
           name="customer"
           value={formData.customer}
           onChange={onChange}
@@ -387,7 +618,7 @@ function OrderDetailsForm({
           required
           error={getError("customer")}
           options={[
-            { label: "By Customer", value: "" },
+            { label: "By Facility", value: "" },
             { label: "Smith & Associates", value: "smith" },
             { label: "Martinez Legal Group", value: "martinez" },
             { label: "Pacific Law Partners", value: "pacific" },
@@ -596,6 +827,7 @@ function ServeInfoForm({
   getError,
   onSave,
   disableSave,
+  saveLabel = "Save Order",
 }) {
   return (
     <div className="space-y-5">
@@ -897,7 +1129,7 @@ function ServeInfoForm({
         }`}
       >
         <SaveIcon />
-        Save Order
+        {saveLabel}
       </button>
     </div>
   );

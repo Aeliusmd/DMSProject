@@ -162,10 +162,6 @@ export default function EmployeesPage() {
     console.log("Deleted employee:", employee);
   };
 
-  const handleActivity = () => {
-    console.log("Open employee activity");
-  };
-
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
@@ -190,15 +186,6 @@ export default function EmployeesPage() {
             >
               <UserPlusIcon />
               New Matrix Employee
-            </button>
-
-            <button
-              type="button"
-              onClick={handleActivity}
-              className="inline-flex h-[36px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
-            >
-              <ActivityIcon />
-              Activity
             </button>
           </div>
         </div>
@@ -250,15 +237,6 @@ function UserPlusIcon() {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
-    </svg>
-  );
-}
-
-function ActivityIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path d="M4 5h16v14H4V5Z" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M8 9h8M8 13h6" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }
