@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 
 const invoiceGroups = [
   {
@@ -140,9 +141,23 @@ const invoiceGroups = [
   },
 ];
 
+function buildWriteOffInvoice(group, row) {
+  return {
+    id: row.id,
+    caseNo: row.caseNo,
+    company: group.company,
+    sentDate: row.sentDate,
+    invoiceDate: row.invDate,
+    invoiced: row.invoiced,
+    paid: row.paid,
+    due: row.due,
+  };
+}
+
 export default function InvoiceReportTable() {
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [writeOffInvoices, setWriteOffInvoices] = useState([]);
 
   const handleToggleRow = (company, rowId) => {
     setSelectedRows((prev) => {
@@ -185,14 +200,40 @@ export default function InvoiceReportTable() {
 
   const handleWriteoffInvoice = (group) => {
     const selectedIds = selectedRows[group.company] || [];
-    const selectedInvoices = group.rows.filter((row) =>
-      selectedIds.includes(row.id)
-    );
+    const selectedInvoices = group.rows
+      .filter((row) => selectedIds.includes(row.id))
+      .map((row) => buildWriteOffInvoice(group, row));
 
-    console.log("Writeoff selected invoices:", {
-      company: group.company,
-      invoices: selectedInvoices,
+    if (selectedInvoices.length === 0) return;
+
+    setWriteOffInvoices(selectedInvoices);
+  };
+
+  const handleOpenSingleWriteOffModal = (group, row) => {
+    setWriteOffInvoices([buildWriteOffInvoice(group, row)]);
+  };
+
+  const handleSubmitWriteOff = (payload) => {
+    console.log("Write off invoice payload:", payload);
+
+    setSelectedRows((prev) => {
+      const next = { ...prev };
+
+      payload.invoices.forEach((invoice) => {
+        if (!invoice.company || !next[invoice.company]) return;
+
+        next[invoice.company] = next[invoice.company].filter(
+          (rowId) => rowId !== invoice.id
+        );
+      });
+
+      return next;
     });
+
+    setWriteOffInvoices([]);
+
+    // Replace the console.log above with your API call, for example:
+    // await writeOffInvoicesApi(payload);
   };
 
   const handleOpenInvoiceModal = (group, row) => {
@@ -250,6 +291,7 @@ export default function InvoiceReportTable() {
                     onSendInvoice={handleSendInvoice}
                     onWriteoffInvoice={handleWriteoffInvoice}
                     onOpenInvoiceModal={handleOpenInvoiceModal}
+                    onOpenSingleWriteOffModal={handleOpenSingleWriteOffModal}
                   />
                 );
               })}
@@ -264,6 +306,13 @@ export default function InvoiceReportTable() {
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
       />
+
+      <WriteOffInvoiceModal
+        isOpen={writeOffInvoices.length > 0}
+        invoices={writeOffInvoices}
+        onClose={() => setWriteOffInvoices([])}
+        onSubmit={handleSubmitWriteOff}
+      />
     </>
   );
 }
@@ -277,6 +326,7 @@ function InvoiceGroup({
   onSendInvoice,
   onWriteoffInvoice,
   onOpenInvoiceModal,
+  onOpenSingleWriteOffModal,
 }) {
   const hasSelected = selectedIds.length > 0;
 
@@ -308,6 +358,7 @@ function InvoiceGroup({
           checked={selectedIds.includes(row.id)}
           onToggleRow={onToggleRow}
           onOpenInvoiceModal={onOpenInvoiceModal}
+          onOpenSingleWriteOffModal={onOpenSingleWriteOffModal}
         />
       ))}
 
@@ -375,6 +426,7 @@ function InvoiceRow({
   checked,
   onToggleRow,
   onOpenInvoiceModal,
+  onOpenSingleWriteOffModal,
 }) {
   return (
     <tr className="border-b border-[#F1F5F9] bg-white hover:bg-[#F8FAFC]">
@@ -440,7 +492,7 @@ function InvoiceRow({
       <td className="px-4 py-4 align-top text-right">
         <button
           type="button"
-          onClick={() => console.log("Writeoff invoice:", row)}
+          onClick={() => onOpenSingleWriteOffModal(group, row)}
           className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
         >
           Writeoff

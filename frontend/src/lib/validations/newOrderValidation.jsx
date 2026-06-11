@@ -1,5 +1,5 @@
 export const immediateRequiredFields = [
-  "customer",
+  "facility",
   "type",
   "firstName",
   "lastName",
@@ -34,7 +34,7 @@ export const paymentPrefixes = ["prepayment", "custodian", "xray"];
 export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
 
-  if (!data.customer) errors.customer = "Customer is required";
+  if (!data.facility) errors.facility = "Facility is required";
   if (!data.type) errors.type = "Type is required";
   if (!data.firstName.trim()) errors.firstName = "First name is required";
   if (!data.lastName.trim()) errors.lastName = "Last name is required";

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 
 const companyDetails = {
   1: {
@@ -64,6 +65,22 @@ const invoiceSeed = [
   },
 ];
 
+function buildWriteOffInvoice(company, invoice) {
+  return {
+    id: invoice.id,
+    caseNo: invoice.invoiceId,
+    invoiceId: invoice.invoiceId,
+    company: company.name,
+    email: company.email,
+    sentDate: invoice.invoiceDate,
+    invoiceDate: invoice.invoiceDate,
+    status: invoice.status,
+    invoiced: invoice.invoiced,
+    paid: invoice.paid,
+    due: invoice.due,
+  };
+}
+
 export default function CompanyInvoiceDetailsPage() {
   const params = useParams();
   const companyId = String(params.companyId);
@@ -76,6 +93,7 @@ export default function CompanyInvoiceDetailsPage() {
   const [invoices] = useState(invoiceSeed);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [writeOffInvoices, setWriteOffInvoices] = useState([]);
 
   const [filters, setFilters] = useState({
     search: "",
@@ -168,11 +186,32 @@ export default function CompanyInvoiceDetailsPage() {
   const handleWriteOffSelected = () => {
     if (selectedInvoices.length === 0) return;
 
-    console.log("Write off selected invoices:", selectedInvoices);
+    const selectedWriteOffInvoices = selectedInvoices.map((invoice) =>
+      buildWriteOffInvoice(company, invoice)
+    );
+
+    setWriteOffInvoices(selectedWriteOffInvoices);
   };
 
   const handleWriteOffSingle = (invoice) => {
-    console.log("Write off invoice:", invoice);
+    setWriteOffInvoices([buildWriteOffInvoice(company, invoice)]);
+  };
+
+  const handleSubmitWriteOff = (payload) => {
+    console.log("Company wise write off payload:", payload);
+
+    setSelectedIds((prev) =>
+      prev.filter(
+        (selectedId) =>
+          !payload.invoices.some((invoice) => invoice.id === selectedId)
+      )
+    );
+
+    setWriteOffInvoices([]);
+
+    // Replace the console.log above with your backend API call.
+    // Example:
+    // await writeOffInvoicesApi(payload);
   };
 
   const handleOpenEditInvoice = (invoice) => {
@@ -273,6 +312,13 @@ export default function CompanyInvoiceDetailsPage() {
         mode="edit"
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
+      />
+
+      <WriteOffInvoiceModal
+        isOpen={writeOffInvoices.length > 0}
+        invoices={writeOffInvoices}
+        onClose={() => setWriteOffInvoices([])}
+        onSubmit={handleSubmitWriteOff}
       />
     </DashboardShell>
   );

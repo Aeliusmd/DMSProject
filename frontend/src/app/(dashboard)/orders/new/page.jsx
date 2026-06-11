@@ -33,7 +33,7 @@ import {
 } from "@/components/icons/NewOrderIcons";
 
 const initialFormData = {
-  customer: "",
+  facility: "",
   type: "",
   caseNumber: "",
   ssn: "",
@@ -114,7 +114,7 @@ const initialFormData = {
 
 const editOrdersSeed = {
   "71956-4": {
-    customer: "smith",
+    facility: "smith",
     type: "medical",
     caseNumber: "71956-4",
     orderNumber: "71956-4",
@@ -140,7 +140,7 @@ const editOrdersSeed = {
     fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
   },
   "71956-5": {
-    customer: "smith",
+    facility: "smith",
     type: "medical",
     caseNumber: "71956-5",
     orderNumber: "71956-5",
@@ -166,7 +166,7 @@ const editOrdersSeed = {
     fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
   },
   "71956-6": {
-    customer: "smith",
+    facility: "smith",
     type: "billing",
     caseNumber: "71956-6",
     orderNumber: "71956-6",
@@ -192,7 +192,7 @@ const editOrdersSeed = {
     fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
   },
   "71956-7": {
-    customer: "smith",
+    facility: "smith",
     type: "medical",
     caseNumber: "71956-7",
     orderNumber: "71956-7",
@@ -218,7 +218,7 @@ const editOrdersSeed = {
     fullAddress: "123 Main Street Suite 400, Beverly Hills, CA 90210",
   },
   "72001-2": {
-    customer: "martinez",
+    facility: "martinez",
     type: "billing",
     caseNumber: "72001-2",
     orderNumber: "72001-2",
@@ -243,7 +243,7 @@ const editOrdersSeed = {
     fullAddress: "450 Legal Avenue, Los Angeles, CA 90017",
   },
   "72012-2": {
-    customer: "pacific",
+    facility: "pacific",
     type: "medical",
     caseNumber: "72012-2",
     orderNumber: "72012-2",
@@ -281,7 +281,7 @@ function getEditOrderData(orderId) {
 
   return {
     ...initialFormData,
-    customer: "smith",
+    facility: "smith",
     type: "medical",
     caseNumber: orderId,
     orderNumber: orderId,
@@ -596,7 +596,7 @@ function OrderDetailsForm({
   submitAttempted,
 }) {
   const hasRequiredErrors =
-    getError("customer") ||
+    getError("facility") ||
     getError("type") ||
     getError("firstName") ||
     getError("lastName");
@@ -611,12 +611,12 @@ function OrderDetailsForm({
       <div className="space-y-4">
         <NewOrderField
           label="Facility"
-          name="customer"
-          value={formData.customer}
+          name="facility"
+          value={formData.facility}
           onChange={onChange}
           onBlur={onBlur}
           required
-          error={getError("customer")}
+          error={getError("facility")}
           options={[
             { label: "By Facility", value: "" },
             { label: "Smith & Associates", value: "smith" },
