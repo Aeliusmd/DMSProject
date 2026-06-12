@@ -224,7 +224,7 @@ const activityLogs = [
     module: "Billing",
     performedBy: "Sarah Chen",
     initials: "SC",
-    details: "Invoice due date updated after customer request",
+    details: "Invoice due date updated after facility request",
   },
 ];
 

@@ -39,7 +39,7 @@ const stats = [
     iconColor: "#7C3AED",
   },
   {
-    label: "Customers",
+    label: "Facilities",
     value: "15",
     icon: <CustomerIcon />,
     iconBg: "#EFF6FF",
@@ -92,10 +92,10 @@ const quickActions = [
   label: "Batch Scan",
   href: "/orders/batch-scan",
   icon: <ScanIcon />,
-},,
+},
   {
     label: "Facilities",
-    href: "/customers",
+    href: "/facilities",
     icon: <CustomerIcon />,
   },
   {

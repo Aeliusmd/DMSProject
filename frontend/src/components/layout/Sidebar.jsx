@@ -9,7 +9,7 @@ const navItems = [
   { label: "Orders", href: "/orders", icon: <OrdersIcon /> },
   { label: "Invoices", href: "/invoices", icon: <InvoicesIcon /> },
   { label: "Employees", href: "/employees", icon: <EmployeesIcon /> },
-  { label: "Facilities", href: "/facilities", icon: <CustomersIcon /> },
+  { label: "Facilities", href: "/facilities", icon: <FacilitiesIcon /> },
   { label: "Activity Log", href: "/activity-log", icon: <ActivityIcon /> },
   { label: "Reports", href: "/reports", icon: <ReportsIcon /> },
   { label: "Settings", href: "/settings", icon: <SettingsIcon /> },
@@ -126,11 +126,11 @@ function EmployeesIcon() {
   );
 }
 
-function CustomersIcon() {
+function FacilitiesIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 22V12h6v10" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

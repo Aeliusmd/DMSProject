@@ -2,17 +2,35 @@
 
 import { useState } from "react";
 
-export default function OrderFilterBar() {
-  const [customer, setCustomer] = useState("");
-  const [year, setYear] = useState("");
-  const [status, setStatus] = useState("");
-  const [search, setSearch] = useState("");
+const defaultFilters = {
+  facility: "",
+  year: "",
+  status: "",
+  search: "",
+};
+
+export default function OrderFilterBar({ filters, onFiltersChange }) {
+  const [localFilters, setLocalFilters] = useState(defaultFilters);
+
+  const activeFilters = filters || localFilters;
+
+  const updateFilters = (nextFilters) => {
+    if (!filters) {
+      setLocalFilters(nextFilters);
+    }
+
+    onFiltersChange?.(nextFilters);
+  };
+
+  const updateFilter = (name, value) => {
+    updateFilters({
+      ...activeFilters,
+      [name]: value,
+    });
+  };
 
   const handleReset = () => {
-    setCustomer("");
-    setYear("");
-    setStatus("");
-    setSearch("");
+    updateFilters(defaultFilters);
   };
 
   return (
@@ -23,19 +41,19 @@ export default function OrderFilterBar() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_140px_140px_minmax(220px,1fr)_auto]">
         <select
-          value={customer}
-          onChange={(e) => setCustomer(e.target.value)}
+          value={activeFilters.facility}
+          onChange={(e) => updateFilter("facility", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
-          <option value="">Customer</option>
+          <option value="">Facility</option>
           <option value="smith">Smith & Associates</option>
           <option value="martinez">Martinez Legal Group</option>
           <option value="pacific">Pacific Law Partners</option>
         </select>
 
         <select
-          value={year}
-          onChange={(e) => setYear(e.target.value)}
+          value={activeFilters.year}
+          onChange={(e) => updateFilter("year", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">Year</option>
@@ -45,8 +63,8 @@ export default function OrderFilterBar() {
         </select>
 
         <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
+          value={activeFilters.status}
+          onChange={(e) => updateFilter("status", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">Status</option>
@@ -59,8 +77,8 @@ export default function OrderFilterBar() {
         <div className="flex h-[34px] min-w-0 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">
           <SearchIcon />
           <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={activeFilters.search}
+            onChange={(e) => updateFilter("search", e.target.value)}
             placeholder="Search orders..."
             className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
           />
@@ -80,7 +98,13 @@ export default function OrderFilterBar() {
 
 function SearchIcon() {
   return (
-    <svg className="shrink-0" width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <svg
+      className="shrink-0"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
       <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.7" />
     </svg>

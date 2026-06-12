@@ -11,7 +11,6 @@ const facilitiesSeed = {
   1: {
     id: 1,
     facilityName: "Smith & Associates",
-    parentCompany: "Smith & Associates",
     userName: "smithassoc",
     password: "",
     firstName: "Robert",
@@ -39,7 +38,6 @@ const facilitiesSeed = {
   2: {
     id: 2,
     facilityName: "Martinez Legal Group",
-    parentCompany: "Martinez Legal Group",
     userName: "martinezlegal",
     password: "",
     firstName: "Linda",

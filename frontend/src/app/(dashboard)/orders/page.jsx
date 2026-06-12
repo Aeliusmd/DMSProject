@@ -1,16 +1,23 @@
 "use client";
 
+import { useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import OrderStatsGrid from "@/components/orders/OrderStatsGrid";
 import OrderActionButton from "@/components/orders/OrderActionButton";
 import OrderFilterBar from "@/components/orders/OrderFilterBar";
 import OrdersTable from "@/components/orders/OrdersTable";
-import { useState } from "react";
 import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal";
 
-export default function OrdersPage() {
-    const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+const defaultFilters = {
+  facility: "",
+  year: "",
+  status: "",
+  search: "",
+};
 
+export default function OrdersPage() {
+  const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
+  const [filters, setFilters] = useState(defaultFilters);
 
   return (
     <DashboardShell>
@@ -32,31 +39,39 @@ export default function OrdersPage() {
           </h2>
 
           <div className="flex flex-wrap gap-3">
-            <OrderActionButton href="/orders/new" variant="primary" icon={<PlusIcon />}>
-               New Order
+            <OrderActionButton
+              href="/orders/new"
+              variant="primary"
+              icon={<PlusIcon />}
+            >
+              New Order
             </OrderActionButton>
 
-            <OrderActionButton href="/orders/unprocessed" icon={<DocumentIcon />}>
-               Unprocessed
+            <OrderActionButton
+              href="/orders/unprocessed"
+              icon={<DocumentIcon />}
+            >
+              Unprocessed
             </OrderActionButton>
 
             <OrderActionButton href="/orders/batch-scan" icon={<BatchIcon />}>
               Batch Scan
             </OrderActionButton>
 
-           <OrderActionButton
-                icon={<ReminderIcon />}
-                onClick={() => setIsReminderModalOpen(true)}
+            <OrderActionButton
+              icon={<ReminderIcon />}
+              onClick={() => setIsReminderModalOpen(true)}
             >
               Reminder
             </OrderActionButton>
           </div>
         </section>
 
-        <OrderFilterBar />
+        <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
 
-        <OrdersTable />
+        <OrdersTable filters={filters} />
       </div>
+
       <ReminderNotesModal
         isOpen={isReminderModalOpen}
         onClose={() => setIsReminderModalOpen(false)}
@@ -94,7 +109,11 @@ function BatchIcon() {
 function ReminderIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7Z" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
       <path d="M10 19a2 2 0 0 0 4 0" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );

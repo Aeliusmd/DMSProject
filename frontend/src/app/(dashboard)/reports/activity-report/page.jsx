@@ -133,7 +133,7 @@ export default function ActivityReportPage() {
   const [filters, setFilters] = useState({
     reportDate: "2026-06-02",
     throughDate: "2026-06-02",
-    customer: "All Customers",
+    facility: "All Facilities",
     activity: "All",
   });
 
@@ -152,9 +152,9 @@ export default function ActivityReportPage() {
     const search = appliedSearch.trim().toLowerCase();
 
     return companiesSeed.filter((company) => {
-      const matchesCustomer =
-        filters.customer === "All Customers" ||
-        company.name === filters.customer;
+      const matchesFacility =
+        filters.facility === "All Facilities" ||
+        company.name === filters.facility;
 
       const matchesActivity =
         filters.activity === "All" ||
@@ -167,9 +167,9 @@ export default function ActivityReportPage() {
         String(company.invoiced).includes(search) ||
         String(company.paid).includes(search);
 
-      return matchesCustomer && matchesActivity && matchesSearch;
+      return matchesFacility && matchesActivity && matchesSearch;
     });
-  }, [filters.customer, filters.activity, appliedSearch]);
+  }, [filters.facility, filters.activity, appliedSearch]);
 
   const totalCases = filteredCompanies.reduce(
     (sum, company) => sum + company.cases,
@@ -286,13 +286,13 @@ export default function ActivityReportPage() {
             />
 
             <ReportField
-              label="Customer"
-              name="customer"
+              label="Facility"
+              name="facility"
               type="select"
-              value={filters.customer}
+              value={filters.facility}
               onChange={handleChange}
               options={[
-                "All Customers",
+                "All Facilities",
                 ...companiesSeed.map((company) => company.name),
               ]}
             />
@@ -341,7 +341,7 @@ export default function ActivityReportPage() {
                     value={searchInput}
                     onChange={(e) => setSearchInput(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder="Search companies..."
+                    placeholder="Search facilities..."
                     className="h-[34px] w-full rounded-[6px] border border-[#CBD5E1] bg-white pl-[36px] pr-8 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
                   />
 
@@ -373,7 +373,7 @@ export default function ActivityReportPage() {
         <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
             <p className="text-[12px] font-semibold text-[#475569]">
-              Showing {filteredCompanies.length} companies
+              Showing {filteredCompanies.length} facilities
             </p>
 
             <p className="text-[12px] text-[#94A3B8]">

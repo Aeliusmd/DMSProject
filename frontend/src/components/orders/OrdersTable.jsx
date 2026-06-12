@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
@@ -11,6 +11,51 @@ import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
 
 const ORDERS_PER_PAGE = 6;
+
+const defaultOrderFilters = {
+  facility: "",
+  year: "",
+  status: "",
+  search: "",
+};
+
+function getOrderFilterStatus(order) {
+  if (order.filterStatus) return order.filterStatus;
+
+  const hasSentStatus = order.status?.some(
+    (item) => item.label.toLowerCase() === "sent"
+  );
+
+  if (hasSentStatus || order.invoice?.paid) return "completed";
+
+  const hasPendingStatus = order.status?.some((item) => item.type === "red");
+
+  if (hasPendingStatus) return "active";
+
+  return "ready";
+}
+
+function getOrderSearchText(order) {
+  return [
+    order.id,
+    order.court,
+    order.applicant,
+    order.orderRef,
+    order.records?.title,
+    ...(order.records?.lines || []),
+    ...(order.records?.links || []),
+    order.company?.name,
+    order.company?.address,
+    order.company?.phone,
+    order.company?.email,
+    ...(order.dobSsn || []),
+    ...(order.forms || []),
+    ...(order.status?.map((item) => item.label) || []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
 
 const orderActivityLogs = [
   {
@@ -120,6 +165,9 @@ const orderActivityLogs = [
 const orders = [
   {
     id: "70656-1",
+    facility: "smith",
+    year: "2026",
+    filterStatus: "completed",
     note: true,
     subpoena: true,
     court: "WCAB",
@@ -164,6 +212,9 @@ const orders = [
   },
   {
     id: "6443-1",
+    facility: "martinez",
+    year: "2026",
+    filterStatus: "completed",
     note: true,
     subpoena: true,
     court: "WCAB",
@@ -208,6 +259,9 @@ const orders = [
   },
   {
     id: "65322-1",
+    facility: "martinez",
+    year: "2025",
+    filterStatus: "completed",
     note: true,
     subpoena: false,
     court: "WCAB",
@@ -252,6 +306,9 @@ const orders = [
   },
   {
     id: "70123-2",
+    facility: "smith",
+    year: "2025",
+    filterStatus: "active",
     note: true,
     subpoena: false,
     court: "",
@@ -289,6 +346,9 @@ const orders = [
   },
   {
     id: "7157-1",
+    facility: "smith",
+    year: "2025",
+    filterStatus: "completed",
     note: true,
     subpoena: false,
     court: "",
@@ -332,6 +392,9 @@ const orders = [
   },
   {
     id: "7289-3",
+    facility: "martinez",
+    year: "2025",
+    filterStatus: "active",
     note: true,
     subpoena: false,
     court: "",
@@ -369,6 +432,9 @@ const orders = [
   },
   {
     id: "7310-1",
+    facility: "pacific",
+    year: "2025",
+    filterStatus: "completed",
     note: true,
     subpoena: true,
     court: "WCAB",
@@ -412,6 +478,9 @@ const orders = [
   },
   {
     id: "7422-4",
+    facility: "pacific",
+    year: "2025",
+    filterStatus: "active",
     note: true,
     subpoena: false,
     court: "",
@@ -453,7 +522,7 @@ const orders = [
   },
 ];
 
-export default function OrdersTable() {
+export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
@@ -464,15 +533,66 @@ export default function OrdersTable() {
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
 
-  const totalPages = Math.ceil(orders.length / ORDERS_PER_PAGE);
+  const normalizedFilters = {
+    facility: filters.facility || "",
+    year: filters.year || "",
+    status: filters.status || "",
+    search: filters.search || "",
+  };
+
+  const filteredOrders = useMemo(() => {
+    const searchValue = normalizedFilters.search.trim().toLowerCase();
+
+    return orders.filter((order) => {
+      const matchesFacility =
+        !normalizedFilters.facility ||
+        order.facility === normalizedFilters.facility;
+
+      const matchesYear =
+        !normalizedFilters.year || order.year === normalizedFilters.year;
+
+      const matchesStatus =
+        !normalizedFilters.status ||
+        getOrderFilterStatus(order) === normalizedFilters.status;
+
+      const matchesSearch =
+        !searchValue || getOrderSearchText(order).includes(searchValue);
+
+      return matchesFacility && matchesYear && matchesStatus && matchesSearch;
+    });
+  }, [
+    normalizedFilters.facility,
+    normalizedFilters.year,
+    normalizedFilters.status,
+    normalizedFilters.search,
+  ]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    normalizedFilters.facility,
+    normalizedFilters.year,
+    normalizedFilters.status,
+    normalizedFilters.search,
+  ]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredOrders.length / ORDERS_PER_PAGE)
+  );
 
   const currentOrders = useMemo(() => {
     const startIndex = (currentPage - 1) * ORDERS_PER_PAGE;
-    return orders.slice(startIndex, startIndex + ORDERS_PER_PAGE);
-  }, [currentPage]);
+    return filteredOrders.slice(startIndex, startIndex + ORDERS_PER_PAGE);
+  }, [currentPage, filteredOrders]);
 
-  const startRecord = (currentPage - 1) * ORDERS_PER_PAGE + 1;
-  const endRecord = Math.min(currentPage * ORDERS_PER_PAGE, orders.length);
+  const startRecord =
+    filteredOrders.length === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE + 1;
+
+  const endRecord = Math.min(
+    currentPage * ORDERS_PER_PAGE,
+    filteredOrders.length
+  );
 
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -509,113 +629,124 @@ export default function OrdersTable() {
             </thead>
 
             <tbody>
-              {currentOrders.map((order) => (
-                <tr
-                  key={order.id}
-                  className="border-b border-[#F1F5F9] text-[11px] text-[#334155] last:border-b-0 hover:bg-[#F8FBFC]"
-                >
-                  <td className="px-4 py-5 align-top">
-                    <Link
-                      href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                        order.id
-                      )}`}
-                      className="font-semibold text-[#007F96] hover:underline"
-                    >
-                      {order.id}
-                    </Link>
-
-                    {order.note && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedNoteOrder(order)}
-                        className="mt-1 block text-[10px] text-[#007F96] underline"
-                      >
-                        Note
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => setSelectedLogOrder(order)}
-                      className="mt-1 block text-left text-[10px] font-medium text-[#007F96] underline"
-                    >
-                      Order Log
-                    </button>
-
-                    {order.subpoena && (
-                      <p className="mt-1 text-[10px] font-semibold text-[#059669]">
-                        ✓ Subpoena
-                      </p>
-                    )}
-
-                    {order.court && (
-                      <p className="mt-1 text-[10px] font-semibold text-[#334155]">
-                        {order.court}
-                      </p>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <p className="font-semibold text-[#111827]">
-                      {order.applicant}
-                    </p>
-
-                    <p className="mt-1 text-[10px] text-[#64748B]">
-                      {order.orderRef}
-                    </p>
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <div className="space-y-1">
-                      {order.status.map((item) => (
-                        <StatusAction key={item.label} item={item} />
-                      ))}
-                    </div>
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <InvoiceBlock
-                      invoice={order.invoice}
-                      onCreateInvoice={() => setSelectedInvoiceOrder(order)}
-                      onCreateXrayInvoice={() => setSelectedXrayOrder(order)}
-                      onCoverSheet={() => setSelectedCoverSheetOrder(order)}
-                      onXrayCoverSheet={() =>
-                        setSelectedXrayCoverSheetOrder(order)
-                      }
-                    />
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <RecordsBlock records={order.records} />
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <CompanyBlock company={order.company} />
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <div className="space-y-1 text-[11px] text-[#334155]">
-                      {order.dobSsn.map((item) => (
-                        <p key={item}>{item}</p>
-                      ))}
-                    </div>
-                  </td>
-
-                  <td className="px-4 py-5 align-top">
-                    <FormsList
-                      forms={order.forms}
-                      onCnrClick={() => setSelectedCnrOrder(order)}
-                    />
+              {currentOrders.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
+                  >
+                    No orders match the selected filters.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                currentOrders.map((order) => (
+                  <tr
+                    key={order.id}
+                    className="border-b border-[#F1F5F9] text-[11px] text-[#334155] last:border-b-0 hover:bg-[#F8FBFC]"
+                  >
+                    <td className="px-4 py-5 align-top">
+                      <Link
+                        href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                          order.id
+                        )}`}
+                        className="font-semibold text-[#007F96] hover:underline"
+                      >
+                        {order.id}
+                      </Link>
+
+                      {order.note && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedNoteOrder(order)}
+                          className="mt-1 block text-[10px] text-[#007F96] underline"
+                        >
+                          Note
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedLogOrder(order)}
+                        className="mt-1 block text-left text-[10px] font-medium text-[#007F96] underline"
+                      >
+                        Order Log
+                      </button>
+
+                      {order.subpoena && (
+                        <p className="mt-1 text-[10px] font-semibold text-[#059669]">
+                          ✓ Subpoena
+                        </p>
+                      )}
+
+                      {order.court && (
+                        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
+                          {order.court}
+                        </p>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <p className="font-semibold text-[#111827]">
+                        {order.applicant}
+                      </p>
+
+                      <p className="mt-1 text-[10px] text-[#64748B]">
+                        {order.orderRef}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <div className="space-y-1">
+                        {order.status.map((item) => (
+                          <StatusAction key={item.label} item={item} />
+                        ))}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <InvoiceBlock
+                        invoice={order.invoice}
+                        onCreateInvoice={() => setSelectedInvoiceOrder(order)}
+                        onCreateXrayInvoice={() => setSelectedXrayOrder(order)}
+                        onCoverSheet={() => setSelectedCoverSheetOrder(order)}
+                        onXrayCoverSheet={() =>
+                          setSelectedXrayCoverSheetOrder(order)
+                        }
+                      />
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <RecordsBlock records={order.records} />
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <CompanyBlock company={order.company} />
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <div className="space-y-1 text-[11px] text-[#334155]">
+                        {order.dobSsn.map((item) => (
+                          <p key={item}>{item}</p>
+                        ))}
+                      </div>
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <FormsList
+                        forms={order.forms}
+                        onCnrClick={() => setSelectedCnrOrder(order)}
+                      />
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
 
         <div className="flex flex-col gap-3 border-t border-[#F1F5F9] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[11px] text-[#64748B]">
-            Showing {startRecord}-{endRecord} of {orders.length} orders
+            Showing {startRecord}-{endRecord} of {filteredOrders.length} orders
           </p>
 
           <div className="flex items-center gap-1">
@@ -648,7 +779,7 @@ export default function OrdersTable() {
             <button
               type="button"
               onClick={goToNextPage}
-              disabled={currentPage === totalPages}
+              disabled={currentPage === totalPages || filteredOrders.length === 0}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ›
