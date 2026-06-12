@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 
 const uploadTypes = ["Standard", "Legal", "Medical", "Financial", "Other"];
 
@@ -11,19 +12,23 @@ export default function UploadDocumentsModal({
   onClose,
   onUpload,
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsClient();
   const [uploadType, setUploadType] = useState("Standard");
   const [files, setFiles] = useState([]);
+  const openSession = open ? "open" : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setUploadType("Standard");
+      setFiles([]);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
-
-    setUploadType("Standard");
-    setFiles([]);
 
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";

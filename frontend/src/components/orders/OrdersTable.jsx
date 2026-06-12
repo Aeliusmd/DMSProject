@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
@@ -540,6 +540,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     search: filters.search || "",
   };
 
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.year}|${normalizedFilters.status}|${normalizedFilters.search}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
+    setCurrentPage(1);
+  }
+
   const filteredOrders = useMemo(() => {
     const searchValue = normalizedFilters.search.trim().toLowerCase();
 
@@ -567,30 +575,29 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     normalizedFilters.search,
   ]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [
-    normalizedFilters.facility,
-    normalizedFilters.year,
-    normalizedFilters.status,
-    normalizedFilters.search,
-  ]);
-
   const totalPages = Math.max(
     1,
     Math.ceil(filteredOrders.length / ORDERS_PER_PAGE)
   );
 
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  if (currentPage !== safeCurrentPage) {
+    setCurrentPage(safeCurrentPage);
+  }
+
   const currentOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * ORDERS_PER_PAGE;
+    const startIndex = (safeCurrentPage - 1) * ORDERS_PER_PAGE;
     return filteredOrders.slice(startIndex, startIndex + ORDERS_PER_PAGE);
-  }, [currentPage, filteredOrders]);
+  }, [safeCurrentPage, filteredOrders]);
 
   const startRecord =
-    filteredOrders.length === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE + 1;
+    filteredOrders.length === 0
+      ? 0
+      : (safeCurrentPage - 1) * ORDERS_PER_PAGE + 1;
 
   const endRecord = Math.min(
-    currentPage * ORDERS_PER_PAGE,
+    safeCurrentPage * ORDERS_PER_PAGE,
     filteredOrders.length
   );
 
@@ -753,7 +760,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
             <button
               type="button"
               onClick={goToPreviousPage}
-              disabled={currentPage === 1}
+              disabled={safeCurrentPage === 1}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ‹
@@ -766,7 +773,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                   type="button"
                   onClick={() => setCurrentPage(page)}
                   className={`flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] px-2 text-[12px] font-semibold ${
-                    currentPage === page
+                    safeCurrentPage === page
                       ? "bg-[#111827] text-white"
                       : "border border-[#E2E8F0] bg-white text-[#334155] hover:bg-[#F8FAFC]"
                   }`}
@@ -779,7 +786,9 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
             <button
               type="button"
               onClick={goToNextPage}
-              disabled={currentPage === totalPages || filteredOrders.length === 0}
+              disabled={
+                safeCurrentPage === totalPages || filteredOrders.length === 0
+              }
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ›

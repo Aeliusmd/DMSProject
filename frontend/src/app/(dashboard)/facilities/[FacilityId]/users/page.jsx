@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
@@ -310,15 +310,19 @@ export default function FacilityUsersPage() {
     return facilities.find((item) => item.id === facilityId) || facilities[0];
   }, [facilityId]);
 
-  const [users, setUsers] = useState([]);
+  const [prevFacilityId, setPrevFacilityId] = useState(facilityId);
+  const [users, setUsers] = useState(
+    () => usersByFacility[facilityId] || usersByFacility[1]
+  );
   const [deleteModal, setDeleteModal] = useState({
     open: false,
     user: null,
   });
 
-  useEffect(() => {
+  if (facilityId !== prevFacilityId) {
+    setPrevFacilityId(facilityId);
     setUsers(usersByFacility[facilityId] || usersByFacility[1]);
-  }, [facilityId]);
+  }
 
   const openDeleteModal = (user) => {
     setDeleteModal({

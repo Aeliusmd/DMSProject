@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const emptyForm = {
   name: "",
@@ -11,19 +11,17 @@ const emptyForm = {
 };
 
 export default function EmployeeFormModal({ open, onClose, onCreate }) {
+  if (!open) return null;
+
+  return (
+    <EmployeeFormModalContent onClose={onClose} onCreate={onCreate} />
+  );
+}
+
+function EmployeeFormModalContent({ onClose, onCreate }) {
   const [formData, setFormData] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-
-    setFormData(emptyForm);
-    setErrors({});
-    setSubmitAttempted(false);
-  }, [open]);
-
-  if (!open) return null;
 
   const handleChange = (e) => {
     const { name, value } = e.target;

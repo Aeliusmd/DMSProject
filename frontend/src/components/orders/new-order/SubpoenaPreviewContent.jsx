@@ -10,41 +10,51 @@ const PDF_BASE_WIDTH = 520;
 const PDF_BASE_HEIGHT = 760;
 
 export default function SubpoenaPreviewContent({ file }) {
-  const [fileUrl, setFileUrl] = useState("");
+  if (!file) {
+    return (
+      <div className="flex h-full min-h-[480px] items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#94A3B8]">
+        Upload a subpoena PDF to preview it here.
+      </div>
+    );
+  }
+
+  return <SubpoenaPreviewInner key={getFileKey(file)} file={file} />;
+}
+
+function SubpoenaPreviewInner({ file }) {
   const [pageCount, setPageCount] = useState(null);
   const [zoom, setZoom] = useState(1);
 
   const isPdf = useMemo(() => {
-    if (!file) return false;
-
     const fileName = file.name?.toLowerCase() || "";
     const fileType = file.type || "";
 
     return fileType === "application/pdf" || fileName.endsWith(".pdf");
   }, [file]);
 
+  const fileUrl = useMemo(() => URL.createObjectURL(file), [file]);
+
   useEffect(() => {
-    if (!file) {
-      setFileUrl("");
-      setPageCount(null);
-      setZoom(1);
+    return () => {
+      URL.revokeObjectURL(fileUrl);
+    };
+  }, [fileUrl]);
+
+  useEffect(() => {
+    if (!isPdf) {
       return;
     }
 
-    const objectUrl = URL.createObjectURL(file);
+    let cancelled = false;
 
-    setFileUrl(objectUrl);
-    setZoom(1);
-    setPageCount(null);
-
-    if (isPdf) {
-      detectPdfPageCount(file).then((count) => {
+    detectPdfPageCount(file).then((count) => {
+      if (!cancelled) {
         setPageCount(count);
-      });
-    }
+      }
+    });
 
     return () => {
-      URL.revokeObjectURL(objectUrl);
+      cancelled = true;
     };
   }, [file, isPdf]);
 
@@ -59,14 +69,6 @@ export default function SubpoenaPreviewContent({ file }) {
   const handleResetZoom = () => {
     setZoom(1);
   };
-
-  if (!file) {
-    return (
-      <div className="flex h-full min-h-[480px] items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#94A3B8]">
-        Upload a subpoena PDF to preview it here.
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full min-h-[520px] flex-col overflow-hidden">
@@ -149,6 +151,10 @@ export default function SubpoenaPreviewContent({ file }) {
       </div>
     </div>
   );
+}
+
+function getFileKey(file) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
 }
 
 async function detectPdfPageCount(file) {

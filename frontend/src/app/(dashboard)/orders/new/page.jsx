@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CollapsibleOrderPanel from "@/components/orders/new-order/CollapsibleOrderPanel";
@@ -303,6 +303,22 @@ function getEditOrderData(orderId) {
 }
 
 export default function NewOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell>
+          <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+            <p className="text-[13px] text-[#64748B]">Loading...</p>
+          </div>
+        </DashboardShell>
+      }
+    >
+      <NewOrderPageContent />
+    </Suspense>
+  );
+}
+
+function NewOrderPageContent() {
   const searchParams = useSearchParams();
 
   const mode = searchParams.get("mode");
@@ -322,6 +338,8 @@ export default function NewOrderPage() {
     payment: true,
   });
 
+  const [prevEditOrderData, setPrevEditOrderData] = useState(editOrderData);
+
   const [formData, setFormData] = useState(() => {
     return editOrderData || initialFormData;
   });
@@ -330,12 +348,13 @@ export default function NewOrderPage() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [fileErrors, setFileErrors] = useState({});
 
-  useEffect(() => {
+  if (editOrderData !== prevEditOrderData) {
+    setPrevEditOrderData(editOrderData);
     setFormData(editOrderData || initialFormData);
     setTouched({});
     setSubmitAttempted(false);
     setFileErrors({});
-  }, [editOrderData]);
+  }
 
   const errors = useMemo(
     () => validateNewOrderForm(formData, fileErrors),

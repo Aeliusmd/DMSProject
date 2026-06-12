@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 
 const MAX_NOTE_LENGTH = 1000;
 const MAX_FILE_SIZE_MB = 10;
@@ -14,7 +15,7 @@ const ALLOWED_FILE_TYPES = [
 ];
 
 export default function OrderNotesModal({ isOpen, order, onClose }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsClient();
   const [noteText, setNoteText] = useState("");
   const [callbackDate, setCallbackDate] = useState("");
   const [attachment, setAttachment] = useState(null);
@@ -38,18 +39,24 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
     ];
   }, [order]);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const openSession =
+    isOpen && order ? String(order.id || order.orderNo) : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setNoteText("");
+      setCallbackDate("");
+      setAttachment(null);
+      setErrors({});
+      setHistory(defaultNoteHistory);
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
-
-    setNoteText("");
-    setCallbackDate("");
-    setAttachment(null);
-    setErrors({});
-    setHistory(defaultNoteHistory);
 
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -57,7 +64,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
     return () => {
       document.body.style.overflow = originalOverflow;
     };
-  }, [isOpen, defaultNoteHistory]);
+  }, [isOpen]);
 
   if (!mounted || !isOpen || !order) return null;
 

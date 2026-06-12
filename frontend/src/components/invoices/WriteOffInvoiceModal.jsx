@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 function parseCurrency(value) {
   if (typeof value === "number") return value;
@@ -37,14 +37,21 @@ export default function WriteOffInvoiceModal({
   const isBulkWriteOff = invoices.length > 1;
   const selectedInvoice = invoices[0];
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const openSession = isOpen
+    ? invoices.map((invoice) => invoice.id || invoice.invoiceNo || "").join(",")
+    : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
 
-    setWriteOffType("full");
-    setSpecifiedAmount("");
-    setOrderAction("keep_write_off");
-    setError("");
-  }, [isOpen, invoices]);
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setWriteOffType("full");
+      setSpecifiedAmount("");
+      setOrderAction("keep_write_off");
+      setError("");
+    }
+  }
 
   if (!isOpen) return null;
 

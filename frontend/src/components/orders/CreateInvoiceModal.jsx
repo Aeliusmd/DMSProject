@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 
 const createInvoiceTypes = [
   "Create Invoice",
@@ -38,7 +39,7 @@ export default function CreateInvoiceModal({
   onClose,
   mode = "create",
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsClient();
   const isEditMode = mode === "edit";
 
   const invoiceTypes = isEditMode ? editInvoiceTypes : createInvoiceTypes;
@@ -50,9 +51,19 @@ export default function CreateInvoiceModal({
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const openSession =
+    isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setActiveType(isEditMode ? "Edit Invoice" : "Create Invoice");
+      setFormData(getInitialInvoiceFormData(order, isEditMode));
+      setErrors({});
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
@@ -64,14 +75,6 @@ export default function CreateInvoiceModal({
       document.body.style.overflow = originalOverflow;
     };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    setActiveType(isEditMode ? "Edit Invoice" : "Create Invoice");
-    setFormData(getInitialInvoiceFormData(order, isEditMode));
-    setErrors({});
-  }, [isOpen, order, isEditMode]);
 
   const pagesAmount = useMemo(() => {
     return toNumber(formData.pages) * toNumber(formData.perPageAmount);

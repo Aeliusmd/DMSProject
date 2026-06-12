@@ -11,17 +11,27 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
   const [trustDevice, setTrustDevice] = useState(false);
 
   const inputRefs = useRef([]);
+  const openSession = isOpen ? "open" : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setOtp(["", "", "", "", "", ""]);
+      setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
+      setTrustDevice(false);
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
 
-    setOtp(["", "", "", "", "", ""]);
-    setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
-    setTrustDevice(false);
-
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       inputRefs.current[0]?.focus();
     }, 100);
+
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
   useEffect(() => {

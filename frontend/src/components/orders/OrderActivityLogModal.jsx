@@ -2,14 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 
 export default function OrderActivityLogModal({ isOpen, order, logs = [], onClose }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsClient();
   const [searchValue, setSearchValue] = useState("");
+  const openSession = isOpen ? "open" : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setSearchValue("");
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
@@ -20,11 +27,6 @@ export default function OrderActivityLogModal({ isOpen, order, logs = [], onClos
     return () => {
       document.body.style.overflow = originalOverflow;
     };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    setSearchValue("");
   }, [isOpen]);
 
   const filteredLogs = useMemo(() => {

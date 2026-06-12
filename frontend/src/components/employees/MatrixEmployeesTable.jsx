@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
 
@@ -130,6 +130,7 @@ export default function MatrixEmployeesTable({
   onDeleteEmployee,
   onActivateEmployee,
 }) {
+  const [prevEmployees, setPrevEmployees] = useState(employees);
   const [tableEmployees, setTableEmployees] = useState(employees || []);
 
   const [confirmModal, setConfirmModal] = useState({
@@ -145,9 +146,10 @@ export default function MatrixEmployeesTable({
 
   const [selectedLogEmployee, setSelectedLogEmployee] = useState(null);
 
-  useEffect(() => {
+  if (employees !== prevEmployees) {
+    setPrevEmployees(employees);
     setTableEmployees(employees || []);
-  }, [employees]);
+  }
 
   const openTerminateModal = (employee) => {
     setConfirmModal({

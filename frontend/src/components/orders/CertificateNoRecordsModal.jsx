@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 import {
   CNR_SIGNER,
   SHEET_COLORS,
@@ -9,11 +10,7 @@ import {
 } from "@/lib/sheetTemplateConstants";
 
 export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useIsClient();
 
   useEffect(() => {
     if (!isOpen) return;
