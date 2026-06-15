@@ -1,113 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import FacilityTable from "@/components/facilities/FacilityTable";
-
-const facilitiesSeed = [
-  {
-    id: 1,
-    facility: "Smith & Associates",
-    city: "Beverly Hills",
-    zip: "90210",
-  },
-  {
-    id: 2,
-    facility: "Martinez Legal Group",
-    city: "Los Angeles",
-    zip: "90017",
-  },
-  {
-    id: 3,
-    facility: "Pacific Law Partners",
-    city: "San Francisco",
-    zip: "94105",
-  },
-  {
-    id: 4,
-    facility: "Williams & Co.",
-    city: "Houston",
-    zip: "77002",
-  },
-  {
-    id: 5,
-    facility: "Brown Family Trust",
-    city: "New York",
-    zip: "10001",
-  },
-  {
-    id: 6,
-    facility: "Davis Law Firm",
-    city: "Chicago",
-    zip: "60601",
-  },
-  {
-    id: 7,
-    facility: "Rodriguez & Partners",
-    city: "Miami",
-    zip: "33101",
-  },
-  {
-    id: 8,
-    facility: "Thompson Industries",
-    city: "Atlanta",
-    zip: "30309",
-  },
-  {
-    id: 9,
-    facility: "Garcia Legal Services",
-    city: "Phoenix",
-    zip: "85001",
-  },
-  {
-    id: 10,
-    facility: "Lee Tech Holdings",
-    city: "Seattle",
-    zip: "98101",
-  },
-  {
-    id: 11,
-    facility: "Anderson Accounting",
-    city: "Dallas",
-    zip: "75201",
-  },
-  {
-    id: 12,
-    facility: "Taylor Financial Group",
-    city: "Chicago",
-    zip: "60606",
-  },
-  {
-    id: 13,
-    facility: "Harrison Medical Group",
-    city: "Houston",
-    zip: "77030",
-  },
-  {
-    id: 14,
-    facility: "O'Connor Legal",
-    city: "Boston",
-    zip: "02101",
-  },
-  {
-    id: 15,
-    facility: "Nelson Healthcare",
-    city: "Orlando",
-    zip: "32801",
-  },
-];
+import {
+  deleteFacility,
+  getFacilities,
+} from "@/lib/facilities/facilityApi";
 
 export default function FacilitiesPage() {
-  const [facilities, setFacilities] = useState(facilitiesSeed);
+  const [facilities, setFacilities] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const handleDeleteFacility = (facility) => {
-    setFacilities((prev) => prev.filter((item) => item.id !== facility.id));
-    console.log("Deleted facility:", facility);
-  };
+  const loadFacilities = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-  const handleUpload = (facility) => {
-    console.log("Open facility upload:", facility);
+    try {
+      const data = await getFacilities();
+      setFacilities(data);
+    } catch (err) {
+      setError(err.message || "Failed to load facilities");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFacilities();
+  }, [loadFacilities]);
+
+  const handleDeleteFacility = async (facility) => {
+    try {
+      await deleteFacility(facility.id);
+      setFacilities((prev) => prev.filter((item) => item.id !== facility.id));
+    } catch (err) {
+      setError(err.message || "Failed to delete facility");
+    }
   };
 
   return (
@@ -137,11 +68,22 @@ export default function FacilitiesPage() {
           </div>
         </div>
 
-        <FacilityTable
-          facilities={facilities}
-          onUpload={handleUpload}
-          onDelete={handleDeleteFacility}
-        />
+        {error && (
+          <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center rounded-[10px] border border-[#E2E8F0] bg-white py-16 text-[13px] text-[#64748B]">
+            Loading facilities...
+          </div>
+        ) : (
+          <FacilityTable
+            facilities={facilities}
+            onDelete={handleDeleteFacility}
+          />
+        )}
       </div>
     </DashboardShell>
   );

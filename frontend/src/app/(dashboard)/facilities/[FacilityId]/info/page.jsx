@@ -1,71 +1,23 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
+import { ApiRequestError } from "@/lib/auth/authApi";
+import {
+  createDoctors,
+  deactivateDoctor,
+  getFacility,
+  reactivateDoctor,
+  setDefaultDoctor,
+  updateFacility,
+} from "@/lib/facilities/facilityApi";
 
-const facilitiesSeed = {
-  1: {
-    id: 1,
-    facilityName: "Smith & Associates",
-    userName: "smithassoc",
-    password: "",
-    firstName: "Robert",
-    middleName: "James",
-    lastName: "Smith",
-    address: "123 Main Street Suite 400",
-    zip: "90210",
-    city: "Beverly Hills",
-    state: "CA",
-    phone: "310-555-1234",
-    fax: "310-555-1235",
-    email: "info@smithassoc.com",
-    officeManagers: [
-      {
-        id: 1,
-        firstName: "Linda",
-        middleName: "Marie",
-        lastName: "Garcia",
-        phone: "310-555-1240",
-        email: "lgarcia@smithassoc.com",
-      },
-    ],
-    ipAddresses: "192.168.1.100\n192.168.1.101\n10.0.0.50",
-  },
-  2: {
-    id: 2,
-    facilityName: "Martinez Legal Group",
-    userName: "martinezlegal",
-    password: "",
-    firstName: "Linda",
-    middleName: "",
-    lastName: "Martinez",
-    address: "450 Legal Avenue",
-    zip: "90017",
-    city: "Los Angeles",
-    state: "CA",
-    phone: "213-555-2200",
-    fax: "213-555-2201",
-    email: "info@martinezlegal.com",
-    officeManagers: [
-      {
-        id: 1,
-        firstName: "Carlos",
-        middleName: "",
-        lastName: "Diaz",
-        phone: "213-555-2210",
-        email: "cdiaz@martinezlegal.com",
-      },
-    ],
-    ipAddresses: "192.168.2.10\n192.168.2.11",
-  },
-};
-
-const initialDoctorItem = {
-  id: 1,
+const createEmptyDoctorInput = (id) => ({
+  id,
   officeName: "",
   isDefault: false,
   firstName: "",
@@ -74,30 +26,7 @@ const initialDoctorItem = {
   phone: "",
   fax: "",
   email: "",
-};
-
-const doctorsSeed = [
-  {
-    id: 1,
-    office: "Smith Medical Center",
-    doctor: "David Paul Anderson",
-    phone: "310-555-1300",
-    fax: "310-555-1301",
-    email: "danderson@smithmed.com",
-    defaultDoctor: true,
-    active: true,
-  },
-  {
-    id: 2,
-    office: "Beverly Hills Clinic",
-    doctor: "Susan Wilson",
-    phone: "310-555-1400",
-    fax: "310-555-1401",
-    email: "swilson@bhclinic.com",
-    defaultDoctor: false,
-    active: true,
-  },
-];
+});
 
 const notesSeed = [
   {
@@ -133,35 +62,130 @@ export default function FacilityDetailsPage() {
   const params = useParams();
 
   const facilityId = String(
-    params?.facilityId || params?.FacilityId || params?.id || "1"
+    params?.facilityId || params?.FacilityId || params?.id || ""
   );
 
-  const facility = facilitiesSeed[facilityId] || facilitiesSeed[1];
-
-  const [formData, setFormData] = useState(facility);
-  const [doctorInputs, setDoctorInputs] = useState([initialDoctorItem]);
-  const [doctors, setDoctors] = useState(doctorsSeed);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [formData, setFormData] = useState(null);
+  const [doctorInputs, setDoctorInputs] = useState([
+    createEmptyDoctorInput("doctor-input-1"),
+  ]);
+  const [doctors, setDoctors] = useState([]);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [creatingDoctors, setCreatingDoctors] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [doctorError, setDoctorError] = useState("");
+  const [doctorErrors, setDoctorErrors] = useState({});
+  const [doctorSubmitAttempted, setDoctorSubmitAttempted] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState(null);
+
+  const [saveConfirmModal, setSaveConfirmModal] = useState({ open: false });
+
+  const [removeManagerModal, setRemoveManagerModal] = useState({
+    open: false,
+    manager: null,
+  });
 
   const [deleteDoctorModal, setDeleteDoctorModal] = useState({
     open: false,
     doctor: null,
   });
 
+  const loadFacility = useCallback(async () => {
+    if (!facilityId) return;
+
+    setLoading(true);
+    setLoadError("");
+
+    try {
+      const facility = await getFacility(facilityId);
+
+      const nextFormData = {
+        ...facility,
+        zip: facility.zip || facility.zipCode || "",
+        officeManagers:
+          facility.officeManagers?.length > 0
+            ? facility.officeManagers
+            : [
+                {
+                  id: null,
+                  firstName: "",
+                  middleName: "",
+                  lastName: "",
+                  phone: "",
+                  email: "",
+                },
+              ],
+      };
+
+      setFormData(nextFormData);
+      setSavedSnapshot(normalizeFacilityFormData(nextFormData));
+      setDoctors(facility.doctors || []);
+    } catch (err) {
+      setLoadError(err.message || "Failed to load facility");
+    } finally {
+      setLoading(false);
+    }
+  }, [facilityId]);
+
+  useEffect(() => {
+    loadFacility();
+  }, [loadFacility]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
 
+    let nextValue = value;
+
+    if (name === "phone" || name === "fax") {
+      nextValue = formatPhone(value);
+    }
+
+    if (name === "zip") {
+      nextValue = value.replace(/\D/g, "").slice(0, 5);
+    }
+
+    if (name === "state") {
+      nextValue = value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2);
+    }
+
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: nextValue,
     }));
+
+    if (submitAttempted) {
+      const fieldError = validateFacilityField(name, nextValue);
+
+      setErrors((prev) => {
+        const nextErrors = { ...prev };
+
+        if (fieldError) {
+          nextErrors[name] = fieldError;
+        } else {
+          delete nextErrors[name];
+        }
+
+        return nextErrors;
+      });
+    }
   };
 
   const handleManagerChange = (managerId, field, value) => {
+    let nextValue = value;
+
+    if (field === "phone") {
+      nextValue = formatPhone(value);
+    }
+
     setFormData((prev) => ({
       ...prev,
       officeManagers: prev.officeManagers.map((manager) =>
-        manager.id === managerId ? { ...manager, [field]: value } : manager
+        manager.id === managerId ? { ...manager, [field]: nextValue } : manager
       ),
     }));
   };
@@ -172,7 +196,7 @@ export default function FacilityDetailsPage() {
       officeManagers: [
         ...prev.officeManagers,
         {
-          id: Date.now(),
+          id: `new-${Date.now()}`,
           firstName: "",
           middleName: "",
           lastName: "",
@@ -183,19 +207,120 @@ export default function FacilityDetailsPage() {
     }));
   };
 
-  const handleRemoveManager = (managerId) => {
-    setFormData((prev) => ({
-      ...prev,
-      officeManagers: prev.officeManagers.filter(
-        (manager) => manager.id !== managerId
-      ),
+  const openRemoveManagerModal = (manager) => {
+    setRemoveManagerModal({
+      open: true,
+      manager,
+    });
+  };
+
+  const closeRemoveManagerModal = () => {
+    setRemoveManagerModal({
+      open: false,
+      manager: null,
+    });
+  };
+
+  const handleRemoveManager = (manager) => {
+    openRemoveManagerModal(manager);
+  };
+
+  const persistFacilityUpdate = async (data) => {
+    const officeManagers = data.officeManagers.map((manager) => ({
+      id: typeof manager.id === "number" ? manager.id : null,
+      firstName: manager.firstName,
+      middleName: manager.middleName,
+      lastName: manager.lastName,
+      phone: manager.phone,
+      email: manager.email,
     }));
+
+    const updated = await updateFacility(facilityId, {
+      facilityName: data.facilityName,
+      userName: data.userName,
+      password: data.password,
+      firstName: data.firstName,
+      middleName: data.middleName,
+      lastName: data.lastName,
+      address: data.address,
+      zipCode: data.zip,
+      city: data.city,
+      state: data.state,
+      phone: data.phone,
+      fax: data.fax,
+      email: data.email,
+      ipAddresses: data.ipAddresses,
+      officeManagers,
+    });
+
+    const nextFormData = {
+      ...updated,
+      zip: updated.zip || updated.zipCode || "",
+      password: "",
+    };
+
+    setFormData(nextFormData);
+    setSavedSnapshot(normalizeFacilityFormData(nextFormData));
+
+    return nextFormData;
+  };
+
+  const handleConfirmRemoveManager = async () => {
+    const manager = removeManagerModal.manager;
+
+    if (!manager || !formData) return;
+
+    const updatedManagers = formData.officeManagers.filter(
+      (item) => item.id !== manager.id
+    );
+
+    const nextFormData = {
+      ...formData,
+      officeManagers:
+        updatedManagers.length > 0
+          ? updatedManagers
+          : [
+              {
+                id: null,
+                firstName: "",
+                middleName: "",
+                lastName: "",
+                phone: "",
+                email: "",
+              },
+            ],
+    };
+
+    if (typeof manager.id === "number") {
+      setSaving(true);
+      setSubmitError("");
+
+      try {
+        await persistFacilityUpdate(nextFormData);
+      } catch (err) {
+        setSubmitError(err.message || "Failed to remove office manager");
+      } finally {
+        setSaving(false);
+        closeRemoveManagerModal();
+      }
+
+      return;
+    }
+
+    setFormData(nextFormData);
+    closeRemoveManagerModal();
   };
 
   const handleDoctorInputChange = (doctorId, field, value) => {
+    let nextValue = value;
+
+    if (field === "phone" || field === "fax") {
+      nextValue = formatPhone(value);
+    }
+
     setDoctorInputs((prev) =>
       prev.map((doctor) =>
-        doctor.id === doctorId ? { ...doctor, [field]: value } : doctor
+        doctor.id === doctorId ? { ...doctor, [field]: nextValue } : doctor
       )
     );
   };
@@ -215,10 +340,7 @@ export default function FacilityDetailsPage() {
   const handleAddDoctorInput = () => {
     setDoctorInputs((prev) => [
       ...prev,
-      {
-        ...initialDoctorItem,
-        id: Date.now(),
-      },
+      createEmptyDoctorInput(`doctor-input-${Date.now()}`),
     ]);
   };
 
@@ -240,20 +362,177 @@ export default function FacilityDetailsPage() {
     });
   };
 
-  const handleConfirmDeleteDoctor = () => {
+  const handleConfirmDeleteDoctor = async () => {
     if (!deleteDoctorModal.doctor) return;
 
-    setDoctors((prev) =>
-      prev.filter((doctor) => doctor.id !== deleteDoctorModal.doctor.id)
-    );
+    try {
+      const updated = await deactivateDoctor(
+        facilityId,
+        deleteDoctorModal.doctor.id
+      );
 
-    closeDeleteDoctorModal();
+      setDoctors((prev) =>
+        prev.map((doctor) =>
+          doctor.id === updated.id ? updated : doctor
+        )
+      );
+
+      const refreshed = await getFacility(facilityId);
+      setDoctors(refreshed.doctors || []);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to deactivate doctor");
+    } finally {
+      closeDeleteDoctorModal();
+    }
+  };
+
+  const handleReactivateDoctor = async (doctor) => {
+    try {
+      await reactivateDoctor(facilityId, doctor.id);
+      const refreshed = await getFacility(facilityId);
+      setDoctors(refreshed.doctors || []);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to reactivate doctor");
+    }
+  };
+
+  const handleSetDefaultDoctor = async (doctor) => {
+    try {
+      await setDefaultDoctor(facilityId, doctor.id);
+      const refreshed = await getFacility(facilityId);
+      setDoctors(refreshed.doctors || []);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to set default doctor");
+    }
   };
 
   const handleSaveFacility = () => {
-    console.log("Saved facility details:", formData);
-    console.log("Doctor input sections:", doctorInputs);
+    if (!formData) return;
+
+    setSubmitAttempted(true);
+    setSubmitError("");
+
+    const validationErrors = validateFacilityForm(formData);
+    setErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0) return;
+
+    if (!hasFacilityChanges(formData, savedSnapshot)) return;
+
+    setSaveConfirmModal({ open: true });
   };
+
+  const closeSaveConfirmModal = () => {
+    setSaveConfirmModal({ open: false });
+  };
+
+  const confirmSaveFacility = async () => {
+    if (!formData) return;
+
+    closeSaveConfirmModal();
+    setSaving(true);
+    setSubmitError("");
+
+    try {
+      await persistFacilityUpdate(formData);
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.errors) {
+        setErrors(mapApiErrors(err.errors));
+      }
+      setSubmitError(err.message || "Failed to update facility");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateDoctors = async () => {
+    setDoctorSubmitAttempted(true);
+    setDoctorError("");
+
+    const doctorsToCreate = doctorInputs
+      .map(({ officeName, firstName, middleName, lastName, phone, fax, email, isDefault }) => ({
+        officeName,
+        firstName,
+        middleName,
+        lastName,
+        phone,
+        fax,
+        email,
+        isDefault,
+      }))
+      .filter(
+        (doctor) =>
+          doctor.officeName?.trim() ||
+          doctor.firstName?.trim() ||
+          doctor.lastName?.trim() ||
+          doctor.phone?.trim() ||
+          doctor.fax?.trim() ||
+          doctor.email?.trim()
+      );
+
+    if (doctorsToCreate.length === 0) {
+      setDoctorError("Add at least one doctor with details");
+      return;
+    }
+
+    const validationErrors = validateDoctorsForm(doctorsToCreate);
+    setDoctorErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0) return;
+
+    setCreatingDoctors(true);
+
+    try {
+      const created = await createDoctors(facilityId, doctorsToCreate);
+      setDoctors(created);
+      setDoctorInputs([createEmptyDoctorInput(`doctor-input-${Date.now()}`)]);
+      setDoctorSubmitAttempted(false);
+      setDoctorErrors({});
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.errors) {
+        setDoctorErrors(mapApiErrors(err.errors));
+      }
+      setDoctorError(err.message || "Failed to create doctors");
+    } finally {
+      setCreatingDoctors(false);
+    }
+  };
+
+  const getError = (field) => {
+    if (!submitAttempted) return "";
+    return errors[field] || "";
+  };
+
+  const getDoctorInputError = (index, field) => {
+    if (!doctorSubmitAttempted) return "";
+    return doctorErrors[`doctors.${index}.${field}`] || "";
+  };
+
+  if (loading) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center text-[13px] text-[#64748B]">
+          Loading facility...
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  if (loadError || !formData) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-4">
+          <p className="text-[13px] font-semibold text-red-600">{loadError || "Facility not found"}</p>
+          <Link
+            href="/facilities"
+            className="text-[12px] font-semibold text-[#007F96] hover:underline"
+          >
+            Back to Facilities
+          </Link>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   const handleUploadDocuments = (uploadData) => {
     console.log("Upload documents for facility:", facilityId);
@@ -299,6 +578,7 @@ export default function FacilityDetailsPage() {
               value={formData.facilityName}
               onChange={handleChange}
               required
+              error={getError("facilityName")}
               hint="Please leave blank spaces between numbers, names or words"
             />
 
@@ -323,6 +603,7 @@ export default function FacilityDetailsPage() {
               value={formData.userName}
               onChange={handleChange}
               required
+              error={getError("userName")}
             />
 
             <TextField
@@ -374,6 +655,7 @@ export default function FacilityDetailsPage() {
               name="zip"
               value={formData.zip}
               onChange={handleChange}
+              error={getError("zipCode")}
             />
 
             <TextField
@@ -388,6 +670,7 @@ export default function FacilityDetailsPage() {
               name="state"
               value={formData.state}
               onChange={handleChange}
+              error={getError("state")}
             />
           </div>
 
@@ -398,6 +681,7 @@ export default function FacilityDetailsPage() {
               value={formData.phone}
               onChange={handleChange}
               placeholder="XXX-XXX-XXXX"
+              error={getError("phone")}
             />
 
             <TextField
@@ -406,6 +690,7 @@ export default function FacilityDetailsPage() {
               value={formData.fax}
               onChange={handleChange}
               placeholder="XXX-XXX-XXXX"
+              error={getError("fax")}
             />
           </div>
 
@@ -417,6 +702,7 @@ export default function FacilityDetailsPage() {
               onChange={handleChange}
               required
               placeholder="email"
+              error={getError("email")}
             />
           </div>
 
@@ -429,7 +715,7 @@ export default function FacilityDetailsPage() {
           <div className="space-y-4">
             {formData.officeManagers.map((manager, index) => (
               <OfficeManagerCard
-                key={manager.id}
+                key={manager.id ?? `manager-${index}`}
                 manager={manager}
                 index={index}
                 showRemove={formData.officeManagers.length > 1}
@@ -459,12 +745,19 @@ export default function FacilityDetailsPage() {
             />
           </div>
 
+          {submitError && (
+            <div className="mt-4 rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+              {submitError}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleSaveFacility}
-            className="mt-5 inline-flex h-[38px] items-center justify-center rounded-[6px] bg-[#0097B2] px-6 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+            disabled={saving}
+            className="mt-5 inline-flex h-[38px] items-center justify-center rounded-[6px] bg-[#0097B2] px-6 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Save
+            {saving ? "Saving..." : "Save"}
           </button>
         </section>
 
@@ -483,21 +776,44 @@ export default function FacilityDetailsPage() {
                 onChange={handleDoctorInputChange}
                 onDefaultChange={handleDoctorCheckboxChange}
                 onRemove={handleRemoveDoctorInput}
+                getError={(field) => getDoctorInputError(index, field)}
               />
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={handleAddDoctorInput}
-            className="mt-5 inline-flex h-[36px] items-center justify-center gap-2 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-4 text-[12px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
-          >
-            <PlusIcon />
-            Add Doctor
-          </button>
+          {doctorError && (
+            <div className="mt-4 rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+              {doctorError}
+            </div>
+          )}
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleAddDoctorInput}
+              className="inline-flex h-[36px] items-center justify-center gap-2 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-4 text-[12px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+            >
+              <PlusIcon />
+              Add Doctor
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCreateDoctors}
+              disabled={creatingDoctors}
+              className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {creatingDoctors ? "Creating..." : "Create Doctors"}
+            </button>
+          </div>
         </section>
 
-        <DoctorsTable doctors={doctors} onDelete={openDeleteDoctorModal} />
+        <DoctorsTable
+          doctors={doctors}
+          onDelete={openDeleteDoctorModal}
+          onReactivate={handleReactivateDoctor}
+          onSetDefault={handleSetDefaultDoctor}
+        />
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           <NotesCard facilityId={facilityId} />
@@ -506,11 +822,35 @@ export default function FacilityDetailsPage() {
       </div>
 
       <ConfirmModal
+        open={saveConfirmModal.open}
+        title="Save Changes"
+        message="Save the updated facility details?"
+        variant="warning"
+        confirmLabel="Yes"
+        cancelLabel="No"
+        onCancel={closeSaveConfirmModal}
+        onConfirm={confirmSaveFacility}
+      />
+
+      <ConfirmModal
+        open={removeManagerModal.open}
+        title="Remove Office Manager"
+        message={`Remove ${formatManagerName(
+          removeManagerModal.manager
+        )} from this facility?`}
+        variant="danger"
+        confirmLabel="Remove"
+        cancelLabel="No"
+        onCancel={closeRemoveManagerModal}
+        onConfirm={handleConfirmRemoveManager}
+      />
+
+      <ConfirmModal
         open={deleteDoctorModal.open}
-        title="Delete Doctor"
-        message={`Are you sure you want to delete ${
+        title="Deactivate Doctor"
+        message={`Are you sure you want to deactivate ${
           deleteDoctorModal.doctor?.doctor || "this doctor"
-        }? This action cannot be undone.`}
+        }?`}
         variant="danger"
         confirmLabel="Confirm"
         cancelLabel="Cancel"
@@ -535,6 +875,7 @@ function DoctorInputCard({
   onChange,
   onDefaultChange,
   onRemove,
+  getError,
 }) {
   return (
     <div className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4">
@@ -562,6 +903,7 @@ function DoctorInputCard({
           onChange={(e) => onChange(doctor.id, "officeName", e.target.value)}
           placeholder="Office Name"
           hint="Office"
+          error={getError?.("officeName")}
         />
 
         <label className="mb-[10px] flex items-center gap-2 text-[12px] text-[#475569]">
@@ -584,6 +926,7 @@ function DoctorInputCard({
           value={doctor.firstName}
           onChange={(e) => onChange(doctor.id, "firstName", e.target.value)}
           placeholder="First Name"
+          error={getError?.("firstName")}
         />
 
         <TextField
@@ -605,6 +948,7 @@ function DoctorInputCard({
           value={doctor.phone}
           onChange={(e) => onChange(doctor.id, "phone", e.target.value)}
           placeholder="XXX-XXX-XXXX"
+          error={getError?.("phone")}
         />
 
         <TextField
@@ -612,6 +956,7 @@ function DoctorInputCard({
           value={doctor.fax}
           onChange={(e) => onChange(doctor.id, "fax", e.target.value)}
           placeholder="XXX-XXX-XXXX"
+          error={getError?.("fax")}
         />
       </div>
 
@@ -620,6 +965,7 @@ function DoctorInputCard({
           label="Email"
           value={doctor.email}
           onChange={(e) => onChange(doctor.id, "email", e.target.value)}
+          error={getError?.("email")}
         />
       </div>
     </div>
@@ -643,7 +989,7 @@ function OfficeManagerCard({
         {showRemove && (
           <button
             type="button"
-            onClick={() => onRemove(manager.id)}
+            onClick={() => onRemove(manager)}
             className="inline-flex h-[28px] items-center justify-center gap-1 rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
           >
             <TrashIcon />
@@ -690,11 +1036,11 @@ function OfficeManagerCard({
   );
 }
 
-function DoctorsTable({ doctors, onDelete }) {
+function DoctorsTable({ doctors, onDelete, onReactivate, onSetDefault }) {
   return (
     <section className="overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
       <div className="overflow-auto">
-        <table className="w-full min-w-[960px] border-collapse">
+        <table className="w-full min-w-[1060px] border-collapse">
           <thead className="bg-[#F8FAFC]">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
               <th className="w-[60px] px-5 py-3">ID</th>
@@ -703,20 +1049,20 @@ function DoctorsTable({ doctors, onDelete }) {
               <th className="w-[140px] px-5 py-3">Phone</th>
               <th className="w-[140px] px-5 py-3">Fax</th>
               <th className="w-[230px] px-5 py-3">Email</th>
-              <th className="w-[90px] px-5 py-3 text-center">Default</th>
+              <th className="w-[110px] px-5 py-3 text-center">Default</th>
               <th className="w-[90px] px-5 py-3 text-center">Active</th>
-              <th className="w-[100px] px-5 py-3 text-center">Delete</th>
+              <th className="w-[140px] px-5 py-3 text-center">Actions</th>
             </tr>
           </thead>
 
           <tbody>
-            {doctors.map((doctor, index) => (
+            {doctors.map((doctor) => (
               <tr
                 key={doctor.id}
                 className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC]"
               >
                 <td className="px-5 py-4 text-[12px] text-[#64748B]">
-                  {index + 1}
+                  {doctor.id}
                 </td>
 
                 <td className="px-5 py-4 text-[12px] text-[#334155]">
@@ -742,24 +1088,46 @@ function DoctorsTable({ doctors, onDelete }) {
                 <td className="px-5 py-4 text-center">
                   {doctor.defaultDoctor ? (
                     <StatusPill label="Yes" />
+                  ) : doctor.active ? (
+                    <button
+                      type="button"
+                      onClick={() => onSetDefault(doctor)}
+                      className="text-[11px] font-semibold text-[#007F96] hover:underline"
+                    >
+                      Set Default
+                    </button>
                   ) : (
                     <span className="text-[12px] text-[#94A3B8]">No</span>
                   )}
                 </td>
 
                 <td className="px-5 py-4 text-center">
-                  <StatusPill label="Active" />
+                  {doctor.active ? (
+                    <StatusPill label="Active" />
+                  ) : (
+                    <InactivePill />
+                  )}
                 </td>
 
                 <td className="px-5 py-4 text-center">
-                  <button
-                    type="button"
-                    onClick={() => onDelete(doctor)}
-                    className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
-                  >
-                    <TrashIcon />
-                    Delete
-                  </button>
+                  {doctor.active ? (
+                    <button
+                      type="button"
+                      onClick={() => onDelete(doctor)}
+                      className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                    >
+                      <TrashIcon />
+                      Delete
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onReactivate(doctor)}
+                      className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+                    >
+                      Reactivate
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -902,6 +1270,7 @@ function TextField({
   required = false,
   hint = "",
   type = "text",
+  error = "",
 }) {
   return (
     <div className="min-w-0">
@@ -918,10 +1287,20 @@ function TextField({
         value={value || ""}
         onChange={onChange}
         placeholder={placeholder}
-        className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+        className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
+          error
+            ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+            : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+        }`}
       />
 
-      {hint && <p className="mt-[5px] text-[10px] text-[#94A3B8]">{hint}</p>}
+      <div className="mt-[5px] min-h-[15px]">
+        {error ? (
+          <p className="text-[11px] font-medium text-red-500">{error}</p>
+        ) : hint ? (
+          <p className="text-[10px] text-[#94A3B8]">{hint}</p>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -983,6 +1362,197 @@ function StatusPill({ label }) {
       {label}
     </span>
   );
+}
+
+function InactivePill() {
+  return (
+    <span className="inline-flex h-[24px] items-center rounded-full bg-[#FEF2F2] px-3 text-[11px] font-semibold text-[#DC2626]">
+      Inactive
+    </span>
+  );
+}
+
+function mapApiErrors(errors) {
+  const mapped = {};
+
+  errors.forEach(({ field, message }) => {
+    mapped[field] = message;
+  });
+
+  return mapped;
+}
+
+function normalizeFacilityFormData(data) {
+  return {
+    facilityName: data.facilityName?.trim() || "",
+    userName: data.userName?.trim() || "",
+    firstName: data.firstName?.trim() || "",
+    middleName: data.middleName?.trim() || "",
+    lastName: data.lastName?.trim() || "",
+    address: data.address?.trim() || "",
+    zip: (data.zip || data.zipCode || "").trim(),
+    city: data.city?.trim() || "",
+    state: data.state?.trim() || "",
+    phone: data.phone?.trim() || "",
+    fax: data.fax?.trim() || "",
+    email: data.email?.trim() || "",
+    ipAddresses: data.ipAddresses?.trim() || "",
+    password: data.password?.trim() || "",
+    officeManagers: (data.officeManagers || []).map((manager) => ({
+      id: typeof manager.id === "number" ? manager.id : null,
+      firstName: manager.firstName?.trim() || "",
+      middleName: manager.middleName?.trim() || "",
+      lastName: manager.lastName?.trim() || "",
+      phone: manager.phone?.trim() || "",
+      email: manager.email?.trim() || "",
+    })),
+  };
+}
+
+function hasFacilityChanges(formData, savedSnapshot) {
+  if (!savedSnapshot) return true;
+
+  return (
+    JSON.stringify(normalizeFacilityFormData(formData)) !==
+    JSON.stringify(savedSnapshot)
+  );
+}
+
+function formatManagerName(manager) {
+  if (!manager) return "this office manager";
+
+  const name = [manager.firstName, manager.middleName, manager.lastName]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+
+  return name || "this office manager";
+}
+
+function validateFacilityForm(data) {
+  const errors = {};
+
+  if (!data.facilityName?.trim()) {
+    errors.facilityName = "Facility name is required";
+  }
+
+  if (!data.userName?.trim()) {
+    errors.userName = "User name is required";
+  }
+
+  if (data.password?.trim() && data.password.length < 8) {
+    errors.password = "Password must be at least 8 characters";
+  }
+
+  if (!data.email?.trim()) {
+    errors.email = "Email is required";
+  } else if (!isValidEmail(data.email)) {
+    errors.email = "Enter a valid email address";
+  }
+
+  if (data.zip && getDigits(data.zip).length !== 5) {
+    errors.zipCode = "ZIP must be 5 digits";
+  }
+
+  if (data.state && data.state.length !== 2) {
+    errors.state = "State must be 2 letters";
+  }
+
+  if (data.phone && getDigits(data.phone).length !== 10) {
+    errors.phone = "Enter a valid 10 digit number";
+  }
+
+  if (data.fax && getDigits(data.fax).length !== 10) {
+    errors.fax = "Enter a valid 10 digit number";
+  }
+
+  (data.officeManagers || []).forEach((manager, index) => {
+    if (manager.phone && getDigits(manager.phone).length !== 10) {
+      errors[`managers.${index}.phone`] = "Enter a valid 10 digit number";
+    }
+
+    if (manager.email && !isValidEmail(manager.email)) {
+      errors[`managers.${index}.email`] = "Enter a valid email address";
+    }
+  });
+
+  return errors;
+}
+
+function validateFacilityField(field, value) {
+  if (!value?.trim()) {
+    if (field === "facilityName") return "Facility name is required";
+    if (field === "userName") return "User name is required";
+    if (field === "email") return "Email is required";
+  }
+
+  if (field === "password" && value && value.length < 8) {
+    return "Password must be at least 8 characters";
+  }
+
+  if (field === "email" && value && !isValidEmail(value)) {
+    return "Enter a valid email address";
+  }
+
+  if (field === "zip" && value && getDigits(value).length !== 5) {
+    return "ZIP must be 5 digits";
+  }
+
+  if (field === "state" && value && value.length !== 2) {
+    return "State must be 2 letters";
+  }
+
+  if ((field === "phone" || field === "fax") && value) {
+    if (getDigits(value).length !== 10) return "Enter a valid 10 digit number";
+  }
+
+  return "";
+}
+
+function validateDoctorsForm(doctors) {
+  const errors = {};
+
+  doctors.forEach((doctor, index) => {
+    if (!doctor.officeName?.trim()) {
+      errors[`doctors.${index}.officeName`] = "Office name is required";
+    }
+
+    if (!doctor.firstName?.trim() && !doctor.lastName?.trim()) {
+      errors[`doctors.${index}.firstName`] =
+        "Doctor first or last name is required";
+    }
+
+    if (doctor.phone && getDigits(doctor.phone).length !== 10) {
+      errors[`doctors.${index}.phone`] = "Enter a valid 10 digit number";
+    }
+
+    if (doctor.fax && getDigits(doctor.fax).length !== 10) {
+      errors[`doctors.${index}.fax`] = "Enter a valid 10 digit number";
+    }
+
+    if (doctor.email && !isValidEmail(doctor.email)) {
+      errors[`doctors.${index}.email`] = "Enter a valid email address";
+    }
+  });
+
+  return errors;
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+}
+
+function getDigits(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function formatPhone(value) {
+  const digits = getDigits(value).slice(0, 10);
+
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+
+  return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
 function Divider() {

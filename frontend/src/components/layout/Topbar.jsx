@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import NotificationsModal from "@/components/layout/NotificationsModal";
+import { getStoredUser } from "@/lib/auth/authStorage";
 
 const notifications = [
   {
@@ -41,6 +42,10 @@ const notifications = [
 export default function Topbar({ onToggleSidebar }) {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const notificationButtonRef = useRef(null);
+
+  const user = getStoredUser();
+  const displayName = user?.name || "User";
+  const initials = getInitials(displayName);
 
   const unreadCount = notifications.filter((item) => !item.read).length;
 
@@ -87,16 +92,30 @@ export default function Topbar({ onToggleSidebar }) {
           className="flex shrink-0 items-center gap-[7px] rounded-[6px] px-1 py-1 hover:bg-[#F8FAFC] sm:gap-[9px]"
         >
           <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full bg-[#BDECF3] text-[11px] font-medium text-[#007F96]">
-            JD
+            {initials}
           </div>
 
           <p className="hidden text-[13px] font-medium text-[#111827] sm:block">
-            John Doe
+            {displayName}
           </p>
         </button>
       </div>
     </header>
   );
+}
+
+function getInitials(name) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+
+  if (parts.length === 0) {
+    return "U";
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
 function MenuIcon() {

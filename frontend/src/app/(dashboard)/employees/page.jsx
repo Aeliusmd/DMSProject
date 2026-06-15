@@ -1,180 +1,82 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import MatrixEmployeesTable from "@/components/employees/MatrixEmployeesTable";
 import EmployeeFormModal from "@/components/employees/EmployeeFormModal";
-
-const employeesSeed = [
-  {
-    id: 1,
-    name: "John Doe",
-    logon: "jdoe",
-    email: "jdoe@dmscustodian.com",
-    role: "Manager",
-    lastLogin: "05/29/26 09:03AM",
-    terminated: false,
-  },
-  {
-    id: 2,
-    name: "Sarah Johnson",
-    logon: "sjohnson",
-    email: "sjohnson@dmscustodian.com",
-    role: "Manager",
-    lastLogin: "05/28/26 02:45PM",
-    terminated: false,
-  },
-  {
-    id: 3,
-    name: "Michael Chen",
-    logon: "mchen",
-    email: "mchen@dmscustodian.com",
-    role: "Manager",
-    lastLogin: "05/27/26 11:12AM",
-    terminated: false,
-  },
-  {
-    id: 4,
-    name: "Emily Rodriguez",
-    logon: "erodriguez",
-    email: "erodriguez@dmscustodian.com",
-    role: "Manager",
-    lastLogin: "05/26/26 04:30PM",
-    terminated: false,
-  },
-  {
-    id: 5,
-    name: "David Kim",
-    logon: "dkim",
-    email: "dkim@dmscustodian.com",
-    role: "Manager",
-    lastLogin: "05/25/26 08:15AM",
-    terminated: false,
-  },
-  {
-    id: 6,
-    name: "Lisa Thompson",
-    logon: "lthompson",
-    email: "lthompson@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/24/26 10:22AM",
-    terminated: false,
-  },
-  {
-    id: 7,
-    name: "Robert Garcia",
-    logon: "rgarcia",
-    email: "rgarcia@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/23/26 03:45PM",
-    terminated: false,
-  },
-  {
-    id: 8,
-    name: "Amanda White",
-    logon: "awhite",
-    email: "awhite@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/22/26 01:10PM",
-    terminated: false,
-  },
-  {
-    id: 9,
-    name: "James Wilson",
-    logon: "jwilson",
-    email: "jwilson@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/21/26 09:50AM",
-    terminated: false,
-  },
-  {
-    id: 10,
-    name: "Patricia Brown",
-    logon: "pbrown",
-    email: "pbrown@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/20/26 11:35AM",
-    terminated: false,
-  },
-  {
-    id: 11,
-    name: "Mark Davis",
-    logon: "mdavis",
-    email: "mdavis@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/19/26 02:00PM",
-    terminated: false,
-  },
-  {
-    id: 12,
-    name: "Jennifer Martinez",
-    logon: "jmartinez",
-    email: "jmartinez@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/18/26 08:45AM",
-    terminated: false,
-  },
-  {
-    id: 13,
-    name: "Thomas Anderson",
-    logon: "tanderson",
-    email: "tanderson@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/15/26 04:20PM",
-    terminated: true,
-  },
-  {
-    id: 14,
-    name: "Maria Lopez",
-    logon: "mlopez",
-    email: "mlopez@dmscustodian.com",
-    role: "Employee",
-    lastLogin: "05/10/26 10:30AM",
-    terminated: true,
-  },
-];
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessEmployeesPage } from "@/lib/auth/roles";
+import {
+  activateEmployee,
+  createEmployee,
+  deleteEmployee,
+  getEmployees,
+  terminateEmployee,
+} from "@/lib/employees/employeeApi";
 
 export default function EmployeesPage() {
-  const [employees, setEmployees] = useState(employeesSeed);
+  const router = useRouter();
+  const [employees, setEmployees] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [isNewEmployeeModalOpen, setIsNewEmployeeModalOpen] = useState(false);
 
-  const handleCreateEmployee = (newEmployeeData) => {
-    const nextId =
-      employees.length > 0
-        ? Math.max(...employees.map((employee) => employee.id)) + 1
-        : 1;
+  useEffect(() => {
+    const user = getStoredUser();
 
-    const newEmployee = {
-      id: nextId,
-      name: newEmployeeData.name,
-      logon: newEmployeeData.logon,
-      email: newEmployeeData.email,
-      role: newEmployeeData.role,
-      lastLogin: "Never",
-      terminated: false,
-    };
+    if (!canAccessEmployeesPage(user)) {
+      router.replace("/dashboard");
+      return;
+    }
 
-    setEmployees((prev) => [newEmployee, ...prev]);
+    async function loadEmployees() {
+      setIsLoading(true);
+      setPageError("");
+
+      try {
+        const data = await getEmployees();
+        setEmployees(data);
+      } catch (error) {
+        if (error.status === 403) {
+          router.replace("/dashboard");
+          return;
+        }
+
+        setPageError(error.message || "Unable to load employees");
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadEmployees();
+  }, [router]);
+
+  const handleCreateEmployee = async (newEmployeeData) => {
+    const employee = await createEmployee(newEmployeeData);
+    setEmployees((prev) => [employee, ...prev]);
     setIsNewEmployeeModalOpen(false);
-
-    console.log("Created employee:", newEmployee);
   };
 
-  const handleTerminateEmployee = (employee) => {
+  const handleTerminateEmployee = async (employee) => {
+    const updatedEmployee = await terminateEmployee(employee.id);
     setEmployees((prev) =>
-      prev.map((item) =>
-        item.id === employee.id ? { ...item, terminated: true } : item
-      )
+      prev.map((item) => (item.id === updatedEmployee.id ? updatedEmployee : item))
     );
-
-    console.log("Terminated employee:", employee);
   };
 
-  const handleDeleteEmployee = (employee) => {
-    setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
+  const handleActivateEmployee = async (employee) => {
+    const updatedEmployee = await activateEmployee(employee.id);
+    setEmployees((prev) =>
+      prev.map((item) => (item.id === updatedEmployee.id ? updatedEmployee : item))
+    );
+    return updatedEmployee;
+  };
 
-    console.log("Deleted employee:", employee);
+  const handleDeleteEmployee = async (employee) => {
+    await deleteEmployee(employee.id);
+    setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
   };
 
   return (
@@ -205,11 +107,24 @@ export default function EmployeesPage() {
           </div>
         </div>
 
-        <MatrixEmployeesTable
-          employees={employees}
-          onTerminateEmployee={handleTerminateEmployee}
-          onDeleteEmployee={handleDeleteEmployee}
-        />
+        {pageError && (
+          <p className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600">
+            {pageError}
+          </p>
+        )}
+
+        {isLoading ? (
+          <div className="flex flex-1 items-center justify-center rounded-[10px] border border-[#E2E8F0] bg-white">
+            <p className="text-[13px] text-[#64748B]">Loading employees...</p>
+          </div>
+        ) : (
+          <MatrixEmployeesTable
+            employees={employees}
+            onTerminateEmployee={handleTerminateEmployee}
+            onDeleteEmployee={handleDeleteEmployee}
+            onActivateEmployee={handleActivateEmployee}
+          />
+        )}
 
         <EmployeeFormModal
           open={isNewEmployeeModalOpen}

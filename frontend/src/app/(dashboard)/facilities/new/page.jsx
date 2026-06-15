@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import { createFacility } from "@/lib/facilities/facilityApi";
+import { ApiRequestError } from "@/lib/auth/authApi";
 
 const initialFormData = {
   facilityName: "",
@@ -38,6 +40,8 @@ export default function NewFacilityPage() {
   const [managers, setManagers] = useState([createEmptyManager()]);
   const [errors, setErrors] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -136,21 +140,45 @@ export default function NewFacilityPage() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSubmitAttempted(true);
+    setSubmitError("");
 
     const validationErrors = validateFacilityForm(formData, managers);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    console.log("New facility data:", {
-      ...formData,
-      managers,
-    });
+    setSaving(true);
 
-    // Later: call create facility API here
-    router.push("/facilities");
+    try {
+      const facility = await createFacility({
+        facilityName: formData.facilityName,
+        userName: formData.userName,
+        password: formData.password,
+        firstName: formData.firstName,
+        middleName: formData.middleName,
+        lastName: formData.lastName,
+        address: formData.address,
+        zipCode: formData.zipCode,
+        city: formData.city,
+        state: formData.state,
+        phone: formData.phone,
+        fax: formData.fax,
+        email: formData.email,
+        ipAddresses: formData.ipAddresses,
+        officeManagers: managers,
+      });
+
+      router.push(`/facilities/${facility.id}/info`);
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.errors) {
+        setErrors(mapApiErrors(err.errors));
+      }
+      setSubmitError(err.message || "Failed to create facility");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const getError = (field) => {
@@ -365,6 +393,12 @@ export default function NewFacilityPage() {
                 hint="one ip address per line"
               />
 
+              {submitError && (
+                <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+                  {submitError}
+                </div>
+              )}
+
               {submitAttempted && Object.keys(errors).length > 0 && (
                 <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
                   Please fill out all required fields correctly.
@@ -375,9 +409,10 @@ export default function NewFacilityPage() {
                 <button
                   type="button"
                   onClick={handleSave}
-                  className="inline-flex h-[38px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+                  disabled={saving}
+                  className="inline-flex h-[38px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save
+                  {saving ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>
@@ -536,6 +571,20 @@ function FacilityField({
       </div>
     </div>
   );
+}
+
+function mapApiErrors(errors) {
+  const mapped = {};
+
+  errors.forEach(({ field, message }) => {
+    if (field?.startsWith("managers.")) {
+      mapped[field.replace("managers.", "managers.")] = message;
+    } else {
+      mapped[field] = message;
+    }
+  });
+
+  return mapped;
 }
 
 function validateFacilityForm(data, managers) {

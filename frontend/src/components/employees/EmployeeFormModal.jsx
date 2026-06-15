@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ApiRequestError } from "@/lib/auth/authApi";
 
 const emptyForm = {
   name: "",
@@ -22,6 +23,8 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
   const [formData, setFormData] = useState(emptyForm);
   const [errors, setErrors] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -48,22 +51,42 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setSubmitAttempted(true);
+    setSubmitError("");
 
     const validationErrors = validateEmployeeForm(formData);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    onCreate({
-      name: formData.name.trim(),
-      userName: formData.userName.trim(),
-      logon: formData.userName.trim(),
-      password: formData.password,
-      email: formData.email.trim(),
-      role: formData.role,
-    });
+    setIsSubmitting(true);
+
+    try {
+      await onCreate({
+        name: formData.name.trim(),
+        userName: formData.userName.trim(),
+        logon: formData.userName.trim(),
+        password: formData.password,
+        email: formData.email.trim(),
+        role: formData.role,
+      });
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.errors?.length) {
+        const apiErrors = {};
+
+        error.errors.forEach((item) => {
+          const field = item.field === "logon" ? "userName" : item.field;
+          apiErrors[field] = item.message;
+        });
+
+        setErrors((prev) => ({ ...prev, ...apiErrors }));
+      }
+
+      setSubmitError(error.message || "Unable to create employee");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getError = (field) => {
@@ -145,6 +168,12 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
               error={getError("role")}
               required
             />
+            {submitError && (
+              <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+                {submitError}
+              </div>
+            )}
+
             {submitAttempted && Object.keys(errors).length > 0 && (
               <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
                 Please fill out all required fields correctly.
@@ -165,9 +194,10 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
           <button
             type="button"
             onClick={handleSubmit}
-            className="h-[34px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+            disabled={isSubmitting}
+            className="h-[34px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Save
+            {isSubmitting ? "Saving..." : "Save"}
           </button>
         </footer>
       </section>

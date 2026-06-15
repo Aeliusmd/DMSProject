@@ -2,7 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { logout } from "@/lib/auth/authApi";
+
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessEmployeesPage } from "@/lib/auth/roles";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
@@ -17,6 +22,26 @@ const navItems = [
 
 export default function Sidebar({ isCollapsed }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const user = getStoredUser();
+  const visibleNavItems = navItems.filter(
+    (item) => item.href !== "/employees" || canAccessEmployeesPage(user)
+  );
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+
+    try {
+      await logout();
+    } finally {
+      router.push("/login");
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <aside
@@ -39,7 +64,7 @@ export default function Sidebar({ isCollapsed }) {
 
       <nav className="flex-1 px-[10px] py-[16px]">
         <div className="space-y-[7px]">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = pathname === item.href;
 
             return (
@@ -74,14 +99,20 @@ export default function Sidebar({ isCollapsed }) {
         <button
           type="button"
           title={isCollapsed ? "Log out" : ""}
-          className={`flex h-[40px] w-full items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] ${
+          onClick={handleLogout}
+          disabled={isLoggingOut}
+          className={`flex h-[40px] w-full items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60 ${
             isCollapsed
               ? "justify-center"
               : "gap-[12px] px-[12px] max-md:justify-center max-md:px-0"
           }`}
         >
           <LogoutIcon />
-          {!isCollapsed && <span className="max-md:hidden">Log out</span>}
+          {!isCollapsed && (
+            <span className="max-md:hidden">
+              {isLoggingOut ? "Logging out..." : "Log out"}
+            </span>
+          )}
         </button>
       </div>
     </aside>

@@ -3,126 +3,7 @@
 import { useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
-
-const employeeLogsSeed = {
-  1: [
-    {
-      date: "06/04/26",
-      by: "Matthew Perera",
-      callback: "",
-      note: "Login successful from dashboard portal.",
-    },
-    {
-      date: "06/04/26",
-      by: "Matthew Perera",
-      callback: "",
-      note: "Employee profile Updated by admin.",
-    },
-    {
-      date: "06/03/26",
-      by: "System",
-      callback: "",
-      note: "Password reset email sent.",
-    },
-    {
-      date: "06/02/26",
-      by: "Matthew Perera",
-      callback: "",
-      note: "Role Updated from Processor to Manager.",
-    },
-    {
-      date: "06/01/26",
-      by: "System",
-      callback: "",
-      note: "Login failed attempt recorded.",
-    },
-    {
-      date: "06/01/26",
-      by: "Matthew Perera",
-      callback: "",
-      note: "Employee account created.",
-    },
-  ],
-  2: [
-    {
-      date: "06/04/26",
-      by: "Sarah Chen",
-      callback: "",
-      note: "Login successful from office device.",
-    },
-    {
-      date: "06/03/26",
-      by: "Sarah Chen",
-      callback: "",
-      note: "Processed invoice records.",
-    },
-    {
-      date: "06/02/26",
-      by: "Matthew Perera",
-      callback: "",
-      note: "Employee schedule Updated.",
-    },
-    {
-      date: "06/01/26",
-      by: "System",
-      callback: "",
-      note: "Password changed successfully.",
-    },
-  ],
-  3: [
-    {
-      date: "06/04/26",
-      by: "John Doe",
-      callback: "",
-      note: "Login successful.",
-    },
-    {
-      date: "06/03/26",
-      by: "Matthew Perera",
-      callback: "",
-      note: "Employee permission Updated.",
-    },
-    {
-      date: "06/02/26",
-      by: "System",
-      callback: "",
-      note: "Security check completed.",
-    },
-  ],
-};
-
-function getEmployeeLogs(employee) {
-  if (!employee) return [];
-
-  return (
-    employeeLogsSeed[employee.id] || [
-      {
-        date: "06/04/26",
-        by: "Matthew Perera",
-        callback: "",
-        note: `${employee.name} Login successful.`,
-      },
-      {
-        date: "06/03/26",
-        by: "System",
-        callback: "",
-        note: `${employee.name} profile Updated automatically.`,
-      },
-      {
-        date: "06/02/26",
-        by: "Matthew Perera",
-        callback: "",
-        note: `${employee.name} employee record reviewed.`,
-      },
-      {
-        date: "06/01/26",
-        by: "System",
-        callback: "",
-        note: `${employee.name} account activity synced.`,
-      },
-    ]
-  );
-}
+import { ApiRequestError } from "@/lib/auth/authApi";
 
 export default function MatrixEmployeesTable({
   employees,
@@ -145,6 +26,8 @@ export default function MatrixEmployeesTable({
   });
 
   const [selectedLogEmployee, setSelectedLogEmployee] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   if (employees !== prevEmployees) {
     setPrevEmployees(employees);
@@ -152,6 +35,7 @@ export default function MatrixEmployeesTable({
   }
 
   const openTerminateModal = (employee) => {
+    setActionError("");
     setConfirmModal({
       open: true,
       action: "terminate",
@@ -160,6 +44,7 @@ export default function MatrixEmployeesTable({
   };
 
   const openDeleteModal = (employee) => {
+    setActionError("");
     setConfirmModal({
       open: true,
       action: "delete",
@@ -175,50 +60,57 @@ export default function MatrixEmployeesTable({
     });
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     const { action, employee } = confirmModal;
 
-    if (!employee) return;
+    if (!employee || actionLoading) return;
 
-    if (action === "terminate") {
-      setTableEmployees((prev) =>
-        prev.map((item) =>
-          item.id === employee.id ? { ...item, terminated: true } : item
-        )
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      if (action === "terminate") {
+        await onTerminateEmployee?.(employee);
+      }
+
+      if (action === "delete") {
+        await onDeleteEmployee?.(employee);
+      }
+
+      closeConfirmModal();
+    } catch (error) {
+      setActionError(
+        error instanceof ApiRequestError
+          ? error.message
+          : "Unable to complete this action"
       );
-
-      onTerminateEmployee?.(employee);
+    } finally {
+      setActionLoading(false);
     }
-
-    if (action === "delete") {
-      setTableEmployees((prev) =>
-        prev.filter((item) => item.id !== employee.id)
-      );
-
-      onDeleteEmployee?.(employee);
-    }
-
-    closeConfirmModal();
   };
 
-  const handleActivateEmployee = (employee) => {
-    const activatedEmployee = {
-      ...employee,
-      terminated: false,
-    };
+  const handleActivateEmployee = async (employee) => {
+    if (actionLoading) return;
 
-    setTableEmployees((prev) =>
-      prev.map((item) =>
-        item.id === employee.id ? activatedEmployee : item
-      )
-    );
+    setActionLoading(true);
+    setActionError("");
 
-    onActivateEmployee?.(activatedEmployee);
+    try {
+      const activatedEmployee = await onActivateEmployee?.(employee);
 
-    setActivateSuccessModal({
-      open: true,
-      employee: activatedEmployee,
-    });
+      setActivateSuccessModal({
+        open: true,
+        employee: activatedEmployee || employee,
+      });
+    } catch (error) {
+      setActionError(
+        error instanceof ApiRequestError
+          ? error.message
+          : "Unable to activate employee"
+      );
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const closeActivateSuccessModal = () => {
@@ -240,6 +132,12 @@ export default function MatrixEmployeesTable({
 
   return (
     <>
+      {actionError && (
+        <p className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600">
+          {actionError}
+        </p>
+      )}
+
       <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="h-full overflow-auto">
           <table className="w-full min-w-[1080px] border-collapse">
@@ -369,7 +267,7 @@ export default function MatrixEmployeesTable({
         title={modalTitle}
         message={modalMessage}
         variant={confirmModal.action === "delete" ? "danger" : "warning"}
-        confirmLabel="Confirm"
+        confirmLabel={actionLoading ? "Processing..." : "Confirm"}
         cancelLabel="Cancel"
         onCancel={closeConfirmModal}
         onConfirm={handleConfirmAction}
@@ -392,7 +290,7 @@ export default function MatrixEmployeesTable({
         isOpen={Boolean(selectedLogEmployee)}
         title="Employee Activity Log"
         reference={selectedLogEmployee?.name}
-        logs={getEmployeeLogs(selectedLogEmployee)}
+        logs={[]}
         onClose={() => setSelectedLogEmployee(null)}
       />
     </>

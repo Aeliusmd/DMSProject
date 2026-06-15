@@ -1,29 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import AuthInput from "@/components/ui/AuthInput";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
+import { login } from "@/lib/auth/authApi";
+import { isAuthenticated } from "@/lib/auth/authStorage";
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
   const [isTwoFactorOpen, setIsTwoFactorOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState("");
+
+  const [sessionToken, setSessionToken] = useState("");
+  const [maskedEmail, setMaskedEmail] = useState("");
 
   const [touched, setTouched] = useState({
     email: false,
     password: false,
   });
 
+  useEffect(() => {
+    if (isAuthenticated()) {
+      router.replace("/dashboard");
+    }
+  }, [router]);
+
   const emailError = validateEmail(email);
   const passwordError = validatePassword(password);
 
   const isFormValid = !emailError && !passwordError;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     setTouched({
@@ -31,17 +47,39 @@ export default function LoginPage() {
       password: true,
     });
 
-    if (!isFormValid) return;
+    if (!isFormValid || isSubmitting) return;
 
-    console.log("Login submitted:", {
-      email,
-      password,
-    });
+    setIsSubmitting(true);
+    setLoginError("");
 
-    // Later:
-    // 1. call login API
-    // 2. if credentials are correct, open 2FA modal
-    setIsTwoFactorOpen(true);
+    try {
+      const response = await login({
+        email: email.trim(),
+        password,
+      });
+
+      const payload = response?.data || {};
+
+      setSessionToken(payload.sessionToken || "");
+      setMaskedEmail(payload.email || email.trim());
+      setIsTwoFactorOpen(true);
+    } catch (error) {
+      setLoginError(error.message || "Unable to sign in. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleTwoFactorClose = () => {
+    setIsTwoFactorOpen(false);
+    setSessionToken("");
+    setMaskedEmail("");
+  };
+
+  const handleTwoFactorSuccess = () => {
+    setIsTwoFactorOpen(false);
+    setSessionToken("");
+    router.push("/dashboard");
   };
 
   return (
@@ -121,6 +159,12 @@ export default function LoginPage() {
                 />
               </div>
 
+              {loginError && (
+                <p className="mt-4 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600">
+                  {loginError}
+                </p>
+              )}
+
               <div className="mt-[15px] flex items-center justify-between">
                 <label className="flex items-center gap-[8px] text-[12px] text-[#64748B]">
                   <input
@@ -139,8 +183,11 @@ export default function LoginPage() {
               </div>
 
               <div className="mt-[17px]">
-                <PrimaryButton type="submit" disabled={!isFormValid}>
-                  Sign In
+                <PrimaryButton
+                  type="submit"
+                  disabled={!isFormValid || isSubmitting}
+                >
+                  {isSubmitting ? "Signing in..." : "Sign In"}
                 </PrimaryButton>
               </div>
             </form>
@@ -154,8 +201,10 @@ export default function LoginPage() {
 
       <TwoFactorAuthModal
         isOpen={isTwoFactorOpen}
-        onClose={() => setIsTwoFactorOpen(false)}
-        email={email}
+        onClose={handleTwoFactorClose}
+        onSuccess={handleTwoFactorSuccess}
+        email={maskedEmail || email}
+        sessionToken={sessionToken}
       />
     </>
   );
