@@ -5,15 +5,20 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import AlertModal from "@/components/ui/AlertModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
+import DocumentPreviewModal from "@/components/facilities/DocumentPreviewModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   createDoctors,
   deactivateDoctor,
+  deleteFacilityDocument,
   getFacility,
+  getFacilityDocuments,
   reactivateDoctor,
   setDefaultDoctor,
   updateFacility,
+  uploadFacilityDocument,
 } from "@/lib/facilities/facilityApi";
 
 const createEmptyDoctorInput = (id) => ({
@@ -43,21 +48,6 @@ const notesSeed = [
   },
 ];
 
-const uploadsSeed = [
-  {
-    id: 1,
-    upload: "Business License",
-    date: "2026-04-10",
-    type: "PDF",
-  },
-  {
-    id: 2,
-    upload: "Insurance Certificate",
-    date: "2026-04-12",
-    type: "PDF",
-  },
-];
-
 export default function FacilityDetailsPage() {
   const params = useParams();
 
@@ -72,7 +62,23 @@ export default function FacilityDetailsPage() {
     createEmptyDoctorInput("doctor-input-1"),
   ]);
   const [doctors, setDoctors] = useState([]);
+  const [documents, setDocuments] = useState([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [uploadDocError, setUploadDocError] = useState("");
+  const [previewDocument, setPreviewDocument] = useState(null);
+  const [uploadAlert, setUploadAlert] = useState({
+    open: false,
+    variant: "success",
+    title: "",
+    message: "",
+  });
+  const [deleteDocumentModal, setDeleteDocumentModal] = useState({
+    open: false,
+    document: null,
+  });
+  const [deletingDocument, setDeletingDocument] = useState(false);
   const [errors, setErrors] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -94,6 +100,21 @@ export default function FacilityDetailsPage() {
     open: false,
     doctor: null,
   });
+
+  const loadDocuments = useCallback(async () => {
+    if (!facilityId) return;
+
+    setDocumentsLoading(true);
+
+    try {
+      const data = await getFacilityDocuments(facilityId);
+      setDocuments(data);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to load documents");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [facilityId]);
 
   const loadFacility = useCallback(async () => {
     if (!facilityId) return;
@@ -135,6 +156,10 @@ export default function FacilityDetailsPage() {
   useEffect(() => {
     loadFacility();
   }, [loadFacility]);
+
+  useEffect(() => {
+    loadDocuments();
+  }, [loadDocuments]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -534,9 +559,104 @@ export default function FacilityDetailsPage() {
     );
   }
 
-  const handleUploadDocuments = (uploadData) => {
-    console.log("Upload documents for facility:", facilityId);
-    console.log(uploadData);
+  const handleUploadDocuments = async ({ documentType, files }) => {
+    if (!files?.length) return;
+
+    setUploadingDocument(true);
+    setUploadDocError("");
+
+    try {
+      for (const file of files) {
+        await uploadFacilityDocument(facilityId, file, documentType);
+      }
+
+      await loadDocuments();
+      setUploadModalOpen(false);
+      setUploadDocError("");
+      setUploadAlert({
+        open: true,
+        variant: "success",
+        title: "Upload Successful",
+        message:
+          files.length > 1
+            ? `${files.length} documents were uploaded successfully.`
+            : "Document was uploaded successfully.",
+      });
+    } catch (err) {
+      const message = err.message || "Failed to upload document";
+      setUploadDocError(message);
+      setUploadAlert({
+        open: true,
+        variant: "error",
+        title: "Upload Failed",
+        message,
+      });
+      throw err;
+    } finally {
+      setUploadingDocument(false);
+    }
+  };
+
+  const openDeleteDocumentModal = (document) => {
+    setDeleteDocumentModal({
+      open: true,
+      document,
+    });
+  };
+
+  const closeDeleteDocumentModal = () => {
+    if (deletingDocument) return;
+
+    setDeleteDocumentModal({
+      open: false,
+      document: null,
+    });
+  };
+
+  const handleConfirmDeleteDocument = async () => {
+    if (!deleteDocumentModal.document) return;
+
+    setDeletingDocument(true);
+
+    try {
+      await deleteFacilityDocument(facilityId, deleteDocumentModal.document.id);
+
+      if (previewDocument?.id === deleteDocumentModal.document.id) {
+        setPreviewDocument(null);
+      }
+
+      await loadDocuments();
+      setUploadAlert({
+        open: true,
+        variant: "success",
+        title: "Document Deleted",
+        message: "The document was deleted successfully.",
+      });
+    } catch (err) {
+      setUploadAlert({
+        open: true,
+        variant: "error",
+        title: "Delete Failed",
+        message: err.message || "Failed to delete document",
+      });
+    } finally {
+      setDeletingDocument(false);
+      setDeleteDocumentModal({
+        open: false,
+        document: null,
+      });
+    }
+  };
+
+  const openUploadModal = () => {
+    setUploadDocError("");
+    setUploadModalOpen(true);
+  };
+
+  const closeUploadModal = () => {
+    if (uploadingDocument) return;
+    setUploadModalOpen(false);
+    setUploadDocError("");
   };
 
   return (
@@ -817,7 +937,13 @@ export default function FacilityDetailsPage() {
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           <NotesCard facilityId={facilityId} />
-          <UploadedDocumentsCard onNewUpload={() => setUploadModalOpen(true)} />
+          <UploadedDocumentsCard
+            documents={documents}
+            loading={documentsLoading}
+            onNewUpload={openUploadModal}
+            onSelectDocument={setPreviewDocument}
+            onDeleteDocument={openDeleteDocumentModal}
+          />
         </div>
       </div>
 
@@ -858,11 +984,43 @@ export default function FacilityDetailsPage() {
         onConfirm={handleConfirmDeleteDoctor}
       />
 
+      <ConfirmModal
+        open={deleteDocumentModal.open}
+        title="Delete Document"
+        message={`Are you sure you want to delete ${
+          deleteDocumentModal.document?.documentName ||
+          deleteDocumentModal.document?.name ||
+          "this document"
+        }?`}
+        variant="danger"
+        confirmLabel="Yes"
+        cancelLabel="No"
+        onCancel={closeDeleteDocumentModal}
+        onConfirm={handleConfirmDeleteDocument}
+      />
+
+      <AlertModal
+        open={uploadAlert.open}
+        title={uploadAlert.title}
+        message={uploadAlert.message}
+        variant={uploadAlert.variant}
+        onClose={() => setUploadAlert((prev) => ({ ...prev, open: false }))}
+      />
+
       <UploadDocumentsModal
         open={uploadModalOpen}
         title="Upload Documents"
-        onClose={() => setUploadModalOpen(false)}
+        onClose={closeUploadModal}
         onUpload={handleUploadDocuments}
+        uploading={uploadingDocument}
+        uploadError={uploadDocError}
+      />
+
+      <DocumentPreviewModal
+        open={Boolean(previewDocument)}
+        facilityId={facilityId}
+        selectedDocument={previewDocument}
+        onClose={() => setPreviewDocument(null)}
       />
     </DashboardShell>
   );
@@ -1200,7 +1358,13 @@ function NotesCard({ facilityId }) {
   );
 }
 
-function UploadedDocumentsCard({ onNewUpload }) {
+function UploadedDocumentsCard({
+  documents,
+  loading,
+  onNewUpload,
+  onSelectDocument,
+  onDeleteDocument,
+}) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
@@ -1219,41 +1383,84 @@ function UploadedDocumentsCard({ onNewUpload }) {
       </div>
 
       <div className="overflow-auto">
-        <table className="w-full min-w-[460px] border-collapse">
+        <table className="w-full min-w-[640px] border-collapse">
           <thead className="bg-[#F8FAFC]">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
-              <th className="px-4 py-3">Upload</th>
+              <th className="px-4 py-3">Document</th>
               <th className="w-[120px] px-4 py-3">Date</th>
-              <th className="w-[80px] px-4 py-3 text-center">Type</th>
+              <th className="w-[120px] px-4 py-3 text-center">Document Type</th>
+              <th className="w-[80px] px-4 py-3 text-center">File Type</th>
+              <th className="w-[90px] px-4 py-3 text-center">Delete</th>
             </tr>
           </thead>
 
           <tbody>
-            {uploadsSeed.map((upload) => (
-              <tr
-                key={upload.id}
-                className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC]"
-              >
-                <td className="px-4 py-4">
-                  <button
-                    type="button"
-                    className="text-[12px] font-semibold text-[#007F96] hover:underline"
-                  >
-                    {upload.upload}
-                  </button>
-                </td>
-
-                <td className="px-4 py-4 text-[12px] text-[#64748B]">
-                  {upload.date}
-                </td>
-
-                <td className="px-4 py-4 text-center">
-                  <span className="inline-flex h-[24px] items-center rounded-full bg-[#F1F5F9] px-3 text-[11px] font-semibold text-[#64748B]">
-                    {upload.type}
-                  </span>
+            {loading && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-[12px] text-[#94A3B8]"
+                >
+                  Loading documents...
                 </td>
               </tr>
-            ))}
+            )}
+
+            {!loading &&
+              documents.map((upload) => (
+                <tr
+                  key={upload.id}
+                  className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC]"
+                >
+                  <td className="px-4 py-4">
+                    <button
+                      type="button"
+                      onClick={() => onSelectDocument(upload)}
+                      className="text-left text-[12px] font-semibold text-[#007F96] hover:underline"
+                    >
+                      {upload.documentName || upload.name}
+                    </button>
+                  </td>
+
+                  <td className="px-4 py-4 text-[12px] text-[#64748B]">
+                    {upload.date}
+                  </td>
+
+                  <td className="px-4 py-4 text-center">
+                    <span className="inline-flex h-[24px] items-center rounded-full bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96]">
+                      {upload.documentType}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-4 text-center">
+                    <span className="inline-flex h-[24px] items-center rounded-full bg-[#F1F5F9] px-3 text-[11px] font-semibold text-[#64748B]">
+                      {upload.fileType}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => onDeleteDocument(upload)}
+                      className="inline-flex h-[28px] items-center justify-center gap-1 rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                    >
+                      <TrashIcon />
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+
+            {!loading && documents.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-8 text-center text-[12px] text-[#94A3B8]"
+                >
+                  No documents uploaded yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

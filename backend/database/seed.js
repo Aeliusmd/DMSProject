@@ -29,6 +29,8 @@ async function seed() {
   );
 
   if (existing.length > 0) {
+    const employeeId = existing[0].id;
+
     await pool.execute(
       `UPDATE matrix_employees
        SET password_hash = :passwordHash, role = :role, updated_at = NOW()
@@ -40,9 +42,12 @@ async function seed() {
       }
     );
 
+    const EmployeeSettings = require("../src/models/EmployeeSettings");
+    await EmployeeSettings.ensureForEmployee(employeeId);
+
     console.log(`Updated existing user: ${employee.email}`);
   } else {
-    await pool.execute(
+    const [result] = await pool.execute(
       `INSERT INTO matrix_employees
         (name, logon, email, password_hash, role, is_terminated, created_at, updated_at)
        VALUES
@@ -55,6 +60,9 @@ async function seed() {
         role: employee.role,
       }
     );
+
+    const EmployeeSettings = require("../src/models/EmployeeSettings");
+    await EmployeeSettings.ensureForEmployee(result.insertId);
 
     console.log(`Created user: ${employee.email}`);
   }

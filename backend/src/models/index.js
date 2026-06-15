@@ -8,4 +8,6 @@ module.exports = {
   Facility: require("./Facility"),
   OfficeManager: require("./OfficeManager"),
   FacilityDoctor: require("./FacilityDoctor"),
+  FacilityDocument: require("./FacilityDocument"),
+  EmployeeSettings: require("./EmployeeSettings"),
 };
