@@ -39,3 +39,39 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# --- DMS project additions ---
+
+# Database schema (kept outside repo)
+DMS_MySQL_Schema.sql
+database/
+
+# Backend
+backend/node_modules/
+backend/uploads/*
+!backend/uploads/**/.gitkeep
+backend/logs/*.log
+!backend/logs/.gitkeep
+
+# Document file server (local path from FILE_SERVER)
+fileserver/
+
+# Subpoena_Extraction runtime / credentials
+Subpoena_Extraction/temp/
+Subpoena_Extraction/output/
+Subpoena_Extraction/__pycache__/
+Subpoena_Extraction/**/__pycache__/
+Subpoena_Extraction/*.json
+Subpoena_Extraction/.env
+Subpoena_Extraction/.venv/
+Subpoena_Extraction/venv/
+
+# Python
+*.pyc
+.Python
+
+# Duplicate frontend folder (app lives at repo root on this branch)
+frontend/
+
+# Generated docs
+docs/*.pdf
