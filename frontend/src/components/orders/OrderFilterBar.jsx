@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getFacilities } from "@/lib/facilities/facilityApi";
 
 const defaultFilters = {
   facility: "",
@@ -11,6 +12,23 @@ const defaultFilters = {
 
 export default function OrderFilterBar({ filters, onFiltersChange }) {
   const [localFilters, setLocalFilters] = useState(defaultFilters);
+  const [facilities, setFacilities] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+
+    getFacilities()
+      .then((data) => {
+        if (active) setFacilities(data);
+      })
+      .catch(() => {
+        if (active) setFacilities([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const activeFilters = filters || localFilters;
 
@@ -46,9 +64,11 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">Facility</option>
-          <option value="smith">Smith & Associates</option>
-          <option value="martinez">Martinez Legal Group</option>
-          <option value="pacific">Pacific Law Partners</option>
+          {facilities.map((facility) => (
+            <option key={facility.id} value={String(facility.id)}>
+              {facility.facility || facility.facilityName || facility.name}
+            </option>
+          ))}
         </select>
 
         <select

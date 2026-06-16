@@ -1,8 +1,34 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { createOrderNote, getOrderNotes } from "@/lib/orders/orderApi";
+import { API_BASE_URL } from "@/config/api";
+
+function toFileUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const origin = API_BASE_URL.replace(/\/api\/?$/, "");
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function formatNoteDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function toHistoryItems(notes = []) {
+  return notes.map((note) => ({
+    id: note.id,
+    date: formatNoteDate(note.noteDate),
+    by: note.authorName || "—",
+    note: note.note || "",
+    attachmentUrl: toFileUrl(note.attachmentUrl),
+  }));
+}
 
 const MAX_NOTE_LENGTH = 1000;
 const MAX_FILE_SIZE_MB = 10;
@@ -21,39 +47,42 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
   const [attachment, setAttachment] = useState(null);
   const [errors, setErrors] = useState({});
   const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
-  const defaultNoteHistory = useMemo(() => {
-    if (!order) return [];
+  const orderId = order?.dbId ?? order?.id ?? null;
 
-    return [
-      {
-        date: "06/02/2026 10:45 AM",
-        by: "John Smith",
-        note: "Called - 06/02/2026 10:45 AM",
-      },
-      {
-        date: "05/28/2026 2:15 PM",
-        by: "John Smith",
-        note: "Called - 05/28/2026 2:15 PM",
-      },
-    ];
-  }, [order]);
+  useEffect(() => {
+    if (!isOpen || !orderId) return undefined;
 
-  const openSession =
-    isOpen && order ? String(order.id || order.orderNo) : null;
-  const [prevOpenSession, setPrevOpenSession] = useState(null);
+    let active = true;
 
-  if (openSession !== prevOpenSession) {
-    setPrevOpenSession(openSession);
+    setNoteText("");
+    setCallbackDate("");
+    setAttachment(null);
+    setErrors({});
+    setLoadError("");
+    setLoading(true);
 
-    if (openSession) {
-      setNoteText("");
-      setCallbackDate("");
-      setAttachment(null);
-      setErrors({});
-      setHistory(defaultNoteHistory);
-    }
-  }
+    getOrderNotes(orderId)
+      .then((notes) => {
+        if (active) setHistory(toHistoryItems(notes));
+      })
+      .catch((err) => {
+        if (active) {
+          setHistory([]);
+          setLoadError(err.message || "Failed to load notes");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, orderId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -151,67 +180,42 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
     return Object.keys(newErrors).length === 0;
   };
 
+  const submitNote = async (text) => {
+    if (!orderId) return;
+
+    setSaving(true);
+    setLoadError("");
+
+    try {
+      const notes = await createOrderNote(orderId, {
+        note: text,
+        callbackDate,
+        attachment,
+      });
+
+      setHistory(toHistoryItems(notes));
+      setNoteText("");
+      setCallbackDate("");
+      setAttachment(null);
+      setErrors({});
+    } catch (err) {
+      setErrors((prev) => ({
+        ...prev,
+        noteText: err.message || "Failed to save note",
+      }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveNote = () => {
-    if (!validateNote()) return;
-
-    const now = new Date().toLocaleString();
-
-    const payload = {
-      orderId: order.id,
-      applicant: order.applicant,
-      noteText: noteText.trim(),
-      callbackDate,
-      attachment,
-      type: "note",
-    };
-
-    console.log("Save order note:", payload);
-
-    setHistory((prev) => [
-      {
-        date: now,
-        by: "John Smith",
-        note: noteText.trim(),
-      },
-      ...prev,
-    ]);
-
-    setNoteText("");
-    setCallbackDate("");
-    setAttachment(null);
-    setErrors({});
+    if (saving || !validateNote()) return;
+    submitNote(noteText.trim());
   };
 
   const handleCalled = () => {
-    if (!validateCallbackOnly()) return;
-
-    const now = new Date().toLocaleString();
-    const calledNote = `Called - ${now}`;
-
-    const payload = {
-      orderId: order.id,
-      applicant: order.applicant,
-      noteText: calledNote,
-      callbackDate,
-      attachment,
-      type: "called",
-    };
-
-    console.log("Called note:", payload);
-
-    setHistory((prev) => [
-      {
-        date: now,
-        by: "John Smith",
-        note: calledNote,
-      },
-      ...prev,
-    ]);
-
-    setNoteText("");
-    setCallbackDate("");
-    setAttachment(null);
-    setErrors({});
+    if (saving || !validateCallbackOnly()) return;
+    submitNote(`Called - ${new Date().toLocaleString()}`);
   };
 
   const handleAttachmentChange = (e) => {
@@ -338,15 +342,17 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
             <button
               type="button"
               onClick={handleSaveNote}
-              className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
+              disabled={saving}
+              className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Save Note
+              {saving ? "Saving..." : "Save Note"}
             </button>
 
             <button
               type="button"
               onClick={handleCalled}
-              className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#111827] px-4 text-[11px] font-semibold text-white hover:bg-[#1F2937]"
+              disabled={saving}
+              className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#111827] px-4 text-[11px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Called
             </button>
@@ -360,7 +366,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
             <div className="space-y-2">
               {history.map((item, index) => (
                 <div
-                  key={`${item.date}-${index}`}
+                  key={item.id ?? `${item.date}-${index}`}
                   className="rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2"
                 >
                   <p className="text-[10px] font-semibold text-[#007F96]">
@@ -373,10 +379,33 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
                   <p className="mt-1 text-[11px] text-[#334155]">
                     {item.note}
                   </p>
+
+                  {item.attachmentUrl && (
+                    <a
+                      href={item.attachmentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-block text-[10px] font-semibold text-[#0097B2] underline"
+                    >
+                      View attachment
+                    </a>
+                  )}
                 </div>
               ))}
 
-              {history.length === 0 && (
+              {loading && (
+                <div className="rounded-[6px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-3 py-5 text-center text-[11px] text-[#94A3B8]">
+                  Loading notes...
+                </div>
+              )}
+
+              {!loading && loadError && (
+                <div className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-5 text-center text-[11px] font-medium text-red-500">
+                  {loadError}
+                </div>
+              )}
+
+              {!loading && !loadError && history.length === 0 && (
                 <div className="rounded-[6px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-3 py-5 text-center text-[11px] text-[#94A3B8]">
                   No note history found.
                 </div>

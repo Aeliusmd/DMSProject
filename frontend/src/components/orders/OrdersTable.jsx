@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
@@ -9,6 +10,7 @@ import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
+import { getOrders } from "@/lib/orders/orderApi";
 
 const ORDERS_PER_PAGE = 6;
 
@@ -19,42 +21,51 @@ const defaultOrderFilters = {
   search: "",
 };
 
-function getOrderFilterStatus(order) {
-  if (order.filterStatus) return order.filterStatus;
+const DEFAULT_ORDER_FORMS = [
+  "Send Copy/Letter",
+  "Copy Center",
+  "Certification",
+  "Records",
+  "CNR",
+  "Called",
+  "Edit Order",
+];
 
-  const hasSentStatus = order.status?.some(
-    (item) => item.label.toLowerCase() === "sent"
+const WORKFLOW_STAGES = ["Review Records", "Serve", "Custodian", "SENT"];
+const COMPLETED_STAGE_STATUSES = ["complete", "sent"];
+
+function mapWorkflowStages(stages = []) {
+  const byName = new Map(
+    stages.map((stage) => [stage.stageName, stage.stageStatus])
   );
 
-  if (hasSentStatus || order.invoice?.paid) return "completed";
+  return WORKFLOW_STAGES.map((stageName) => {
+    const stageStatus = byName.get(stageName) || "pending";
+    const completed = COMPLETED_STAGE_STATUSES.includes(stageStatus);
 
-  const hasPendingStatus = order.status?.some((item) => item.type === "red");
-
-  if (hasPendingStatus) return "active";
-
-  return "ready";
+    return {
+      label: stageName,
+      completed,
+    };
+  });
 }
 
-function getOrderSearchText(order) {
-  return [
-    order.id,
-    order.court,
-    order.applicant,
-    order.orderRef,
-    order.records?.title,
-    ...(order.records?.lines || []),
-    ...(order.records?.links || []),
-    order.company?.name,
-    order.company?.address,
-    order.company?.phone,
-    order.company?.email,
-    ...(order.dobSsn || []),
-    ...(order.forms || []),
-    ...(order.status?.map((item) => item.label) || []),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+function toRenderOrder(order) {
+  return {
+    id: order.id,
+    dbId: order.dbId,
+    note: order.note,
+    subpoena: order.subpoena,
+    court: order.court || "",
+    applicant: order.applicant || "",
+    orderRef: order.orderRef || "",
+    status: mapWorkflowStages(order.workflowStages),
+    invoice: { createOnly: true },
+    records: order.records || { title: "Records", lines: [], links: [] },
+    company: order.company || { name: "—", address: "", phone: "", email: "" },
+    dobSsn: order.dobSsn || [],
+    forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
+  };
 }
 
 const orderActivityLogs = [
@@ -162,367 +173,8 @@ const orderActivityLogs = [
   },
 ];
 
-const orders = [
-  {
-    id: "70656-1",
-    facility: "smith",
-    year: "2026",
-    filterStatus: "completed",
-    note: true,
-    subpoena: true,
-    court: "WCAB",
-    applicant: "Carlos Rivera",
-    orderRef: "Ord #W-27285-3",
-    status: [
-      { label: "Review Records", type: "green" },
-      { label: "Serve", type: "green" },
-      { label: "Custodian", type: "red" },
-      { label: "SENT", type: "check" },
-    ],
-    invoice: {
-      reviewDate: "05/25",
-      reviewAmount: "$285.00",
-      printAmount: "$15.00",
-      custodianAmount: "$20.00",
-      sentDate: "05/26",
-      showXray: true,
-      showEmail: true,
-    },
-    records: {
-      title: "Medical Records",
-      lines: ["ANY N ALL", "04/01/2015 - Present"],
-      links: ["Printed/Sent Out Note", "CNR Note"],
-    },
-    company: {
-      name: "CITYWIDE SCANNING SERVICES, Inc.",
-      address: "3010 WILSHIRE BLVD SUITE 22, Los Angeles",
-      phone: "Phone 213-353-0500 | Fax 213-677-5238",
-      email: "Email: records@citywidescanning.com",
-    },
-    dobSsn: ["04/01/93", "06/01/24", "02/04/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "6443-1",
-    facility: "martinez",
-    year: "2026",
-    filterStatus: "completed",
-    note: true,
-    subpoena: true,
-    court: "WCAB",
-    applicant: "Carlos Eduardo Diaz",
-    orderRef: "Ord #REC-1630864",
-    status: [
-      { label: "Review Records", type: "green" },
-      { label: "Serve", type: "green" },
-      { label: "Custodian", type: "green" },
-      { label: "SENT", type: "check" },
-    ],
-    invoice: {
-      reviewDate: "06/10",
-      reviewAmount: "$15.00",
-      printAmount: "$24.90",
-      custodianAmount: "$6.25",
-      sentDate: "06/26",
-      paid: true,
-    },
-    records: {
-      title: "Medical Records",
-      lines: ["ANY N ALL, FROM", "04/23/2015 - Present"],
-      links: ["Printed/Sent Out Note", "CNR Note"],
-    },
-    company: {
-      name: "GEMINI",
-      address: "250 TECHNOLOGY WAY, ROCKLIN, Rocklin",
-      phone: "Phone 877-739-7481 | Fax 707-204-8527",
-      email: "Email: records@geminilegal.com",
-    },
-    dobSsn: ["07/13/70", "03/29/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Send CNR L",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "65322-1",
-    facility: "martinez",
-    year: "2025",
-    filterStatus: "completed",
-    note: true,
-    subpoena: false,
-    court: "WCAB",
-    applicant: "Christian Lopez",
-    orderRef: "Ord #REC-1540811",
-    status: [
-      { label: "Review Records", type: "green" },
-      { label: "Serve", type: "green" },
-      { label: "Custodian", type: "green" },
-      { label: "SENT", type: "check" },
-    ],
-    invoice: {
-      reviewDate: "07/11",
-      reviewAmount: "$15.00",
-      printAmount: "$20.00",
-      custodianAmount: "$20.00",
-      sentDate: "07/11/25",
-      showXray: true,
-      paid: true,
-    },
-    records: {
-      title: "Medical Records",
-      lines: ["ANY N ALL FROM", "05/21/2015 - Present"],
-      links: ["Printed/Sent Out Note", "CNR Note"],
-    },
-    company: {
-      name: "Gemini Legal Support, Inc.",
-      address: "250 Technology Way, Rocklin",
-      phone: "Phone 877-739-7481 | Fax 626-966-9975",
-      email: "Email: records@gemini.Legal",
-    },
-    dobSsn: ["11/22/1944", "04/10/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "70123-2",
-    facility: "smith",
-    year: "2025",
-    filterStatus: "active",
-    note: true,
-    subpoena: false,
-    court: "",
-    applicant: "Maria Hernandez",
-    orderRef: "Ord #REC-187679",
-    status: [
-      { label: "Review Records", type: "red" },
-      { label: "Serve", type: "red" },
-      { label: "Custodian", type: "red" },
-    ],
-    invoice: {
-      createOnly: true,
-    },
-    records: {
-      title: "Medical Records",
-      lines: ["ANY N ALL", "01/15/2020 - Present"],
-      links: ["Upload Subpoena"],
-    },
-    company: {
-      name: "Adventist Health",
-      address: "1500 Chevy Chase Dr, Glendale, CA 91206",
-      phone: "Phone 818-409-8000 | Fax 818-409-8010",
-      email: "Email: records@adventisthealth.org",
-    },
-    dobSsn: ["03/22/1985", "04/01/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "7157-1",
-    facility: "smith",
-    year: "2025",
-    filterStatus: "completed",
-    note: true,
-    subpoena: false,
-    court: "",
-    applicant: "Robert Kim",
-    orderRef: "Ord #W-28934-1",
-    status: [
-      { label: "Review Records", type: "green" },
-      { label: "Serve", type: "green" },
-      { label: "Custodian", type: "red" },
-      { label: "SENT", type: "check" },
-    ],
-    invoice: {
-      reviewDate: "04/20",
-      reviewAmount: "$45.00",
-      printAmount: "$15.00",
-      sentDate: "04/20/25",
-      showXray: true,
-      paid: true,
-    },
-    records: {
-      title: "Medical Records",
-      lines: ["ANY N ALL", "06/01/2018 - Present"],
-      links: ["Printed/Sent Out Note"],
-    },
-    company: {
-      name: "Cedars-Sinai Medical Center",
-      address: "8700 Beverly Blvd, Los Angeles, CA 90048",
-      phone: "Phone 310-423-3277 | Fax 310-423-3272",
-      email: "Email: records@cedars-sinai.edu",
-    },
-    dobSsn: ["09/12/1978", "05/15/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "7289-3",
-    facility: "martinez",
-    year: "2025",
-    filterStatus: "active",
-    note: true,
-    subpoena: false,
-    court: "",
-    applicant: "Jennifer Martinez",
-    orderRef: "Ord #REC-1923456",
-    status: [
-      { label: "Review Records", type: "red" },
-      { label: "Serve", type: "green" },
-      { label: "Custodian", type: "red" },
-    ],
-    invoice: {
-      createOnly: true,
-    },
-    records: {
-      title: "Medical Records",
-      lines: ["ANY N ALL", "03/10/2019 - Present"],
-      links: ["Review Subpoena"],
-    },
-    company: {
-      name: "Children's Hospital Los Angeles",
-      address: "4650 Sunset Blvd, Los Angeles, CA 90027",
-      phone: "Phone 323-660-2450 | Fax 323-660-2451",
-      email: "Email: roi@chla.usc.edu",
-    },
-    dobSsn: ["02/14/2010", "06/20/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "7310-1",
-    facility: "pacific",
-    year: "2025",
-    filterStatus: "completed",
-    note: true,
-    subpoena: true,
-    court: "WCAB",
-    applicant: "Angela Foster",
-    orderRef: "Ord #W-1938482",
-    status: [
-      { label: "Review Records", type: "green" },
-      { label: "Serve", type: "green" },
-      { label: "Custodian", type: "green" },
-      { label: "SENT", type: "check" },
-    ],
-    invoice: {
-      reviewDate: "06/02",
-      reviewAmount: "$75.00",
-      printAmount: "$15.00",
-      custodianAmount: "$25.00",
-      sentDate: "06/03/25",
-      showEmail: true,
-    },
-    records: {
-      title: "Billing Records",
-      lines: ["ALL BILLING", "01/01/2020 - Present"],
-      links: ["Printed/Sent Out Note", "CNR Note"],
-    },
-    company: {
-      name: "Pacific Diagnostic Center",
-      address: "8900 Sunset Blvd, Floor 4, West Hollywood",
-      phone: "Phone 310-553-2400 | Fax 310-553-2401",
-      email: "Email: records@pacificdiagnostic.com",
-    },
-    dobSsn: ["05/20/82", "06/02/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-  {
-    id: "7422-4",
-    facility: "pacific",
-    year: "2025",
-    filterStatus: "active",
-    note: true,
-    subpoena: false,
-    court: "",
-    applicant: "Michael Brooks",
-    orderRef: "Ord #REC-1945520",
-    status: [
-      { label: "Review Records", type: "green" },
-      { label: "Serve", type: "red" },
-      { label: "Custodian", type: "green" },
-    ],
-    invoice: {
-      reviewDate: "05/18",
-      reviewAmount: "$95.00",
-      printAmount: "$20.00",
-      sentDate: "05/19/25",
-      paid: true,
-    },
-    records: {
-      title: "X-Ray Films",
-      lines: ["ANY N ALL", "02/01/2017 - Present"],
-      links: ["Printed/Sent Out Note", "CNR Note"],
-    },
-    company: {
-      name: "UCLA Health",
-      address: "10833 Le Conte Ave, Los Angeles, CA 90095",
-      phone: "Phone 310-825-9111 | Fax 310-825-9820",
-      email: "Email: records@uclahealth.org",
-    },
-    dobSsn: ["09/12/78", "05/15/25"],
-    forms: [
-      "Send Copy/Letter",
-      "Copy Center",
-      "Certification",
-      "Records",
-      "CNR",
-      "Called",
-      "Edit Order",
-    ],
-  },
-];
-
 export default function OrdersTable({ filters = defaultOrderFilters }) {
+  const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
@@ -532,6 +184,10 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
+
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const normalizedFilters = {
     facility: filters.facility || "",
@@ -548,32 +204,42 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     setCurrentPage(1);
   }
 
-  const filteredOrders = useMemo(() => {
-    const searchValue = normalizedFilters.search.trim().toLowerCase();
+  useEffect(() => {
+    let active = true;
 
-    return orders.filter((order) => {
-      const matchesFacility =
-        !normalizedFilters.facility ||
-        order.facility === normalizedFilters.facility;
+    setLoading(true);
+    setError("");
 
-      const matchesYear =
-        !normalizedFilters.year || order.year === normalizedFilters.year;
+    getOrders({
+      facility: normalizedFilters.facility,
+      year: normalizedFilters.year,
+      status: normalizedFilters.status,
+      search: normalizedFilters.search,
+    })
+      .then((data) => {
+        if (!active) return;
+        setOrders(data.map(toRenderOrder));
+      })
+      .catch((err) => {
+        if (!active) return;
+        setError(err.message || "Failed to load orders");
+        setOrders([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
-      const matchesStatus =
-        !normalizedFilters.status ||
-        getOrderFilterStatus(order) === normalizedFilters.status;
-
-      const matchesSearch =
-        !searchValue || getOrderSearchText(order).includes(searchValue);
-
-      return matchesFacility && matchesYear && matchesStatus && matchesSearch;
-    });
+    return () => {
+      active = false;
+    };
   }, [
     normalizedFilters.facility,
     normalizedFilters.year,
     normalizedFilters.status,
     normalizedFilters.search,
   ]);
+
+  const filteredOrders = orders;
 
   const totalPages = Math.max(
     1,
@@ -636,7 +302,25 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
             </thead>
 
             <tbody>
-              {currentOrders.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
+                  >
+                    Loading orders...
+                  </td>
+                </tr>
+              ) : error ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-10 text-center text-[12px] font-semibold text-red-500"
+                  >
+                    {error}
+                  </td>
+                </tr>
+              ) : currentOrders.length === 0 ? (
                 <tr>
                   <td
                     colSpan={8}
@@ -648,28 +332,26 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : (
                 currentOrders.map((order) => (
                   <tr
-                    key={order.id}
+                    key={order.dbId}
                     className="border-b border-[#F1F5F9] text-[11px] text-[#334155] last:border-b-0 hover:bg-[#F8FBFC]"
                   >
                     <td className="px-4 py-5 align-top">
                       <Link
                         href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                          order.id
+                          order.dbId
                         )}`}
                         className="font-semibold text-[#007F96] hover:underline"
                       >
                         {order.id}
                       </Link>
 
-                      {order.note && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedNoteOrder(order)}
-                          className="mt-1 block text-[10px] text-[#007F96] underline"
-                        >
-                          Note
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedNoteOrder(order)}
+                        className="mt-1 block text-[10px] text-[#007F96] underline"
+                      >
+                        {order.note ? "Note ●" : "Note"}
+                      </button>
 
                       <button
                         type="button"
@@ -704,8 +386,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
                     <td className="px-4 py-5 align-top">
                       <div className="space-y-1">
-                        {order.status.map((item) => (
-                          <StatusAction key={item.label} item={item} />
+                        {order.status.map((stage) => (
+                          <WorkflowStageItem key={stage.label} stage={stage} />
                         ))}
                       </div>
                     </td>
@@ -742,6 +424,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <FormsList
                         forms={order.forms}
                         onCnrClick={() => setSelectedCnrOrder(order)}
+                        onEditClick={() =>
+                          router.push(
+                            `/orders/new?mode=edit&orderId=${encodeURIComponent(
+                              order.dbId
+                            )}`
+                          )
+                        }
                       />
                     </td>
                   </tr>
@@ -843,32 +532,21 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   );
 }
 
-function StatusAction({ item }) {
-  const styles = {
-    green: "text-[#059669]",
-    red: "text-red-500",
-    check: "text-[#059669]",
-  };
-
+function WorkflowStageItem({ stage }) {
   return (
-    <button
-      type="button"
-      className={`flex items-center gap-1 text-left text-[10px] font-semibold hover:underline ${
-        styles[item.type] || "text-[#64748B]"
+    <div
+      className={`flex items-center gap-1.5 text-left text-[10px] font-semibold ${
+        stage.completed ? "text-[#059669]" : "text-red-500"
       }`}
     >
-      {item.type === "check" ? (
-        <span className="text-[10px]">✓</span>
-      ) : (
-        <span
-          className={`h-[6px] w-[6px] rounded-full ${
-            item.type === "red" ? "bg-red-500" : "bg-[#10B981]"
-          }`}
-        />
-      )}
+      <span
+        className={`h-[6px] w-[6px] shrink-0 rounded-full ${
+          stage.completed ? "bg-[#10B981]" : "bg-red-500"
+        }`}
+      />
 
-      {item.label}
-    </button>
+      {stage.label}
+    </div>
   );
 }
 
@@ -1011,23 +689,24 @@ function CompanyBlock({ company }) {
   );
 }
 
-function FormsList({ forms, onCnrClick }) {
+function FormsList({ forms, onCnrClick, onEditClick }) {
+  const handlers = {
+    CNR: onCnrClick,
+    "Edit Order": onEditClick,
+  };
+
   return (
     <div className="space-y-1">
-      {forms.map((form) => {
-        const isCnr = form === "CNR";
-
-        return (
-          <button
-            key={form}
-            type="button"
-            onClick={isCnr ? onCnrClick : undefined}
-            className="block text-left text-[10px] font-medium text-[#007F96] underline"
-          >
-            {form}
-          </button>
-        );
-      })}
+      {forms.map((form) => (
+        <button
+          key={form}
+          type="button"
+          onClick={handlers[form]}
+          className="block text-left text-[10px] font-medium text-[#007F96] underline"
+        >
+          {form}
+        </button>
+      ))}
     </div>
   );
 }

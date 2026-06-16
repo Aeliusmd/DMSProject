@@ -23,10 +23,33 @@ async function parseResponse(response) {
   }
 }
 
-export async function request(path, { method = "GET", body, auth = false } = {}) {
-  const headers = {
-    "Content-Type": "application/json",
-  };
+// Ensures only one refresh request is in flight even if several authed
+// requests get a 401 at the same time (e.g. concurrent dropdown loads).
+let refreshPromise = null;
+
+function refreshOnce() {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
+  return refreshPromise;
+}
+
+export async function request(
+  path,
+  { method = "GET", body, auth = false, _isRetry = false } = {}
+) {
+  const isFormData =
+    typeof FormData !== "undefined" && body instanceof FormData;
+
+  const headers = {};
+
+  // Let the browser set the multipart boundary for FormData uploads.
+  if (!isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
 
   if (auth) {
     const accessToken = getAccessToken();
@@ -36,11 +59,33 @@ export async function request(path, { method = "GET", body, auth = false } = {})
     }
   }
 
+  let requestBody;
+  if (body !== undefined && body !== null) {
+    requestBody = isFormData ? body : JSON.stringify(body);
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    body: requestBody,
   });
+
+  // Access token likely expired — try to refresh once, then retry.
+  if (
+    response.status === 401 &&
+    auth &&
+    !_isRetry &&
+    !path.startsWith("/auth/")
+  ) {
+    try {
+      await refreshOnce();
+    } catch {
+      clearAuth();
+      throw new ApiRequestError("Session expired. Please sign in again.", 401);
+    }
+
+    return request(path, { method, body, auth, _isRetry: true });
+  }
 
   const data = await parseResponse(response);
 

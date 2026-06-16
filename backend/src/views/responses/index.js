@@ -25,6 +25,22 @@ function formatOrder(order) {
   };
 }
 
+function formatProvider(provider) {
+  if (!provider) return null;
+
+  return {
+    id: provider.id,
+    companyName: provider.companyName,
+    address: provider.address,
+    zipCode: provider.zipCode,
+    city: provider.city,
+    state: provider.state,
+    phone: provider.phone,
+    fax: provider.fax,
+    email: provider.email,
+  };
+}
+
 function formatFacility(facility) {
   if (!facility) return null;
 
@@ -91,6 +107,7 @@ function formatNotification(notification) {
 module.exports = {
   formatUser,
   formatOrder,
+  formatProvider,
   formatFacility,
   formatEmployee,
   formatInvoice,

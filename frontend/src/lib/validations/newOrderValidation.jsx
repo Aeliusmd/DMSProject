@@ -73,23 +73,10 @@ export function validateNewOrderForm(data, fileErrors = {}) {
 
   paymentPrefixes.forEach((prefix) => {
     const checkField = `${prefix}Check`;
-    const dateField = `${prefix}Date`;
     const paidField = `${prefix}Paid`;
-
-    if (!data[checkField]) {
-      errors[checkField] = "Check number is required";
-    }
 
     if (data[checkField] && !/^\d+$/.test(data[checkField])) {
       errors[checkField] = "Check number must contain only numbers";
-    }
-
-    if (!data[dateField]) {
-      errors[dateField] = "Check date is required";
-    }
-
-    if (!data[paidField]) {
-      errors[paidField] = "Paid amount is required";
     }
 
     if (data[paidField] && !isValidMoney(data[paidField])) {
