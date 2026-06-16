@@ -1,9 +1,9 @@
 module.exports = {
   authService: require("./authService"),
-  orderService: require("./orderService"),
   facilityService: require("./facilityService"),
   employeeService: require("./employeeService"),
   invoiceService: require("./invoiceService"),
-  subpoenaExtractionService: require("./subpoenaExtractionService"),
+  emailService: require("./emailService"),
+  tokenService: require("./tokenService"),
   batchScanService: require("./batchScanService"),
 };

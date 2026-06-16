@@ -1,59 +1,44 @@
 const mysql = require("mysql2/promise");
 const config = require("./index");
+const logger = require("../utils/logger");
 
 let pool = null;
 
-function getPool() {
-  if (!pool) {
-    if (!config.databaseUrl && !config.db.user) {
-      throw new Error("Database is not configured");
-    }
-    pool = mysql.createPool({
-      host: config.db.host,
-      port: config.db.port,
-      user: config.db.user,
-      password: config.db.password,
-      database: config.db.name,
-      waitForConnections: true,
-      connectionLimit: 10,
-      namedPlaceholders: true,
-      dateStrings: true,
-    });
-  }
-  return pool;
+function createPool() {
+  return mysql.createPool({
+    host: config.db.host,
+    port: config.db.port,
+    user: config.db.user,
+    password: config.db.password,
+    database: config.db.database,
+    waitForConnections: true,
+    connectionLimit: 10,
+    namedPlaceholders: true,
+  });
 }
 
 async function connectDatabase() {
-  const p = getPool();
-  const conn = await p.getConnection();
-  await conn.ping();
-  conn.release();
-  return p;
-}
-
-async function query(sql, params) {
-  const [rows] = await getPool().execute(sql, params);
-  return rows;
-}
-
-async function withTransaction(fn) {
-  const conn = await getPool().getConnection();
-  try {
-    await conn.beginTransaction();
-    const result = await fn(conn);
-    await conn.commit();
-    return result;
-  } catch (err) {
-    await conn.rollback();
-    throw err;
-  } finally {
-    conn.release();
+  if (pool) {
+    return pool;
   }
+
+  pool = createPool();
+
+  const connection = await pool.getConnection();
+  await connection.ping();
+  connection.release();
+
+  logger.info("MySQL database connected", { database: config.db.database });
+
+  return pool;
 }
 
-module.exports = {
-  getPool,
-  connectDatabase,
-  query,
-  withTransaction,
-};
+function getPool() {
+  if (!pool) {
+    throw new Error("Database pool is not initialized. Call connectDatabase() first.");
+  }
+
+  return pool;
+}
+
+module.exports = { connectDatabase, getPool };

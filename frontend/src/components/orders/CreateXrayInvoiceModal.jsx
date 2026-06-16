@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 
 const initialFormData = {
   xrayInvoiceDate: "2026-06-02",
@@ -14,13 +15,22 @@ const initialFormData = {
 };
 
 export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useIsClient();
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const openSession =
+    isOpen && order ? String(order.id || order.orderNo) : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setFormData(initialFormData);
+      setErrors({});
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
@@ -32,13 +42,6 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
       document.body.style.overflow = originalOverflow;
     };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    setFormData(initialFormData);
-    setErrors({});
-  }, [isOpen, order]);
 
   const viewsAmount = useMemo(() => {
     return toNumber(formData.views) * toNumber(formData.perViewAmount);

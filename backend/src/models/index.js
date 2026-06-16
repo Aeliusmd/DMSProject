@@ -1,14 +1,17 @@
 /**
  * Model layer — data access and database schemas.
- * Export all models from this file once your ORM/ODM is configured.
  */
 
 module.exports = {
-  // User: require("./User"),
-  // Order: require("./Order"),
-  // Facility: require("./Facility"),
-  // Employee: require("./Employee"),
-  // Invoice: require("./Invoice"),
-  // Notification: require("./Notification"),
-  // ActivityLog: require("./ActivityLog"),
+  Employee: require("./Employee"),
+  AuthSession: require("./AuthSession"),
+  Facility: require("./Facility"),
+  OfficeManager: require("./OfficeManager"),
+  FacilityDoctor: require("./FacilityDoctor"),
+  Provider: require("./Provider"),
+  Order: require("./Order"),
+  FacilityDocument: require("./FacilityDocument"),
+  FacilityNote: require("./FacilityNote"),
+  EmployeeSettings: require("./EmployeeSettings"),
+  ActivityLog: require("./ActivityLog"),
 };

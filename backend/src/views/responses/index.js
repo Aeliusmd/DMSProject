@@ -1,14 +1,10 @@
-/**
- * View layer — formats data for API responses.
- * Controllers use these helpers to shape output (MVC "View" for REST APIs).
- */
-
 function formatUser(user) {
   if (!user) return null;
 
   return {
     id: user.id,
     name: user.name,
+    logon: user.logon,
     email: user.email,
     role: user.role,
   };
@@ -26,6 +22,22 @@ function formatOrder(order) {
     facility: order.facility,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
+  };
+}
+
+function formatProvider(provider) {
+  if (!provider) return null;
+
+  return {
+    id: provider.id,
+    companyName: provider.companyName,
+    address: provider.address,
+    zipCode: provider.zipCode,
+    city: provider.city,
+    state: provider.state,
+    phone: provider.phone,
+    fax: provider.fax,
+    email: provider.email,
   };
 }
 
@@ -47,9 +59,11 @@ function formatEmployee(employee) {
   return {
     id: employee.id,
     name: employee.name,
+    logon: employee.logon,
     email: employee.email,
     role: employee.role,
-    terminated: employee.terminated,
+    lastLogin: employee.lastLogin || "Never",
+    terminated: Boolean(employee.terminated ?? employee.is_terminated),
   };
 }
 
@@ -93,6 +107,7 @@ function formatNotification(notification) {
 module.exports = {
   formatUser,
   formatOrder,
+  formatProvider,
   formatFacility,
   formatEmployee,
   formatInvoice,

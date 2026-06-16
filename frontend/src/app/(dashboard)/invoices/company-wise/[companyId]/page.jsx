@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
+import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 
 const companyDetails = {
   1: {
@@ -63,6 +65,22 @@ const invoiceSeed = [
   },
 ];
 
+function buildWriteOffInvoice(company, invoice) {
+  return {
+    id: invoice.id,
+    caseNo: invoice.invoiceId,
+    invoiceId: invoice.invoiceId,
+    company: company.name,
+    email: company.email,
+    sentDate: invoice.invoiceDate,
+    invoiceDate: invoice.invoiceDate,
+    status: invoice.status,
+    invoiced: invoice.invoiced,
+    paid: invoice.paid,
+    due: invoice.due,
+  };
+}
+
 export default function CompanyInvoiceDetailsPage() {
   const params = useParams();
   const companyId = String(params.companyId);
@@ -74,6 +92,9 @@ export default function CompanyInvoiceDetailsPage() {
 
   const [invoices] = useState(invoiceSeed);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [writeOffInvoices, setWriteOffInvoices] = useState([]);
+
   const [filters, setFilters] = useState({
     search: "",
     fromDate: "",
@@ -165,11 +186,51 @@ export default function CompanyInvoiceDetailsPage() {
   const handleWriteOffSelected = () => {
     if (selectedInvoices.length === 0) return;
 
-    console.log("Write off selected invoices:", selectedInvoices);
+    const selectedWriteOffInvoices = selectedInvoices.map((invoice) =>
+      buildWriteOffInvoice(company, invoice)
+    );
+
+    setWriteOffInvoices(selectedWriteOffInvoices);
   };
 
   const handleWriteOffSingle = (invoice) => {
-    console.log("Write off invoice:", invoice);
+    setWriteOffInvoices([buildWriteOffInvoice(company, invoice)]);
+  };
+
+  const handleSubmitWriteOff = (payload) => {
+    console.log("Company wise write off payload:", payload);
+
+    setSelectedIds((prev) =>
+      prev.filter(
+        (selectedId) =>
+          !payload.invoices.some((invoice) => invoice.id === selectedId)
+      )
+    );
+
+    setWriteOffInvoices([]);
+
+    // Replace the console.log above with your backend API call.
+    // Example:
+    // await writeOffInvoicesApi(payload);
+  };
+
+  const handleOpenEditInvoice = (invoice) => {
+    setSelectedInvoiceOrder({
+      id: invoice.invoiceId,
+      applicant: invoice.invoiceId,
+      court: "N/A",
+      company: {
+        name: company.name,
+      },
+      invoice: {
+        date: invoice.invoiceDate,
+        sentDate: invoice.invoiceDate,
+        invoiced: invoice.invoiced,
+        paid: invoice.paid,
+        due: invoice.due,
+        status: invoice.status,
+      },
+    });
   };
 
   return (
@@ -242,8 +303,23 @@ export default function CompanyInvoiceDetailsPage() {
           onToggleAll={handleToggleAll}
           onToggleInvoice={handleToggleInvoice}
           onWriteOffSingle={handleWriteOffSingle}
+          onOpenEditInvoice={handleOpenEditInvoice}
         />
       </div>
+
+      <CreateInvoiceModal
+        isOpen={Boolean(selectedInvoiceOrder)}
+        mode="edit"
+        order={selectedInvoiceOrder}
+        onClose={() => setSelectedInvoiceOrder(null)}
+      />
+
+      <WriteOffInvoiceModal
+        isOpen={writeOffInvoices.length > 0}
+        invoices={writeOffInvoices}
+        onClose={() => setWriteOffInvoices([])}
+        onSubmit={handleSubmitWriteOff}
+      />
     </DashboardShell>
   );
 }
@@ -372,6 +448,7 @@ function CompanyInvoiceTable({
   onToggleAll,
   onToggleInvoice,
   onWriteOffSingle,
+  onOpenEditInvoice,
 }) {
   return (
     <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
@@ -384,7 +461,7 @@ function CompanyInvoiceTable({
                   type="checkbox"
                   checked={allSelected}
                   onChange={onToggleAll}
-                  className="h-[13px] w-[13px]"
+                  className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
                 />
               </th>
               <th className="w-[160px] px-4 py-3">Invoice ID</th>
@@ -411,23 +488,29 @@ function CompanyInvoiceTable({
                       type="checkbox"
                       checked={selected}
                       onChange={() => onToggleInvoice(invoice.id)}
-                      className="h-[13px] w-[13px]"
+                      className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
                     />
+                  </td>
+
+                  <td className="px-4 py-4 align-middle">
+                    <Link
+                      href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                        invoice.invoiceId
+                      )}`}
+                      className="text-[12px] font-semibold text-[#007F96] hover:underline"
+                    >
+                      {invoice.invoiceId}
+                    </Link>
                   </td>
 
                   <td className="px-4 py-4 align-middle">
                     <button
                       type="button"
-                      className="text-[12px] font-semibold text-[#007F96] hover:underline"
+                      onClick={() => onOpenEditInvoice(invoice)}
+                      className="text-left text-[12px] font-semibold text-red-500 hover:underline"
                     >
-                      {invoice.invoiceId}
-                    </button>
-                  </td>
-
-                  <td className="px-4 py-4 align-middle">
-                    <p className="text-[12px] font-semibold text-red-500">
                       {invoice.invoiceDate}
-                    </p>
+                    </button>
 
                     <p className="mt-1 text-[10px] text-[#64748B]">
                       ({invoice.days} days)

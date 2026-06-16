@@ -6,12 +6,17 @@ const config = require("./config");
 const routes = require("./routes");
 const notFound = require("./middleware/notFound");
 const errorHandler = require("./middleware/errorHandler");
+const { UPLOADS_ROOT } = require("./middleware/uploadMiddleware");
 
 const app = express();
+
+app.set("trust proxy", 1);
 
 app.use(cors({ origin: config.clientUrl, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.use("/uploads", express.static(UPLOADS_ROOT));
 
 if (config.nodeEnv !== "test") {
   app.use(morgan("dev"));

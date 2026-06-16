@@ -4,24 +4,51 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { TWO_FACTOR_AUTH_COUNTDOWN_SECONDS } from "@/lib/constants";
 import PrimaryButton from "@/components/ui/PrimaryButton";
+import {
+  resendTwoFactor,
+  saveAuthSession,
+  verifyTwoFactor,
+} from "@/lib/auth/authApi";
 
-export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
+export default function TwoFactorAuthModal({
+  isOpen,
+  onClose,
+  onSuccess,
+  email,
+  sessionToken,
+}) {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [countdown, setCountdown] = useState(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
   const [trustDevice, setTrustDevice] = useState(false);
+  const [error, setError] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
 
   const inputRefs = useRef([]);
+  const openSession = isOpen ? sessionToken || "open" : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setOtp(["", "", "", "", "", ""]);
+      setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
+      setTrustDevice(false);
+      setError("");
+      setIsVerifying(false);
+      setIsResending(false);
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
 
-    setOtp(["", "", "", "", "", ""]);
-    setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
-    setTrustDevice(false);
-
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       inputRefs.current[0]?.focus();
     }, 100);
+
+    return () => clearTimeout(timer);
   }, [isOpen]);
 
   useEffect(() => {
@@ -37,7 +64,40 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
 
   if (!isOpen) return null;
 
+  const submitCode = async (code) => {
+    if (!sessionToken || isVerifying) return;
+
+    setIsVerifying(true);
+    setError("");
+
+    try {
+      const response = await verifyTwoFactor({
+        sessionToken,
+        code,
+        trustDevice,
+      });
+
+      const payload = response?.data || {};
+
+      saveAuthSession({
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken,
+        user: payload.user,
+      });
+
+      onSuccess?.();
+    } catch (requestError) {
+      setError(requestError.message || "Invalid verification code");
+      setOtp(["", "", "", "", "", ""]);
+      inputRefs.current[0]?.focus();
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleOtpChange = (index, value) => {
+    if (isVerifying) return;
+
     const digit = value.replace(/\D/g, "");
 
     if (!digit) {
@@ -50,6 +110,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
     const updatedOtp = [...otp];
     updatedOtp[index] = digit.slice(-1);
     setOtp(updatedOtp);
+    setError("");
 
     if (index < 5) {
       inputRefs.current[index + 1]?.focus();
@@ -58,11 +119,7 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
     const finalOtp = updatedOtp.join("");
 
     if (finalOtp.length === 6) {
-      console.log("2FA code entered:", finalOtp);
-      console.log("Email:", email);
-      console.log("Trust device:", trustDevice);
-
-      // Later: call verify 2FA API here
+      submitCode(finalOtp);
     }
   };
 
@@ -77,6 +134,8 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
   };
 
   const handlePaste = (e) => {
+    if (isVerifying) return;
+
     e.preventDefault();
 
     const pastedValue = e.clipboardData
@@ -93,27 +152,32 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
     });
 
     setOtp(updatedOtp);
+    setError("");
 
     const nextIndex = pastedValue.length >= 6 ? 5 : pastedValue.length;
     inputRefs.current[nextIndex]?.focus();
 
     if (pastedValue.length === 6) {
-      console.log("2FA code pasted:", pastedValue);
-      console.log("Email:", email);
-
-      // Later: call verify 2FA API here
+      submitCode(pastedValue);
     }
   };
 
-  const handleResendCode = () => {
-    setOtp(["", "", "", "", "", ""]);
-    setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
-    inputRefs.current[0]?.focus();
+  const handleResendCode = async () => {
+    if (!sessionToken || isResending || countdown > 0) return;
 
-    console.log("Resend 2FA code");
-    console.log("Email:", email);
+    setIsResending(true);
+    setError("");
 
-    // Later: call resend 2FA API here
+    try {
+      await resendTwoFactor(sessionToken);
+      setOtp(["", "", "", "", "", ""]);
+      setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
+      inputRefs.current[0]?.focus();
+    } catch (requestError) {
+      setError(requestError.message || "Unable to resend code");
+    } finally {
+      setIsResending(false);
+    }
   };
 
   return (
@@ -152,7 +216,8 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
           </h2>
 
           <p className="mt-[8px] text-[13px] text-[#64748B]">
-            Enter the 6-digit code sent to your email
+            Enter the 6-digit code sent to{" "}
+            <span className="font-medium text-[#334155]">{email}</span>
           </p>
 
           <div className="mt-[22px] flex justify-center gap-[10px]">
@@ -166,18 +231,28 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
                 inputMode="numeric"
                 maxLength={1}
                 value={digit}
+                disabled={isVerifying}
                 onChange={(e) => handleOtpChange(index, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(index, e)}
                 onPaste={handlePaste}
-                className="h-[54px] w-[42px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] text-center text-[18px] font-medium text-[#111827] outline-none transition focus:border-[#0097B2] focus:bg-white focus:ring-2 focus:ring-[#0097B2]/10"
+                className="h-[54px] w-[42px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] text-center text-[18px] font-medium text-[#111827] outline-none transition focus:border-[#0097B2] focus:bg-white focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
               />
             ))}
           </div>
+
+          {error && (
+            <p className="mt-4 text-[12px] font-medium text-red-600">{error}</p>
+          )}
+
+          {isVerifying && (
+            <p className="mt-4 text-[12px] text-[#64748B]">Verifying code...</p>
+          )}
 
           <label className="mt-[22px] flex items-center justify-center gap-[8px] text-[13px] text-[#475569]">
             <input
               type="checkbox"
               checked={trustDevice}
+              disabled={isVerifying}
               onChange={(e) => setTrustDevice(e.target.checked)}
               className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
             />
@@ -194,8 +269,12 @@ export default function TwoFactorAuthModal({ isOpen, onClose, email }) {
               </p>
             ) : (
               <div className="mx-auto w-full max-w-[160px]">
-                <PrimaryButton type="button" onClick={handleResendCode}>
-                  Resend Code
+                <PrimaryButton
+                  type="button"
+                  disabled={isResending}
+                  onClick={handleResendCode}
+                >
+                  {isResending ? "Sending..." : "Resend Code"}
                 </PrimaryButton>
               </div>
             )}

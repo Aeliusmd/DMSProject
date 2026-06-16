@@ -1,11 +1,25 @@
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
+const multer = require("multer");
 
 function errorHandler(err, _req, res, _next) {
-  if (err.code === "LIMIT_FILE_SIZE") {
+  if (err instanceof multer.MulterError || err?.name === "MulterError") {
+    const message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Uploaded file exceeds the 10MB limit"
+        : `File upload error: ${err.message}`;
+
     return res.status(400).json({
       success: false,
-      message: "Uploaded file exceeds the maximum allowed size",
+      message,
+      errors: null,
+    });
+  }
+
+  if (err && !(err instanceof ApiError) && err.message === "Unsupported file type") {
+    return res.status(400).json({
+      success: false,
+      message: err.message,
       errors: null,
     });
   }

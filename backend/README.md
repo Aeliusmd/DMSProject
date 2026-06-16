@@ -65,48 +65,75 @@ Request → Route → Controller → Service → Model (database)
 
 ```bash
 cd backend
-cp .env.example .env
+cp .env.example .env   # add MySQL, JWT, and SMTP values
 npm install
+npm run seed           # creates test user (admin@dms.local / Admin@123)
 npm run dev
 ```
 
 Health check: `GET http://localhost:5000/health`
 
-## Environment
+## Authentication (JWT + 2FA)
 
-| Variable | Description |
-|----------|-------------|
-| `FILE_SERVER` | Absolute path where documents are stored (batch scans, orders, facilities) |
-| `SUBPOENA_EXTRACTION_API_URL` | Python Subpoena_Extraction service — `POST /process` endpoint |
-| `SUBPOENA_EXTRACTION_TIMEOUT_MS` | Max wait for AI extraction (default 300000 ms) |
-| `UPLOAD_MAX_FILE_SIZE_MB` | Max PDF upload size (default 50) |
+Uses `matrix_employees` and `auth_sessions` in MySQL.
 
-## Batch scan + AI extraction
+### Flow
 
-`POST /api/orders/batch-scan` (multipart)
+1. **Login** — validate credentials, create session, email 6-digit OTP
+2. **Verify 2FA** — validate OTP, issue access + refresh JWT tokens
+3. **Refresh** — get a new access token using refresh token
+4. **Logout** — delete session
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `file` | Yes | Batch PDF with barcode separator sheets |
-| `uploadedBy` | Yes | `matrix_employees.id` (until JWT auth is implemented) |
+### Auth endpoints
 
-Flow:
-1. Saves parent PDF → `{FILE_SERVER}/Order/BatchScan/{userId}/{name}_{userId}_{documentId}.pdf`
-2. Calls Subpoena_Extraction `POST /process`
-3. Node splits child PDFs → `{documentId}_1.pdf`, `_2.pdf`, …
-4. Inserts parent → `unprocessed_subpoenas`, children → `batch_scan_extracts`
-5. Writes `activity_logs` row
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Login with email/logon + password |
+| POST | `/api/auth/verify-2fa` | Verify OTP and receive tokens |
+| POST | `/api/auth/resend-2fa` | Resend OTP email |
+| POST | `/api/auth/refresh` | Refresh access token |
+| POST | `/api/auth/logout` | End session |
+| GET | `/api/auth/me` | Current user (requires access token) |
 
-`GET /api/orders/unprocessed` — list child extracts in queue  
-`GET /api/orders/unprocessed/:extractId` — single child + AI fields
+### Login request
 
-Run migration: `database/migrations/001_batch_scan_extracts.sql`  
-Seed test employee: `database/seed_dev_minimal.sql`
+```json
+{
+  "email": "admin@dms.local",
+  "password": "Admin@123"
+}
+```
 
-## Next steps
+### Verify 2FA request
 
-1. Choose a database & ORM (PostgreSQL + Prisma/Sequelize, or MongoDB + Mongoose)
-2. Implement models in `src/models/`
-3. Add business logic in `src/services/`
-4. Wire controllers to services
-5. Enable `authenticate` middleware on protected routes
+```json
+{
+  "sessionToken": "<from login response>",
+  "code": "123456",
+  "trustDevice": true
+}
+```
+
+### Token usage
+
+Send access token on protected routes:
+
+```
+Authorization: Bearer <accessToken>
+```
+
+### Role-based access
+
+Use middleware on protected routes:
+
+```js
+const { authenticate, authorize } = require("../middleware/authMiddleware");
+
+router.get("/admin-only", authenticate, authorize("Manager"), controller.action);
+```
+
+Supported roles match `matrix_employees.role` (e.g. `Manager`, `Employee`).
+
+## Environment variables
+
+See `.env.example` for MySQL, JWT, SMTP, and session settings.

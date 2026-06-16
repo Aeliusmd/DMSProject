@@ -2,14 +2,19 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { logout } from "@/lib/auth/authApi";
+
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessEmployeesPage } from "@/lib/auth/roles";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
   { label: "Orders", href: "/orders", icon: <OrdersIcon /> },
   { label: "Invoices", href: "/invoices", icon: <InvoicesIcon /> },
   { label: "Employees", href: "/employees", icon: <EmployeesIcon /> },
-  { label: "Facilities", href: "/customers", icon: <CustomersIcon /> },
+  { label: "Facilities", href: "/facilities", icon: <FacilitiesIcon /> },
   { label: "Activity Log", href: "/activity-log", icon: <ActivityIcon /> },
   { label: "Reports", href: "/reports", icon: <ReportsIcon /> },
   { label: "Settings", href: "/settings", icon: <SettingsIcon /> },
@@ -17,6 +22,26 @@ const navItems = [
 
 export default function Sidebar({ isCollapsed }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const user = getStoredUser();
+  const visibleNavItems = navItems.filter(
+    (item) => item.href !== "/employees" || canAccessEmployeesPage(user)
+  );
+
+  const handleLogout = async () => {
+    if (isLoggingOut) return;
+
+    setIsLoggingOut(true);
+
+    try {
+      await logout();
+    } finally {
+      router.push("/login");
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <aside
@@ -39,7 +64,7 @@ export default function Sidebar({ isCollapsed }) {
 
       <nav className="flex-1 px-[10px] py-[16px]">
         <div className="space-y-[7px]">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = pathname === item.href;
 
             return (
@@ -74,14 +99,20 @@ export default function Sidebar({ isCollapsed }) {
         <button
           type="button"
           title={isCollapsed ? "Log out" : ""}
-          className={`flex h-[40px] w-full items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] ${
+          onClick={handleLogout}
+          disabled={isLoggingOut}
+          className={`flex h-[40px] w-full items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60 ${
             isCollapsed
               ? "justify-center"
               : "gap-[12px] px-[12px] max-md:justify-center max-md:px-0"
           }`}
         >
           <LogoutIcon />
-          {!isCollapsed && <span className="max-md:hidden">Log out</span>}
+          {!isCollapsed && (
+            <span className="max-md:hidden">
+              {isLoggingOut ? "Logging out..." : "Log out"}
+            </span>
+          )}
         </button>
       </div>
     </aside>
@@ -126,11 +157,11 @@ function EmployeesIcon() {
   );
 }
 
-function CustomersIcon() {
+function FacilitiesIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M4 21a8 8 0 0 1 16 0" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M9 22V12h6v10" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

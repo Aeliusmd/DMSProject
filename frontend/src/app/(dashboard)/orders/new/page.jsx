@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CollapsibleOrderPanel from "@/components/orders/new-order/CollapsibleOrderPanel";
 import NewOrderField, {
@@ -8,6 +9,7 @@ import NewOrderField, {
   RadioOption,
 } from "@/components/orders/new-order/NewOrderField";
 import PaymentChargeCard from "@/components/orders/new-order/PaymentChargeCard";
+import ProviderSearchField from "@/components/orders/new-order/ProviderSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 import CertificateNoRecordsPanel from "@/components/orders/new-order/CertificateNoRecordsPanel";
 
@@ -31,8 +33,25 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
+import { createOrder, getOrder, updateOrder } from "@/lib/orders/orderApi";
+import { getFacilities } from "@/lib/facilities/facilityApi";
+import { API_BASE_URL } from "@/config/api";
+
+function toFileUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const origin = API_BASE_URL.replace(/\/api\/?$/, "");
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function subpoenaFileName(path) {
+  if (!path) return "Subpoena";
+  return path.split("/").pop() || "Subpoena";
+}
+
 const initialFormData = {
-  customer: "",
+  facility: "",
+  providerId: "",
   type: "",
   caseNumber: "",
   ssn: "",
@@ -112,6 +131,30 @@ const initialFormData = {
 };
 
 export default function NewOrderPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell>
+          <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+            <p className="text-[13px] text-[#64748B]">Loading...</p>
+          </div>
+        </DashboardShell>
+      }
+    >
+      <NewOrderPageContent />
+    </Suspense>
+  );
+}
+
+function NewOrderPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const mode = searchParams.get("mode");
+  const orderId = searchParams.get("orderId");
+
+  const isEditMode = mode === "edit" && Boolean(orderId);
+
   const [expandedPanels, setExpandedPanels] = useState({
     subpoena: false,
     order: true,
@@ -120,9 +163,86 @@ export default function NewOrderPage() {
   });
 
   const [formData, setFormData] = useState(initialFormData);
+
   const [touched, setTouched] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [fileErrors, setFileErrors] = useState({});
+
+  const [facilities, setFacilities] = useState([]);
+
+  const [loadingOrder, setLoadingOrder] = useState(isEditMode);
+  const [loadError, setLoadError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    getFacilities()
+      .then((facilityList) => {
+        if (!active) return;
+        setFacilities(facilityList);
+      })
+      .catch(() => {
+        if (active) {
+          setFacilities([]);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!isEditMode || !orderId) {
+      setFormData(initialFormData);
+      setTouched({});
+      setSubmitAttempted(false);
+      setFileErrors({});
+      setLoadingOrder(false);
+      return undefined;
+    }
+
+    setLoadingOrder(true);
+    setLoadError("");
+
+    getOrder(orderId)
+      .then((order) => {
+        if (!active) return;
+
+        if (!order) {
+          setLoadError("Order not found");
+          return;
+        }
+
+        setFormData({ ...initialFormData, ...order });
+        setTouched({});
+        setSubmitAttempted(false);
+        setFileErrors({});
+      })
+      .catch((err) => {
+        if (active) setLoadError(err.message || "Failed to load order");
+      })
+      .finally(() => {
+        if (active) setLoadingOrder(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isEditMode, orderId]);
+
+  const facilityOptions = useMemo(
+    () =>
+      facilities.map((facility) => ({
+        label: facility.facility || facility.facilityName || facility.name,
+        value: String(facility.id),
+      })),
+    [facilities]
+  );
 
   const errors = useMemo(
     () => validateNewOrderForm(formData, fileErrors),
@@ -133,7 +253,9 @@ export default function NewOrderPage() {
     (field) => errors[field]
   );
 
-  const visiblePanelKeys = formData.subpoenaFile
+  const hasSubpoena = Boolean(formData.subpoenaFile || formData.subpoenaUrl);
+
+  const visiblePanelKeys = hasSubpoena
     ? ["subpoena", "order", "serve", "payment"]
     : ["order", "serve", "payment"];
 
@@ -151,7 +273,7 @@ export default function NewOrderPage() {
 
     setExpandedPanels((prev) => ({
       ...prev,
-      subpoena: formData.subpoenaFile ? nextValue : false,
+      subpoena: hasSubpoena ? nextValue : false,
       order: nextValue,
       serve: nextValue,
       payment: nextValue,
@@ -217,6 +339,36 @@ export default function NewOrderPage() {
     }));
   };
 
+  const handleProviderInput = (companyName) => {
+    setFormData((prev) => ({
+      ...prev,
+      providerId: "",
+      serveCompanyName: companyName,
+      address: "",
+      zip: "",
+      city: "",
+      state: "",
+      phone: "",
+      fax: "",
+      email: "",
+    }));
+  };
+
+  const handleProviderSelect = (provider) => {
+    setFormData((prev) => ({
+      ...prev,
+      providerId: String(provider.id),
+      serveCompanyName: provider.companyName || "",
+      address: provider.address || "",
+      zip: provider.zipCode || provider.zip || "",
+      city: provider.city || "",
+      state: provider.state || "",
+      phone: provider.phone || "",
+      fax: provider.fax || "",
+      email: provider.email || "",
+    }));
+  };
+
   const handleFileChange = (e, fieldName) => {
     const file = e.target.files?.[0] || null;
     const error = validateFile(file);
@@ -244,16 +396,57 @@ export default function NewOrderPage() {
     }
   };
 
-  const handleSaveOrder = () => {
+  const handleSaveOrder = async () => {
     setSubmitAttempted(true);
+    setSaveError("");
 
     if (Object.keys(errors).length > 0) {
-      console.log("Validation errors:", errors);
+      setSaveError("Please fix the highlighted fields before saving.");
       return;
     }
 
-    console.log("New order form data:", formData);
+    setSaving(true);
+
+    try {
+      if (isEditMode) {
+        await updateOrder(orderId, formData);
+      } else {
+        await createOrder(formData);
+      }
+
+      router.push("/orders");
+    } catch (err) {
+      setSaveError(err.message || "Failed to save order");
+      setSaving(false);
+    }
   };
+
+  if (isEditMode && loadingOrder) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+          <p className="text-[13px] text-[#64748B]">Loading order...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  if (isEditMode && loadError) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-3">
+          <p className="text-[13px] font-semibold text-red-500">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => router.push("/orders")}
+            className="rounded-[6px] bg-[#0097B2] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+          >
+            Back to Orders
+          </button>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>
@@ -261,18 +454,26 @@ export default function NewOrderPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-[20px] font-semibold text-[#111827]">
-              New Order
+              {isEditMode ? "Edit Order" : "New Order"}
             </h1>
 
             <p className="mt-[4px] text-[13px] text-[#64748B]">
-              {formData.subpoenaFile
+              {isEditMode
+                ? `Editing existing order ${formData.orderNumber || orderId}`
+                : formData.subpoenaFile
                 ? "Create a new DMS order with attached subpoena"
                 : "Create a new DMS order with all required information"}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {formData.subpoenaFile && (
+            {isEditMode && (
+              <span className="inline-flex items-center gap-2 rounded-full bg-[#FFF7ED] px-4 py-2 text-[12px] font-semibold text-[#EA580C]">
+                Editing Order #{formData.orderNumber || orderId}
+              </span>
+            )}
+
+            {(formData.subpoenaFile || formData.subpoenaUrl) && (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#E6F7FA] px-4 py-2 text-[12px] font-semibold text-[#007F96]">
                 <SubpoenaIcon />
                 Subpoena attached
@@ -290,7 +491,7 @@ export default function NewOrderPage() {
         </div>
 
         <div className="flex flex-col gap-4 xl:h-[calc(100vh-170px)] xl:flex-row xl:items-stretch">
-          {formData.subpoenaFile && (
+          {(formData.subpoenaFile || formData.subpoenaUrl) && (
             <CollapsibleOrderPanel
               title="Subpoena"
               color="subpoena"
@@ -298,7 +499,15 @@ export default function NewOrderPage() {
               expanded={expandedPanels.subpoena}
               onToggle={() => togglePanel("subpoena")}
             >
-              <SubpoenaPreviewContent file={formData.subpoenaFile} />
+              <SubpoenaPreviewContent
+                file={formData.subpoenaFile}
+                src={
+                  formData.subpoenaFile
+                    ? undefined
+                    : toFileUrl(formData.subpoenaUrl)
+                }
+                name={subpoenaFileName(formData.subpoenaStoragePath)}
+              />
             </CollapsibleOrderPanel>
           )}
 
@@ -316,6 +525,7 @@ export default function NewOrderPage() {
               getError={getError}
               onFileChange={handleFileChange}
               submitAttempted={submitAttempted}
+              facilityOptions={facilityOptions}
             />
           </CollapsibleOrderPanel>
 
@@ -332,7 +542,17 @@ export default function NewOrderPage() {
               onBlur={handleBlur}
               getError={getError}
               onSave={handleSaveOrder}
-              disableSave={hasImmediateRequiredErrors}
+              disableSave={hasImmediateRequiredErrors || saving}
+              saveLabel={
+                saving
+                  ? "Saving..."
+                  : isEditMode
+                  ? "Update Order"
+                  : "Save Order"
+              }
+              saveError={saveError}
+              onProviderInput={handleProviderInput}
+              onProviderSelect={handleProviderSelect}
             />
           </CollapsibleOrderPanel>
 
@@ -363,9 +583,10 @@ function OrderDetailsForm({
   getError,
   onFileChange,
   submitAttempted,
+  facilityOptions = [],
 }) {
   const hasRequiredErrors =
-    getError("customer") ||
+    getError("facility") ||
     getError("type") ||
     getError("firstName") ||
     getError("lastName");
@@ -379,19 +600,14 @@ function OrderDetailsForm({
 
       <div className="space-y-4">
         <NewOrderField
-          label="Customer"
-          name="customer"
-          value={formData.customer}
+          label="Facility"
+          name="facility"
+          value={formData.facility}
           onChange={onChange}
           onBlur={onBlur}
           required
-          error={getError("customer")}
-          options={[
-            { label: "By Customer", value: "" },
-            { label: "Smith & Associates", value: "smith" },
-            { label: "Martinez Legal Group", value: "martinez" },
-            { label: "Pacific Law Partners", value: "pacific" },
-          ]}
+          error={getError("facility")}
+          options={facilityOptions}
         />
 
         <NewOrderField
@@ -403,7 +619,6 @@ function OrderDetailsForm({
           required
           error={getError("type")}
           options={[
-            { label: "Select from List", value: "" },
             { label: "Medical Records", value: "medical" },
             { label: "Billing Records", value: "billing" },
             { label: "Employment Records", value: "employment" },
@@ -542,9 +757,17 @@ function OrderDetailsForm({
         error={getError("subpoenaFile")}
       />
 
+      {!formData.subpoenaFile && formData.subpoenaUrl && (
+        <ExistingFileLink
+          label="Current subpoena"
+          name={subpoenaFileName(formData.subpoenaStoragePath)}
+          href={toFileUrl(formData.subpoenaUrl)}
+        />
+      )}
+
       <div>
         <h3 className="mb-3 text-[13px] font-semibold text-[#111827]">
-          Upload Additional Documents
+          Upload Additional Document
         </h3>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
@@ -563,6 +786,23 @@ function OrderDetailsForm({
             error={getError("additionalDocumentFile")}
           />
         </div>
+
+        {Array.isArray(formData.documents) && formData.documents.length > 0 && (
+          <div className="mt-3 space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-[#94A3B8]">
+              Uploaded documents
+            </p>
+
+            {formData.documents.map((doc) => (
+              <ExistingFileLink
+                key={doc.id}
+                label={doc.documentName || "Document"}
+                name={doc.originalFileName}
+                href={toFileUrl(doc.url)}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
       {(submitAttempted || hasRequiredErrors) && hasRequiredErrors && (
@@ -596,6 +836,10 @@ function ServeInfoForm({
   getError,
   onSave,
   disableSave,
+  saveLabel = "Save Order",
+  saveError = "",
+  onProviderInput,
+  onProviderSelect,
 }) {
   return (
     <div className="space-y-5">
@@ -625,15 +869,15 @@ function ServeInfoForm({
         </button>
       </div>
 
-      <NewOrderField
-        label="Name"
-        name="serveCompanyName"
+      <ProviderSearchField
+        label="Provider"
         value={formData.serveCompanyName}
-        onChange={onChange}
-        onBlur={onBlur}
-        placeholder="company name"
+        providerId={formData.providerId}
+        onInputChange={onProviderInput}
+        onSelect={onProviderSelect}
         required
         error={getError("serveCompanyName")}
+        hint="Search existing providers or type a new company name"
       />
 
       <NewOrderField
@@ -886,6 +1130,12 @@ function ServeInfoForm({
         />
       )}
 
+      {saveError && (
+        <div className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+          {saveError}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={onSave}
@@ -897,7 +1147,7 @@ function ServeInfoForm({
         }`}
       >
         <SaveIcon />
-        Save Order
+        {saveLabel}
       </button>
     </div>
   );
@@ -1037,6 +1287,32 @@ function FileInput({ title, onChange, error, compact = false }) {
         </p>
       )}
     </div>
+  );
+}
+
+function ExistingFileLink({ label, name, href }) {
+  return (
+    <a
+      href={href || "#"}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 hover:border-[#0097B2] hover:bg-[#F0FBFD]"
+    >
+      <span className="min-w-0">
+        <span className="block truncate text-[12px] font-semibold text-[#111827]">
+          {label}
+        </span>
+        {name && (
+          <span className="block truncate text-[11px] text-[#64748B]">
+            {name}
+          </span>
+        )}
+      </span>
+
+      <span className="shrink-0 text-[11px] font-semibold text-[#0097B2]">
+        View
+      </span>
+    </a>
   );
 }
 

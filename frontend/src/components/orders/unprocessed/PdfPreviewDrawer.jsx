@@ -8,6 +8,18 @@ const ZOOM_STEP = 0.1;
 const BASE_PAGE_HEIGHT = 560;
 
 export default function PdfPreviewDrawer({ subpoena, onClose }) {
+  if (!subpoena) return null;
+
+  return (
+    <PdfPreviewDrawerContent
+      key={subpoena.id}
+      subpoena={subpoena}
+      onClose={onClose}
+    />
+  );
+}
+
+function PdfPreviewDrawerContent({ subpoena, onClose }) {
   const [activePage, setActivePage] = useState(1);
   const [pageZooms, setPageZooms] = useState({});
 
@@ -15,28 +27,12 @@ export default function PdfPreviewDrawer({ subpoena, onClose }) {
   const pageRefs = useRef({});
 
   const previewPages = useMemo(() => {
-    if (!subpoena) return [];
     return Array.from({ length: subpoena.pages }, (_, index) => index + 1);
   }, [subpoena]);
 
   useEffect(() => {
-    if (!subpoena) return;
-
-    setActivePage(1);
-    setPageZooms({});
-    pageRefs.current = {};
-
-    setTimeout(() => {
-      scrollContainerRef.current?.scrollTo({
-        top: 0,
-        behavior: "instant",
-      });
-    }, 0);
-  }, [subpoena]);
-
-  useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container || !subpoena) return;
+    if (!container) return;
 
     const handleScroll = () => {
       const containerRect = container.getBoundingClientRect();
@@ -65,9 +61,7 @@ export default function PdfPreviewDrawer({ subpoena, onClose }) {
     handleScroll();
 
     return () => container.removeEventListener("scroll", handleScroll);
-  }, [previewPages, subpoena]);
-
-  if (!subpoena) return null;
+  }, [previewPages]);
 
   const activeZoom = pageZooms[activePage] || 1;
 

@@ -2,9 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import useIsClient from "@/hooks/useIsClient";
 
-const invoiceTypes = [
+const createInvoiceTypes = [
   "Create Invoice",
+  "Create Insurance Bill",
+  "Create Custodian Invoice",
+];
+
+const editInvoiceTypes = [
+  "Edit Invoice",
   "Create Insurance Bill",
   "Create Custodian Invoice",
 ];
@@ -26,15 +33,37 @@ const initialFormData = {
   rushOrder: false,
 };
 
-export default function CreateInvoiceModal({ isOpen, order, onClose }) {
-  const [mounted, setMounted] = useState(false);
-  const [activeType, setActiveType] = useState("Create Invoice");
+export default function CreateInvoiceModal({
+  isOpen,
+  order,
+  onClose,
+  mode = "create",
+}) {
+  const mounted = useIsClient();
+  const isEditMode = mode === "edit";
+
+  const invoiceTypes = isEditMode ? editInvoiceTypes : createInvoiceTypes;
+
+  const [activeType, setActiveType] = useState(
+    isEditMode ? "Edit Invoice" : "Create Invoice"
+  );
+
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const openSession =
+    isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
+  const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  if (openSession !== prevOpenSession) {
+    setPrevOpenSession(openSession);
+
+    if (openSession) {
+      setActiveType(isEditMode ? "Edit Invoice" : "Create Invoice");
+      setFormData(getInitialInvoiceFormData(order, isEditMode));
+      setErrors({});
+    }
+  }
 
   useEffect(() => {
     if (!isOpen) return;
@@ -46,14 +75,6 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
       document.body.style.overflow = originalOverflow;
     };
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    setActiveType("Create Invoice");
-    setFormData(initialFormData);
-    setErrors({});
-  }, [isOpen, order]);
 
   const pagesAmount = useMemo(() => {
     return toNumber(formData.pages) * toNumber(formData.perPageAmount);
@@ -73,6 +94,9 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
   }, [formData, pagesAmount]);
 
   if (!mounted || !isOpen || !order) return null;
+
+  const modalTitle = isEditMode ? "Edit Invoice" : "Create Invoice";
+  const submitLabel = isEditMode ? "Edit Invoice" : "Create Invoice";
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -128,6 +152,19 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
 
     if (Object.keys(validationErrors).length > 0) return;
 
+    if (isEditMode) {
+      console.log("Edit invoice:", {
+        type: activeType,
+        order,
+        formData,
+        pagesAmount,
+        totalAmount,
+      });
+
+      onClose();
+      return;
+    }
+
     console.log("Create invoice:", {
       type: activeType,
       order,
@@ -153,7 +190,7 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
           </button>
 
           <h2 className="text-[15px] font-semibold leading-none">
-            Create Invoice
+            {modalTitle}
           </h2>
 
           <p className="mt-3 text-[11px] font-medium text-white/90">
@@ -174,6 +211,14 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
               value={order.company?.name || order.provider || "N/A"}
               linkStyle
             />
+
+            {isEditMode && order.invoice?.due && (
+              <MetaItem label="Due" value={order.invoice.due} />
+            )}
+
+            {isEditMode && order.invoice?.paid && (
+              <MetaItem label="Paid" value={order.invoice.paid} />
+            )}
           </div>
         </div>
 
@@ -375,7 +420,7 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
                 onClick={handleSubmit}
                 className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937]"
               >
-                Create Invoice
+                {submitLabel}
               </button>
 
               <button
@@ -392,6 +437,64 @@ export default function CreateInvoiceModal({ isOpen, order, onClose }) {
     </div>,
     document.body
   );
+}
+
+function getInitialInvoiceFormData(order, isEditMode) {
+  if (!isEditMode) {
+    return initialFormData;
+  }
+
+  const invoice = order?.invoice || {};
+  const invoiceAmount = moneyToInput(invoice.invoiced, "250.00");
+
+  return {
+    ...initialFormData,
+    invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
+    serviceDate: toDateInput(invoice.sentDate) || "",
+    servedAmount: "0.00",
+    serviceFee: invoiceAmount,
+    custodianFee: "0.00",
+    xrayFee: "0.00",
+    mileage: "0.00",
+    parking: "0.00",
+    other: "0.00",
+    pages: "0",
+    perPageAmount: "0.00",
+    notes: `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
+    sendOrderDetails: true,
+    rushOrder: false,
+  };
+}
+
+function toDateInput(dateValue) {
+  if (!dateValue) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateValue)) {
+    return dateValue;
+  }
+
+  const parts = String(dateValue).split("/");
+
+  if (parts.length !== 3) {
+    return "";
+  }
+
+  const [month, day, year] = parts;
+
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function moneyToInput(value, fallback = "0.00") {
+  if (!value) return fallback;
+
+  const cleanValue = String(value).replace(/[^\d.]/g, "");
+  const numberValue = Number(cleanValue);
+
+  if (Number.isNaN(numberValue)) {
+    return fallback;
+  }
+
+  return numberValue.toFixed(2);
 }
 
 function MetaItem({ label, value, linkStyle = false }) {

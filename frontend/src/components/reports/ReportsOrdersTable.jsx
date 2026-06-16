@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 
 const allColumns = [
@@ -28,6 +28,7 @@ export default function ReportsOrdersTable({
 }) {
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [collapsedColumns, setCollapsedColumns] = useState([]);
+  const [prevOrders, setPrevOrders] = useState(orders);
   const [currentPage, setCurrentPage] = useState(1);
 
   const visibleColumns = useMemo(() => {
@@ -49,23 +50,25 @@ export default function ReportsOrdersTable({
 
   const totalPages = Math.max(1, Math.ceil(orders.length / recordsPerPage));
 
-  const paginatedOrders = useMemo(() => {
-    const startIndex = (currentPage - 1) * recordsPerPage;
-    return orders.slice(startIndex, startIndex + recordsPerPage);
-  }, [orders, currentPage, recordsPerPage]);
-
-  const startRecord = orders.length === 0 ? 0 : (currentPage - 1) * recordsPerPage + 1;
-  const endRecord = Math.min(currentPage * recordsPerPage, orders.length);
-
-  useEffect(() => {
+  if (orders !== prevOrders) {
+    setPrevOrders(orders);
     setCurrentPage(1);
-  }, [orders]);
+  }
 
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  if (currentPage !== safeCurrentPage) {
+    setCurrentPage(safeCurrentPage);
+  }
+
+  const paginatedOrders = useMemo(() => {
+    const startIndex = (safeCurrentPage - 1) * recordsPerPage;
+    return orders.slice(startIndex, startIndex + recordsPerPage);
+  }, [orders, safeCurrentPage, recordsPerPage]);
+
+  const startRecord =
+    orders.length === 0 ? 0 : (safeCurrentPage - 1) * recordsPerPage + 1;
+  const endRecord = Math.min(safeCurrentPage * recordsPerPage, orders.length);
 
   const isVisible = (key) => visibleColumns.some((column) => column.key === key);
 
@@ -379,7 +382,7 @@ export default function ReportsOrdersTable({
         </div>
 
         <ReportsPagination
-          currentPage={currentPage}
+          currentPage={safeCurrentPage}
           totalPages={totalPages}
           startRecord={startRecord}
           endRecord={endRecord}
