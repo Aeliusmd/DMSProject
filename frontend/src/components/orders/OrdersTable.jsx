@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
@@ -189,6 +189,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Guards a silent refetch from running too often, and discards responses
+  // from stale requests so a late silent fetch never overwrites fresh data.
+  const lastFetchAtRef = useRef(0);
+  const requestIdRef = useRef(0);
+
   const normalizedFilters = {
     facility: filters.facility || "",
     year: filters.year || "",
@@ -204,40 +209,70 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     setCurrentPage(1);
   }
 
-  useEffect(() => {
-    let active = true;
+  const fetchOrders = useCallback(
+    async ({ silent = false } = {}) => {
+      // A silent (focus-triggered) refetch is skipped if we just fetched,
+      // so returning to the tab repeatedly never spams the API.
+      if (silent && Date.now() - lastFetchAtRef.current < 5000) return;
 
-    setLoading(true);
-    setError("");
+      const requestId = (requestIdRef.current += 1);
 
-    getOrders({
-      facility: normalizedFilters.facility,
-      year: normalizedFilters.year,
-      status: normalizedFilters.status,
-      search: normalizedFilters.search,
-    })
-      .then((data) => {
-        if (!active) return;
+      if (!silent) {
+        setLoading(true);
+        setError("");
+      }
+
+      try {
+        const data = await getOrders({
+          facility: normalizedFilters.facility,
+          year: normalizedFilters.year,
+          status: normalizedFilters.status,
+          search: normalizedFilters.search,
+        });
+
+        if (requestId !== requestIdRef.current) return;
         setOrders(data.map(toRenderOrder));
-      })
-      .catch((err) => {
-        if (!active) return;
-        setError(err.message || "Failed to load orders");
-        setOrders([]);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+        setError("");
+      } catch (err) {
+        if (requestId !== requestIdRef.current) return;
+        if (!silent) {
+          setError(err.message || "Failed to load orders");
+          setOrders([]);
+        }
+      } finally {
+        lastFetchAtRef.current = Date.now();
+        if (!silent && requestId === requestIdRef.current) setLoading(false);
+      }
+    },
+    [
+      normalizedFilters.facility,
+      normalizedFilters.year,
+      normalizedFilters.status,
+      normalizedFilters.search,
+    ]
+  );
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  // Refresh workflow/status changes made elsewhere when the user comes back
+  // to the tab or window. No polling, so there is no idle network cost.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        fetchOrders({ silent: true });
+      }
+    };
+
+    window.addEventListener("focus", refreshIfVisible);
+    document.addEventListener("visibilitychange", refreshIfVisible);
 
     return () => {
-      active = false;
+      window.removeEventListener("focus", refreshIfVisible);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
     };
-  }, [
-    normalizedFilters.facility,
-    normalizedFilters.year,
-    normalizedFilters.status,
-    normalizedFilters.search,
-  ]);
+  }, [fetchOrders]);
 
   const filteredOrders = orders;
 
