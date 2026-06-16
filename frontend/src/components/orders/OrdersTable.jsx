@@ -32,7 +32,13 @@ const DEFAULT_ORDER_FORMS = [
 ];
 
 const WORKFLOW_STAGES = ["Review Records", "Serve", "Custodian", "SENT"];
-const COMPLETED_STAGE_STATUSES = ["complete", "sent"];
+
+const WORKFLOW_STATUS_STYLES = {
+  complete: { text: "text-[#059669]", dot: "bg-[#10B981]" },
+  failed: { text: "text-red-500", dot: "bg-red-500" },
+  pending: { text: "text-[#CA8A04]", dot: "bg-[#EAB308]" },
+  sent: { text: "text-[#2563EB]", dot: "bg-[#3B82F6]" },
+};
 
 function mapWorkflowStages(stages = []) {
   const byName = new Map(
@@ -40,12 +46,11 @@ function mapWorkflowStages(stages = []) {
   );
 
   return WORKFLOW_STAGES.map((stageName) => {
-    const stageStatus = byName.get(stageName) || "pending";
-    const completed = COMPLETED_STAGE_STATUSES.includes(stageStatus);
+    const status = byName.get(stageName) || "pending";
 
     return {
       label: stageName,
-      completed,
+      status,
     };
   });
 }
@@ -568,17 +573,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 }
 
 function WorkflowStageItem({ stage }) {
+  const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+
   return (
     <div
-      className={`flex items-center gap-1.5 text-left text-[10px] font-semibold ${
-        stage.completed ? "text-[#059669]" : "text-red-500"
-      }`}
+      className={`flex items-center gap-1.5 text-left text-[10px] font-semibold ${style.text}`}
     >
-      <span
-        className={`h-[6px] w-[6px] shrink-0 rounded-full ${
-          stage.completed ? "bg-[#10B981]" : "bg-red-500"
-        }`}
-      />
+      <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
 
       {stage.label}
     </div>
