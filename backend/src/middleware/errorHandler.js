@@ -3,11 +3,11 @@ const logger = require("../utils/logger");
 const multer = require("multer");
 
 function errorHandler(err, _req, res, _next) {
-  if (err instanceof multer.MulterError) {
+  if (err instanceof multer.MulterError || err?.name === "MulterError") {
     const message =
       err.code === "LIMIT_FILE_SIZE"
-        ? "File size must be 15MB or less"
-        : err.message;
+        ? "Uploaded file exceeds the 10MB limit"
+        : `File upload error: ${err.message}`;
 
     return res.status(400).json({
       success: false,

@@ -1,8 +1,39 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import {
+  createOrderNote,
+  getOrderNotes,
+  updateOrderNote,
+} from "@/lib/orders/orderApi";
+import { API_BASE_URL } from "@/config/api";
+
+function toFileUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const origin = API_BASE_URL.replace(/\/api\/?$/, "");
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+function formatNoteDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
+}
+
+function toHistoryItems(notes = []) {
+  return notes.map((note) => ({
+    id: note.id,
+    date: formatNoteDate(note.noteDate),
+    by: note.authorName || "—",
+    note: note.note || "",
+    callbackDate: note.callbackDate || "",
+    attachmentUrl: toFileUrl(note.attachmentUrl),
+  }));
+}
 
 const MAX_NOTE_LENGTH = 1000;
 const MAX_FILE_SIZE_MB = 10;
@@ -21,39 +52,52 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
   const [attachment, setAttachment] = useState(null);
   const [errors, setErrors] = useState({});
   const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
-  const defaultNoteHistory = useMemo(() => {
-    if (!order) return [];
+  const [selectedNoteId, setSelectedNoteId] = useState(null);
+  const [existingAttachmentUrl, setExistingAttachmentUrl] = useState("");
 
-    return [
-      {
-        date: "06/02/2026 10:45 AM",
-        by: "John Smith",
-        note: "Called - 06/02/2026 10:45 AM",
-      },
-      {
-        date: "05/28/2026 2:15 PM",
-        by: "John Smith",
-        note: "Called - 05/28/2026 2:15 PM",
-      },
-    ];
-  }, [order]);
+  const orderId = order?.dbId ?? order?.id ?? null;
+  const isEditing = selectedNoteId !== null;
 
-  const openSession =
-    isOpen && order ? String(order.id || order.orderNo) : null;
-  const [prevOpenSession, setPrevOpenSession] = useState(null);
+  const resetForm = () => {
+    setNoteText("");
+    setCallbackDate("");
+    setAttachment(null);
+    setErrors({});
+    setSelectedNoteId(null);
+    setExistingAttachmentUrl("");
+  };
 
-  if (openSession !== prevOpenSession) {
-    setPrevOpenSession(openSession);
+  useEffect(() => {
+    if (!isOpen || !orderId) return undefined;
 
-    if (openSession) {
-      setNoteText("");
-      setCallbackDate("");
-      setAttachment(null);
-      setErrors({});
-      setHistory(defaultNoteHistory);
-    }
-  }
+    let active = true;
+
+    resetForm();
+    setLoadError("");
+    setLoading(true);
+
+    getOrderNotes(orderId)
+      .then((notes) => {
+        if (active) setHistory(toHistoryItems(notes));
+      })
+      .catch((err) => {
+        if (active) {
+          setHistory([]);
+          setLoadError(err.message || "Failed to load notes");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, orderId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -78,138 +122,128 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
     });
   };
 
+  const validateAttachment = (newErrors) => {
+    if (attachment) {
+      const fileSizeMb = attachment.size / (1024 * 1024);
+
+      if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
+        newErrors.attachment =
+          "Only PDF, Word, JPG, and PNG files are allowed.";
+      }
+
+      if (fileSizeMb > MAX_FILE_SIZE_MB) {
+        newErrors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
+      }
+    }
+  };
+
+  const validateCallback = (newErrors) => {
+    if (callbackDate) {
+      const selectedDate = new Date(callbackDate);
+      const today = new Date();
+
+      today.setHours(0, 0, 0, 0);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      if (selectedDate < today) {
+        newErrors.callbackDate = "Callback date cannot be in the past.";
+      }
+    }
+  };
+
   const validateNote = () => {
     const newErrors = {};
     const trimmedNote = noteText.trim();
 
     if (!trimmedNote) {
       newErrors.noteText = "Note text is required.";
-    }
-
-    if (trimmedNote.length > MAX_NOTE_LENGTH) {
+    } else if (trimmedNote.length > MAX_NOTE_LENGTH) {
       newErrors.noteText = `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`;
     }
 
-    if (callbackDate) {
-      const selectedDate = new Date(callbackDate);
-      const today = new Date();
-
-      today.setHours(0, 0, 0, 0);
-      selectedDate.setHours(0, 0, 0, 0);
-
-      if (selectedDate < today) {
-        newErrors.callbackDate = "Callback date cannot be in the past.";
-      }
-    }
-
-    if (attachment) {
-      const fileSizeMb = attachment.size / (1024 * 1024);
-
-      if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
-        newErrors.attachment =
-          "Only PDF, Word, JPG, and PNG files are allowed.";
-      }
-
-      if (fileSizeMb > MAX_FILE_SIZE_MB) {
-        newErrors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
-      }
-    }
+    validateCallback(newErrors);
+    validateAttachment(newErrors);
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const validateCallbackOnly = () => {
-    const newErrors = {};
+  const handleSaveNewNote = async () => {
+    if (saving || !validateNote()) return;
 
-    if (callbackDate) {
-      const selectedDate = new Date(callbackDate);
-      const today = new Date();
+    setSaving(true);
+    setLoadError("");
 
-      today.setHours(0, 0, 0, 0);
-      selectedDate.setHours(0, 0, 0, 0);
-
-      if (selectedDate < today) {
-        newErrors.callbackDate = "Callback date cannot be in the past.";
-      }
-    }
-
-    if (attachment) {
-      const fileSizeMb = attachment.size / (1024 * 1024);
-
-      if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
-        newErrors.attachment =
-          "Only PDF, Word, JPG, and PNG files are allowed.";
-      }
-
-      if (fileSizeMb > MAX_FILE_SIZE_MB) {
-        newErrors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
-      }
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSaveNote = () => {
-    if (!validateNote()) return;
-
-    const now = new Date().toLocaleString();
-
-    const payload = {
-      orderId: order.id,
-      applicant: order.applicant,
-      noteText: noteText.trim(),
-      callbackDate,
-      attachment,
-      type: "note",
-    };
-
-    console.log("Save order note:", payload);
-
-    setHistory((prev) => [
-      {
-        date: now,
-        by: "John Smith",
+    try {
+      const notes = await createOrderNote(orderId, {
         note: noteText.trim(),
-      },
-      ...prev,
-    ]);
+        callbackDate,
+        attachment,
+      });
 
-    setNoteText("");
-    setCallbackDate("");
-    setAttachment(null);
-    setErrors({});
+      setHistory(toHistoryItems(notes));
+      resetForm();
+    } catch (err) {
+      setErrors((prev) => ({
+        ...prev,
+        noteText: err.message || "Failed to save note",
+      }));
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleCalled = () => {
-    if (!validateCallbackOnly()) return;
+  const handleUpdateNote = async () => {
+    if (saving || !isEditing || !validateNote()) return;
 
-    const now = new Date().toLocaleString();
-    const calledNote = `Called - ${now}`;
+    setSaving(true);
+    setLoadError("");
 
-    const payload = {
-      orderId: order.id,
-      applicant: order.applicant,
-      noteText: calledNote,
-      callbackDate,
-      attachment,
-      type: "called",
-    };
+    try {
+      const result = await updateOrderNote(orderId, selectedNoteId, {
+        note: noteText.trim(),
+        callbackDate,
+        attachment,
+      });
 
-    console.log("Called note:", payload);
+      setHistory(toHistoryItems(result.notes));
+      resetForm();
+    } catch (err) {
+      setErrors((prev) => ({
+        ...prev,
+        noteText: err.message || "Failed to update note",
+      }));
+    } finally {
+      setSaving(false);
+    }
+  };
 
-    setHistory((prev) => [
-      {
-        date: now,
-        by: "John Smith",
-        note: calledNote,
-      },
-      ...prev,
-    ]);
+  const handleCall = () => {
+    if (saving || !isEditing) return;
 
-    setNoteText("");
-    setCallbackDate("");
+    const now = new Date();
+    const callLine = `Callback - ${now.toLocaleString()}`;
+
+    const nextText = noteText.trim()
+      ? `${noteText.trim()}\n${callLine}`
+      : callLine;
+
+    if (nextText.length > MAX_NOTE_LENGTH) {
+      setErrors({
+        noteText: `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`,
+      });
+      return;
+    }
+
+    setNoteText(nextText);
+    clearError("noteText");
+  };
+
+  const handleSelectHistory = (item) => {
+    setSelectedNoteId(item.id);
+    setNoteText(item.note);
+    setCallbackDate(item.callbackDate || "");
+    setExistingAttachmentUrl(item.attachmentUrl || "");
     setAttachment(null);
     setErrors({});
   };
@@ -223,7 +257,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-[2px]">
-      <section className="flex max-h-[calc(100vh-44px)] w-full max-w-[430px] flex-col overflow-hidden rounded-[8px] bg-white shadow-2xl">
+      <section className="flex max-h-[calc(100vh-44px)] w-full max-w-[720px] flex-col overflow-hidden rounded-[8px] bg-white shadow-2xl">
         <div className="flex h-[48px] shrink-0 items-start justify-between border-b border-[#E2E8F0] px-5 py-3">
           <div className="min-w-0">
             <h2 className="text-[13px] font-semibold text-[#111827]">
@@ -246,6 +280,28 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-[6px] flex items-center justify-between gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-[2px] text-[10px] font-semibold ${
+                isEditing
+                  ? "bg-[#FFF7ED] text-[#EA580C]"
+                  : "bg-[#E6F7FA] text-[#007F96]"
+              }`}
+            >
+              {isEditing ? "Editing note" : "New note"}
+            </span>
+
+            {isEditing && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-[10px] font-semibold text-[#0097B2] underline"
+              >
+                + New note
+              </button>
+            )}
+          </div>
+
           <div>
             <div className="mb-[6px] flex items-center justify-between gap-2">
               <label className="block text-[11px] font-semibold text-[#475569]">
@@ -326,6 +382,17 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
                 }`}
               />
 
+              {!attachment && existingAttachmentUrl && (
+                <a
+                  href={existingAttachmentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-[5px] inline-block text-[10px] font-semibold text-[#0097B2] underline"
+                >
+                  Current attachment
+                </a>
+              )}
+
               {errors.attachment && (
                 <p className="mt-[5px] text-[11px] font-medium text-red-500">
                   {errors.attachment}
@@ -334,22 +401,37 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
             </div>
           </div>
 
-          <div className="mt-4 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleSaveNote}
-              className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
-            >
-              Save Note
-            </button>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {isEditing ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleUpdateNote}
+                  disabled={saving}
+                  className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving ? "Saving..." : "Save Note"}
+                </button>
 
-            <button
-              type="button"
-              onClick={handleCalled}
-              className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#111827] px-4 text-[11px] font-semibold text-white hover:bg-[#1F2937]"
-            >
-              Called
-            </button>
+                <button
+                  type="button"
+                  onClick={handleCall}
+                  disabled={saving}
+                  className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#111827] px-4 text-[11px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Call
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSaveNewNote}
+                disabled={saving}
+                className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? "Saving..." : "Save Note"}
+              </button>
+            )}
           </div>
 
           <div className="mt-5">
@@ -357,30 +439,82 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
               Note History
             </h3>
 
-            <div className="space-y-2">
-              {history.map((item, index) => (
-                <div
-                  key={`${item.date}-${index}`}
-                  className="rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2"
-                >
-                  <p className="text-[10px] font-semibold text-[#007F96]">
-                    {item.date}{" "}
-                    <span className="font-normal text-[#94A3B8]">
-                      — {item.by}
-                    </span>
-                  </p>
+            <div className="overflow-x-auto rounded-[6px] border border-[#E2E8F0]">
+              <table className="w-full min-w-[480px] border-collapse text-left">
+                <thead>
+                  <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC] text-[10px] font-semibold text-[#64748B]">
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">By</th>
+                    <th className="px-3 py-2">Note</th>
+                  </tr>
+                </thead>
 
-                  <p className="mt-1 text-[11px] text-[#334155]">
-                    {item.note}
-                  </p>
-                </div>
-              ))}
+                <tbody>
+                  {history.map((item) => {
+                    const isSelected = item.id === selectedNoteId;
 
-              {history.length === 0 && (
-                <div className="rounded-[6px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-3 py-5 text-center text-[11px] text-[#94A3B8]">
-                  No note history found.
-                </div>
-              )}
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`border-b border-[#F1F5F9] text-[11px] last:border-b-0 ${
+                          isSelected ? "bg-[#F0FBFD]" : "bg-white"
+                        }`}
+                      >
+                        <td className="px-3 py-2 align-top">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectHistory(item)}
+                            className="text-left text-[10px] font-semibold text-[#007F96] underline"
+                          >
+                            {item.date}
+                          </button>
+                        </td>
+
+                        <td className="px-3 py-2 align-top font-medium text-[#334155]">
+                          {item.by}
+                        </td>
+
+                        <td className="px-3 py-2 align-top text-[#334155]">
+                          {item.note || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {loading && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-3 py-6 text-center text-[11px] text-[#94A3B8]"
+                      >
+                        Loading notes...
+                      </td>
+                    </tr>
+                  )}
+
+                  {!loading && loadError && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-3 py-6 text-center text-[11px] font-medium text-red-500"
+                      >
+                        {loadError}
+                      </td>
+                    </tr>
+                  )}
+
+                  {!loading && !loadError && history.length === 0 && (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="px-3 py-6 text-center text-[11px] text-[#94A3B8]"
+                      >
+                        No pending notes.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

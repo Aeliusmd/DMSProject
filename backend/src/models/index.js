@@ -8,6 +8,8 @@ module.exports = {
   Facility: require("./Facility"),
   OfficeManager: require("./OfficeManager"),
   FacilityDoctor: require("./FacilityDoctor"),
+  Provider: require("./Provider"),
+  Order: require("./Order"),
   FacilityDocument: require("./FacilityDocument"),
   FacilityNote: require("./FacilityNote"),
   EmployeeSettings: require("./EmployeeSettings"),

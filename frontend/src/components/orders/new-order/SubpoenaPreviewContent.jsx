@@ -9,8 +9,8 @@ const ZOOM_STEP = 0.1;
 const PDF_BASE_WIDTH = 520;
 const PDF_BASE_HEIGHT = 760;
 
-export default function SubpoenaPreviewContent({ file }) {
-  if (!file) {
+export default function SubpoenaPreviewContent({ file, src, name }) {
+  if (!file && !src) {
     return (
       <div className="flex h-full min-h-[480px] items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#94A3B8]">
         Upload a subpoena PDF to preview it here.
@@ -18,31 +18,43 @@ export default function SubpoenaPreviewContent({ file }) {
     );
   }
 
-  return <SubpoenaPreviewInner key={getFileKey(file)} file={file} />;
+  const key = file ? getFileKey(file) : src;
+  return <SubpoenaPreviewInner key={key} file={file} src={src} name={name} />;
 }
 
-function SubpoenaPreviewInner({ file }) {
+function SubpoenaPreviewInner({ file, src, name }) {
   const [pageCount, setPageCount] = useState(null);
   const [zoom, setZoom] = useState(1);
 
+  const displayName = file ? file.name : name || "Subpoena";
+
   const isPdf = useMemo(() => {
-    const fileName = file.name?.toLowerCase() || "";
-    const fileType = file.type || "";
+    const fileName = (file ? file.name : displayName)?.toLowerCase() || "";
+    const fileType = file?.type || "";
 
-    return fileType === "application/pdf" || fileName.endsWith(".pdf");
-  }, [file]);
+    return (
+      fileType === "application/pdf" ||
+      fileName.endsWith(".pdf") ||
+      (!file && /\.pdf(\?|#|$)/i.test(src || ""))
+    );
+  }, [file, src, displayName]);
 
-  const fileUrl = useMemo(() => URL.createObjectURL(file), [file]);
+  const fileUrl = useMemo(
+    () => (file ? URL.createObjectURL(file) : src || ""),
+    [file, src]
+  );
 
   useEffect(() => {
     return () => {
-      URL.revokeObjectURL(fileUrl);
+      if (file && fileUrl) {
+        URL.revokeObjectURL(fileUrl);
+      }
     };
-  }, [fileUrl]);
+  }, [file, fileUrl]);
 
   useEffect(() => {
-    if (!isPdf) {
-      return;
+    if (!isPdf || !file) {
+      return undefined;
     }
 
     let cancelled = false;
@@ -80,12 +92,12 @@ function SubpoenaPreviewInner({ file }) {
 
           <div className="min-w-0">
             <p className="truncate text-[12px] font-semibold text-[#111827]">
-              {file.name}
+              {displayName}
             </p>
 
             <p className="mt-[2px] text-[11px] text-[#94A3B8]">
-              {pageCount ? `${pageCount} pages` : "PDF preview"} ·{" "}
-              {formatFileSize(file.size)}
+              {pageCount ? `${pageCount} pages` : "PDF preview"}
+              {file ? ` · ${formatFileSize(file.size)}` : ""}
             </p>
           </div>
         </div>
@@ -134,7 +146,7 @@ function SubpoenaPreviewInner({ file }) {
             <iframe
               key={fileUrl}
               src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=1`}
-              title={file.name}
+              title={displayName}
               className="origin-top-left rounded-[4px] border border-[#CBD5E1] bg-white shadow-sm"
               style={{
                 width: `${PDF_BASE_WIDTH}px`,

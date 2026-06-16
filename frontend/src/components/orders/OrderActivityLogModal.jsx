@@ -3,10 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { getOrderActivityLogs } from "@/lib/orders/orderApi";
+import { API_BASE_URL } from "@/config/api";
 
-export default function OrderActivityLogModal({ isOpen, order, logs = [], onClose }) {
+function toFileUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const origin = API_BASE_URL.replace(/\/api\/?$/, "");
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
+
+export default function OrderActivityLogModal({ isOpen, order, onClose }) {
   const mounted = useIsClient();
   const [searchValue, setSearchValue] = useState("");
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+
+  const orderId = order?.dbId ?? order?.id ?? null;
+
   const openSession = isOpen ? "open" : null;
   const [prevOpenSession, setPrevOpenSession] = useState(null);
 
@@ -17,6 +32,33 @@ export default function OrderActivityLogModal({ isOpen, order, logs = [], onClos
       setSearchValue("");
     }
   }
+
+  useEffect(() => {
+    if (!isOpen || !orderId) return undefined;
+
+    let active = true;
+
+    setLoading(true);
+    setLoadError("");
+
+    getOrderActivityLogs(orderId)
+      .then((data) => {
+        if (active) setLogs(data);
+      })
+      .catch((err) => {
+        if (active) {
+          setLogs([]);
+          setLoadError(err.message || "Failed to load activity logs");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, orderId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -106,9 +148,33 @@ export default function OrderActivityLogModal({ isOpen, order, logs = [], onClos
             </thead>
 
             <tbody>
-              {filteredLogs.map((log, index) => (
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                  >
+                    Loading activity logs...
+                  </td>
+                </tr>
+              )}
+
+              {!loading && loadError && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-5 py-14 text-center text-[13px] font-medium text-red-500"
+                  >
+                    {loadError}
+                  </td>
+                </tr>
+              )}
+
+              {!loading &&
+                !loadError &&
+                filteredLogs.map((log, index) => (
                 <tr
-                  key={`${log.date}-${index}`}
+                  key={log.id ?? `${log.date}-${index}`}
                   className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
                 >
                   <td className="px-5 py-4 align-top text-[#475569]">
@@ -124,12 +190,26 @@ export default function OrderActivityLogModal({ isOpen, order, logs = [], onClos
                   </td>
 
                   <td className="px-5 py-4 align-top leading-[18px] text-[#334155]">
-                    {renderNote(log.note)}
-                  </td>
+  <div>{renderNote(log.note)}</div>
+
+  {log.attachmentUrl && (
+    <div className="mt-2">
+      <a
+        href={toFileUrl(log.attachmentUrl)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center text-[11px] font-semibold text-[#0097B2] underline"
+      >
+        View attachment
+      </a>
+    </div>
+  )}
+</td>
+                 
                 </tr>
               ))}
 
-              {filteredLogs.length === 0 && (
+              {!loading && !loadError && filteredLogs.length === 0 && (
                 <tr>
                   <td
                     colSpan={4}
@@ -155,18 +235,27 @@ export default function OrderActivityLogModal({ isOpen, order, logs = [], onClos
 }
 
 function renderNote(note) {
-  const parts = String(note).split(/(CNR Letter|Copy Service Letter)/g);
+  const lines = String(note).split("\n");
 
-  return parts.map((part, index) => {
-    if (part === "CNR Letter" || part === "Copy Service Letter") {
-      return (
-        <span key={index} className="font-semibold text-[#2563EB]">
-          {part}
-        </span>
-      );
-    }
+  return lines.map((line, lineIndex) => {
+    const parts = line.split(/(CNR Letter|Copy Service Letter)/g);
 
-    return <span key={index}>{part}</span>;
+    return (
+      <span key={lineIndex}>
+        {lineIndex > 0 && <br />}
+        {parts.map((part, index) => {
+          if (part === "CNR Letter" || part === "Copy Service Letter") {
+            return (
+              <span key={index} className="font-semibold text-[#2563EB]">
+                {part}
+              </span>
+            );
+          }
+
+          return <span key={index}>{part}</span>;
+        })}
+      </span>
+    );
   });
 }
 
