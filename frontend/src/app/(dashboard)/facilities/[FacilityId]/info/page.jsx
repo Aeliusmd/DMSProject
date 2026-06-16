@@ -15,6 +15,7 @@ import {
   deleteFacilityDocument,
   getFacility,
   getFacilityDocuments,
+  getFacilityNotes,
   reactivateDoctor,
   setDefaultDoctor,
   updateFacility,
@@ -33,21 +34,6 @@ const createEmptyDoctorInput = (id) => ({
   email: "",
 });
 
-const notesSeed = [
-  {
-    id: 1,
-    date: "2026-04-15",
-    by: "John Doe",
-    note: "Initial setup completed. Facility verified all contact information.",
-  },
-  {
-    id: 2,
-    date: "2026-05-01",
-    by: "Sarah Johnson",
-    note: "Added new doctor - Susan Wilson. Updated IP whitelist.",
-  },
-];
-
 export default function FacilityDetailsPage() {
   const params = useParams();
 
@@ -64,6 +50,8 @@ export default function FacilityDetailsPage() {
   const [doctors, setDoctors] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [notes, setNotes] = useState([]);
+  const [notesLoading, setNotesLoading] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [uploadDocError, setUploadDocError] = useState("");
@@ -116,6 +104,21 @@ export default function FacilityDetailsPage() {
     }
   }, [facilityId]);
 
+  const loadNotes = useCallback(async () => {
+    if (!facilityId) return;
+
+    setNotesLoading(true);
+
+    try {
+      const data = await getFacilityNotes(facilityId);
+      setNotes(data);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to load notes");
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [facilityId]);
+
   const loadFacility = useCallback(async () => {
     if (!facilityId) return;
 
@@ -160,6 +163,10 @@ export default function FacilityDetailsPage() {
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
+
+  useEffect(() => {
+    loadNotes();
+  }, [loadNotes]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -936,7 +943,11 @@ export default function FacilityDetailsPage() {
         />
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-          <NotesCard facilityId={facilityId} />
+          <NotesCard
+            facilityId={facilityId}
+            notes={notes}
+            loading={notesLoading}
+          />
           <UploadedDocumentsCard
             documents={documents}
             loading={documentsLoading}
@@ -1307,7 +1318,7 @@ function DoctorsTable({ doctors, onDelete, onReactivate, onSetDefault }) {
   );
 }
 
-function NotesCard({ facilityId }) {
+function NotesCard({ facilityId, notes, loading }) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
@@ -1333,24 +1344,47 @@ function NotesCard({ facilityId }) {
           </thead>
 
           <tbody>
-            {notesSeed.map((note) => (
-              <tr
-                key={note.id}
-                className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC]"
-              >
-                <td className="px-4 py-4 text-[12px] text-[#64748B]">
-                  {note.date}
-                </td>
-
-                <td className="px-4 py-4 text-[12px] text-[#334155]">
-                  {note.by}
-                </td>
-
-                <td className="px-4 py-4 text-[12px] leading-[18px] text-[#334155]">
-                  {note.note}
+            {loading && (
+              <tr>
+                <td
+                  colSpan={3}
+                  className="px-4 py-8 text-center text-[12px] text-[#94A3B8]"
+                >
+                  Loading notes...
                 </td>
               </tr>
-            ))}
+            )}
+
+            {!loading &&
+              notes.map((note) => (
+                <tr
+                  key={note.id}
+                  className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#F8FBFC]"
+                >
+                  <td className="px-4 py-4 text-[12px] text-[#64748B]">
+                    {note.date}
+                  </td>
+
+                  <td className="px-4 py-4 text-[12px] text-[#334155]">
+                    {note.by}
+                  </td>
+
+                  <td className="px-4 py-4 text-[12px] leading-[18px] text-[#334155]">
+                    {note.note}
+                  </td>
+                </tr>
+              ))}
+
+            {!loading && notes.length === 0 && (
+              <tr>
+                <td
+                  colSpan={3}
+                  className="px-4 py-8 text-center text-[12px] text-[#94A3B8]"
+                >
+                  No notes found.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

@@ -180,3 +180,18 @@ export async function deleteFacilityDocument(facilityId, documentId) {
     auth: true,
   });
 }
+
+export async function getFacilityNotes(facilityId) {
+  const data = await request(`/facilities/${facilityId}/notes`, { auth: true });
+  return data?.data?.notes || [];
+}
+
+export async function createFacilityNote(facilityId, note) {
+  const data = await request(`/facilities/${facilityId}/notes`, {
+    method: "POST",
+    auth: true,
+    body: { note },
+  });
+
+  return data?.data?.note;
+}

@@ -2,6 +2,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
 const authService = require("../services/authService");
+const activityLogService = require("../services/activityLogService");
 const {
   validateLogin,
   validateTwoFactor,
@@ -40,11 +41,22 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
+  const meta = getRequestMeta(req);
   const result = await authService.verifyTwoFactor({
     sessionToken: req.body.sessionToken,
     code: String(req.body.code).replace(/\D/g, ""),
     trustDevice: Boolean(req.body.trustDevice),
-    ...getRequestMeta(req),
+    ...meta,
+  });
+
+  await activityLogService.recordSafe({
+    performedBy: result.user.id,
+    performerName: result.user.name,
+    context: "auth",
+    action: "login",
+    details: "Logged in successfully",
+    targetEmployeeId: result.user.id,
+    companyName: "System",
   });
 
   return ApiResponse.success(res, result, "Authentication successful");
@@ -85,10 +97,22 @@ exports.logout = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
+  const meta = getRequestMeta(req);
   const result = await authService.logout({
     refreshToken: req.body.refreshToken,
     sessionToken: req.body.sessionToken,
   });
+
+  if (result.employeeId) {
+    await activityLogService.recordSafe({
+      performedBy: result.employeeId,
+      context: "auth",
+      action: "logout",
+      details: "Logged out successfully",
+      targetEmployeeId: result.employeeId,
+      companyName: "System",
+    });
+  }
 
   return ApiResponse.success(res, result, result.message);
 });

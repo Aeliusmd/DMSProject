@@ -10,6 +10,8 @@ export default function ActivityLogModal({
   reference = "",
   countLabel = "entries",
   logs = [],
+  loading = false,
+  error = "",
   onClose,
 }) {
   const mounted = useIsClient();
@@ -42,8 +44,9 @@ export default function ActivityLogModal({
     if (!search) return logs;
 
     return logs.filter((log) => {
+      const searchableDate = log.displayDate || log.date || "";
       return (
-        String(log.date || "").toLowerCase().includes(search) ||
+        String(searchableDate).toLowerCase().includes(search) ||
         String(log.by || "").toLowerCase().includes(search) ||
         String(log.callback || "").toLowerCase().includes(search) ||
         String(log.note || "").toLowerCase().includes(search)
@@ -117,13 +120,37 @@ export default function ActivityLogModal({
             </thead>
 
             <tbody>
-              {filteredLogs.map((log, index) => (
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-5 py-14 text-center text-[13px] text-[#64748B]"
+                  >
+                    Loading activity logs...
+                  </td>
+                </tr>
+              )}
+
+              {!loading && error && (
+                <tr>
+                  <td
+                    colSpan={4}
+                    className="px-5 py-14 text-center text-[13px] text-red-500"
+                  >
+                    {error}
+                  </td>
+                </tr>
+              )}
+
+              {!loading &&
+                !error &&
+                filteredLogs.map((log) => (
                 <tr
-                  key={`${log.date}-${index}`}
+                  key={log.id || `${log.date}-${log.callback}-${log.note}`}
                   className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
                 >
                   <td className="px-5 py-4 align-top text-[#475569]">
-                    {log.date}
+                    {log.displayDate || log.date}
                   </td>
 
                   <td className="px-5 py-4 align-top font-semibold text-[#111827]">
@@ -140,7 +167,7 @@ export default function ActivityLogModal({
                 </tr>
               ))}
 
-              {filteredLogs.length === 0 && (
+              {!loading && !error && filteredLogs.length === 0 && (
                 <tr>
                   <td
                     colSpan={4}
@@ -167,7 +194,7 @@ export default function ActivityLogModal({
 
 function renderNote(note) {
   const parts = String(note).split(
-    /(CNR Letter|Copy Service Letter|Login|Password|Terminated|Deleted|Updated)/g
+    /(CNR Letter|Copy Service Letter|Login|Logout|Password|Terminated|Deleted|Updated|Created|Activated|Uploaded)/g
   );
 
   return parts.map((part, index) => {
@@ -175,10 +202,14 @@ function renderNote(note) {
       part === "CNR Letter" ||
       part === "Copy Service Letter" ||
       part === "Login" ||
+      part === "Logout" ||
       part === "Password" ||
       part === "Terminated" ||
       part === "Deleted" ||
-      part === "Updated"
+      part === "Updated" ||
+      part === "Created" ||
+      part === "Activated" ||
+      part === "Uploaded"
     ) {
       return (
         <span key={index} className="font-semibold text-[#2563EB]">

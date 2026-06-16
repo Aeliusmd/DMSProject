@@ -3,6 +3,8 @@ const fs = require("fs");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const facilityDocumentService = require("../services/facilityDocumentService");
+const facilityService = require("../services/facilityService");
+const activityLogService = require("../services/activityLogService");
 
 exports.listDocuments = asyncHandler(async (req, res) => {
   const documents = await facilityDocumentService.getDocuments(req.params.id);
@@ -10,12 +12,21 @@ exports.listDocuments = asyncHandler(async (req, res) => {
 });
 
 exports.uploadDocument = asyncHandler(async (req, res) => {
+  const facility = await facilityService.getFacilityById(req.params.id);
   const document = await facilityDocumentService.createDocument(
     req.params.id,
     req.file,
     req.body.documentType,
     req.user.id
   );
+
+  await activityLogService.recordFromRequest(req, {
+    context: "documents",
+    action: "upload",
+    details: `Uploaded document "${document.documentName}" (${document.documentType}) to ${facility.facilityName}`,
+    facilityId: Number(req.params.id),
+    companyName: facility.facilityName,
+  });
 
   return ApiResponse.created(res, { document }, "Document uploaded successfully");
 });
@@ -54,11 +65,25 @@ exports.previewDocument = asyncHandler(async (req, res) => {
 });
 
 exports.deleteDocument = asyncHandler(async (req, res) => {
+  const facility = await facilityService.getFacilityById(req.params.id);
+  const document = await facilityDocumentService.getDocumentFile(
+    req.params.id,
+    req.params.documentId
+  );
+
   const result = await facilityDocumentService.deleteDocument(
     req.params.id,
     req.params.documentId,
     req.user.id
   );
+
+  await activityLogService.recordFromRequest(req, {
+    context: "documents",
+    action: "delete",
+    details: `Deleted document "${document.document_name}" from ${facility.facilityName}`,
+    facilityId: Number(req.params.id),
+    companyName: facility.facilityName,
+  });
 
   return ApiResponse.success(res, result, result.message);
 });

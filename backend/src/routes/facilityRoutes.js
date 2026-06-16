@@ -1,6 +1,7 @@
 const express = require("express");
 const facilityController = require("../controllers/facilityController");
 const facilityDocumentController = require("../controllers/facilityDocumentController");
+const facilityNoteController = require("../controllers/facilityNoteController");
 const { authenticate } = require("../middleware/authMiddleware");
 const { facilityDocumentUpload } = require("../middleware/uploadMiddleware");
 
@@ -29,6 +30,9 @@ router.delete(
   "/:id/documents/:documentId",
   facilityDocumentController.deleteDocument
 );
+
+router.get("/:id/notes", facilityNoteController.listNotes);
+router.post("/:id/notes", facilityNoteController.createNote);
 
 router.get("/:id", facilityController.getById);
 router.put("/:id", facilityController.update);

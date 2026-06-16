@@ -9,5 +9,7 @@ module.exports = {
   OfficeManager: require("./OfficeManager"),
   FacilityDoctor: require("./FacilityDoctor"),
   FacilityDocument: require("./FacilityDocument"),
+  FacilityNote: require("./FacilityNote"),
   EmployeeSettings: require("./EmployeeSettings"),
+  ActivityLog: require("./ActivityLog"),
 };

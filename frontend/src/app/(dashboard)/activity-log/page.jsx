@@ -1,249 +1,50 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
-
-const activityLogs = [
-  {
-    id: 1,
-    date: "2026-04-07",
-    time: "09:14",
-    action: "Order Created",
-    company: "Smith & Associates",
-    module: "Orders",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "New order ORD-2026-001 created for Smith v. Johnson Pro",
-  },
-  {
-    id: 2,
-    date: "2026-04-07",
-    time: "08:52",
-    action: "Invoice Generated",
-    company: "Martinez Legal Group",
-    module: "Billing",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "Invoice INV-003 generated for Martinez Immigration Appeal",
-  },
-  {
-    id: 3,
-    date: "2026-04-07",
-    time: "08:30",
-    action: "Employee Added",
-    company: "System",
-    module: "Employees",
-    performedBy: "John Doe",
-    initials: "JD",
-    details: "New employee Patricia Brown added to the system with role",
-  },
-  {
-    id: 4,
-    date: "2026-04-06",
-    time: "17:42",
-    action: "Order Updated",
-    company: "Pacific Law Partners",
-    module: "Orders",
-    performedBy: "James Wilson",
-    initials: "JW",
-    details: "Status changed to Ready to Pickup for ORD-2026-003 Chen",
-  },
-  {
-    id: 5,
-    date: "2026-04-06",
-    time: "15:30",
-    action: "Invoice Resent",
-    company: "Davis Law Firm",
-    module: "Billing",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "Invoice resent to billing@davislawfirm.com for case 72058-2",
-  },
-  {
-    id: 6,
-    date: "2026-04-06",
-    time: "14:16",
-    action: "Payment Received",
-    company: "Thompson Industries",
-    module: "Billing",
-    performedBy: "Greg Holt",
-    initials: "GH",
-    details: "Payment of $2,500.00 received via ACH for invoice INV-014",
-  },
-  {
-    id: 7,
-    date: "2026-04-06",
-    time: "12:48",
-    action: "Employee Terminated",
-    company: "System",
-    module: "Employees",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "Thomas Anderson terminated. Account deactivated and log",
-  },
-  {
-    id: 8,
-    date: "2026-04-06",
-    time: "11:00",
-    action: "Invoice Sent",
-    company: "Coastal Insurance",
-    module: "Billing",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "Bulk invoice sent to 5 companies for outstanding cases",
-  },
-  {
-    id: 9,
-    date: "2026-04-05",
-    time: "11:05",
-    action: "Billing Updated",
-    company: "System",
-    module: "Billing",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "Monthly billing rate updated from $450 to $475 per case",
-  },
-  {
-    id: 10,
-    date: "2026-04-05",
-    time: "09:30",
-    action: "Order Created",
-    company: "Williams & Co.",
-    module: "Orders",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "New order ORD-2026-004 created for Williams Criminal Defe",
-  },
-  {
-    id: 11,
-    date: "2026-04-04",
-    time: "16:20",
-    action: "Batch Scan Complete",
-    company: "System",
-    module: "Processing",
-    performedBy: "Michael Chen",
-    initials: "MC",
-    details: "Batch scan completed for 47 documents across 12 cases",
-  },
-  {
-    id: 12,
-    date: "2026-04-04",
-    time: "14:15",
-    action: "Reminder Scheduled",
-    company: "Brown Family Trust",
-    module: "Orders",
-    performedBy: "Amanda White",
-    initials: "AW",
-    details: "Pickup reminder scheduled for ORD-2026-005 Brown Estate",
-  },
-  {
-    id: 13,
-    date: "2026-04-04",
-    time: "11:30",
-    action: "Order Cancelled",
-    company: "Rodriguez & Partners",
-    module: "Orders",
-    performedBy: "Lisa Thompson",
-    initials: "LT",
-    details: "ORD-2026-007 Rodriguez Divorce Settlement cancelled by cl",
-  },
-  {
-    id: 14,
-    date: "2026-04-03",
-    time: "15:45",
-    action: "Report Exported",
-    company: "System",
-    module: "Reports",
-    performedBy: "David Kim",
-    initials: "DK",
-    details: "Outstanding Invoices Report exported as PDF for April 2026",
-  },
-  {
-    id: 15,
-    date: "2026-04-03",
-    time: "10:00",
-    action: "Writeoff Applied",
-    company: "Lee Tech Holdings",
-    module: "Billing",
-    performedBy: "Robert Garcia",
-    initials: "RG",
-    details: "Writeoff applied to case 72108-2 for $1,900.00 — client settl",
-  },
-  {
-    id: 16,
-    date: "2026-04-02",
-    time: "13:20",
-    action: "Documents Uploaded",
-    company: "Anderson Accounting",
-    module: "Orders",
-    performedBy: "Emily Rodriguez",
-    initials: "ER",
-    details: "3 files uploaded to ORD-2026-011 Anderson Tax Audit Defen",
-  },
-  {
-    id: 17,
-    date: "2026-04-02",
-    time: "09:10",
-    action: "Employee Updated",
-    company: "System",
-    module: "Employees",
-    performedBy: "John Doe",
-    initials: "JD",
-    details: "Emily Rodriguez role changed from Processor to Senior Proce",
-  },
-  {
-    id: 18,
-    date: "2026-04-01",
-    time: "16:35",
-    action: "Security Login",
-    company: "System",
-    module: "Security",
-    performedBy: "John Doe",
-    initials: "JD",
-    details: "Successful admin login from trusted device",
-  },
-  {
-    id: 19,
-    date: "2026-04-01",
-    time: "13:40",
-    action: "Order Processed",
-    company: "Taylor Financial Group",
-    module: "Processing",
-    performedBy: "Michael Chen",
-    initials: "MC",
-    details: "Order packet processed and marked ready for review",
-  },
-  {
-    id: 20,
-    date: "2026-04-01",
-    time: "09:22",
-    action: "Invoice Updated",
-    company: "Harrison Medical Group",
-    module: "Billing",
-    performedBy: "Sarah Chen",
-    initials: "SC",
-    details: "Invoice due date updated after facility request",
-  },
-];
+import { getActivityLogs } from "@/lib/activityLog/activityLogApi";
 
 const filters = [
   "All Modules",
   "Orders",
   "Billing",
   "Employees",
+  "Facilities",
   "Processing",
   "Reports",
   "Security",
 ];
 
 export default function ActivityLogPage() {
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState("All Modules");
   const [dateFilters, setDateFilters] = useState({
     fromDate: "",
     toDate: "",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getActivityLogs()
+      .then((logs) => {
+        if (!cancelled) {
+          setActivityLogs(logs);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLogsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredLogs = useMemo(() => {
     return activityLogs.filter((log) => {
@@ -261,7 +62,7 @@ export default function ActivityLogPage() {
 
       return matchesFilter && matchesFromDate && matchesToDate;
     });
-  }, [activeFilter, dateFilters]);
+  }, [activityLogs, activeFilter, dateFilters]);
 
   const handleDateFilterChange = (e) => {
     const { name, value } = e.target;
@@ -351,11 +152,13 @@ export default function ActivityLogPage() {
           </div>
 
           <p className="justify-self-start text-[11px] text-[#64748B] 2xl:justify-self-end">
-            Showing {filteredLogs.length} of {activityLogs.length} entries
+            {logsLoading
+              ? "Loading activity logs..."
+              : `Showing ${filteredLogs.length} of ${activityLogs.length} entries`}
           </p>
         </div>
 
-        <ActivityLogTable logs={filteredLogs} />
+        <ActivityLogTable logs={logsLoading ? [] : filteredLogs} />
       </div>
     </DashboardShell>
   );
