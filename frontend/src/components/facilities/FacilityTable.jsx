@@ -3,7 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import AlertModal from "@/components/ui/AlertModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
+import { uploadFacilityDocument } from "@/lib/facilities/facilityApi";
 
 export default function FacilitiesTable({ facilities, onDelete }) {
   const [deleteModal, setDeleteModal] = useState({
@@ -14,6 +16,14 @@ export default function FacilitiesTable({ facilities, onDelete }) {
   const [uploadModal, setUploadModal] = useState({
     open: false,
     facility: null,
+  });
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [uploadAlert, setUploadAlert] = useState({
+    open: false,
+    variant: "success",
+    title: "",
+    message: "",
   });
 
   const openDeleteModal = (facility) => {
@@ -38,6 +48,7 @@ export default function FacilitiesTable({ facilities, onDelete }) {
   };
 
   const openUploadModal = (facility) => {
+    setUploadError("");
     setUploadModal({
       open: true,
       facility,
@@ -45,15 +56,57 @@ export default function FacilitiesTable({ facilities, onDelete }) {
   };
 
   const closeUploadModal = () => {
+    if (uploading) return;
+
     setUploadModal({
       open: false,
       facility: null,
     });
+    setUploadError("");
   };
 
-  const handleUploadDocuments = (uploadData) => {
-    console.log("Facility upload:", uploadModal.facility);
-    console.log("Upload data:", uploadData);
+  const handleUploadDocuments = async ({ documentType, files }) => {
+    if (!uploadModal.facility?.id || !files?.length) return;
+
+    setUploading(true);
+    setUploadError("");
+
+    try {
+      for (const file of files) {
+        await uploadFacilityDocument(
+          uploadModal.facility.id,
+          file,
+          documentType
+        );
+      }
+
+      setUploadModal({
+        open: false,
+        facility: null,
+      });
+      setUploadError("");
+      setUploadAlert({
+        open: true,
+        variant: "success",
+        title: "Upload Successful",
+        message:
+          files.length > 1
+            ? `${files.length} documents were uploaded successfully.`
+            : "Document was uploaded successfully.",
+      });
+    } catch (err) {
+      const message = err.message || "Failed to upload document";
+      setUploadError(message);
+      setUploadAlert({
+        open: true,
+        variant: "error",
+        title: "Upload Failed",
+        message,
+      });
+      throw err;
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -167,6 +220,16 @@ export default function FacilitiesTable({ facilities, onDelete }) {
         title="Upload Documents"
         onClose={closeUploadModal}
         onUpload={handleUploadDocuments}
+        uploading={uploading}
+        uploadError={uploadError}
+      />
+
+      <AlertModal
+        open={uploadAlert.open}
+        title={uploadAlert.title}
+        message={uploadAlert.message}
+        variant={uploadAlert.variant}
+        onClose={() => setUploadAlert((prev) => ({ ...prev, open: false }))}
       />
     </>
   );

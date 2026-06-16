@@ -1,21 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
+import AlertModal from "@/components/ui/AlertModal";
+import { ApiRequestError } from "@/lib/auth/authApi";
+import { setAuth, getStoredUser } from "@/lib/auth/authStorage";
 import { validatePasswordChangeForm } from "@/lib/passwordValidations";
-
-const initialProfile = {
-  firstName: "John",
-  lastName: "Doe",
-  email: "john.doe@lexflow.com",
-};
-
-const initialNotifications = {
-  newOrderAlerts: true,
-  invoiceReminders: true,
-  employeeActivity: true,
-  caseStatusUpdates: true,
-};
+import {
+  changePassword,
+  getSettings,
+  updateNotificationPreferences,
+  updateProfile,
+} from "@/lib/settings/settingsApi";
 
 const notificationItems = [
   {
@@ -41,8 +37,19 @@ const notificationItems = [
 ];
 
 export default function SettingsPage() {
-  const [profile, setProfile] = useState(initialProfile);
-  const [notifications, setNotifications] = useState(initialNotifications);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [profile, setProfile] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+  });
+  const [notifications, setNotifications] = useState({
+    newOrderAlerts: true,
+    invoiceReminders: true,
+    employeeActivity: true,
+    caseStatusUpdates: true,
+  });
 
   const [passwordData, setPasswordData] = useState({
     currentPassword: "",
@@ -51,7 +58,52 @@ export default function SettingsPage() {
   });
 
   const [errors, setErrors] = useState({});
+  const [profileErrors, setProfileErrors] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingNotifications, setSavingNotifications] = useState(false);
+  const [updatingPassword, setUpdatingPassword] = useState(false);
+
+  const [alert, setAlert] = useState({
+    open: false,
+    variant: "success",
+    title: "",
+    message: "",
+  });
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+
+    try {
+      const settings = await getSettings();
+
+      if (settings?.profile) {
+        setProfile(settings.profile);
+      }
+
+      if (settings?.notifications) {
+        setNotifications(settings.notifications);
+      }
+    } catch (err) {
+      setLoadError(err.message || "Failed to load settings");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const showAlert = (variant, title, message) => {
+    setAlert({
+      open: true,
+      variant,
+      title,
+      message,
+    });
+  };
 
   const handleProfileChange = (e) => {
     const { name, value } = e.target;
@@ -60,6 +112,14 @@ export default function SettingsPage() {
       ...prev,
       [name]: value,
     }));
+
+    if (profileErrors[name]) {
+      setProfileErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
   };
 
   const handleNotificationToggle = (key) => {
@@ -84,7 +144,94 @@ export default function SettingsPage() {
     }
   };
 
-  const handleUpdatePassword = () => {
+  const validateProfileForm = () => {
+    const nextErrors = {};
+
+    if (!profile.firstName.trim()) {
+      nextErrors.firstName = "First name is required";
+    }
+
+    if (!profile.email.trim()) {
+      nextErrors.email = "Email is required";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(profile.email.trim())) {
+      nextErrors.email = "Enter a valid email address";
+    }
+
+    return nextErrors;
+  };
+
+  const handleSaveProfile = async () => {
+    const validationErrors = validateProfileForm();
+    setProfileErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0) return;
+
+    setSavingProfile(true);
+
+    try {
+      const settings = await updateProfile(profile);
+
+      if (settings?.profile) {
+        setProfile(settings.profile);
+      }
+
+      const storedUser = getStoredUser();
+
+      if (storedUser && settings?.user) {
+        setAuth({
+          accessToken: null,
+          refreshToken: null,
+          user: settings.user,
+        });
+      }
+
+      showAlert("success", "Profile Updated", "Your profile was saved successfully.");
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.errors) {
+        const mapped = {};
+        err.errors.forEach(({ field, message }) => {
+          mapped[field] = message;
+        });
+        setProfileErrors(mapped);
+      }
+
+      showAlert(
+        "error",
+        "Profile Update Failed",
+        err.message || "Failed to save profile"
+      );
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    setSavingNotifications(true);
+
+    try {
+      const settings = await updateNotificationPreferences(notifications);
+
+      if (settings?.notifications) {
+        setNotifications(settings.notifications);
+      }
+
+      showAlert(
+        "success",
+        "Preferences Saved",
+        "Your notification preferences were saved successfully."
+      );
+    } catch (err) {
+      showAlert(
+        "error",
+        "Save Failed",
+        err.message || "Failed to save notification preferences"
+      );
+    } finally {
+      setSavingNotifications(false);
+    }
+  };
+
+  const handleUpdatePassword = async () => {
     setSubmitAttempted(true);
 
     const validationErrors = validatePasswordChangeForm(passwordData);
@@ -92,17 +239,55 @@ export default function SettingsPage() {
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    console.log("Password update data:", passwordData);
+    setUpdatingPassword(true);
 
-    setPasswordData({
-      currentPassword: "",
-      newPassword: "",
-      confirmPassword: "",
-    });
+    try {
+      await changePassword({
+        currentPassword: passwordData.currentPassword,
+        newPassword: passwordData.newPassword,
+      });
 
-    setErrors({});
-    setSubmitAttempted(false);
+      setPasswordData({
+        currentPassword: "",
+        newPassword: "",
+        confirmPassword: "",
+      });
+      setErrors({});
+      setSubmitAttempted(false);
+
+      showAlert(
+        "success",
+        "Password Updated",
+        "Your password was changed successfully."
+      );
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.errors) {
+        const mapped = {};
+        err.errors.forEach(({ field, message }) => {
+          mapped[field] = message;
+        });
+        setErrors(mapped);
+      }
+
+      showAlert(
+        "error",
+        "Password Update Failed",
+        err.message || "Failed to update password"
+      );
+    } finally {
+      setUpdatingPassword(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center text-[13px] text-[#64748B]">
+          Loading settings...
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>
@@ -117,6 +302,12 @@ export default function SettingsPage() {
           </p>
         </div>
 
+        {loadError && (
+          <div className="max-w-[680px] rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+            {loadError}
+          </div>
+        )}
+
         <div className="flex w-full max-w-[680px] flex-col gap-5">
           <SettingsCard title="Profile Information">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -125,6 +316,7 @@ export default function SettingsPage() {
                 name="firstName"
                 value={profile.firstName}
                 onChange={handleProfileChange}
+                error={profileErrors.firstName}
               />
 
               <SettingsField
@@ -132,6 +324,7 @@ export default function SettingsPage() {
                 name="lastName"
                 value={profile.lastName}
                 onChange={handleProfileChange}
+                error={profileErrors.lastName}
               />
             </div>
 
@@ -141,7 +334,17 @@ export default function SettingsPage() {
               type="email"
               value={profile.email}
               onChange={handleProfileChange}
+              error={profileErrors.email}
             />
+
+            <button
+              type="button"
+              onClick={handleSaveProfile}
+              disabled={savingProfile}
+              className="inline-flex h-[38px] min-w-[110px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {savingProfile ? "Saving..." : "Save Profile"}
+            </button>
           </SettingsCard>
 
           <SettingsCard title="Notification Preferences">
@@ -156,6 +359,15 @@ export default function SettingsPage() {
                 />
               ))}
             </div>
+
+            <button
+              type="button"
+              onClick={handleSaveNotifications}
+              disabled={savingNotifications}
+              className="inline-flex h-[38px] min-w-[140px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {savingNotifications ? "Saving..." : "Save Preferences"}
+            </button>
           </SettingsCard>
 
           <SettingsCard title="Security">
@@ -190,14 +402,23 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleUpdatePassword}
-                className="inline-flex h-[38px] min-w-[132px] items-center justify-center rounded-[6px] bg-[#111827] px-5 text-[12px] font-semibold text-white hover:bg-[#1F2937]"
+                disabled={updatingPassword}
+                className="inline-flex h-[38px] min-w-[132px] items-center justify-center rounded-[6px] bg-[#111827] px-5 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Update Password
+                {updatingPassword ? "Updating..." : "Update Password"}
               </button>
             </div>
           </SettingsCard>
         </div>
       </div>
+
+      <AlertModal
+        open={alert.open}
+        title={alert.title}
+        message={alert.message}
+        variant={alert.variant}
+        onClose={() => setAlert((prev) => ({ ...prev, open: false }))}
+      />
     </DashboardShell>
   );
 }

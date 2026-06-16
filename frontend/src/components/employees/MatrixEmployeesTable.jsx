@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
+import { getEmployeeActivityLogs } from "@/lib/activityLog/activityLogApi";
 
 export default function MatrixEmployeesTable({
   employees,
@@ -26,6 +27,9 @@ export default function MatrixEmployeesTable({
   });
 
   const [selectedLogEmployee, setSelectedLogEmployee] = useState(null);
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
 
@@ -119,6 +123,45 @@ export default function MatrixEmployeesTable({
       employee: null,
     });
   };
+
+  useEffect(() => {
+    if (!selectedLogEmployee?.id) {
+      setActivityLogs([]);
+      setLogsError("");
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    setLogsLoading(true);
+    setLogsError("");
+
+    getEmployeeActivityLogs(selectedLogEmployee.id)
+      .then((logs) => {
+        if (!cancelled) {
+          setActivityLogs(logs);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setActivityLogs([]);
+          setLogsError(
+            error instanceof ApiRequestError
+              ? error.message
+              : "Unable to load activity logs"
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLogsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLogEmployee?.id]);
 
   const modalTitle =
     confirmModal.action === "delete"
@@ -290,7 +333,9 @@ export default function MatrixEmployeesTable({
         isOpen={Boolean(selectedLogEmployee)}
         title="Employee Activity Log"
         reference={selectedLogEmployee?.name}
-        logs={[]}
+        logs={activityLogs}
+        loading={logsLoading}
+        error={logsError}
         onClose={() => setSelectedLogEmployee(null)}
       />
     </>

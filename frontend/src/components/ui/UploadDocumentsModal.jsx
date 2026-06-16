@@ -4,17 +4,26 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 
-const uploadTypes = ["Standard", "Legal", "Medical", "Financial", "Other"];
+export const DOCUMENT_TYPES = [
+  "Standard",
+  "Legal",
+  "Medical",
+  "Financial",
+  "Other",
+];
 
 export default function UploadDocumentsModal({
   open,
   title = "Upload Documents",
   onClose,
   onUpload,
+  uploading = false,
+  uploadError = "",
 }) {
   const mounted = useIsClient();
-  const [uploadType, setUploadType] = useState("Standard");
+  const [documentType, setDocumentType] = useState("Standard");
   const [files, setFiles] = useState([]);
+  const [localError, setLocalError] = useState("");
   const openSession = open ? "open" : null;
   const [prevOpenSession, setPrevOpenSession] = useState(null);
 
@@ -22,8 +31,9 @@ export default function UploadDocumentsModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
-      setUploadType("Standard");
+      setDocumentType("Standard");
       setFiles([]);
+      setLocalError("");
     }
   }
 
@@ -41,32 +51,42 @@ export default function UploadDocumentsModal({
   if (!mounted || !open) return null;
 
   const handleFileChange = (e) => {
-    setFiles(Array.from(e.target.files || []));
+    const selectedFiles = Array.from(e.target.files || []);
+    setFiles(selectedFiles);
+    setLocalError("");
   };
 
-  const handleUpload = () => {
-    const uploadData = {
-      uploadType,
-      files,
-    };
+  const handleUpload = async () => {
+    if (files.length === 0) {
+      setLocalError("Please select a file to upload");
+      return;
+    }
 
-    console.log("Upload documents:", uploadData);
-    onUpload?.(uploadData);
-    onClose?.();
+    setLocalError("");
+
+    try {
+      await onUpload?.({
+        documentType,
+        files,
+      });
+    } catch {
+      // Parent handles and passes uploadError.
+    }
   };
+
+  const displayError = localError || uploadError;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-[2px]">
       <section className="w-full max-w-[380px] overflow-hidden rounded-[8px] bg-white shadow-2xl">
         <div className="flex h-[50px] items-center justify-between border-b border-[#E2E8F0] px-5">
-          <h2 className="text-[13px] font-semibold text-[#111827]">
-            {title}
-          </h2>
+          <h2 className="text-[13px] font-semibold text-[#111827]">{title}</h2>
 
           <button
             type="button"
             onClick={onClose}
-            className="flex h-[26px] w-[26px] items-center justify-center rounded-[5px] text-[16px] leading-none text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#334155]"
+            disabled={uploading}
+            className="flex h-[26px] w-[26px] items-center justify-center rounded-[5px] text-[16px] leading-none text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#334155] disabled:opacity-60"
             aria-label="Close upload modal"
           >
             ×
@@ -76,15 +96,16 @@ export default function UploadDocumentsModal({
         <div className="space-y-4 px-5 py-4">
           <div>
             <label className="mb-[6px] block text-[11px] font-medium text-[#475569]">
-              Upload Type
+              Document Type
             </label>
 
             <select
-              value={uploadType}
-              onChange={(e) => setUploadType(e.target.value)}
-              className="h-[34px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              value={documentType}
+              onChange={(e) => setDocumentType(e.target.value)}
+              disabled={uploading}
+              className="h-[34px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:opacity-60"
             >
-              {uploadTypes.map((type) => (
+              {DOCUMENT_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type}
                 </option>
@@ -101,7 +122,8 @@ export default function UploadDocumentsModal({
               type="file"
               multiple
               onChange={handleFileChange}
-              className="block w-full text-[11px] text-[#64748B] file:mr-3 file:h-[30px] file:rounded-[5px] file:border file:border-[#E2E8F0] file:bg-[#F8FAFC] file:px-3 file:text-[11px] file:font-medium file:text-[#334155] hover:file:bg-[#F1F5F9]"
+              disabled={uploading}
+              className="block w-full text-[11px] text-[#64748B] file:mr-3 file:h-[30px] file:rounded-[5px] file:border file:border-[#E2E8F0] file:bg-[#F8FAFC] file:px-3 file:text-[11px] file:font-medium file:text-[#334155] hover:file:bg-[#F1F5F9] disabled:opacity-60"
             />
 
             {files.length > 0 && (
@@ -110,13 +132,20 @@ export default function UploadDocumentsModal({
               </p>
             )}
           </div>
+
+          {displayError && (
+            <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600">
+              {displayError}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-[#F1F5F9] px-5 py-4">
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-[32px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[11px] font-semibold text-[#475569] hover:bg-[#F8FAFC]"
+            disabled={uploading}
+            className="inline-flex h-[32px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[11px] font-semibold text-[#475569] hover:bg-[#F8FAFC] disabled:opacity-60"
           >
             Cancel
           </button>
@@ -124,10 +153,11 @@ export default function UploadDocumentsModal({
           <button
             type="button"
             onClick={handleUpload}
-            className="inline-flex h-[32px] items-center justify-center gap-2 rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
+            disabled={uploading}
+            className="inline-flex h-[32px] items-center justify-center gap-2 rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <UploadIcon />
-            Upload
+            {uploading ? "Uploading..." : "Upload"}
           </button>
         </div>
       </section>

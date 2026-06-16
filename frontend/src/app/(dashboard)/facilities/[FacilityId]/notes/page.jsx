@@ -1,54 +1,60 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
-
-const facilities = [
-  { id: 1, facility: "Smith & Associates" },
-  { id: 2, facility: "Martinez Legal Group" },
-  { id: 3, facility: "Pacific Law Partners" },
-  { id: 4, facility: "Williams & Co." },
-  { id: 5, facility: "Brown Family Trust" },
-  { id: 6, facility: "Davis Law Firm" },
-  { id: 7, facility: "Rodriguez & Partners" },
-  { id: 8, facility: "Thompson Industries" },
-  { id: 9, facility: "Garcia Legal Services" },
-  { id: 10, facility: "Lee Tech Holdings" },
-  { id: 11, facility: "Anderson Accounting" },
-  { id: 12, facility: "Taylor Financial Group" },
-  { id: 13, facility: "Harrison Medical Group" },
-  { id: 14, facility: "O'Connor Legal" },
-  { id: 15, facility: "Nelson Healthcare" },
-];
-
-const initialNotes = [
-  {
-    id: 1,
-    date: "2026-4-15",
-    by: "John Doe",
-    note: "Initial setup completed. Facility verified all contact information.",
-  },
-  {
-    id: 2,
-    date: "2026-05-01",
-    by: "Sarah Johnson",
-    note: "Added new doctor - Susan Wilson. Updated IP whitelist.",
-  },
-];
+import AlertModal from "@/components/ui/AlertModal";
+import {
+  createFacilityNote,
+  getFacility,
+  getFacilityNotes,
+} from "@/lib/facilities/facilityApi";
 
 export default function FacilityNotesPage() {
   const params = useParams();
-  const facilityId = Number(params.facilityId || params.FacilityId || params.id);
+  const facilityId = String(
+    params?.facilityId || params?.FacilityId || params?.id || ""
+  );
 
-  const facility = useMemo(() => {
-    return facilities.find((item) => item.id === facilityId) || facilities[0];
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [facilityName, setFacilityName] = useState("");
+  const [note, setNote] = useState("");
+  const [notes, setNotes] = useState([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [alert, setAlert] = useState({
+    open: false,
+    variant: "success",
+    title: "",
+    message: "",
+  });
+
+  const loadPageData = useCallback(async () => {
+    if (!facilityId) return;
+
+    setLoading(true);
+    setLoadError("");
+
+    try {
+      const [facility, facilityNotes] = await Promise.all([
+        getFacility(facilityId),
+        getFacilityNotes(facilityId),
+      ]);
+
+      setFacilityName(facility?.facilityName || "");
+      setNotes(facilityNotes);
+    } catch (err) {
+      setLoadError(err.message || "Failed to load facility notes");
+    } finally {
+      setLoading(false);
+    }
   }, [facilityId]);
 
-  const [note, setNote] = useState("");
-  const [notes, setNotes] = useState(initialNotes);
-  const [error, setError] = useState("");
+  useEffect(() => {
+    loadPageData();
+  }, [loadPageData]);
 
   const handleNoteChange = (e) => {
     const value = e.target.value.slice(0, 500);
@@ -59,35 +65,69 @@ export default function FacilityNotesPage() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!note.trim()) {
       setError("Note is required");
       return;
     }
 
-    const newNote = {
-      id: Date.now(),
-      date: getTodayDate(),
-      by: "John Doe",
-      note: note.trim(),
-    };
-
-    setNotes((prev) => [newNote, ...prev]);
-    setNote("");
+    setSaving(true);
     setError("");
 
-    console.log("Saved facility note:", {
-      facility,
-      note: newNote,
-    });
+    try {
+      const created = await createFacilityNote(facilityId, note.trim());
+      setNotes((prev) => [created, ...prev]);
+      setNote("");
+      setAlert({
+        open: true,
+        variant: "success",
+        title: "Note Saved",
+        message: "The facility note was saved successfully.",
+      });
+    } catch (err) {
+      setAlert({
+        open: true,
+        variant: "error",
+        title: "Save Failed",
+        message: err.message || "Failed to save note",
+      });
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center text-[13px] text-[#64748B]">
+          Loading notes...
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-4">
+          <p className="text-[13px] font-semibold text-red-600">{loadError}</p>
+          <Link
+            href="/facilities"
+            className="text-[12px] font-semibold text-[#007F96] hover:underline"
+          >
+            Back to Facilities
+          </Link>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
         <div className="flex w-full items-center justify-between gap-4">
           <h1 className="text-[18px] font-semibold text-[#111827]">
-            {facility.facility} - Notes
+            {facilityName || "Facility"} - Notes
           </h1>
 
           <Link
@@ -108,7 +148,7 @@ export default function FacilityNotesPage() {
             <div className="space-y-5">
               <FacilityInput
                 label="Facility"
-                value={facility.facility}
+                value={facilityName}
                 disabled
               />
 
@@ -142,66 +182,81 @@ export default function FacilityNotesPage() {
                 <button
                   type="button"
                   onClick={handleSave}
-                  className="inline-flex h-[36px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+                  disabled={saving}
+                  className="inline-flex h-[36px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save
+                  {saving ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>
           </section>
 
-          <section className="min-h-[360px] overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-sm">
-            <h2 className="mb-5 text-[14px] font-semibold text-[#111827]">
-              Notes History
-            </h2>
-
-            <div className="overflow-auto">
-              <table className="w-full min-w-[520px] border-collapse">
-                <thead className="bg-[#F8FAFC]">
-                  <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
-                    <th className="w-[110px] px-4 py-3">Date</th>
-                    <th className="w-[130px] px-4 py-3">By</th>
-                    <th className="px-4 py-3">Note</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {notes.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC]"
-                    >
-                      <td className="px-4 py-4 align-top text-[12px] text-[#475569]">
-                        {item.date}
-                      </td>
-
-                      <td className="px-4 py-4 align-top text-[12px] text-[#475569]">
-                        {item.by}
-                      </td>
-
-                      <td className="px-4 py-4 align-top text-[12px] leading-[20px] text-[#334155]">
-                        {item.note}
-                      </td>
-                    </tr>
-                  ))}
-
-                  {notes.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={3}
-                        className="px-4 py-10 text-center text-[12px] text-[#94A3B8]"
-                      >
-                        No notes found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <NotesHistoryTable notes={notes} />
         </div>
       </div>
+
+      <AlertModal
+        open={alert.open}
+        title={alert.title}
+        message={alert.message}
+        variant={alert.variant}
+        onClose={() => setAlert((prev) => ({ ...prev, open: false }))}
+      />
     </DashboardShell>
+  );
+}
+
+function NotesHistoryTable({ notes }) {
+  return (
+    <section className="min-h-[360px] overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-sm">
+      <h2 className="mb-5 text-[14px] font-semibold text-[#111827]">
+        Notes History
+      </h2>
+
+      <div className="overflow-auto">
+        <table className="w-full min-w-[520px] border-collapse">
+          <thead className="bg-[#F8FAFC]">
+            <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
+              <th className="w-[110px] px-4 py-3">Date</th>
+              <th className="w-[130px] px-4 py-3">By</th>
+              <th className="px-4 py-3">Note</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {notes.map((item) => (
+              <tr
+                key={item.id}
+                className="border-b border-[#F1F5F9] last:border-b-0 hover:bg-[#F8FAFC]"
+              >
+                <td className="px-4 py-4 align-top text-[12px] text-[#475569]">
+                  {item.date}
+                </td>
+
+                <td className="px-4 py-4 align-top text-[12px] text-[#475569]">
+                  {item.by}
+                </td>
+
+                <td className="px-4 py-4 align-top text-[12px] leading-[20px] text-[#334155]">
+                  {item.note}
+                </td>
+              </tr>
+            ))}
+
+            {notes.length === 0 && (
+              <tr>
+                <td
+                  colSpan={3}
+                  className="px-4 py-10 text-center text-[12px] text-[#94A3B8]"
+                >
+                  No notes found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -221,16 +276,6 @@ function FacilityInput({ label, value, disabled = false }) {
       />
     </div>
   );
-}
-
-function getTodayDate() {
-  const now = new Date();
-
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
 }
 
 function ArrowLeftIcon() {

@@ -218,7 +218,10 @@ async function logout({ refreshToken, sessionToken }) {
       const decoded = tokenService.verifyRefreshToken(refreshToken);
       twoFactorStore.remove(decoded.sessionId);
       await AuthSession.deleteById(decoded.sessionId);
-      return { message: "Logged out successfully" };
+      return {
+        message: "Logged out successfully",
+        employeeId: decoded.sub,
+      };
     } catch {
       // Fall through to session token logout
     }
@@ -230,9 +233,13 @@ async function logout({ refreshToken, sessionToken }) {
     if (session) {
       twoFactorStore.remove(session.id);
       await AuthSession.deleteBySessionToken(sessionToken);
+      return {
+        message: "Logged out successfully",
+        employeeId: session.employee_id,
+      };
     }
 
-    return { message: "Logged out successfully" };
+    return { message: "Logged out successfully", employeeId: null };
   }
 
   throw new ApiError(400, "Refresh token or session token is required");

@@ -39,7 +39,7 @@ class Employee {
     const deletedClause = includeDeleted ? "" : "AND deleted_at IS NULL";
 
     const [rows] = await pool.execute(
-      `SELECT id, name, logon, email, role, last_login_at,
+      `SELECT id, name, logon, email, password_hash, role, last_login_at,
               is_terminated, deleted_at, deleted_by, created_at, updated_at
        FROM matrix_employees
        WHERE id = :id
@@ -49,6 +49,15 @@ class Employee {
     );
 
     return rows[0] || null;
+  }
+
+  static async findByIdPublic(id) {
+    const employee = await this.findById(id);
+
+    if (!employee) return null;
+
+    const { password_hash, ...publicEmployee } = employee;
+    return publicEmployee;
   }
 
   static async findAll() {
@@ -65,14 +74,16 @@ class Employee {
     return rows;
   }
 
-  static async findByEmail(email) {
+  static async findByEmail(email, excludeId = null) {
     const pool = getPool();
 
     const [rows] = await pool.execute(
       `SELECT id FROM matrix_employees
-       WHERE email = :email AND deleted_at IS NULL
+       WHERE email = :email
+         AND deleted_at IS NULL
+         ${excludeId ? "AND id <> :excludeId" : ""}
        LIMIT 1`,
-      { email }
+      { email, excludeId }
     );
 
     return rows[0] || null;
@@ -154,6 +165,30 @@ class Employee {
     await pool.execute(
       `UPDATE matrix_employees SET last_login_at = NOW(), updated_at = NOW() WHERE id = :id`,
       { id }
+    );
+  }
+
+  static async updateProfile(id, { name, email }) {
+    const pool = getPool();
+
+    await pool.execute(
+      `UPDATE matrix_employees
+       SET name = :name, email = :email, updated_at = NOW()
+       WHERE id = :id AND deleted_at IS NULL`,
+      { id, name, email }
+    );
+
+    return this.findByIdPublic(id);
+  }
+
+  static async updatePassword(id, passwordHash) {
+    const pool = getPool();
+
+    await pool.execute(
+      `UPDATE matrix_employees
+       SET password_hash = :passwordHash, updated_at = NOW()
+       WHERE id = :id AND deleted_at IS NULL`,
+      { id, passwordHash }
     );
   }
 }

@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const ApiError = require("../utils/ApiError");
 const Employee = require("../models/Employee");
+const EmployeeSettings = require("../models/EmployeeSettings");
 const AuthSession = require("../models/AuthSession");
 const { formatEmployee } = require("../views/responses");
 
@@ -68,6 +69,8 @@ async function createEmployee({ name, logon, email, password, role }) {
     passwordHash,
     role,
   });
+
+  await EmployeeSettings.ensureForEmployee(employee.id);
 
   return mapEmployeeRow(employee);
 }
