@@ -1,3 +1,5 @@
+const path = require("path");
+
 module.exports = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: Number(process.env.PORT) || 5000,
@@ -9,6 +11,14 @@ module.exports = {
     user: process.env.DB_USER || "root",
     password: process.env.DB_PASSWORD || "",
     database: process.env.DB_NAME || "dms_db",
+  },
+
+  fileServer: process.env.FILE_SERVER
+    ? path.resolve(process.env.FILE_SERVER)
+    : "",
+  subpoenaExtraction: {
+    apiUrl: process.env.SUBPOENA_EXTRACTION_API_URL || "",
+    timeoutMs: Number(process.env.SUBPOENA_EXTRACTION_TIMEOUT_MS) || 300000,
   },
 
   jwt: {

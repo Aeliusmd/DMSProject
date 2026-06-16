@@ -3,6 +3,7 @@ const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
 const { notImplemented } = require("./_controllerHelper");
 const orderService = require("../services/orderService");
+const batchScanService = require("../services/batchScanService");
 const {
   validateCreateOrder,
   validateUpdateOrder,
@@ -15,7 +16,23 @@ exports.getAll = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { orders });
 });
 
-exports.getUnprocessed = notImplemented("Get unprocessed orders");
+exports.getUnprocessed = asyncHandler(async (_req, res) => {
+  const items = await batchScanService.getUnprocessedQueue();
+  return ApiResponse.success(res, items, "Unprocessed subpoenas retrieved");
+});
+
+exports.getUnprocessedById = asyncHandler(async (req, res) => {
+  const item = await batchScanService.getUnprocessedExtract(req.params.extractId);
+  return ApiResponse.success(res, item, "Unprocessed subpoena retrieved");
+});
+
+exports.batchScan = asyncHandler(async (req, res) => {
+  const result = await batchScanService.processBatchScan(
+    req.file,
+    req.body.uploadedBy || req.user?.id
+  );
+  return ApiResponse.created(res, result, "Batch scan processed successfully");
+});
 
 exports.getById = asyncHandler(async (req, res) => {
   const order = await orderService.getOrderById(req.params.id);

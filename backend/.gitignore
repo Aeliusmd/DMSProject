@@ -1,7 +1,8 @@
 node_modules/
 .env
+.env.local
 logs/*.log
-uploads/temp/*
+uploads/*
 !uploads/temp/.gitkeep
 !uploads/documents/.gitkeep
 !logs/.gitkeep

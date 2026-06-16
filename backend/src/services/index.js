@@ -5,4 +5,5 @@ module.exports = {
   invoiceService: require("./invoiceService"),
   emailService: require("./emailService"),
   tokenService: require("./tokenService"),
+  batchScanService: require("./batchScanService"),
 };

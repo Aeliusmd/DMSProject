@@ -4,6 +4,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 const {
   uploadOrderFiles,
   uploadNoteAttachment,
+  uploadSinglePdf,
 } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
@@ -12,6 +13,12 @@ router.use(authenticate);
 
 router.get("/", orderController.getAll);
 router.get("/unprocessed", orderController.getUnprocessed);
+router.get("/unprocessed/:extractId", orderController.getUnprocessedById);
+router.post(
+  "/batch-scan",
+  uploadSinglePdf("file"),
+  orderController.batchScan
+);
 router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);
