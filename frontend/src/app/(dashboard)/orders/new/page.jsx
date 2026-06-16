@@ -9,6 +9,7 @@ import NewOrderField, {
   RadioOption,
 } from "@/components/orders/new-order/NewOrderField";
 import PaymentChargeCard from "@/components/orders/new-order/PaymentChargeCard";
+import ProviderSearchField from "@/components/orders/new-order/ProviderSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 import CertificateNoRecordsPanel from "@/components/orders/new-order/CertificateNoRecordsPanel";
 
@@ -34,7 +35,6 @@ import {
 
 import { createOrder, getOrder, updateOrder } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
-import { getProviders } from "@/lib/providers/providerApi";
 import { API_BASE_URL } from "@/config/api";
 
 function toFileUrl(path) {
@@ -169,7 +169,6 @@ function NewOrderPageContent() {
   const [fileErrors, setFileErrors] = useState({});
 
   const [facilities, setFacilities] = useState([]);
-  const [providers, setProviders] = useState([]);
 
   const [loadingOrder, setLoadingOrder] = useState(isEditMode);
   const [loadError, setLoadError] = useState("");
@@ -179,16 +178,14 @@ function NewOrderPageContent() {
   useEffect(() => {
     let active = true;
 
-    Promise.all([getFacilities(), getProviders()])
-      .then(([facilityList, providerList]) => {
+    getFacilities()
+      .then((facilityList) => {
         if (!active) return;
         setFacilities(facilityList);
-        setProviders(providerList);
       })
       .catch(() => {
         if (active) {
           setFacilities([]);
-          setProviders([]);
         }
       });
 
@@ -239,25 +236,12 @@ function NewOrderPageContent() {
   }, [isEditMode, orderId]);
 
   const facilityOptions = useMemo(
-    () => [
-      { label: "By Facility", value: "" },
-      ...facilities.map((facility) => ({
+    () =>
+      facilities.map((facility) => ({
         label: facility.facility || facility.facilityName || facility.name,
         value: String(facility.id),
       })),
-    ],
     [facilities]
-  );
-
-  const providerOptions = useMemo(
-    () => [
-      { label: "Select provider (optional)", value: "" },
-      ...providers.map((provider) => ({
-        label: provider.companyName,
-        value: String(provider.id),
-      })),
-    ],
-    [providers]
   );
 
   const errors = useMemo(
@@ -355,25 +339,33 @@ function NewOrderPageContent() {
     }));
   };
 
-  const handleProviderChange = (e) => {
-    const providerId = e.target.value;
-    const provider = providers.find((item) => String(item.id) === providerId);
-
+  const handleProviderInput = (companyName) => {
     setFormData((prev) => ({
       ...prev,
-      providerId,
-      ...(provider
-        ? {
-            serveCompanyName: provider.companyName || "",
-            address: provider.address || "",
-            zip: provider.zipCode || provider.zip || "",
-            city: provider.city || "",
-            state: provider.state || "",
-            phone: provider.phone || "",
-            fax: provider.fax || "",
-            email: provider.email || "",
-          }
-        : {}),
+      providerId: "",
+      serveCompanyName: companyName,
+      address: "",
+      zip: "",
+      city: "",
+      state: "",
+      phone: "",
+      fax: "",
+      email: "",
+    }));
+  };
+
+  const handleProviderSelect = (provider) => {
+    setFormData((prev) => ({
+      ...prev,
+      providerId: String(provider.id),
+      serveCompanyName: provider.companyName || "",
+      address: provider.address || "",
+      zip: provider.zipCode || provider.zip || "",
+      city: provider.city || "",
+      state: provider.state || "",
+      phone: provider.phone || "",
+      fax: provider.fax || "",
+      email: provider.email || "",
     }));
   };
 
@@ -559,8 +551,8 @@ function NewOrderPageContent() {
                   : "Save Order"
               }
               saveError={saveError}
-              providerOptions={providerOptions}
-              onProviderChange={handleProviderChange}
+              onProviderInput={handleProviderInput}
+              onProviderSelect={handleProviderSelect}
             />
           </CollapsibleOrderPanel>
 
@@ -591,7 +583,7 @@ function OrderDetailsForm({
   getError,
   onFileChange,
   submitAttempted,
-  facilityOptions = [{ label: "By Facility", value: "" }],
+  facilityOptions = [],
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -627,7 +619,6 @@ function OrderDetailsForm({
           required
           error={getError("type")}
           options={[
-            { label: "Select from List", value: "" },
             { label: "Medical Records", value: "medical" },
             { label: "Billing Records", value: "billing" },
             { label: "Employment Records", value: "employment" },
@@ -847,8 +838,8 @@ function ServeInfoForm({
   disableSave,
   saveLabel = "Save Order",
   saveError = "",
-  providerOptions = [{ label: "Select provider (optional)", value: "" }],
-  onProviderChange,
+  onProviderInput,
+  onProviderSelect,
 }) {
   return (
     <div className="space-y-5">
@@ -878,24 +869,15 @@ function ServeInfoForm({
         </button>
       </div>
 
-      <NewOrderField
+      <ProviderSearchField
         label="Provider"
-        name="providerId"
-        value={formData.providerId}
-        onChange={onProviderChange}
-        hint="Optional — selecting a provider fills the company details below"
-        options={providerOptions}
-      />
-
-      <NewOrderField
-        label="Name"
-        name="serveCompanyName"
         value={formData.serveCompanyName}
-        onChange={onChange}
-        onBlur={onBlur}
-        placeholder="company name"
+        providerId={formData.providerId}
+        onInputChange={onProviderInput}
+        onSelect={onProviderSelect}
         required
         error={getError("serveCompanyName")}
+        hint="Search existing providers or type a new company name"
       />
 
       <NewOrderField

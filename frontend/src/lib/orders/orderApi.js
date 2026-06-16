@@ -112,3 +112,33 @@ export async function createOrderNote(id, { note, callbackDate, attachment }) {
 
   return data?.data?.notes || [];
 }
+
+export async function updateOrderNote(
+  orderId,
+  noteId,
+  { note, callbackDate, attachment } = {}
+) {
+  const formData = new FormData();
+  formData.append("note", note ?? "");
+
+  if (callbackDate) {
+    formData.append("callbackDate", callbackDate);
+  }
+
+  if (attachment) {
+    formData.append("attachment", attachment);
+  }
+
+  const data = await request(`/orders/${orderId}/notes/${noteId}`, {
+    method: "PUT",
+    auth: true,
+    body: formData,
+  });
+
+  return data?.data || { notes: [], activityLogs: [] };
+}
+
+export async function getOrderActivityLogs(id) {
+  const data = await request(`/orders/${id}/activity-logs`, { auth: true });
+  return data?.data?.logs || [];
+}

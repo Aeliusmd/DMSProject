@@ -5,6 +5,7 @@
 const ApiError = require("../utils/ApiError");
 const Order = require("../models/Order");
 const Facility = require("../models/Facility");
+const Provider = require("../models/Provider");
 const Employee = require("../models/Employee");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
@@ -331,6 +332,23 @@ function mapWorkflowStage(stage) {
   };
 }
 
+function normalizeNoteText(text) {
+  return `${text || ""}`.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+}
+
+function mapActivityLog(log) {
+  return {
+    id: log.id,
+    date: toShortDate(log.activity_date),
+    by: log.author_name || "—",
+    callback: toShortDate(log.callback_date),
+    note: log.note || "",
+    attachmentUrl: log.attachment_path
+      ? `/uploads/${log.attachment_path}`
+      : "",
+  };
+}
+
 function mapNote(note) {
   return {
     id: note.id,
@@ -338,6 +356,7 @@ function mapNote(note) {
     authorName: note.author_name || "",
     noteDate: note.note_date || null,
     callbackDate: toInputDate(note.callback_date),
+    isCalled: Boolean(note.is_called),
     attachmentPath: note.attachment_path || "",
     attachmentUrl: note.attachment_path
       ? `/uploads/${note.attachment_path}`
@@ -499,7 +518,7 @@ async function getOrderNotes(orderId) {
     throw new ApiError(404, "Order not found");
   }
 
-  const notes = await Order.findNotesByOrderId(order.id);
+  const notes = await Order.findNotesByOrderId(order.id, true);
   return notes.map(mapNote);
 }
 
@@ -525,10 +544,105 @@ async function addOrderNote(orderId, data, actorId, file) {
     note: noteText,
     callbackDate: dateOrNull(data.callbackDate),
     attachmentPath: toRelativeStoragePath(file),
+    isCalled: 0,
   });
 
-  const notes = await Order.findNotesByOrderId(order.id);
+  const notes = await Order.findNotesByOrderId(order.id, true);
   return notes.map(mapNote);
+}
+
+async function updateOrderNote(orderId, noteId, data, actorId, file) {
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const note = await Order.findNoteById(noteId);
+
+  if (!note || String(note.order_id) !== String(order.id)) {
+    throw new ApiError(404, "Note not found");
+  }
+
+  const noteText = trimOrNull(data.note);
+
+  if (!noteText) {
+    throw new ApiError(400, "Note text is required");
+  }
+
+  const authorName = await resolveAuthorName(actorId);
+  const attachmentPath = toRelativeStoragePath(file);
+
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    await Order.updateNote(connection, note.id, {
+      note: noteText,
+      callbackDate: dateOrNull(data.callbackDate),
+      attachmentPath,
+      isCalled: 1,
+    });
+
+    const updatedNote = await Order.findNoteById(note.id, connection);
+
+    await Order.createActivityLog(connection, {
+      orderId: order.id,
+      activityDate: new Date(),
+      performedBy: actorId || null,
+      authorName,
+      callbackDate: null,
+      note: noteText,
+      attachmentPath: updatedNote?.attachment_path || null,
+    });
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
+  const notes = await Order.findNotesByOrderId(order.id, true);
+  const activityLogs = await Order.findActivityLogsByOrderId(order.id);
+
+  return {
+    notes: notes.map(mapNote),
+    activityLogs: activityLogs.map(mapActivityLog),
+  };
+}
+
+async function getOrderActivityLogs(orderId) {
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const logs = await Order.findActivityLogsByOrderId(order.id);
+  const notes = await Order.findNotesByOrderId(order.id, false);
+
+  return logs.map((log) => {
+    let attachmentPath = log.attachment_path;
+
+    if (!attachmentPath) {
+      const match = notes.find(
+        (note) =>
+          note.is_called &&
+          note.attachment_path &&
+          normalizeNoteText(note.note) === normalizeNoteText(log.note)
+      );
+
+      if (match) {
+        attachmentPath = match.attachment_path;
+      }
+    }
+
+    return mapActivityLog({ ...log, attachment_path: attachmentPath });
+  });
 }
 
 async function getWorkflowStages(orderId) {
@@ -614,6 +728,40 @@ async function resolveOrderNumber(rawOrderNumber, excludeId = null) {
   return orderNumber;
 }
 
+async function resolveProviderId(connection, data) {
+  const companyName = trimOrNull(data.serveCompanyName);
+
+  if (!companyName) {
+    return data.providerId ? Number(data.providerId) : null;
+  }
+
+  if (data.providerId) {
+    const selected = await Provider.findById(Number(data.providerId), connection);
+    if (
+      selected &&
+      selected.company_name.toLowerCase().trim() === companyName.toLowerCase()
+    ) {
+      return selected.id;
+    }
+  }
+
+  const existing = await Provider.findByCompanyName(companyName, connection);
+  if (existing) {
+    return existing.id;
+  }
+
+  return Provider.create(connection, {
+    companyName,
+    address: trimOrNull(data.address),
+    zipCode: trimOrNull(data.zip),
+    city: trimOrNull(data.city),
+    state: trimOrNull(data.state),
+    phone: trimOrNull(data.phone),
+    fax: trimOrNull(data.fax),
+    email: trimOrNull(data.email),
+  });
+}
+
 async function createOrder(data, actorId, files) {
   const facility = await Facility.findById(Number(data.facility));
 
@@ -622,7 +770,6 @@ async function createOrder(data, actorId, files) {
   }
 
   const orderNumber = await resolveOrderNumber(data.orderNumber);
-  const payload = buildOrderDbPayload(data);
   const payments = collectPayments(data);
 
   const subpoenaFile = getUploadedFile(files, "subpoenaFile");
@@ -634,6 +781,9 @@ async function createOrder(data, actorId, files) {
 
   try {
     await connection.beginTransaction();
+
+    const providerId = await resolveProviderId(connection, data);
+    const payload = buildOrderDbPayload({ ...data, providerId });
 
     const orderId = await Order.create(connection, {
       ...payload,
@@ -686,7 +836,6 @@ async function updateOrder(id, data, actorId, files) {
     data.orderNumber || existing.order_number,
     existing.id
   );
-  const payload = buildOrderDbPayload(data);
   const payments = collectPayments(data);
 
   const subpoenaFile = getUploadedFile(files, "subpoenaFile");
@@ -700,6 +849,9 @@ async function updateOrder(id, data, actorId, files) {
 
   try {
     await connection.beginTransaction();
+
+    const providerId = await resolveProviderId(connection, data);
+    const payload = buildOrderDbPayload({ ...data, providerId });
 
     await Order.update(connection, existing.id, {
       ...payload,
@@ -753,6 +905,8 @@ module.exports = {
   deleteOrder,
   getOrderNotes,
   addOrderNote,
+  updateOrderNote,
+  getOrderActivityLogs,
   getWorkflowStages,
   updateOrderWorkflowStage,
 };

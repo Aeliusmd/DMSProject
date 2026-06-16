@@ -318,14 +318,19 @@ class Order {
     );
   }
 
-  static async findNotesByOrderId(orderId) {
+  static async findNotesByOrderId(orderId, pendingOnly = false) {
     const pool = getPool();
+
+    const conditions = ["order_id = :orderId"];
+    if (pendingOnly) {
+      conditions.push("is_called = 0");
+    }
 
     const [rows] = await pool.execute(
       `SELECT id, order_id, note_date, created_by, author_name, note,
-              callback_date, attachment_path
+              callback_date, attachment_path, is_called
        FROM order_notes
-       WHERE order_id = :orderId
+       WHERE ${conditions.join(" AND ")}
        ORDER BY note_date DESC, id DESC`,
       { orderId }
     );
@@ -339,10 +344,10 @@ class Order {
     const [result] = await pool.execute(
       `INSERT INTO order_notes
         (order_id, note_date, created_by, author_name, note,
-         callback_date, attachment_path, created_at, updated_at)
+         callback_date, attachment_path, is_called, created_at, updated_at)
        VALUES
         (:orderId, NOW(), :createdBy, :authorName, :note,
-         :callbackDate, :attachmentPath, NOW(), NOW())`,
+         :callbackDate, :attachmentPath, :isCalled, NOW(), NOW())`,
       data
     );
 
@@ -354,12 +359,55 @@ class Order {
     return result.insertId;
   }
 
-  static async findNoteById(id) {
+  static async updateNote(connection, id, data) {
+    // attachmentPath is COALESCE'd so passing null keeps the existing file.
+    await connection.execute(
+      `UPDATE order_notes
+       SET note = :note,
+           callback_date = :callbackDate,
+           attachment_path = COALESCE(:attachmentPath, attachment_path),
+           is_called = :isCalled,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { ...data, id }
+    );
+  }
+
+  static async createActivityLog(connection, data) {
+    const [result] = await connection.execute(
+      `INSERT INTO order_activity_logs
+        (order_id, activity_date, performed_by, author_name,
+         callback_date, note, attachment_path, created_at)
+       VALUES
+        (:orderId, :activityDate, :performedBy, :authorName,
+         :callbackDate, :note, :attachmentPath, NOW())`,
+      data
+    );
+
+    return result.insertId;
+  }
+
+  static async findActivityLogsByOrderId(orderId) {
     const pool = getPool();
 
     const [rows] = await pool.execute(
+      `SELECT id, order_id, activity_date, performed_by, author_name,
+              callback_date, note, attachment_path
+       FROM order_activity_logs
+       WHERE order_id = :orderId
+       ORDER BY activity_date DESC, id DESC`,
+      { orderId }
+    );
+
+    return rows;
+  }
+
+  static async findNoteById(id, connection = null) {
+    const db = connection || getPool();
+
+    const [rows] = await db.execute(
       `SELECT id, order_id, note_date, created_by, author_name, note,
-              callback_date, attachment_path
+              callback_date, attachment_path, is_called
        FROM order_notes
        WHERE id = :id
        LIMIT 1`,

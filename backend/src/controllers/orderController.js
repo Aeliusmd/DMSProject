@@ -82,6 +82,29 @@ exports.createNote = asyncHandler(async (req, res) => {
   return ApiResponse.created(res, { notes }, "Note added successfully");
 });
 
+exports.updateNote = asyncHandler(async (req, res) => {
+  const validation = validateOrderNote(req.body);
+
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
+  const result = await orderService.updateOrderNote(
+    req.params.id,
+    req.params.noteId,
+    req.body,
+    req.user.id,
+    req.file
+  );
+
+  return ApiResponse.success(res, result, "Note updated successfully");
+});
+
+exports.getActivityLogs = asyncHandler(async (req, res) => {
+  const logs = await orderService.getOrderActivityLogs(req.params.id);
+  return ApiResponse.success(res, { logs });
+});
+
 exports.getWorkflowStages = asyncHandler(async (req, res) => {
   const stages = await orderService.getWorkflowStages(req.params.id);
   return ApiResponse.success(res, { stages });

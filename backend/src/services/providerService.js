@@ -25,6 +25,11 @@ async function getAllProviders() {
   return providers.map(mapProviderRow);
 }
 
+async function searchProviders(query) {
+  const providers = await Provider.search(query);
+  return providers.map(mapProviderRow);
+}
+
 async function getProviderById(id) {
   const provider = await Provider.findById(id);
 
@@ -37,5 +42,6 @@ async function getProviderById(id) {
 
 module.exports = {
   getAllProviders,
+  searchProviders,
   getProviderById,
 };

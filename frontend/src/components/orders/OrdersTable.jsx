@@ -73,111 +73,6 @@ function toRenderOrder(order) {
   };
 }
 
-const orderActivityLogs = [
-  {
-    date: "06/04/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Letter CNR Letter emailed to devindiabeykoon@gmail.com, sarasinisala@gmail.com",
-  },
-  {
-    date: "06/04/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Per Elizabeth this is a CNR",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Invoice Updated by Matthew Perera on 06/01/2026 02:35AM",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Records Emailed to",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Invoice Updated by Matthew Perera on 06/01/2026 02:27AM",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Invoice Updated by Matthew Perera on 06/01/2026 02:27AM",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Previous Check Entered...",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "XRay Invoice emailed to devindiabeykoon@gmail.com",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Records Sent to devindiabeykoon@gmail.com",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Records Sent to devindiabeykoon@gmail.com",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Matthew Perera updated order on 06/01/2026 02:15AM",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Matthew Perera updated order on 06/01/2026 02:11AM",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Letter CNR Letter emailed to devindiabeykoon@gmail.com",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Letter Copy Service Letter emailed to devindiabeykoon@gmail.com",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Per Elizabeth this is a CNR",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "Records printed and invoices sent out",
-  },
-  {
-    date: "06/01/26",
-    by: "Matthew Perera",
-    callback: "",
-    note: "XRay Invoice emailed to devindiabeykoon@gmail.com",
-  },
-];
-
 export default function OrdersTable({ filters = defaultOrderFilters }) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
@@ -559,7 +454,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       <OrderActivityLogModal
         isOpen={Boolean(selectedLogOrder)}
         order={selectedLogOrder}
-        logs={orderActivityLogs}
         onClose={() => setSelectedLogOrder(null)}
       />
 

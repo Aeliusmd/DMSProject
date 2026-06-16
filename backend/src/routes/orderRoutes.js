@@ -19,6 +19,13 @@ router.delete("/:id", orderController.remove);
 
 router.get("/:id/notes", orderController.getNotes);
 router.post("/:id/notes", uploadNoteAttachment, orderController.createNote);
+router.put(
+  "/:id/notes/:noteId",
+  uploadNoteAttachment,
+  orderController.updateNote
+);
+
+router.get("/:id/activity-logs", orderController.getActivityLogs);
 
 router.get("/:id/workflow-stages", orderController.getWorkflowStages);
 router.patch("/:id/workflow-stages", orderController.updateWorkflowStage);

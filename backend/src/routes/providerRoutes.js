@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.use(authenticate);
 
+router.get("/search", providerController.search);
 router.get("/", providerController.getAll);
 router.get("/:id", providerController.getById);
 
