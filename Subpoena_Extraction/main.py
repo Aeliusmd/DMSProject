@@ -15,12 +15,12 @@ from google.cloud import documentai_v1 as documentai
 from google.api_core.client_options import ClientOptions
 
 # ─── Config ────────────────────────────────────────────────────────────────────
-CREDENTIALS_PATH = r"E:\03-Dev-Ratheeskan\Subpoena_Extraction\NEWKEY.json"
+CREDENTIALS_PATH = r"platinum-honor-468520-e6-43ba2ce59daf.json"
 PROJECT_ID       = "platinum-honor-468520-e6"
 LOCATION         = "us"
 PROCESSOR_ID     = "68993e5df69a40d"   # Extractor processor
 MIME_TYPE        = "application/pdf"
-DELETE_TEMP      = False   # Set to False to keep temp folder for debugging
+DELETE_TEMP      = True   # Set to False to keep temp folder for debugging
 MAX_PARALLEL_EXTRACTORS = int(os.getenv("MAX_PARALLEL_EXTRACTORS", "4"))
 
 EXPECTED_FIELDS = [
@@ -318,4 +318,4 @@ async def process_document(file: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="10.103.0.91", port=8010, reload=False)
+    uvicorn.run("main:app", host="10.103.0.177", port=8010, reload=False)

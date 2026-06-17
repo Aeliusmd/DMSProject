@@ -36,6 +36,19 @@ exports.getUnprocessedById = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, item, "Unprocessed subpoena retrieved");
 });
 
+exports.getUnprocessedFile = asyncHandler(async (req, res) => {
+  const fileInfo = await batchScanService.getUnprocessedExtractFile(
+    req.params.extractId
+  );
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
+  );
+  return res.sendFile(fileInfo.absolutePath);
+});
+
 exports.batchScan = asyncHandler(async (req, res) => {
   const result = await batchScanService.processBatchScan(
     req.file,

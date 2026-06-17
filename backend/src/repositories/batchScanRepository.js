@@ -46,8 +46,8 @@ async function insertChildExtract(conn, child) {
     )`,
     {
       ...child,
-      extraction_confidence: child.extraction_confidence || {},
-      raw_extraction: child.raw_extraction || {},
+      extraction_confidence: JSON.stringify(child.extraction_confidence || {}),
+      raw_extraction: JSON.stringify(child.raw_extraction || {}),
     }
   );
   return result.insertId;

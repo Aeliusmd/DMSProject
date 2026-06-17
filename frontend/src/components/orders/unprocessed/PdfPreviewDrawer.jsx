@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchUnprocessedSubpoenaPdf } from "@/lib/orders/orderApi";
 
 const MIN_ZOOM = 0.7;
 const MAX_ZOOM = 1.6;
@@ -22,17 +23,60 @@ export default function PdfPreviewDrawer({ subpoena, onClose }) {
 function PdfPreviewDrawerContent({ subpoena, onClose }) {
   const [activePage, setActivePage] = useState(1);
   const [pageZooms, setPageZooms] = useState({});
+  const [pdfUrl, setPdfUrl] = useState("");
+  const [loadingPdf, setLoadingPdf] = useState(Boolean(subpoena?.id));
+  const [pdfError, setPdfError] = useState("");
 
   const scrollContainerRef = useRef(null);
   const pageRefs = useRef({});
 
+  useEffect(() => {
+    if (!subpoena?.id) {
+      setPdfUrl("");
+      setLoadingPdf(false);
+      setPdfError("");
+      return undefined;
+    }
+
+    let active = true;
+    let objectUrl = "";
+
+    setLoadingPdf(true);
+    setPdfError("");
+
+    fetchUnprocessedSubpoenaPdf(subpoena.id)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfUrl(objectUrl);
+      })
+      .catch((err) => {
+        if (active) {
+          setPdfError(err.message || "Failed to load PDF preview.");
+          setPdfUrl("");
+        }
+      })
+      .finally(() => {
+        if (active) setLoadingPdf(false);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [subpoena?.id]);
+
   const previewPages = useMemo(() => {
-    return Array.from({ length: subpoena.pages }, (_, index) => index + 1);
-  }, [subpoena]);
+    return Array.from({ length: subpoena.pages || 1 }, (_, index) => index + 1);
+  }, [subpoena.pages]);
 
   useEffect(() => {
+    if (pdfUrl) return undefined;
+
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container) return undefined;
 
     const handleScroll = () => {
       const containerRect = container.getBoundingClientRect();
@@ -61,7 +105,7 @@ function PdfPreviewDrawerContent({ subpoena, onClose }) {
     handleScroll();
 
     return () => container.removeEventListener("scroll", handleScroll);
-  }, [previewPages]);
+  }, [previewPages, pdfUrl]);
 
   const activeZoom = pageZooms[activePage] || 1;
 
@@ -82,7 +126,8 @@ function PdfPreviewDrawerContent({ subpoena, onClose }) {
   };
 
   const goToPage = (pageNumber) => {
-    const safePage = Math.min(Math.max(pageNumber, 1), subpoena.pages);
+    const totalPages = subpoena.pages || 1;
+    const safePage = Math.min(Math.max(pageNumber, 1), totalPages);
 
     pageRefs.current[safePage]?.scrollIntoView({
       behavior: "smooth",
@@ -178,37 +223,57 @@ function PdfPreviewDrawerContent({ subpoena, onClose }) {
           ref={scrollContainerRef}
           className="min-h-0 flex-1 overflow-auto bg-[#F8FAFC] px-4 py-5"
         >
-          <div className="space-y-6">
-            {previewPages.map((pageNumber) => {
-              const pageZoom = pageZooms[pageNumber] || 1;
+          {loadingPdf && (
+            <p className="py-8 text-center text-[13px] text-[#64748B]">
+              Loading PDF...
+            </p>
+          )}
 
-              return (
-                <div
-                  key={pageNumber}
-                  ref={(el) => {
-                    pageRefs.current[pageNumber] = el;
-                  }}
-                  className="flex justify-center"
-                  style={{
-                    height: `${BASE_PAGE_HEIGHT * pageZoom}px`,
-                  }}
-                >
+          {!loadingPdf && pdfError && (
+            <p className="py-8 text-center text-[13px] text-red-500">{pdfError}</p>
+          )}
+
+          {!loadingPdf && pdfUrl && (
+            <iframe
+              src={pdfUrl}
+              title={subpoena.fileName}
+              className="h-[calc(100vh-120px)] min-h-[600px] w-full rounded-[6px] border border-[#E2E8F0] bg-white"
+            />
+          )}
+
+          {!loadingPdf && !pdfUrl && !pdfError && (
+            <div className="space-y-6">
+              {previewPages.map((pageNumber) => {
+                const pageZoom = pageZooms[pageNumber] || 1;
+
+                return (
                   <div
+                    key={pageNumber}
+                    ref={(el) => {
+                      pageRefs.current[pageNumber] = el;
+                    }}
+                    className="flex justify-center"
                     style={{
-                      transform: `scale(${pageZoom})`,
-                      transformOrigin: "top center",
+                      height: `${BASE_PAGE_HEIGHT * pageZoom}px`,
                     }}
                   >
-                    <MockPdfPage
-                      pageNumber={pageNumber}
-                      totalPages={subpoena.pages}
-                      fileName={subpoena.fileName}
-                    />
+                    <div
+                      style={{
+                        transform: `scale(${pageZoom})`,
+                        transformOrigin: "top center",
+                      }}
+                    >
+                      <MockPdfPage
+                        pageNumber={pageNumber}
+                        totalPages={subpoena.pages}
+                        fileName={subpoena.fileName}
+                      />
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </aside>
     </div>
