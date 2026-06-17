@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const { randomUUID } = require("crypto");
 const ApiError = require("../utils/ApiError");
 const fileStorage = require("../utils/fileStorage");
@@ -278,9 +279,27 @@ async function getUnprocessedExtract(extractId) {
   return mapExtractRowToApi(row);
 }
 
+async function getUnprocessedExtractFile(extractId) {
+  const row = await batchScanRepository.getExtractById(extractId);
+  if (!row) {
+    throw new ApiError(404, "Unprocessed subpoena not found");
+  }
+
+  const absolutePath = fileStorage.resolveAbsolutePath(row.storage_path);
+  if (!fs.existsSync(absolutePath)) {
+    throw new ApiError(404, "PDF file not found on disk");
+  }
+
+  return {
+    absolutePath,
+    fileName: row.file_name || "subpoena.pdf",
+  };
+}
+
 module.exports = {
   processBatchScan,
   getUnprocessedQueue,
   getUnprocessedExtract,
+  getUnprocessedExtractFile,
   mapExtractRowToApi,
 };

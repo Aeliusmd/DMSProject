@@ -41,4 +41,25 @@ function getPool() {
   return pool;
 }
 
-module.exports = { connectDatabase, getPool };
+async function query(sql, params = {}) {
+  const [rows] = await getPool().execute(sql, params);
+  return rows;
+}
+
+async function withTransaction(callback) {
+  const connection = await getPool().getConnection();
+
+  try {
+    await connection.beginTransaction();
+    const result = await callback(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+module.exports = { connectDatabase, getPool, query, withTransaction };

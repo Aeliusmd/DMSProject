@@ -1,13 +1,18 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import { uploadBatchScan } from "@/lib/orders/orderApi";
 
 export default function BatchScanPage() {
+  const router = useRouter();
   const fileInputRef = useRef(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const handleChooseFile = () => {
     fileInputRef.current?.click();
@@ -15,6 +20,7 @@ export default function BatchScanPage() {
 
   const validateAndSetFile = (file) => {
     setError("");
+    setSuccessMessage("");
 
     if (!file) return;
 
@@ -25,7 +31,6 @@ export default function BatchScanPage() {
     }
 
     setSelectedFile(file);
-    console.log("Selected batch scan PDF:", file);
   };
 
   const handleFileChange = (e) => {
@@ -48,6 +53,34 @@ export default function BatchScanPage() {
 
     const file = e.dataTransfer.files?.[0];
     validateAndSetFile(file);
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || uploading) return;
+
+    setError("");
+    setSuccessMessage("");
+    setUploading(true);
+
+    try {
+      const result = await uploadBatchScan(selectedFile);
+      const count = result?.total ?? result?.children?.length ?? 0;
+      setSuccessMessage(
+        `Batch scan complete. ${count} subpoena(s) extracted.`
+      );
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      setTimeout(() => {
+        router.push("/orders/unprocessed");
+      }, 1200);
+    } catch (err) {
+      setError(err.message || "Batch scan upload failed.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -90,7 +123,8 @@ export default function BatchScanPage() {
               <button
                 type="button"
                 onClick={handleChooseFile}
-                className="mt-5 inline-flex h-[30px] items-center justify-center rounded-[5px] bg-[#E6F7FA] px-4 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+                disabled={uploading}
+                className="mt-5 inline-flex h-[30px] items-center justify-center rounded-[5px] bg-[#E6F7FA] px-4 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Choose File
               </button>
@@ -109,6 +143,23 @@ export default function BatchScanPage() {
             {selectedFile && (
               <p className="mt-4 truncate text-[11px] font-medium text-[#007F96]">
                 Selected: {selectedFile.name}
+              </p>
+            )}
+
+            {selectedFile && (
+              <button
+                type="button"
+                onClick={handleUpload}
+                disabled={uploading}
+                className="mt-4 inline-flex h-[34px] w-full items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#007F96] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {uploading ? "Uploading..." : "Upload & Process"}
+              </button>
+            )}
+
+            {successMessage && (
+              <p className="mt-4 text-[11px] font-medium text-[#059669]">
+                {successMessage}
               </p>
             )}
 

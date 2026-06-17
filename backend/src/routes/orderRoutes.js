@@ -13,6 +13,7 @@ router.use(authenticate);
 
 router.get("/", orderController.getAll);
 router.get("/unprocessed", orderController.getUnprocessed);
+router.get("/unprocessed/:extractId/file", orderController.getUnprocessedFile);
 router.get("/unprocessed/:extractId", orderController.getUnprocessedById);
 router.post(
   "/batch-scan",

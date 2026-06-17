@@ -33,7 +33,7 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { API_BASE_URL } from "@/config/api";
 
@@ -130,6 +130,68 @@ const initialFormData = {
   xrayMemo: "",
 };
 
+function mapOrderHintsToForm(hints, facilityList = []) {
+  if (!hints) return {};
+
+  const updates = {};
+
+  if (hints.orderNumber) updates.orderNumber = hints.orderNumber;
+  if (hints.caseName) updates.caseNumber = hints.caseName;
+  if (hints.ssn) updates.ssn = hints.ssn;
+  if (hints.dateOfBirth) updates.dob = hints.dateOfBirth;
+  if (hints.companyName) updates.serveCompanyName = hints.companyName;
+  if (hints.companyAddress) updates.address = hints.companyAddress;
+  if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
+  if (hints.doctorAddress) updates.fullAddress = hints.doctorAddress;
+  if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
+  if (hints.depoDueDate) updates.depoDueDate = hints.depoDueDate;
+  if (hints.requestedRecord) updates.specificRecord = hints.requestedRecord;
+  if (hints.amount) updates.prepaymentPaid = hints.amount;
+  if (hints.chequeDate) updates.prepaymentDate = hints.chequeDate;
+  if (hints.chequeNumber) updates.prepaymentCheck = hints.chequeNumber;
+
+  if (hints.applicantName) {
+    const parts = hints.applicantName.trim().split(/\s+/);
+    if (parts.length === 1) {
+      updates.firstName = parts[0];
+    } else if (parts.length === 2) {
+      updates.firstName = parts[0];
+      updates.lastName = parts[1];
+    } else {
+      updates.firstName = parts[0];
+      updates.middleName = parts.slice(1, -1).join(" ");
+      updates.lastName = parts[parts.length - 1];
+    }
+  }
+
+  const facilityName = hints.customer || hints.companyName;
+  if (facilityName && facilityList.length) {
+    const normalized = facilityName.toLowerCase();
+    const match = facilityList.find((facility) => {
+      const name = (
+        facility.facility ||
+        facility.facilityName ||
+        facility.name ||
+        ""
+      ).toLowerCase();
+      return name && (normalized.includes(name) || name.includes(normalized));
+    });
+    if (match) {
+      updates.facility = String(match.id);
+    }
+  }
+
+  const recordText = `${hints.recordType || ""} ${hints.requestedRecord || ""}`.toLowerCase();
+  if (recordText.includes("medical")) updates.medicalRecords = true;
+  if (recordText.includes("billing")) updates.billingRecords = true;
+  if (recordText.includes("employment")) updates.employmentRecords = true;
+  if (recordText.includes("xray") || recordText.includes("x-ray")) {
+    updates.xrays = true;
+  }
+
+  return updates;
+}
+
 export default function NewOrderPage() {
   return (
     <Suspense
@@ -152,6 +214,7 @@ function NewOrderPageContent() {
 
   const mode = searchParams.get("mode");
   const orderId = searchParams.get("orderId");
+  const subpoenaId = searchParams.get("subpoenaId");
 
   const isEditMode = mode === "edit" && Boolean(orderId);
 
@@ -198,11 +261,15 @@ function NewOrderPageContent() {
     let active = true;
 
     if (!isEditMode || !orderId) {
-      setFormData(initialFormData);
-      setTouched({});
-      setSubmitAttempted(false);
-      setFileErrors({});
-      setLoadingOrder(false);
+      if (!subpoenaId) {
+        setFormData(initialFormData);
+        setTouched({});
+        setSubmitAttempted(false);
+        setFileErrors({});
+      }
+      if (!isEditMode && !subpoenaId) {
+        setLoadingOrder(false);
+      }
       return undefined;
     }
 
@@ -233,7 +300,73 @@ function NewOrderPageContent() {
     return () => {
       active = false;
     };
-  }, [isEditMode, orderId]);
+  }, [isEditMode, orderId, subpoenaId]);
+
+  useEffect(() => {
+    if (isEditMode || !subpoenaId) {
+      return undefined;
+    }
+
+    let active = true;
+
+    setLoadingOrder(true);
+    setLoadError("");
+
+    (async () => {
+      try {
+        const facilityList = facilities.length ? facilities : await getFacilities();
+        if (!active) return;
+
+        if (!facilities.length) {
+          setFacilities(facilityList);
+        }
+
+        const extract = await getUnprocessedSubpoenaById(subpoenaId);
+        if (!active) return;
+
+        if (!extract) {
+          setLoadError("Subpoena extract not found");
+          return;
+        }
+
+        let subpoenaFile = null;
+        try {
+          const blob = await fetchUnprocessedSubpoenaPdf(subpoenaId);
+          subpoenaFile = new File(
+            [blob],
+            extract.fileName || "subpoena.pdf",
+            { type: "application/pdf" }
+          );
+        } catch {
+          // Prefill can still proceed without the PDF attachment.
+        }
+
+        setFormData({
+          ...initialFormData,
+          ...mapOrderHintsToForm(extract.orderHints, facilityList),
+          ...(subpoenaFile ? { subpoenaFile } : {}),
+        });
+        setTouched({});
+        setSubmitAttempted(false);
+        setFileErrors({});
+        setExpandedPanels((prev) => ({
+          ...prev,
+          subpoena: Boolean(subpoenaFile),
+          order: true,
+        }));
+      } catch (err) {
+        if (active) {
+          setLoadError(err.message || "Failed to load subpoena extract");
+        }
+      } finally {
+        if (active) setLoadingOrder(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [isEditMode, subpoenaId]);
 
   const facilityOptions = useMemo(
     () =>
