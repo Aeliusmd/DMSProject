@@ -1,4 +1,5 @@
 const path = require("path");
+const fs = require("fs");
 const { randomUUID } = require("crypto");
 const ApiError = require("../utils/ApiError");
 const fileStorage = require("../utils/fileStorage");
@@ -80,7 +81,7 @@ function mapExtractRowToApi(row) {
   };
 }
 
-async function processBatchScan(file, uploadedBy) {
+async function processBatchScan(file, uploadedBy, options = {}) {
   if (!file?.buffer?.length) {
     throw new ApiError(400, "No file uploaded");
   }
@@ -112,6 +113,13 @@ async function processBatchScan(file, uploadedBy) {
   const results = Array.isArray(extraction.results) ? extraction.results : [];
   if (results.length === 0) {
     throw new ApiError(502, "Extraction service returned no subpoena results");
+  }
+
+  if (options.maxChildren && results.length > options.maxChildren) {
+    throw new ApiError(
+      400,
+      `This PDF contains ${results.length} subpoenas. Use Orders → Batch Scan for multi-subpoena uploads.`
+    );
   }
 
   const parentPageCount = await getPdfPageCount(file.buffer);
@@ -208,11 +216,13 @@ async function processBatchScan(file, uploadedBy) {
     }
 
     await batchScanRepository.insertActivityLog(conn, {
-      action: "Batch Scan Uploaded",
+      action: options.singleSubpoena ? "Single Subpoena Uploaded" : "Batch Scan Uploaded",
       module: "Processing",
       performed_by: userId,
       performer_name: employee.name,
-      details: `Batch ${parentReference}: ${originalName} → ${preparedChildren.length} subpoena(s). Parent: ${parentFile.relativePath}`,
+      details: options.singleSubpoena
+        ? `Single subpoena ${parentReference}: ${originalName} → ${parentFile.relativePath}`
+        : `Batch ${parentReference}: ${originalName} → ${preparedChildren.length} subpoena(s). Parent: ${parentFile.relativePath}`,
     });
 
     return { parentId, childIds };
@@ -278,9 +288,51 @@ async function getUnprocessedExtract(extractId) {
   return mapExtractRowToApi(row);
 }
 
+async function getUnprocessedExtractFile(extractId) {
+  const row = await batchScanRepository.getExtractById(extractId);
+  if (!row) {
+    throw new ApiError(404, "Unprocessed subpoena not found");
+  }
+
+  const absolutePath = fileStorage.resolveAbsolutePath(row.storage_path);
+  if (!fs.existsSync(absolutePath)) {
+    throw new ApiError(404, "PDF file not found on disk");
+  }
+
+  return {
+    absolutePath,
+    fileName: row.file_name || "subpoena.pdf",
+  };
+}
+
+async function processSingleSubpoena(file, uploadedBy) {
+  const result = await processBatchScan(file, uploadedBy, {
+    maxChildren: 1,
+    singleSubpoena: true,
+  });
+
+  const child = result.children[0];
+  if (!child?.id) {
+    throw new ApiError(500, "Failed to save subpoena extract");
+  }
+
+  const extract = await getUnprocessedExtract(child.id);
+
+  return {
+    extractId: child.id,
+    parentId: result.parent.id,
+    extract,
+    orderHints: extract.orderHints,
+    fileName: child.fileName,
+    storagePath: child.storagePath,
+  };
+}
+
 module.exports = {
   processBatchScan,
+  processSingleSubpoena,
   getUnprocessedQueue,
   getUnprocessedExtract,
+  getUnprocessedExtractFile,
   mapExtractRowToApi,
 };

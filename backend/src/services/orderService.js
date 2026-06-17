@@ -10,6 +10,7 @@ const Employee = require("../models/Employee");
 const invoiceService = require("./invoiceService");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
+const batchScanRepository = require("../repositories/batchScanRepository");
 
 const WORKFLOW_STAGE_NAMES = ["Review Records", "Serve", "Custodian", "SENT"];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
@@ -794,7 +795,21 @@ async function createOrder(data, actorId, files) {
 
   const subpoenaFile = getUploadedFile(files, "subpoenaFile");
   const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
-  const subpoenaStoragePath = toRelativeStoragePath(subpoenaFile);
+  const subpoenaExtractId = Number(data.subpoenaExtractId) || null;
+
+  let subpoenaStoragePath = null;
+  if (subpoenaExtractId) {
+    const extract = await batchScanRepository.getExtractById(subpoenaExtractId);
+    if (!extract) {
+      throw new ApiError(400, "Subpoena extract not found");
+    }
+    if (extract.is_processed) {
+      throw new ApiError(409, "This subpoena extract was already processed into an order");
+    }
+    subpoenaStoragePath = extract.storage_path;
+  } else {
+    subpoenaStoragePath = toRelativeStoragePath(subpoenaFile);
+  }
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -825,6 +840,13 @@ async function createOrder(data, actorId, files) {
       documentName: data.documentName,
       actorId,
     });
+
+    if (subpoenaExtractId) {
+      await batchScanRepository.linkExtractToOrder(connection, {
+        extractId: subpoenaExtractId,
+        orderId,
+      });
+    }
 
     await Order.seedWorkflowStages(connection, orderId);
 
