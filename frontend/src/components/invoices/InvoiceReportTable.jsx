@@ -4,146 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
-
-const invoiceGroups = [
-  {
-    company: "Smith & Associates",
-    emails: "billing@smithassociates.com, accounts@smithassociates.com",
-    rows: [
-      {
-        id: "smith-71956-4",
-        caseNo: "71956-4",
-        sentDate: "03/18/2026",
-        days: 74,
-        invDate: "03/18/2026",
-        invoiced: "$1,250.00",
-        paid: "$400.00",
-        due: "$850.00",
-      },
-      {
-        id: "smith-71956-5",
-        caseNo: "71956-5",
-        sentDate: "04/01/2026",
-        days: 60,
-        invDate: "04/01/2026",
-        invoiced: "$850.00",
-        paid: "$0.00",
-        due: "$850.00",
-      },
-      {
-        id: "smith-71956-6",
-        caseNo: "71956-6",
-        sentDate: "04/15/2026",
-        days: 46,
-        invDate: "04/15/2026",
-        invoiced: "$2,100.00",
-        paid: "$1,200.00",
-        due: "$900.00",
-      },
-      {
-        id: "smith-71956-7",
-        caseNo: "71956-7",
-        sentDate: "05/02/2026",
-        days: 29,
-        invDate: "05/02/2026",
-        invoiced: "$975.00",
-        paid: "$0.00",
-        due: "$975.00",
-      },
-    ],
-    total: {
-      invoiced: "$5,175.00",
-      paid: "$1,600.00",
-      due: "$3,575.00",
-    },
-  },
-  {
-    company: "Martinez Legal Group",
-    emails: "invoices@martinezlegal.com",
-    rows: [
-      {
-        id: "martinez-72001-1",
-        caseNo: "72001-1",
-        sentDate: "02/10/2026",
-        days: 110,
-        invDate: "02/10/2026",
-        invoiced: "$3,200.00",
-        paid: "$2,000.00",
-        due: "$1,200.00",
-      },
-      {
-        id: "martinez-72001-2",
-        caseNo: "72001-2",
-        sentDate: "03/25/2026",
-        days: 67,
-        invDate: "03/25/2026",
-        invoiced: "$1,800.00",
-        paid: "$500.00",
-        due: "$1,300.00",
-      },
-      {
-        id: "martinez-72001-3",
-        caseNo: "72001-3",
-        sentDate: "04/20/2026",
-        days: 41,
-        invDate: "04/20/2026",
-        invoiced: "$450.00",
-        paid: "$0.00",
-        due: "$450.00",
-      },
-    ],
-    total: {
-      invoiced: "$5,450.00",
-      paid: "$2,500.00",
-      due: "$2,950.00",
-    },
-  },
-  {
-    company: "Pacific Law Partners",
-    emails: "billing@pacificlaw.com, ar@pacificlaw.com",
-    rows: [
-      {
-        id: "pacific-72012-1",
-        caseNo: "72012-1",
-        sentDate: "01/05/2026",
-        days: 146,
-        invDate: "01/05/2026",
-        invoiced: "$2,750.00",
-        paid: "$2,750.00",
-        due: "$0.00",
-      },
-      {
-        id: "pacific-72012-2",
-        caseNo: "72012-2",
-        sentDate: "03/10/2026",
-        days: 82,
-        invDate: "03/10/2026",
-        invoiced: "$1,500.00",
-        paid: "$0.00",
-        due: "$1,500.00",
-      },
-      {
-        id: "pacific-72012-3",
-        caseNo: "72012-3",
-        sentDate: "04/28/2026",
-        days: 33,
-        invDate: "04/28/2026",
-        invoiced: "$925.00",
-        paid: "$300.00",
-        due: "$625.00",
-      },
-    ],
-    total: {
-      invoiced: "$5,175.00",
-      paid: "$3,050.00",
-      due: "$2,125.00",
-    },
-  },
-];
+import { sendInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
 
 function buildWriteOffInvoice(group, row) {
   return {
     id: row.id,
+    invoiceId: row.invoiceId,
+    orderId: row.orderId,
     caseNo: row.caseNo,
     company: group.company,
     sentDate: row.sentDate,
@@ -154,10 +21,17 @@ function buildWriteOffInvoice(group, row) {
   };
 }
 
-export default function InvoiceReportTable() {
+export default function InvoiceReportTable({
+  invoiceGroups = [],
+  loading = false,
+  onRefresh,
+}) {
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
+  const [writeOffError, setWriteOffError] = useState("");
 
   const handleToggleRow = (company, rowId) => {
     setSelectedRows((prev) => {
@@ -186,16 +60,52 @@ export default function InvoiceReportTable() {
     });
   };
 
-  const handleSendInvoice = (group) => {
+  const handleSendInvoice = async (group) => {
     const selectedIds = selectedRows[group.company] || [];
-    const selectedInvoices = group.rows.filter((row) =>
-      selectedIds.includes(row.id)
+    const selectedInvoiceRows = group.rows.filter(
+      (row) =>
+        selectedIds.includes(row.id) && !row.isSent && !row.isWrittenOff
     );
 
-    console.log("Send selected invoices:", {
-      company: group.company,
-      invoices: selectedInvoices,
-    });
+    if (!selectedInvoiceRows.length || sending) {
+      if (selectedIds.length && !selectedInvoiceRows.length) {
+        const selectedRows = group.rows.filter((row) =>
+          selectedIds.includes(row.id)
+        );
+
+        if (selectedRows.every((row) => row.isSent)) {
+          setSendError("Selected invoices are already sent.");
+        } else if (selectedRows.every((row) => row.isWrittenOff)) {
+          setSendError("Written off invoices cannot be sent.");
+        } else {
+          setSendError("Selected invoices cannot be sent.");
+        }
+      }
+      return;
+    }
+
+    const invoiceIds = selectedInvoiceRows
+      .map((row) => Number(row.invoiceId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (!invoiceIds.length) return;
+
+    setSending(true);
+    setSendError("");
+
+    try {
+      await sendInvoices(invoiceIds);
+      setSelectedRows((prev) => ({
+        ...prev,
+        [group.company]: [],
+      }));
+      onRefresh?.();
+    } catch (error) {
+      setSendError(error?.message || "Failed to send invoices");
+      console.error("Failed to send invoices:", error);
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleWriteoffInvoice = (group) => {
@@ -213,38 +123,46 @@ export default function InvoiceReportTable() {
     setWriteOffInvoices([buildWriteOffInvoice(group, row)]);
   };
 
-  const handleSubmitWriteOff = (payload) => {
-    console.log("Write off invoice payload:", payload);
+  const handleSubmitWriteOff = async (payload) => {
+    setWriteOffError("");
 
-    setSelectedRows((prev) => {
-      const next = { ...prev };
+    try {
+      await submitWriteOffInvoices(payload);
 
-      payload.invoices.forEach((invoice) => {
-        if (!invoice.company || !next[invoice.company]) return;
+      setSelectedRows((prev) => {
+        const next = { ...prev };
 
-        next[invoice.company] = next[invoice.company].filter(
-          (rowId) => rowId !== invoice.id
-        );
+        payload.invoices.forEach((invoice) => {
+          if (!invoice.company || !next[invoice.company]) return;
+
+          next[invoice.company] = next[invoice.company].filter(
+            (rowId) => rowId !== invoice.id
+          );
+        });
+
+        return next;
       });
 
-      return next;
-    });
-
-    setWriteOffInvoices([]);
-
-    // Replace the console.log above with your API call, for example:
-    // await writeOffInvoicesApi(payload);
+      setWriteOffInvoices([]);
+      onRefresh?.();
+    } catch (error) {
+      setWriteOffError(error?.message || "Failed to write off invoices");
+      console.error("Failed to write off invoices:", error);
+    }
   };
 
   const handleOpenInvoiceModal = (group, row) => {
     setSelectedInvoiceOrder({
       id: row.caseNo,
-      applicant: row.caseNo,
+      dbId: row.orderId,
+      invoiceId: row.invoiceId,
+      applicant: row.applicant || row.caseNo,
       court: "N/A",
       company: {
         name: group.company,
       },
       invoice: {
+        invoiceId: row.invoiceId,
         date: row.invDate,
         sentDate: row.sentDate,
         invoiced: row.invoiced,
@@ -256,6 +174,18 @@ export default function InvoiceReportTable() {
 
   return (
     <>
+      {sendError && (
+        <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+          {sendError}
+        </p>
+      )}
+
+      {writeOffError && (
+        <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+          {writeOffError}
+        </p>
+      )}
+
       <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="h-full overflow-auto">
           <table className="w-full min-w-[1180px] border-collapse">
@@ -274,7 +204,19 @@ export default function InvoiceReportTable() {
             </thead>
 
             <tbody>
-              {invoiceGroups.map((group) => {
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                  >
+                    Loading invoices...
+                  </td>
+                </tr>
+              )}
+
+              {!loading &&
+                invoiceGroups.map((group) => {
                 const selectedIds = selectedRows[group.company] || [];
                 const allSelected =
                   selectedIds.length === group.rows.length &&
@@ -286,6 +228,7 @@ export default function InvoiceReportTable() {
                     group={group}
                     selectedIds={selectedIds}
                     allSelected={allSelected}
+                    sending={sending}
                     onToggleRow={handleToggleRow}
                     onToggleGroup={handleToggleGroup}
                     onSendInvoice={handleSendInvoice}
@@ -295,6 +238,17 @@ export default function InvoiceReportTable() {
                   />
                 );
               })}
+
+              {!loading && invoiceGroups.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                  >
+                    No outstanding invoices found.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -305,6 +259,7 @@ export default function InvoiceReportTable() {
         mode="edit"
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
+        onSaved={onRefresh}
       />
 
       <WriteOffInvoiceModal
@@ -321,6 +276,7 @@ function InvoiceGroup({
   group,
   selectedIds,
   allSelected,
+  sending,
   onToggleRow,
   onToggleGroup,
   onSendInvoice,
@@ -376,15 +332,15 @@ function InvoiceGroup({
 
             <button
               type="button"
-              disabled={!hasSelected}
+              disabled={!hasSelected || sending}
               onClick={() => onSendInvoice(group)}
               className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
-                hasSelected
+                hasSelected && !sending
                   ? "bg-[#0097B2] text-white hover:bg-[#0086A0]"
                   : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
               }`}
             >
-              Send Invoice
+              {sending ? "Sending..." : "Send Invoice"}
             </button>
 
             <button
@@ -428,8 +384,12 @@ function InvoiceRow({
   onOpenInvoiceModal,
   onOpenSingleWriteOffModal,
 }) {
+  const rowClassName = row.isWrittenOff
+    ? "border-b border-[#F1F5F9] bg-white text-[#94A3B8] line-through hover:bg-[#F8FAFC]"
+    : "border-b border-[#F1F5F9] bg-white hover:bg-[#F8FAFC]";
+
   return (
-    <tr className="border-b border-[#F1F5F9] bg-white hover:bg-[#F8FAFC]">
+    <tr className={rowClassName}>
       <td className="px-4 py-4 align-top">
         <InvoiceCheckbox
           checked={checked}
@@ -444,19 +404,25 @@ function InvoiceRow({
         <div className="max-w-[190px] text-[12px] leading-[20px]">
           <Link
             href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-              row.caseNo
+              row.orderId
             )}`}
             className="whitespace-nowrap font-semibold text-[#007F96] hover:underline"
           >
             {row.caseNo}
           </Link>
 
-          <span className="ml-2 text-[#94A3B8]">invoice sent</span>
+          {row.isSent ? (
+            <span className="ml-2 text-[#94A3B8]">invoice sent</span>
+          ) : (
+            <span className="ml-2 text-[#94A3B8]">not sent</span>
+          )}
 
           <button
             type="button"
             onClick={() => onOpenInvoiceModal(group, row)}
-            className="ml-1 whitespace-nowrap font-medium text-red-500 hover:underline"
+            className={`ml-1 whitespace-nowrap font-medium hover:underline ${
+              row.isSent ? "text-red-500" : "text-[#475569]"
+            }`}
           >
             {row.sentDate}
           </button>
@@ -493,7 +459,8 @@ function InvoiceRow({
         <button
           type="button"
           onClick={() => onOpenSingleWriteOffModal(group, row)}
-          className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+          disabled={row.isWrittenOff}
+          className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Writeoff
         </button>

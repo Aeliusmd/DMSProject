@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import {
+  getXrayInvoiceByOrderId,
+  saveXrayInvoice,
+} from "@/lib/invoices/invoiceApi";
 
 const initialFormData = {
   xrayInvoiceDate: "2026-06-02",
@@ -14,10 +18,18 @@ const initialFormData = {
   description: "",
 };
 
-export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
+export default function CreateXrayInvoiceModal({
+  isOpen,
+  order,
+  onClose,
+  onSaved,
+}) {
   const mounted = useIsClient();
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [loadingXray, setLoadingXray] = useState(false);
 
   const openSession =
     isOpen && order ? String(order.id || order.orderNo) : null;
@@ -29,8 +41,48 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
     if (openSession) {
       setFormData(initialFormData);
       setErrors({});
+      setSubmitError("");
     }
   }
+
+  useEffect(() => {
+    if (!isOpen || !order?.dbId) return;
+
+    let cancelled = false;
+
+    async function loadXrayInvoice() {
+      setLoadingXray(true);
+
+      try {
+        const data = await getXrayInvoiceByOrderId(order.dbId);
+        if (cancelled || !data?.xray) return;
+
+        setFormData({
+          xrayInvoiceDate: data.xray.xrayInvoiceDate || initialFormData.xrayInvoiceDate,
+          examDate: data.xray.examDate || "",
+          views: data.xray.views ?? initialFormData.views,
+          perViewAmount: data.xray.perViewAmount || initialFormData.perViewAmount,
+          prepayment: data.xray.prepayment || initialFormData.prepayment,
+          checkNumber: data.xray.checkNumber || initialFormData.checkNumber,
+          description: data.xray.description || "",
+        });
+      } catch {
+        if (!cancelled) {
+          setFormData(initialFormData);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingXray(false);
+        }
+      }
+    }
+
+    loadXrayInvoice();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, order?.dbId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -102,21 +154,37 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
     }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const validationErrors = validateXrayInvoiceForm(formData);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    console.log("Create X-Ray invoice:", {
-      order,
-      formData,
-      viewsAmount,
-      totalInvoiced,
-      balanceDue,
-    });
+    setSubmitting(true);
+    setSubmitError("");
 
-    onClose();
+    try {
+      await saveXrayInvoice({
+        orderId: order.dbId,
+        xrayInvoiceDate: formData.xrayInvoiceDate,
+        examDate: formData.examDate,
+        views: formData.views,
+        perViewAmount: formData.perViewAmount,
+        prepayment: formData.prepayment,
+        checkNumber: formData.checkNumber,
+        description: formData.description,
+      });
+
+      if (onSaved) {
+        await onSaved();
+      }
+
+      onClose();
+    } catch (error) {
+      setSubmitError(error?.message || "Failed to save X-Ray invoice");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return createPortal(
@@ -293,12 +361,19 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
             </div>
 
             <div className="mt-auto pt-6">
+              {submitError && (
+                <p className="mb-3 text-center text-[11px] text-red-500">
+                  {submitError}
+                </p>
+              )}
+
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937]"
+                disabled={submitting || loadingXray}
+                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Save Invoice
+                {submitting ? "Saving..." : "Save Invoice"}
               </button>
 
               <button

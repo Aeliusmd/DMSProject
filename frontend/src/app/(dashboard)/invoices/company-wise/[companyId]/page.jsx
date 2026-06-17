@@ -1,75 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
+import { getCompanyInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
 
-const companyDetails = {
-  1: {
-    name: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-  },
-  2: {
-    name: "Martinez Legal Group",
-    email: "invoices@martinezlegal.com",
-  },
-  3: {
-    name: "Pacific Law Partners",
-    email: "billing@pacificlaw.com, ar@pacificlaw.com",
-  },
+const EMPTY_SUMMARY = {
+  totalCases: 0,
+  needsResend: 0,
+  totalInvoiced: "$0.00",
+  totalPaid: "$0.00",
+  totalDue: "$0.00",
 };
-
-const invoiceSeed = [
-  {
-    id: 1,
-    invoiceId: "71956-4",
-    invoiceDate: "03/18/2026",
-    days: 74,
-    status: "Partial",
-    invoiced: "$1,250.00",
-    paid: "$400.00",
-    due: "$850.00",
-  },
-  {
-    id: 2,
-    invoiceId: "71956-5",
-    invoiceDate: "04/01/2026",
-    days: 60,
-    status: "Needs Resend",
-    invoiced: "$850.00",
-    paid: "$0.00",
-    due: "$850.00",
-  },
-  {
-    id: 3,
-    invoiceId: "71956-6",
-    invoiceDate: "04/15/2026",
-    days: 46,
-    status: "Partial",
-    invoiced: "$2,100.00",
-    paid: "$1,200.00",
-    due: "$900.00",
-  },
-  {
-    id: 4,
-    invoiceId: "71956-7",
-    invoiceDate: "05/02/2026",
-    days: 29,
-    status: "Unpaid",
-    invoiced: "$975.00",
-    paid: "$0.00",
-    due: "$975.00",
-  },
-];
 
 function buildWriteOffInvoice(company, invoice) {
   return {
     id: invoice.id,
+    invoiceId: invoice.invoiceDbId || invoice.id,
+    orderId: invoice.orderId,
     caseNo: invoice.invoiceId,
-    invoiceId: invoice.invoiceId,
     company: company.name,
     email: company.email,
     sentDate: invoice.invoiceDate,
@@ -85,21 +37,62 @@ export default function CompanyInvoiceDetailsPage() {
   const params = useParams();
   const companyId = String(params.companyId);
 
-  const company = companyDetails[companyId] || {
-    name: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-  };
-
-  const [invoices] = useState(invoiceSeed);
+  const [company, setCompany] = useState({
+    id: companyId,
+    name: "Company",
+    email: "",
+  });
+  const [invoices, setInvoices] = useState([]);
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
+  const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
+  const [writeOffError, setWriteOffError] = useState("");
 
   const [filters, setFilters] = useState({
     search: "",
     fromDate: "",
     toDate: "",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCompanyInvoices() {
+      setLoading(true);
+
+      try {
+        const data = await getCompanyInvoices(companyId, {
+          dateFrom: filters.fromDate || undefined,
+          dateTo: filters.toDate || undefined,
+        });
+
+        if (cancelled) return;
+
+        setCompany(data.company);
+        setInvoices(data.invoices);
+        setSummary(data.summary);
+        setSelectedIds([]);
+      } catch {
+        if (!cancelled) {
+          setCompany({ id: companyId, name: "Company", email: "" });
+          setInvoices([]);
+          setSummary(EMPTY_SUMMARY);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadCompanyInvoices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, filters.fromDate, filters.toDate]);
 
   const filteredInvoices = useMemo(() => {
     const searchValue = filters.search.trim().toLowerCase();
@@ -197,32 +190,47 @@ export default function CompanyInvoiceDetailsPage() {
     setWriteOffInvoices([buildWriteOffInvoice(company, invoice)]);
   };
 
-  const handleSubmitWriteOff = (payload) => {
-    console.log("Company wise write off payload:", payload);
+  const handleSubmitWriteOff = async (payload) => {
+    setWriteOffError("");
 
-    setSelectedIds((prev) =>
-      prev.filter(
-        (selectedId) =>
-          !payload.invoices.some((invoice) => invoice.id === selectedId)
-      )
-    );
+    try {
+      await submitWriteOffInvoices(payload);
 
-    setWriteOffInvoices([]);
+      setSelectedIds((prev) =>
+        prev.filter(
+          (selectedId) =>
+            !payload.invoices.some((invoice) => invoice.id === selectedId)
+        )
+      );
 
-    // Replace the console.log above with your backend API call.
-    // Example:
-    // await writeOffInvoicesApi(payload);
+      setWriteOffInvoices([]);
+
+      const data = await getCompanyInvoices(companyId, {
+        dateFrom: filters.fromDate || undefined,
+        dateTo: filters.toDate || undefined,
+      });
+
+      setCompany(data.company);
+      setInvoices(data.invoices);
+      setSummary(data.summary);
+    } catch (error) {
+      setWriteOffError(error?.message || "Failed to write off invoices");
+      console.error("Failed to write off invoices:", error);
+    }
   };
 
   const handleOpenEditInvoice = (invoice) => {
     setSelectedInvoiceOrder({
       id: invoice.invoiceId,
+      dbId: invoice.orderId,
+      invoiceId: invoice.invoiceDbId || invoice.id,
       applicant: invoice.invoiceId,
       court: "N/A",
       company: {
         name: company.name,
       },
       invoice: {
+        invoiceId: invoice.invoiceDbId || invoice.id,
         date: invoice.invoiceDate,
         sentDate: invoice.invoiceDate,
         invoiced: invoice.invoiced,
@@ -287,7 +295,13 @@ export default function CompanyInvoiceDetailsPage() {
           </div>
         </div>
 
-        <SummaryCards selectedCount={selectedCount} />
+        <SummaryCards summary={summary} selectedCount={selectedCount} loading={loading} />
+
+        {writeOffError && (
+          <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+            {writeOffError}
+          </p>
+        )}
 
         <InvoiceFilters
           filters={filters}
@@ -300,6 +314,7 @@ export default function CompanyInvoiceDetailsPage() {
           invoices={filteredInvoices}
           selectedIds={selectedIds}
           allSelected={allSelected}
+          loading={loading}
           onToggleAll={handleToggleAll}
           onToggleInvoice={handleToggleInvoice}
           onWriteOffSingle={handleWriteOffSingle}
@@ -397,14 +412,32 @@ function DateField({ label, name, value, onChange }) {
   );
 }
 
-function SummaryCards({ selectedCount }) {
+function SummaryCards({ summary, selectedCount, loading }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-      <SummaryCard label="Total Cases" value="4" />
-      <SummaryCard label="Needs Resend" value="1" orange />
-      <SummaryCard label="Total Invoiced" value="$5,175.00" />
-      <SummaryCard label="Total Paid" value="$1,600.00" green />
-      <SummaryCard label="Total Due" value="$3,575.00" red />
+      <SummaryCard
+        label="Total Cases"
+        value={loading ? "..." : String(summary.totalCases)}
+      />
+      <SummaryCard
+        label="Needs Resend"
+        value={loading ? "..." : String(summary.needsResend)}
+        orange
+      />
+      <SummaryCard
+        label="Total Invoiced"
+        value={loading ? "..." : summary.totalInvoiced}
+      />
+      <SummaryCard
+        label="Total Paid"
+        value={loading ? "..." : summary.totalPaid}
+        green
+      />
+      <SummaryCard
+        label="Total Due"
+        value={loading ? "..." : summary.totalDue}
+        red
+      />
       <SummaryCard label="Selected" value={selectedCount} muted />
     </div>
   );
@@ -445,6 +478,7 @@ function CompanyInvoiceTable({
   invoices,
   selectedIds,
   allSelected,
+  loading,
   onToggleAll,
   onToggleInvoice,
   onWriteOffSingle,
@@ -475,7 +509,19 @@ function CompanyInvoiceTable({
           </thead>
 
           <tbody>
-            {invoices.map((invoice) => {
+            {loading && (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                >
+                  Loading invoices...
+                </td>
+              </tr>
+            )}
+
+            {!loading &&
+              invoices.map((invoice) => {
               const selected = selectedIds.includes(invoice.id);
 
               return (
@@ -495,7 +541,7 @@ function CompanyInvoiceTable({
                   <td className="px-4 py-4 align-middle">
                     <Link
                       href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                        invoice.invoiceId
+                        invoice.orderId || invoice.invoiceId
                       )}`}
                       className="text-[12px] font-semibold text-[#007F96] hover:underline"
                     >
@@ -546,7 +592,7 @@ function CompanyInvoiceTable({
               );
             })}
 
-            {invoices.length === 0 && (
+            {!loading && invoices.length === 0 && (
               <tr>
                 <td
                   colSpan={8}

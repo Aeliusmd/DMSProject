@@ -1,170 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import { getInvoices, resendInvoices } from "@/lib/invoices/invoiceApi";
 
-const resendInvoices = [
-  {
-    id: 1,
-    company: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-    caseNo: "71956-5",
-    sentDate: "04/01/2026",
-    days: 60,
-    invoiceDate: "04/01/2026",
-    invoiced: "$850.00",
-    paid: "$0.00",
-    due: "$850.00",
-  },
-  {
-    id: 2,
-    company: "Martinez Legal Group",
-    email: "invoices@martinezlegal.com",
-    caseNo: "72001-2",
-    sentDate: "03/25/2026",
-    days: 67,
-    invoiceDate: "03/25/2026",
-    invoiced: "$1,800.00",
-    paid: "$500.00",
-    due: "$1,300.00",
-  },
-  {
-    id: 3,
-    company: "Pacific Law Partners",
-    email: "billing@pacificlaw.com, ar@pacificlaw.com",
-    caseNo: "72012-2",
-    sentDate: "02/28/2026",
-    days: 92,
-    invoiceDate: "02/28/2026",
-    invoiced: "$1,500.00",
-    paid: "$0.00",
-    due: "$1,500.00",
-  },
-  {
-    id: 4,
-    company: "Williams & Co.",
-    email: "finance@williamsco.com",
-    caseNo: "72020-1",
-    sentDate: "02/20/2026",
-    days: 100,
-    invoiceDate: "02/20/2026",
-    invoiced: "$950.00",
-    paid: "$0.00",
-    due: "$950.00",
-  },
-  {
-    id: 5,
-    company: "Brown Family Trust",
-    email: "billing@browntrust.com",
-    caseNo: "72035-4",
-    sentDate: "02/10/2026",
-    days: 110,
-    invoiceDate: "02/10/2026",
-    invoiced: "$2,100.00",
-    paid: "$0.00",
-    due: "$2,100.00",
-  },
-  {
-    id: 6,
-    company: "Davis Law Firm",
-    email: "accounts@davislawfirm.com",
-    caseNo: "72058-2",
-    sentDate: "01/30/2026",
-    days: 121,
-    invoiceDate: "01/30/2026",
-    invoiced: "$1,250.00",
-    paid: "$0.00",
-    due: "$1,250.00",
-  },
-  {
-    id: 7,
-    company: "Rodriguez & Partners",
-    email: "billing@rodriguezpartners.com",
-    caseNo: "72067-1",
-    sentDate: "01/22/2026",
-    days: 129,
-    invoiceDate: "01/22/2026",
-    invoiced: "$1,600.00",
-    paid: "$0.00",
-    due: "$1,600.00",
-  },
-  {
-    id: 8,
-    company: "Thompson Industries",
-    email: "ap@thompsonindustries.com",
-    caseNo: "72070-2",
-    sentDate: "01/15/2026",
-    days: 136,
-    invoiceDate: "01/15/2026",
-    invoiced: "$2,500.00",
-    paid: "$0.00",
-    due: "$2,500.00",
-  },
-  {
-    id: 9,
-    company: "Garcia Legal Services",
-    email: "billing@garcialegal.com",
-    caseNo: "72088-3",
-    sentDate: "01/05/2026",
-    days: 146,
-    invoiceDate: "01/05/2026",
-    invoiced: "$975.00",
-    paid: "$0.00",
-    due: "$975.00",
-  },
-  {
-    id: 10,
-    company: "Lee Tech Holdings",
-    email: "payables@leetech.com",
-    caseNo: "72108-2",
-    sentDate: "12/28/2025",
-    days: 154,
-    invoiceDate: "12/28/2025",
-    invoiced: "$1,900.00",
-    paid: "$0.00",
-    due: "$1,900.00",
-  },
-  {
-    id: 11,
-    company: "Anderson Accounting",
-    email: "invoices@andersonaccounting.com",
-    caseNo: "72120-1",
-    sentDate: "12/20/2025",
-    days: 162,
-    invoiceDate: "12/20/2025",
-    invoiced: "$825.00",
-    paid: "$0.00",
-    due: "$825.00",
-  },
-  {
-    id: 12,
-    company: "Taylor Financial Group",
-    email: "billing@taylorfinancial.com",
-    caseNo: "72135-2",
-    sentDate: "12/12/2025",
-    days: 170,
-    invoiceDate: "12/12/2025",
-    invoiced: "$1,450.00",
-    paid: "$0.00",
-    due: "$1,450.00",
-  },
-  {
-    id: 13,
-    company: "Harrison Medical Group",
-    email: "ar@harrisonmedical.com",
-    caseNo: "72140-4",
-    sentDate: "12/01/2025",
-    days: 181,
-    invoiceDate: "12/01/2025",
-    invoiced: "$1,100.00",
-    paid: "$0.00",
-    due: "$1,100.00",
-  },
-];
+const EMPTY_SUMMARY = {
+  companies: 0,
+  cases: 0,
+  invoiced: "$0.00",
+  paid: "$0.00",
+  due: "$0.00",
+};
 
 export default function InvoicesPage() {
   const [activeTab, setActiveTab] = useState("outstanding");
@@ -172,6 +22,49 @@ export default function InvoicesPage() {
     from: "",
     through: "",
   });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [outstanding, setOutstanding] = useState({
+    groups: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+  const [resend, setResend] = useState({
+    invoices: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+
+  const loadInvoices = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const [outstandingData, resendData] = await Promise.all([
+        getInvoices({
+          tab: "outstanding",
+          dateFrom: filters.from || undefined,
+          dateTo: filters.through || undefined,
+        }),
+        getInvoices({
+          tab: "resend",
+          dateFrom: filters.from || undefined,
+          dateTo: filters.through || undefined,
+        }),
+      ]);
+
+      setOutstanding(outstandingData);
+      setResend(resendData);
+    } catch {
+      setOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+      setResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
+    } finally {
+      setLoading(false);
+    }
+  }, [filters.from, filters.through]);
+
+  useEffect(() => {
+    loadInvoices();
+  }, [loadInvoices, refreshKey]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -183,7 +76,7 @@ export default function InvoicesPage() {
   };
 
   const handleFilterByDate = () => {
-    console.log("Filter invoices:", filters);
+    setRefreshKey((value) => value + 1);
   };
 
   const handleReset = () => {
@@ -191,7 +84,11 @@ export default function InvoicesPage() {
       from: "",
       through: "",
     });
+    setRefreshKey((value) => value + 1);
   };
+
+  const activeSummary =
+    activeTab === "resend" ? resend.summary : outstanding.summary;
 
   return (
     <DashboardShell>
@@ -209,7 +106,12 @@ export default function InvoicesPage() {
         </div>
 
         <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0 lg:flex-row lg:items-end lg:justify-between">
-          <InvoiceTabs activeTab={activeTab} onChange={setActiveTab} />
+          <InvoiceTabs
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            outstandingCount={outstanding.count}
+            resendCount={resend.count}
+          />
 
           <Link
             href="/invoices/company-wise"
@@ -228,20 +130,28 @@ export default function InvoicesPage() {
             onReset={handleReset}
           />
 
-          <InvoiceSummary activeTab={activeTab} />
+          <InvoiceSummary summary={activeSummary} loading={loading} />
         </div>
 
         {activeTab === "outstanding" ? (
-          <InvoiceReportTable />
+          <InvoiceReportTable
+            invoiceGroups={outstanding.groups}
+            loading={loading}
+            onRefresh={loadInvoices}
+          />
         ) : (
-          <ResendInvoicesPanel invoices={resendInvoices} />
+          <ResendInvoicesPanel
+            invoices={resend.invoices}
+            loading={loading}
+            onRefresh={loadInvoices}
+          />
         )}
       </div>
     </DashboardShell>
   );
 }
 
-function InvoiceTabs({ activeTab, onChange }) {
+function InvoiceTabs({ activeTab, onChange, outstandingCount, resendCount }) {
   return (
     <div className="flex items-center gap-3 overflow-x-auto">
       <button
@@ -253,7 +163,7 @@ function InvoiceTabs({ activeTab, onChange }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Outstanding Invoices (66)
+        Outstanding Invoices ({outstandingCount})
       </button>
 
       <button
@@ -265,7 +175,7 @@ function InvoiceTabs({ activeTab, onChange }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Resend Invoices (13)
+        Resend Invoices ({resendCount})
       </button>
     </div>
   );
@@ -331,24 +241,7 @@ function DateField({ label, name, value, onChange }) {
   );
 }
 
-function InvoiceSummary({ activeTab }) {
-  const summary =
-    activeTab === "resend"
-      ? {
-          companies: "13",
-          cases: "13",
-          invoiced: "$18,800.00",
-          paid: "$500.00",
-          due: "$18,300.00",
-        }
-      : {
-          companies: "20",
-          cases: "66",
-          invoiced: "$108,065.00",
-          paid: "$39,450.00",
-          due: "$68,615.00",
-        };
-
+function InvoiceSummary({ summary, loading }) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-sm">
       <h2 className="mb-4 text-[13px] font-semibold text-[#334155]">
@@ -356,11 +249,28 @@ function InvoiceSummary({ activeTab }) {
       </h2>
 
       <div className="grid grid-cols-2 gap-x-10 gap-y-4 sm:grid-cols-3 xl:grid-cols-5">
-        <SummaryItem label="Companies" value={summary.companies} />
-        <SummaryItem label="Cases" value={summary.cases} />
-        <SummaryItem label="Invoiced" value={summary.invoiced} />
-        <SummaryItem label="Paid" value={summary.paid} green />
-        <SummaryItem label="Due" value={summary.due} red />
+        <SummaryItem
+          label="Companies"
+          value={loading ? "..." : String(summary.companies)}
+        />
+        <SummaryItem
+          label="Cases"
+          value={loading ? "..." : String(summary.cases)}
+        />
+        <SummaryItem
+          label="Invoiced"
+          value={loading ? "..." : summary.invoiced}
+        />
+        <SummaryItem
+          label="Paid"
+          value={loading ? "..." : summary.paid}
+          green
+        />
+        <SummaryItem
+          label="Due"
+          value={loading ? "..." : summary.due}
+          red
+        />
       </div>
     </section>
   );
@@ -376,8 +286,8 @@ function SummaryItem({ label, value, green = false, red = false }) {
           green
             ? "text-[#059669]"
             : red
-            ? "text-red-500"
-            : "text-[#111827]"
+              ? "text-red-500"
+              : "text-[#111827]"
         }`}
       >
         {value}
@@ -386,9 +296,11 @@ function SummaryItem({ label, value, green = false, red = false }) {
   );
 }
 
-function ResendInvoicesPanel({ invoices }) {
+function ResendInvoicesPanel({ invoices, loading, onRefresh }) {
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
+  const [resendingId, setResendingId] = useState(null);
+  const [resendError, setResendError] = useState("");
 
   const allSelected =
     invoices.length > 0 && selectedInvoiceIds.length === invoices.length;
@@ -412,15 +324,36 @@ function ResendInvoicesPanel({ invoices }) {
     });
   };
 
+  const handleResendInvoice = async (invoice) => {
+    const invoiceId = Number(invoice.invoiceId || invoice.id);
+
+    if (!Number.isFinite(invoiceId) || resendingId) return;
+
+    setResendingId(invoice.id);
+    setResendError("");
+
+    try {
+      await resendInvoices([invoiceId]);
+      onRefresh?.();
+    } catch (error) {
+      setResendError(error?.message || "Failed to resend invoice");
+    } finally {
+      setResendingId(null);
+    }
+  };
+
   const handleOpenInvoiceModal = (invoice) => {
     setSelectedInvoiceOrder({
       id: invoice.caseNo,
-      applicant: invoice.caseNo,
+      dbId: invoice.orderId,
+      invoiceId: invoice.invoiceId || invoice.id,
+      applicant: invoice.applicant || invoice.caseNo,
       court: "N/A",
       company: {
         name: invoice.company,
       },
       invoice: {
+        invoiceId: invoice.invoiceId || invoice.id,
         date: invoice.invoiceDate,
         sentDate: invoice.sentDate,
         invoiced: invoice.invoiced,
@@ -432,6 +365,12 @@ function ResendInvoicesPanel({ invoices }) {
 
   return (
     <>
+      {resendError && (
+        <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+          {resendError}
+        </p>
+      )}
+
       <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="h-full max-h-[calc(100vh-330px)] overflow-auto">
           <table className="w-full min-w-[1150px] border-collapse">
@@ -457,98 +396,117 @@ function ResendInvoicesPanel({ invoices }) {
             </thead>
 
             <tbody>
-              {invoices.map((invoice) => {
-                const isSelected = selectedInvoiceIds.includes(invoice.id);
-
-                return (
-                  <tr
-                    key={invoice.id}
-                    className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
+              {loading && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
                   >
-                    <td className="px-4 py-4 align-middle">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => handleToggleInvoice(invoice.id)}
-                        className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
-                      />
-                    </td>
+                    Loading resend invoices...
+                  </td>
+                </tr>
+              )}
 
-                    <td className="px-4 py-4 align-middle">
-                      <p className="text-[12px] font-semibold text-[#111827]">
-                        {invoice.company}
-                      </p>
-                    </td>
+              {!loading &&
+                invoices.map((invoice) => {
+                  const isSelected = selectedInvoiceIds.includes(invoice.id);
 
-                    <td className="px-4 py-4 align-middle">
-                      <p className="max-w-[270px] truncate text-[12px] text-[#475569]">
-                        {invoice.email}
-                      </p>
-                    </td>
+                  return (
+                    <tr
+                      key={invoice.id}
+                      className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
+                    >
+                      <td className="px-4 py-4 align-middle">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleInvoice(invoice.id)}
+                          className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
+                        />
+                      </td>
 
-                    <td className="px-4 py-4 align-middle">
-                      <div className="flex flex-wrap items-center gap-1 text-[12px]">
-                        <Link
-                          href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                            invoice.caseNo
-                          )}`}
-                          className="font-semibold text-[#007F96] hover:underline"
-                        >
-                          {invoice.caseNo}
-                        </Link>
+                      <td className="px-4 py-4 align-middle">
+                        <p className="text-[12px] font-semibold text-[#111827]">
+                          {invoice.company}
+                        </p>
+                      </td>
 
-                        <span className="text-[#94A3B8]">(invoice sent)</span>
+                      <td className="px-4 py-4 align-middle">
+                        <p className="max-w-[270px] truncate text-[12px] text-[#475569]">
+                          {invoice.email}
+                        </p>
+                      </td>
 
+                      <td className="px-4 py-4 align-middle">
+                        <div className="flex flex-wrap items-center gap-1 text-[12px]">
+                          <Link
+                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                              invoice.orderId
+                            )}`}
+                            className="font-semibold text-[#007F96] hover:underline"
+                          >
+                            {invoice.caseNo}
+                          </Link>
+
+                          {invoice.isSent ? (
+                            <span className="text-[#94A3B8]">(invoice sent)</span>
+                          ) : (
+                            <span className="text-[#94A3B8]">(not sent)</span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenInvoiceModal(invoice)}
+                            className={`font-semibold hover:underline ${
+                              invoice.isSent ? "text-red-500" : "text-[#475569]"
+                            }`}
+                          >
+                            {invoice.sentDate}
+                          </button>
+
+                          <span className="text-[#64748B]">
+                            ({invoice.days} days)
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
                         <button
                           type="button"
                           onClick={() => handleOpenInvoiceModal(invoice)}
-                          className="font-semibold text-red-500 hover:underline"
+                          className="text-[#475569] hover:text-[#007F96] hover:underline"
                         >
-                          {invoice.sentDate}
+                          {invoice.invoiceDate}
                         </button>
+                      </td>
 
-                        <span className="text-[#64748B]">
-                          ({invoice.days} days)
-                        </span>
-                      </div>
-                    </td>
+                      <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
+                        {invoice.invoiced}
+                      </td>
 
-                    <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenInvoiceModal(invoice)}
-                        className="text-[#475569] hover:text-[#007F96] hover:underline"
-                      >
-                        {invoice.invoiceDate}
-                      </button>
-                    </td>
+                      <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#059669]">
+                        {invoice.paid}
+                      </td>
 
-                    <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                      {invoice.invoiced}
-                    </td>
+                      <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#111827]">
+                        {invoice.due}
+                      </td>
 
-                    <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#059669]">
-                      {invoice.paid}
-                    </td>
+                      <td className="px-4 py-4 text-center align-middle">
+                        <button
+                          type="button"
+                          disabled={resendingId === invoice.id}
+                          onClick={() => handleResendInvoice(invoice)}
+                          className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {resendingId === invoice.id ? "Sending..." : "Resend"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
 
-                    <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#111827]">
-                      {invoice.due}
-                    </td>
-
-                    <td className="px-4 py-4 text-center align-middle">
-                      <button
-                        type="button"
-                        onClick={() => console.log("Resend invoice:", invoice)}
-                        className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
-                      >
-                        Resend
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {invoices.length === 0 && (
+              {!loading && invoices.length === 0 && (
                 <tr>
                   <td
                     colSpan={9}
@@ -563,12 +521,13 @@ function ResendInvoicesPanel({ invoices }) {
         </div>
       </section>
 
-     <CreateInvoiceModal
-  isOpen={Boolean(selectedInvoiceOrder)}
-  mode="edit"
-  order={selectedInvoiceOrder}
-  onClose={() => setSelectedInvoiceOrder(null)}
-/>
+      <CreateInvoiceModal
+        isOpen={Boolean(selectedInvoiceOrder)}
+        mode="edit"
+        order={selectedInvoiceOrder}
+        onClose={() => setSelectedInvoiceOrder(null)}
+        onSaved={onRefresh}
+      />
     </>
   );
 }

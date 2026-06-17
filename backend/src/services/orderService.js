@@ -7,6 +7,7 @@ const Order = require("../models/Order");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const Employee = require("../models/Employee");
+const invoiceService = require("./invoiceService");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
 
@@ -276,9 +277,11 @@ function buildRecordsBlock(row) {
   return { title, lines, links: [] };
 }
 
-function mapOrderListRow(row, workflowStages = []) {
+function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = null) {
   const subpoenaYear = row.subpoena_date
     ? String(new Date(row.subpoena_date).getFullYear())
+    : row.created_at
+    ? String(new Date(row.created_at).getFullYear())
     : "";
 
   const dobSsn = [];
@@ -307,6 +310,7 @@ function mapOrderListRow(row, workflowStages = []) {
     company: buildCompanyBlock(row),
     dobSsn,
     forms: DEFAULT_ORDER_FORMS,
+    invoice: invoiceService.mapOrderInvoiceSummary(invoiceRow, xrayRow),
   };
 }
 
@@ -465,7 +469,11 @@ async function getAllOrders(query = {}) {
   }
 
   if (query.year) {
-    filters.year = query.year;
+    const year = Number(query.year);
+
+    if (Number.isFinite(year)) {
+      filters.year = year;
+    }
   }
 
   if (query.search && `${query.search}`.trim()) {
@@ -476,6 +484,8 @@ async function getAllOrders(query = {}) {
 
   const orderIds = rows.map((row) => row.id);
   const stages = await Order.findWorkflowStagesByOrderIds(orderIds);
+  const invoicesByOrderId = await invoiceService.getStandardInvoicesByOrderIds(orderIds);
+  const xrayByOrderId = await invoiceService.getXrayDetailsByOrderIds(orderIds);
 
   const stagesByOrderId = stages.reduce((acc, stage) => {
     if (!acc[stage.order_id]) acc[stage.order_id] = [];
@@ -483,7 +493,17 @@ async function getAllOrders(query = {}) {
     return acc;
   }, {});
 
-  return rows.map((row) => mapOrderListRow(row, stagesByOrderId[row.id] || []));
+  return rows.map((row) => {
+    const invoiceRow = invoicesByOrderId[row.id] || null;
+    const xrayRow = xrayByOrderId[row.id] || null;
+
+    return mapOrderListRow(
+      row,
+      stagesByOrderId[row.id] || [],
+      invoiceRow,
+      xrayRow
+    );
+  });
 }
 
 async function getOrderById(id) {
