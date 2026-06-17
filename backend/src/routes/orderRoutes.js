@@ -16,6 +16,11 @@ router.get("/unprocessed", orderController.getUnprocessed);
 router.get("/unprocessed/:extractId/file", orderController.getUnprocessedFile);
 router.get("/unprocessed/:extractId", orderController.getUnprocessedById);
 router.post(
+  "/subpoena/upload",
+  uploadSinglePdf("file"),
+  orderController.uploadSubpoena
+);
+router.post(
   "/batch-scan",
   uploadSinglePdf("file"),
   orderController.batchScan

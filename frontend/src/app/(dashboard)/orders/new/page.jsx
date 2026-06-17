@@ -33,7 +33,7 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { API_BASE_URL } from "@/config/api";
 
@@ -66,6 +66,7 @@ const initialFormData = {
 
   documentName: "",
   subpoenaFile: null,
+  subpoenaExtractId: "",
   additionalDocumentFile: null,
 
   orderNumber: "",
@@ -192,6 +193,17 @@ function mapOrderHintsToForm(hints, facilityList = []) {
   return updates;
 }
 
+function buildFormFromExtract(extract, facilityList, subpoenaFile) {
+  const orderHints = extract?.orderHints || {};
+  return {
+    ...mapOrderHintsToForm(orderHints, facilityList),
+    ...(subpoenaFile ? { subpoenaFile } : {}),
+    ...(extract?.id || extract?.extractId
+      ? { subpoenaExtractId: String(extract.id || extract.extractId) }
+      : {}),
+  };
+}
+
 export default function NewOrderPage() {
   return (
     <Suspense
@@ -237,6 +249,8 @@ function NewOrderPageContent() {
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [extractingSubpoena, setExtractingSubpoena] = useState(false);
+  const [extractError, setExtractError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -343,8 +357,7 @@ function NewOrderPageContent() {
 
         setFormData({
           ...initialFormData,
-          ...mapOrderHintsToForm(extract.orderHints, facilityList),
-          ...(subpoenaFile ? { subpoenaFile } : {}),
+          ...buildFormFromExtract(extract, facilityList, subpoenaFile),
         });
         setTouched({});
         setSubmitAttempted(false);
@@ -502,13 +515,14 @@ function NewOrderPageContent() {
     }));
   };
 
-  const handleFileChange = (e, fieldName) => {
+  const handleFileChange = async (e, fieldName) => {
     const file = e.target.files?.[0] || null;
     const error = validateFile(file);
 
     setFormData((prev) => ({
       ...prev,
       [fieldName]: file,
+      ...(fieldName === "subpoenaFile" && !file ? { subpoenaExtractId: "" } : {}),
     }));
 
     setFileErrors((prev) => ({
@@ -521,11 +535,44 @@ function NewOrderPageContent() {
       [fieldName]: true,
     }));
 
-    if (fieldName === "subpoenaFile" && file && !error) {
+    if (fieldName === "subpoenaFile" && file && !error && !isEditMode) {
       setExpandedPanels((prev) => ({
         ...prev,
         subpoena: true,
       }));
+
+      setExtractingSubpoena(true);
+      setExtractError("");
+
+      try {
+        const facilityList = facilities.length ? facilities : await getFacilities();
+        if (!facilities.length) {
+          setFacilities(facilityList);
+        }
+
+        const result = await uploadSingleSubpoena(file);
+        const extract = result?.extract || result;
+
+        setFormData((prev) => ({
+          ...prev,
+          ...buildFormFromExtract(
+            { ...extract, extractId: result?.extractId },
+            facilityList,
+            file
+          ),
+        }));
+        setExpandedPanels((prev) => ({
+          ...prev,
+          subpoena: true,
+          order: true,
+        }));
+      } catch (err) {
+        setExtractError(
+          err.message || "Failed to extract subpoena. You can still fill the form manually."
+        );
+      } finally {
+        setExtractingSubpoena(false);
+      }
     }
   };
 
@@ -659,6 +706,8 @@ function NewOrderPageContent() {
               onFileChange={handleFileChange}
               submitAttempted={submitAttempted}
               facilityOptions={facilityOptions}
+              extractingSubpoena={extractingSubpoena}
+              extractError={extractError}
             />
           </CollapsibleOrderPanel>
 
@@ -717,6 +766,8 @@ function OrderDetailsForm({
   onFileChange,
   submitAttempted,
   facilityOptions = [],
+  extractingSubpoena = false,
+  extractError = "",
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -889,6 +940,22 @@ function OrderDetailsForm({
         onChange={(e) => onFileChange(e, "subpoenaFile")}
         error={getError("subpoenaFile")}
       />
+
+      {extractingSubpoena && (
+        <p className="text-[12px] font-medium text-[#007F96]">
+          Extracting subpoena fields — please wait...
+        </p>
+      )}
+
+      {extractError && (
+        <p className="text-[12px] font-medium text-amber-600">{extractError}</p>
+      )}
+
+      {formData.subpoenaExtractId && !extractingSubpoena && (
+        <p className="text-[12px] font-medium text-[#059669]">
+          Subpoena saved and form prefilled from extracted data.
+        </p>
+      )}
 
       {!formData.subpoenaFile && formData.subpoenaUrl && (
         <ExistingFileLink

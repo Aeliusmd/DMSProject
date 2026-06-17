@@ -81,7 +81,7 @@ function mapExtractRowToApi(row) {
   };
 }
 
-async function processBatchScan(file, uploadedBy) {
+async function processBatchScan(file, uploadedBy, options = {}) {
   if (!file?.buffer?.length) {
     throw new ApiError(400, "No file uploaded");
   }
@@ -113,6 +113,13 @@ async function processBatchScan(file, uploadedBy) {
   const results = Array.isArray(extraction.results) ? extraction.results : [];
   if (results.length === 0) {
     throw new ApiError(502, "Extraction service returned no subpoena results");
+  }
+
+  if (options.maxChildren && results.length > options.maxChildren) {
+    throw new ApiError(
+      400,
+      `This PDF contains ${results.length} subpoenas. Use Orders → Batch Scan for multi-subpoena uploads.`
+    );
   }
 
   const parentPageCount = await getPdfPageCount(file.buffer);
@@ -209,11 +216,13 @@ async function processBatchScan(file, uploadedBy) {
     }
 
     await batchScanRepository.insertActivityLog(conn, {
-      action: "Batch Scan Uploaded",
+      action: options.singleSubpoena ? "Single Subpoena Uploaded" : "Batch Scan Uploaded",
       module: "Processing",
       performed_by: userId,
       performer_name: employee.name,
-      details: `Batch ${parentReference}: ${originalName} → ${preparedChildren.length} subpoena(s). Parent: ${parentFile.relativePath}`,
+      details: options.singleSubpoena
+        ? `Single subpoena ${parentReference}: ${originalName} → ${parentFile.relativePath}`
+        : `Batch ${parentReference}: ${originalName} → ${preparedChildren.length} subpoena(s). Parent: ${parentFile.relativePath}`,
     });
 
     return { parentId, childIds };
@@ -296,8 +305,32 @@ async function getUnprocessedExtractFile(extractId) {
   };
 }
 
+async function processSingleSubpoena(file, uploadedBy) {
+  const result = await processBatchScan(file, uploadedBy, {
+    maxChildren: 1,
+    singleSubpoena: true,
+  });
+
+  const child = result.children[0];
+  if (!child?.id) {
+    throw new ApiError(500, "Failed to save subpoena extract");
+  }
+
+  const extract = await getUnprocessedExtract(child.id);
+
+  return {
+    extractId: child.id,
+    parentId: result.parent.id,
+    extract,
+    orderHints: extract.orderHints,
+    fileName: child.fileName,
+    storagePath: child.storagePath,
+  };
+}
+
 module.exports = {
   processBatchScan,
+  processSingleSubpoena,
   getUnprocessedQueue,
   getUnprocessedExtract,
   getUnprocessedExtractFile,
