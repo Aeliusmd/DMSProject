@@ -158,6 +158,19 @@ export async function uploadBatchScan(file) {
   return data?.data || null;
 }
 
+export async function uploadSingleSubpoena(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const data = await request("/orders/subpoena/upload", {
+    method: "POST",
+    auth: true,
+    body: formData,
+  });
+
+  return data?.data || null;
+}
+
 export async function getUnprocessedSubpoenas() {
   const data = await request("/orders/unprocessed", { auth: true });
   return Array.isArray(data?.data) ? data.data : [];

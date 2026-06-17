@@ -47,6 +47,18 @@ exports.batchScan = asyncHandler(async (req, res) => {
   return ApiResponse.created(res, result, "Batch scan processed successfully");
 });
 
+exports.uploadSubpoena = asyncHandler(async (req, res) => {
+  const result = await batchScanService.processSingleSubpoena(
+    req.file,
+    req.user?.id
+  );
+  return ApiResponse.created(
+    res,
+    result,
+    "Subpoena uploaded and extracted successfully"
+  );
+});
+
 exports.getById = asyncHandler(async (req, res) => {
   const order = await orderService.getOrderById(req.params.id);
   return ApiResponse.success(res, { order });

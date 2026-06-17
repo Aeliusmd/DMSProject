@@ -1,4 +1,5 @@
 const { query } = require("../config/database");
+const ApiError = require("../utils/ApiError");
 
 async function findEmployeeById(employeeId) {
   const rows = await query(
@@ -111,6 +112,34 @@ async function getExtractById(extractId) {
   return rows[0] || null;
 }
 
+async function linkExtractToOrder(conn, { extractId, orderId }) {
+  const [rows] = await conn.execute(
+    `SELECT id, storage_path, is_processed
+     FROM batch_scan_extracts
+     WHERE id = :id AND is_deleted = 0
+     LIMIT 1
+     FOR UPDATE`,
+    { id: extractId }
+  );
+
+  const row = rows[0];
+  if (!row) {
+    throw new ApiError(400, "Subpoena extract not found");
+  }
+  if (row.is_processed) {
+    throw new ApiError(409, "This subpoena extract was already processed into an order");
+  }
+
+  await conn.execute(
+    `UPDATE batch_scan_extracts
+     SET order_id = :order_id, is_processed = 1, processed_at = NOW()
+     WHERE id = :id`,
+    { order_id: orderId, id: extractId }
+  );
+
+  return row.storage_path;
+}
+
 module.exports = {
   findEmployeeById,
   insertParentBatch,
@@ -118,4 +147,5 @@ module.exports = {
   insertActivityLog,
   listUnprocessedExtracts,
   getExtractById,
+  linkExtractToOrder,
 };
