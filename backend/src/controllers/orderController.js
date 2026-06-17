@@ -1,15 +1,25 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
-const { notImplemented } = require("./_controllerHelper");
 const orderService = require("../services/orderService");
 const batchScanService = require("../services/batchScanService");
+const activityLogService = require("../services/activityLogService");
 const {
   validateCreateOrder,
   validateUpdateOrder,
   validateOrderNote,
   validateWorkflowStageUpdate,
 } = require("../validators/orderValidator");
+
+function getOrderLogContext(order) {
+  const facilityId = order?.facility ? Number(order.facility) : null;
+
+  return {
+    facilityId: Number.isFinite(facilityId) ? facilityId : null,
+    companyName:
+      order?.facilityName || order?.serveCompanyName || "System",
+  };
+}
 
 exports.getAll = asyncHandler(async (req, res) => {
   const orders = await orderService.getAllOrders(req.query);
@@ -52,6 +62,17 @@ exports.create = asyncHandler(async (req, res) => {
     req.files
   );
 
+  const logContext = getOrderLogContext(order);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "create",
+    details: `Created order ${order.orderNumber} for ${logContext.companyName}`,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
+
   return ApiResponse.created(res, { order }, "Order created successfully");
 });
 
@@ -69,11 +90,34 @@ exports.update = asyncHandler(async (req, res) => {
     req.files
   );
 
+  const logContext = getOrderLogContext(order);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "update",
+    details: `Updated order ${order.orderNumber} for ${logContext.companyName}`,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
+
   return ApiResponse.success(res, { order }, "Order updated successfully");
 });
 
 exports.remove = asyncHandler(async (req, res) => {
+  const order = await orderService.getOrderById(req.params.id);
   const result = await orderService.deleteOrder(req.params.id);
+  const logContext = getOrderLogContext(order);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "delete",
+    details: `Deleted order ${order.orderNumber} for ${logContext.companyName}`,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
+
   return ApiResponse.success(res, result, result.message);
 });
 
@@ -89,12 +133,24 @@ exports.createNote = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
+  const order = await orderService.getOrderById(req.params.id);
   const notes = await orderService.addOrderNote(
     req.params.id,
     req.body,
     req.user.id,
     req.file
   );
+
+  const logContext = getOrderLogContext(order);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "create_note",
+    details: `Added note to order ${order.orderNumber}`,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
 
   return ApiResponse.created(res, { notes }, "Note added successfully");
 });
@@ -106,6 +162,7 @@ exports.updateNote = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
+  const order = await orderService.getOrderById(req.params.id);
   const result = await orderService.updateOrderNote(
     req.params.id,
     req.params.noteId,
@@ -113,6 +170,17 @@ exports.updateNote = asyncHandler(async (req, res) => {
     req.user.id,
     req.file
   );
+
+  const logContext = getOrderLogContext(order);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "update_note",
+    details: `Saved callback note on order ${order.orderNumber}`,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
 
   return ApiResponse.success(res, result, "Note updated successfully");
 });
@@ -134,11 +202,23 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
+  const order = await orderService.getOrderById(req.params.id);
   const stages = await orderService.updateOrderWorkflowStage(
     req.params.id,
     req.body.stageName,
     req.body.stageStatus
   );
+
+  const logContext = getOrderLogContext(order);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "workflow_update",
+    details: `Updated "${req.body.stageName}" workflow stage to ${req.body.stageStatus} on order ${order.orderNumber}`,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
 
   return ApiResponse.success(res, { stages }, "Workflow stage updated");
 });

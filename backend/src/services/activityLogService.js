@@ -65,7 +65,9 @@ function formatActionLabel(action, context) {
         ? "Employee Added"
         : context === "facilities"
           ? "Facility Created"
-          : "Record Created",
+          : context === "orders"
+            ? "Order Created"
+            : "Record Created",
     terminate: "Employee Terminated",
     activate: "Employee Activated",
     delete:
@@ -75,17 +77,35 @@ function formatActionLabel(action, context) {
           ? "Document Deleted"
           : context === "facilities"
             ? "Facility Deleted"
-            : "Record Deleted",
-    update: context === "facilities" ? "Facility Updated" : "Record Updated",
+            : context === "orders"
+              ? "Order Deleted"
+              : "Record Deleted",
+    update:
+      context === "facilities"
+        ? "Facility Updated"
+        : context === "orders"
+          ? "Order Updated"
+          : "Record Updated",
     update_profile: "Profile Updated",
     update_notifications: "Notifications Updated",
     change_password: "Password Changed",
     upload: "Document Uploaded",
+    upload_document: "Document Uploaded",
+    delete_document: "Document Deleted",
     create_doctors: "Doctor Added",
     deactivate_doctor: "Doctor Deactivated",
     reactivate_doctor: "Doctor Reactivated",
     set_default_doctor: "Default Doctor Updated",
-    create_note: "Note Added",
+    add_office_manager: "Office Manager Added",
+    remove_office_manager: "Office Manager Removed",
+    create_note:
+      context === "orders"
+        ? "Order Note Added"
+        : context === "facilities" || context === "notes"
+          ? "Facility Note Added"
+          : "Note Added",
+    update_note: "Order Note Callback",
+    workflow_update: "Order Workflow Updated",
   };
 
   return labels[action] || String(action || "Activity");

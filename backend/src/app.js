@@ -6,7 +6,7 @@ const config = require("./config");
 const routes = require("./routes");
 const notFound = require("./middleware/notFound");
 const errorHandler = require("./middleware/errorHandler");
-const { UPLOADS_ROOT } = require("./middleware/uploadMiddleware");
+const { uploadsRoot } = require("./config/uploads");
 
 const app = express();
 
@@ -16,7 +16,7 @@ app.use(cors({ origin: config.clientUrl, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/uploads", express.static(UPLOADS_ROOT));
+app.use("/uploads", express.static(uploadsRoot));
 
 if (config.nodeEnv !== "test") {
   app.use(morgan("dev"));

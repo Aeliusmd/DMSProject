@@ -41,3 +41,13 @@ docs/*.pdf
 Thumbs.db
 .idea/
 .vscode/
+
+# Frontend / Next.js (generated — never commit)
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+
+# Next.js build output at repo root (if any)
+.next/
+out/
+node_modules/

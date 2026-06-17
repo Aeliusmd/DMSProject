@@ -18,11 +18,12 @@ exports.createNote = asyncHandler(async (req, res) => {
   );
 
   await activityLogService.recordFromRequest(req, {
-    context: "notes",
-    action: "create_note",
-    details: `Added note to facility ${facility.facilityName}`,
     facilityId: Number(req.params.id),
     companyName: facility.facilityName,
+    targetEmployeeId: req.user?.id,
+    context: "facilities",
+    action: "create_note",
+    details: `Added note to facility ${facility.facilityName}`,
   });
 
   return ApiResponse.created(res, { note }, "Note created successfully");

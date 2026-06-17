@@ -41,3 +41,8 @@ docs/*.pdf
 Thumbs.db
 .idea/
 .vscode/
+
+# Next.js (generated — never commit)
+.next/
+out/
+node_modules/

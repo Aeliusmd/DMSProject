@@ -6,6 +6,14 @@ const facilityDocumentService = require("../services/facilityDocumentService");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
 
+function buildFacilityLogBase(req, facility) {
+  return {
+    facilityId: Number(facility.id),
+    companyName: facility.facilityName,
+    targetEmployeeId: req.user?.id,
+  };
+}
+
 exports.listDocuments = asyncHandler(async (req, res) => {
   const documents = await facilityDocumentService.getDocuments(req.params.id);
   return ApiResponse.success(res, { documents });
@@ -21,11 +29,10 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
   );
 
   await activityLogService.recordFromRequest(req, {
-    context: "documents",
-    action: "upload",
+    ...buildFacilityLogBase(req, facility),
+    context: "facilities",
+    action: "upload_document",
     details: `Uploaded document "${document.documentName}" (${document.documentType}) to ${facility.facilityName}`,
-    facilityId: Number(req.params.id),
-    companyName: facility.facilityName,
   });
 
   return ApiResponse.created(res, { document }, "Document uploaded successfully");
@@ -78,11 +85,10 @@ exports.deleteDocument = asyncHandler(async (req, res) => {
   );
 
   await activityLogService.recordFromRequest(req, {
-    context: "documents",
-    action: "delete",
+    ...buildFacilityLogBase(req, facility),
+    context: "facilities",
+    action: "delete_document",
     details: `Deleted document "${document.document_name}" from ${facility.facilityName}`,
-    facilityId: Number(req.params.id),
-    companyName: facility.facilityName,
   });
 
   return ApiResponse.success(res, result, result.message);

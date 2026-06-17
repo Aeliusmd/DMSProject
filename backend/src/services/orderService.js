@@ -593,7 +593,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
       activityDate: new Date(),
       performedBy: actorId || null,
       authorName,
-      callbackDate: null,
+      callbackDate: dateOrNull(data.callbackDate) || updatedNote?.callback_date || null,
       note: noteText,
       attachmentPath: updatedNote?.attachment_path || null,
     });
