@@ -3,7 +3,16 @@ const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const Order = require("../models/Order");
 const Provider = require("../models/Provider");
+const config = require("../config");
 const { getPool } = require("../config/database");
+const { calculateRushLevel } = require("../utils/rushUtils");
+
+const ORDER_TYPE_LABELS = {
+  medical: "Medical Records",
+  billing: "Billing Records",
+  employment: "Employment Records",
+  xrays: "X-Rays",
+};
 
 function trimOrNull(value) {
   if (value === undefined || value === null) return null;
@@ -34,6 +43,91 @@ function getXrayPayment(xrayRow) {
 function getXrayPrepaymentPaid(invoice, xrayRow) {
   if (!invoice || !xrayRow) return 0;
   return Math.min(toNumber(invoice.amount_paid), getXrayPayment(xrayRow));
+}
+
+const ORDER_PAYMENT_TYPES = ["prepayment", "custodian", "xray"];
+
+const ORDER_PAYMENT_LABELS = {
+  prepayment: "Prepayment",
+  custodian: "Custodian",
+  xray: "X-Ray Fee",
+};
+
+function getOrderPaymentAmount(payments = [], paymentType) {
+  const payment = payments.find((row) => row.payment_type === paymentType);
+  if (!payment) return 0;
+
+  const amount = toNumber(payment.amount);
+  return amount > 0 ? amount : 0;
+}
+
+function sumOrderPayments(payments = []) {
+  return ORDER_PAYMENT_TYPES.reduce(
+    (sum, paymentType) => sum + getOrderPaymentAmount(payments, paymentType),
+    0
+  );
+}
+
+function resolveAmountPaid(orderPayments, existing = null) {
+  if (orderPayments !== undefined) {
+    return sumOrderPayments(orderPayments);
+  }
+
+  if (existing) {
+    return toNumber(existing.amount_paid);
+  }
+
+  return 0;
+}
+
+function resolveInvoiceStatusForSave(existing, totalAmount, amountPaid, derivedStatus) {
+  if (!existing) {
+    return derivedStatus ?? deriveInvoiceStatus(totalAmount, amountPaid);
+  }
+
+  if (existing.status === "Written Off") {
+    return "Written Off";
+  }
+
+  if (existing.status === "Needs Resend") {
+    return "Needs Resend";
+  }
+
+  return derivedStatus ?? deriveInvoiceStatus(totalAmount, amountPaid);
+}
+
+async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
+  const db = connection || getPool();
+
+  const [invoiceRows] = await db.execute(
+    `SELECT id, total_amount, status
+     FROM invoices
+     WHERE order_id = :orderId
+     LIMIT 1`,
+    { orderId }
+  );
+  const invoice = invoiceRows[0];
+
+  if (!invoice) {
+    return null;
+  }
+
+  const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
+  const amountPaid = sumOrderPayments(orderPayments);
+  const totalAmount = toNumber(invoice.total_amount);
+  const { amountDue, status } = resolveInvoiceAmounts(totalAmount, amountPaid);
+
+  await connection.execute(
+    `UPDATE invoices
+     SET amount_paid = :amountPaid,
+         amount_due = :amountDue,
+         status = :status,
+         updated_at = NOW()
+     WHERE id = :id`,
+    { amountPaid, amountDue, status, id: invoice.id }
+  );
+
+  return { amountPaid, amountDue, status };
 }
 
 function toNumber(value) {
@@ -86,6 +180,56 @@ function buildApplicantName(row) {
     .filter(Boolean)
     .join(" ")
     .trim();
+}
+
+function buildOrderDetailsText(row) {
+  if (!row) return "";
+
+  const lines = [];
+  const push = (label, value) => {
+    const normalized = trimOrNull(value);
+    if (normalized) {
+      lines.push(`${label}: ${normalized}`);
+    }
+  };
+
+  push("Order Number", row.order_number);
+  push("Case Number", row.case_number);
+  push("Applicant", buildApplicantName(row));
+  push("Defendant", row.defendant);
+  push(
+    "Record Type",
+    ORDER_TYPE_LABELS[row.order_type] || row.order_type
+  );
+  push("Specific Record", row.specific_record);
+  push("Doctor", row.specific_doctor);
+  push("Serve Company", row.serve_company_name);
+
+  const serveAddress = [
+    trimOrNull(row.serve_address),
+    [trimOrNull(row.serve_city), trimOrNull(row.serve_state)]
+      .filter(Boolean)
+      .join(", "),
+    trimOrNull(row.serve_zip),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  push("Serve Address", serveAddress);
+  push(
+    "Subpoena Date",
+    row.subpoena_date ? toShortDate(row.subpoena_date) : null
+  );
+  push(
+    "Depo Due Date",
+    row.depo_due_date ? toShortDate(row.depo_due_date) : null
+  );
+  push(
+    "Date Served",
+    row.date_served ? toShortDate(row.date_served) : null
+  );
+
+  return lines.join("\n");
 }
 
 function daysSince(dateValue) {
@@ -165,24 +309,40 @@ function mapInvoiceDetail(row) {
     notes: row.notes || "",
     sendOrderDetails: Boolean(row.send_order_details),
     rushOrder: Boolean(row.is_rush_order),
+    rushLevel: calculateRushLevel(row.subpoena_date),
+    subpoenaDate: toInputDate(row.subpoena_date),
     applicant: buildApplicantName(row),
   };
 }
 
 function deriveInvoiceStatus(totalAmount, amountPaid) {
-  if (totalAmount <= 0) {
+  const total = toNumber(totalAmount);
+  const paid = toNumber(amountPaid);
+
+  if (paid <= 0) {
     return "Unpaid";
   }
 
-  if (amountPaid >= totalAmount) {
+  if (total <= 0 || paid >= total) {
     return "Paid";
   }
 
-  if (amountPaid > 0) {
-    return "Partial";
-  }
+  return "Partial";
+}
 
-  return "Unpaid";
+function resolveInvoiceAmounts(totalAmount, amountPaid) {
+  const total = toNumber(totalAmount);
+  const paid = toNumber(amountPaid);
+  const amountDue = Math.max(0, total - paid);
+  const overpayment = Math.max(0, paid - total);
+  const status = deriveInvoiceStatus(total, paid);
+
+  return {
+    amountDue,
+    overpayment,
+    status,
+    isOverpaid: overpayment > 0,
+  };
 }
 
 function mapXrayDetail(row, invoice = null) {
@@ -226,9 +386,76 @@ function mapXrayReviewAmount(xrayRow, invoiceRow = null) {
   return formatMoney(balanceDue);
 }
 
-function mapOrderInvoiceSummary(row, xrayRow = null) {
+function mapOrderPaymentsSummary(payments = []) {
+  const amounts = ORDER_PAYMENT_TYPES.reduce((acc, paymentType) => {
+    acc[paymentType] = getOrderPaymentAmount(payments, paymentType);
+    return acc;
+  }, {});
+
+  const paymentLines = ORDER_PAYMENT_TYPES.reduce((lines, paymentType) => {
+    const amount = amounts[paymentType];
+    if (amount <= 0) return lines;
+
+    lines.push({
+      type: paymentType,
+      label: ORDER_PAYMENT_LABELS[paymentType],
+      amount,
+      bracketLabel: `${ORDER_PAYMENT_LABELS[paymentType]} (${formatMoney(amount)})`,
+    });
+
+    return lines;
+  }, []);
+
+  return {
+    prepaymentPaid: amounts.prepayment,
+    custodianPaid: amounts.custodian,
+    xrayPaid: amounts.xray,
+    orderAmountPaid: sumOrderPayments(payments),
+    paymentLines,
+  };
+}
+
+function mapOrderInvoiceFees(invoiceRow, xrayRow = null) {
+  if (!invoiceRow) {
+    return {
+      hasInvoice: false,
+      serviceFee: 0,
+      custodianFee: 0,
+      xrayFee: 0,
+    };
+  }
+
+  const xrayFeeFromInvoice = toNumber(invoiceRow.xray_fee);
+  const xrayFee =
+    xrayFeeFromInvoice > 0
+      ? xrayFeeFromInvoice
+      : xrayRow
+        ? toNumber(xrayRow.payment)
+        : 0;
+
+  return {
+    hasInvoice: true,
+    serviceFee: toNumber(invoiceRow.service_fee),
+    custodianFee: toNumber(invoiceRow.custodian_fee),
+    xrayFee,
+  };
+}
+
+function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
+  const paymentsSummary = mapOrderPaymentsSummary(orderPayments);
+
   if (!row) {
-    return { createOnly: true, hasXray: false };
+    return {
+      createOnly: true,
+      hasXray: false,
+      ...paymentsSummary,
+      status: null,
+      due: formatMoney(0),
+      paidAmount:
+        paymentsSummary.orderAmountPaid > 0
+          ? formatMoney(paymentsSummary.orderAmountPaid)
+          : null,
+    };
   }
 
   const hasXray = Boolean(xrayRow);
@@ -249,11 +476,13 @@ function mapOrderInvoiceSummary(row, xrayRow = null) {
     xrayReviewAmount: mapXrayReviewAmount(xrayRow, row),
     showEmail: Boolean(getInvoiceRecipientEmail(row)),
     paid: row.status === "Paid" ? formatMoney(row.amount_paid) : null,
+    status: row.status || "Unpaid",
     date: toShortDate(row.invoice_date),
     sentDateRaw: toInputDate(row.sent_date),
     invoiced: formatMoney(row.total_amount),
     due: formatMoney(row.amount_due),
     paidAmount: formatMoney(row.amount_paid),
+    ...paymentsSummary,
     servedAmount: toNumber(row.served_amount).toFixed(2),
     serviceFee: toNumber(row.service_fee).toFixed(2),
     custodianFee: toNumber(row.custodian_fee).toFixed(2),
@@ -266,6 +495,8 @@ function mapOrderInvoiceSummary(row, xrayRow = null) {
     notes: row.notes || "",
     sendOrderDetails: Boolean(row.send_order_details),
     rushOrder: Boolean(row.is_rush_order),
+    rushLevel: calculateRushLevel(row.subpoena_date),
+    subpoenaDate: toInputDate(row.subpoena_date),
   };
 }
 
@@ -381,11 +612,15 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
   const xrayFee =
     options.xrayFee !== undefined ? toNumber(options.xrayFee) : toNumber(body.xrayFee);
   const totals = calculateTotals({ ...body, xrayFee });
-  const amountPaid = existing ? toNumber(existing.amount_paid) : 0;
-  const amountDue = Math.max(0, totals.totalAmount - amountPaid);
+  const amountPaid = resolveAmountPaid(options.orderPayments, existing);
+  const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
+    totals.totalAmount,
+    amountPaid
+  );
+  const status = resolveInvoiceStatusForSave(existing, totals.totalAmount, amountPaid, derivedStatus);
 
   return {
-    status: existing?.status || "Unpaid",
+    status,
     invoiceDate: trimOrNull(body.invoiceDate),
     serviceDate: trimOrNull(body.serviceDate),
     sentDate: existing?.sent_date || null,
@@ -485,7 +720,6 @@ async function createOrUpdateXrayInvoice(body, userId) {
   const orderId = Number(body.orderId);
   const viewCount = Math.max(0, Math.floor(toNumber(body.views)));
   const perViewAmount = toNumber(body.perViewAmount);
-  const prepayment = toNumber(body.prepayment);
   const viewsAmount = viewCount * perViewAmount;
   const xrayInvoiceDate = trimOrNull(body.xrayInvoiceDate);
   const examDate = trimOrNull(body.examDate);
@@ -514,14 +748,18 @@ async function createOrUpdateXrayInvoice(body, userId) {
 
     let invoice = await Invoice.findByOrderId(orderId);
     const existingXray = await InvoiceXray.findByOrderId(orderId, connection);
+    const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
+    const orderXrayPaid = getOrderPaymentAmount(orderPayments, "xray");
+    const prepaymentInput = trimOrNull(body.prepayment);
+    const prepayment =
+      prepaymentInput !== null ? toNumber(body.prepayment) : orderXrayPaid;
     const oldPrepayment = getXrayPrepaymentPaid(invoice, existingXray);
     const xrayFee = viewsAmount;
 
     if (!invoice) {
       const totalAmount = xrayFee;
-      const amountPaid = prepayment;
-      const amountDue = Math.max(0, totalAmount - amountPaid);
-      const status = deriveInvoiceStatus(totalAmount, amountPaid);
+      const amountPaid = prepayment > 0 ? prepayment : orderXrayPaid;
+      const { amountDue, status } = resolveInvoiceAmounts(totalAmount, amountPaid);
       const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
       const invoiceId = await Invoice.create(connection, {
@@ -572,9 +810,14 @@ async function createOrUpdateXrayInvoice(body, userId) {
         otherFee +
         pagesAmount;
       const basePaid = Math.max(0, toNumber(invoice.amount_paid) - oldPrepayment);
-      const amountPaid = basePaid + prepayment;
-      const amountDue = Math.max(0, totalAmount - amountPaid);
-      const status = deriveInvoiceStatus(totalAmount, amountPaid);
+      const alreadyIncludedOrderXray =
+        !existingXray ? Math.min(basePaid, orderXrayPaid) : 0;
+      const incrementalPrepayment = Math.max(
+        0,
+        prepayment - alreadyIncludedOrderXray
+      );
+      const amountPaid = basePaid + incrementalPrepayment;
+      const { amountDue, status } = resolveInvoiceAmounts(totalAmount, amountPaid);
       const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
       await Invoice.update(connection, invoice.id, {
@@ -658,16 +901,22 @@ async function createInvoice(body, userId) {
   try {
     await connection.beginTransaction();
 
-    const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
+    const [xrayRow, orderPayments] = await Promise.all([
+      InvoiceXray.findByOrderId(orderId, connection),
+      Order.findPaymentsByOrderId(orderId, connection),
+    ]);
     const xrayFee = getXrayPayment(xrayRow);
-    const invoicePayload = buildInvoicePayload(body, null, { xrayFee });
+    const invoicePayload = buildInvoicePayload(body, null, {
+      xrayFee,
+      orderPayments,
+    });
     const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
     const invoiceId = await Invoice.create(connection, {
       invoiceNumber: trimOrNull(body.invoiceNumber) || `INV-${order.order_number}`,
       orderId,
       facilityId: order.facility_id,
-      status: "Unpaid",
+      status: invoicePayload.status,
       invoiceDate: invoicePayload.invoiceDate,
       serviceDate: invoicePayload.serviceDate,
       sentDate: invoicePayload.sentDate,
@@ -727,14 +976,18 @@ async function updateInvoice(id, body) {
     await connection.beginTransaction();
 
     const xrayRow = await InvoiceXray.findByOrderId(existing.order_id, connection);
+    const orderPayments = await Order.findPaymentsByOrderId(existing.order_id, connection);
     const xrayFee = getXrayPayment(xrayRow);
-    const invoicePayload = buildInvoicePayload(body, existing, { xrayFee });
+    const invoicePayload = buildInvoicePayload(body, existing, {
+      xrayFee,
+      orderPayments,
+    });
     const recipientEmails = order
       ? await resolveInvoiceRecipientFromOrder(order, connection)
       : trimOrNull(existing.recipient_emails);
 
     await Invoice.update(connection, id, {
-      status: existing.status,
+      status: invoicePayload.status,
       invoiceDate: invoicePayload.invoiceDate,
       serviceDate: invoicePayload.serviceDate,
       sentDate: invoicePayload.sentDate,
@@ -902,6 +1155,51 @@ async function getByCompany(facilityId, query = {}) {
   };
 }
 
+async function deliverInvoiceEmail(invoice, { isResend = false } = {}) {
+  if (!invoice) {
+    throw new ApiError(404, "Invoice not found");
+  }
+
+  const recipient = getInvoiceRecipientEmail(invoice);
+
+  if (!recipient) {
+    throw new ApiError(400, "No provider email address is available for this invoice");
+  }
+
+  const primaryEmail = recipient.split(",")[0].trim();
+  const { sendInvoiceEmail } = require("./emailService");
+
+  const result = await sendInvoiceEmail({
+    to: primaryEmail,
+    companyName: invoice.provider_name || invoice.facility_name || "Company",
+    caseNo: invoice.order_number || "",
+    applicant: buildApplicantName(invoice),
+    invoiceDate: toShortDate(invoice.invoice_date),
+    sentDate: toShortDate(isResend ? invoice.sent_date || new Date() : new Date()),
+    invoiced: formatMoney(invoice.total_amount),
+    paid: formatMoney(invoice.amount_paid),
+    due: formatMoney(invoice.amount_due),
+    isResend,
+    sendOrderDetails: Boolean(invoice.send_order_details),
+    isRushOrder: Boolean(invoice.is_rush_order),
+    rushLevel: calculateRushLevel(invoice.subpoena_date),
+    orderDetailsText: Boolean(invoice.send_order_details)
+      ? buildOrderDetailsText(invoice)
+      : "",
+  });
+
+  if (!result.delivered) {
+    const hint =
+      config.nodeEnv === "development" && result.devLogged
+        ? "SMTP is not configured or delivery failed (check backend logs)."
+        : "Failed to deliver invoice email.";
+
+    throw new ApiError(500, hint);
+  }
+
+  return { recipient: primaryEmail, delivered: true };
+}
+
 async function sendInvoices(invoiceIds = []) {
   const ids = [
     ...new Set(
@@ -926,31 +1224,12 @@ async function sendInvoices(invoiceIds = []) {
     .map((row) => normalizeInvoiceId(row.id))
     .filter(Boolean);
 
-  const { sendInvoiceEmail } = require("./emailService");
-
   for (const invoiceId of unsentIds) {
     const invoice = await Invoice.findById(invoiceId);
 
     if (!invoice) continue;
 
-    const recipient = getInvoiceRecipientEmail(invoice);
-
-    if (recipient) {
-      const primaryEmail = recipient.split(",")[0].trim();
-
-      await sendInvoiceEmail({
-        to: primaryEmail,
-        companyName: invoice.provider_name || invoice.facility_name || "Company",
-        caseNo: invoice.order_number || "",
-        applicant: buildApplicantName(invoice),
-        invoiceDate: toShortDate(invoice.invoice_date),
-        sentDate: toShortDate(new Date()),
-        invoiced: formatMoney(invoice.total_amount),
-        paid: formatMoney(invoice.amount_paid),
-        due: formatMoney(invoice.amount_due),
-        isResend: false,
-      });
-    }
+    await deliverInvoiceEmail(invoice, { isResend: false });
   }
 
   const sentCount = await Invoice.markAsSent(unsentIds);
@@ -975,7 +1254,6 @@ async function resendInvoices(invoiceIds = []) {
     throw new ApiError(400, "At least one invoice id is required");
   }
 
-  const { sendInvoiceEmail } = require("./emailService");
   const resent = [];
 
   for (const invoiceId of ids) {
@@ -989,26 +1267,7 @@ async function resendInvoices(invoiceIds = []) {
       throw new ApiError(400, "Only invoices marked for resend can be emailed again");
     }
 
-    const recipient = getInvoiceRecipientEmail(invoice);
-
-    if (!recipient) {
-      throw new ApiError(400, "No provider email address is available for this invoice");
-    }
-
-    const primaryEmail = recipient.split(",")[0].trim();
-
-    await sendInvoiceEmail({
-      to: primaryEmail,
-      companyName: invoice.provider_name || invoice.facility_name || "Company",
-      caseNo: invoice.order_number || "",
-      applicant: buildApplicantName(invoice),
-      invoiceDate: toShortDate(invoice.invoice_date),
-      sentDate: toShortDate(invoice.sent_date),
-      invoiced: formatMoney(invoice.total_amount),
-      paid: formatMoney(invoice.amount_paid),
-      due: formatMoney(invoice.amount_due),
-      isResend: true,
-    });
+    await deliverInvoiceEmail(invoice, { isResend: true });
 
     const updated = await Invoice.markAsResent([invoiceId]);
 
@@ -1020,6 +1279,37 @@ async function resendInvoices(invoiceIds = []) {
   }
 
   return { resentCount: resent.length };
+}
+
+async function emailInvoiceByOrderId(orderId) {
+  const normalizedOrderId = Number(orderId);
+
+  if (!Number.isFinite(normalizedOrderId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const invoice = await Invoice.findByOrderId(normalizedOrderId);
+
+  if (!invoice) {
+    throw new ApiError(404, "No invoice found for this order");
+  }
+
+  const invoiceId = normalizeInvoiceId(invoice.id);
+  const isResend = Boolean(invoice.sent_date);
+  const delivery = await deliverInvoiceEmail(invoice, { isResend });
+
+  if (!isResend) {
+    await Invoice.markAsSent([invoiceId]);
+  } else if (invoice.status === "Needs Resend") {
+    await Invoice.markAsResent([invoiceId]);
+  }
+
+  return {
+    invoiceId,
+    orderId: normalizedOrderId,
+    isResend,
+    recipient: delivery.recipient,
+  };
 }
 
 async function writeOffInvoices(body = {}, userId) {
@@ -1125,10 +1415,14 @@ module.exports = {
   updateInvoice,
   sendInvoices,
   resendInvoices,
+  emailInvoiceByOrderId,
   writeOffInvoices,
   getStandardInvoicesByOrderIds,
   getXrayDetailsByOrderIds,
   getXrayInvoiceByOrderId,
   createOrUpdateXrayInvoice,
   mapOrderInvoiceSummary,
+  mapOrderPaymentsSummary,
+  mapOrderInvoiceFees,
+  syncInvoiceAmountPaidFromOrder,
 };

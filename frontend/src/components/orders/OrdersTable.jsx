@@ -11,6 +11,7 @@ import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsM
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
 import { getOrders } from "@/lib/orders/orderApi";
+import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
 
 const ORDERS_PER_PAGE = 6;
 
@@ -85,6 +86,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
+  const [emailingOrderId, setEmailingOrderId] = useState(null);
+  const [emailError, setEmailError] = useState("");
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -157,6 +160,25 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     fetchOrders();
   }, [fetchOrders]);
 
+  const handleEmailInvoice = useCallback(
+    async (order) => {
+      if (!order?.dbId || emailingOrderId) return;
+
+      setEmailError("");
+      setEmailingOrderId(order.dbId);
+
+      try {
+        await emailInvoiceByOrderId(order.dbId);
+        await fetchOrders({ silent: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to email invoice");
+      } finally {
+        setEmailingOrderId(null);
+      }
+    },
+    [emailingOrderId, fetchOrders]
+  );
+
   // Refresh workflow/status changes made elsewhere when the user comes back
   // to the tab or window. No polling, so there is no idle network cost.
   useEffect(() => {
@@ -221,6 +243,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
           <p className="text-[11px] text-[#94A3B8]">Last updated: 6/2/2026</p>
         </div>
+
+        {emailError && (
+          <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
+            {emailError}
+          </p>
+        )}
 
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[1280px] border-collapse">
@@ -352,6 +380,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         onXrayCoverSheet={() =>
                           setSelectedXrayCoverSheetOrder(order)
                         }
+                        onEmailInvoice={() => handleEmailInvoice(order)}
+                        emailing={emailingOrderId === order.dbId}
                       />
                     </td>
 
@@ -507,6 +537,8 @@ function InvoiceBlock({
   onReviewXrayInvoice,
   onCoverSheet,
   onXrayCoverSheet,
+  onEmailInvoice,
+  emailing = false,
 }) {
   const xrayReviewLine = invoice.hasXray ? (
     <p className="text-[#334155]">
@@ -615,8 +647,13 @@ function InvoiceBlock({
       {xrayReviewLine}
 
       {invoice.showEmail && (
-        <button type="button" className="block text-[#007F96] underline">
-          Email Invoice
+        <button
+          type="button"
+          onClick={onEmailInvoice}
+          disabled={emailing}
+          className="block text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {emailing ? "Sending..." : "Email Invoice"}
         </button>
       )}
 
