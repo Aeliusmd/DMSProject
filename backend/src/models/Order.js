@@ -142,14 +142,40 @@ class Order {
       ? `WHERE ${conditions.join(" AND ")}`
       : "";
 
+    const limit =
+      filters.limit && Number(filters.limit) > 0
+        ? Math.min(Number(filters.limit), 500)
+        : null;
+
     const [rows] = await pool.execute(
       `${ORDER_DETAIL_SELECT}
        ${whereClause}
-       ORDER BY o.id DESC`,
+       ORDER BY o.id DESC
+       ${limit ? `LIMIT ${limit}` : ""}`,
       params
     );
 
     return rows;
+  }
+
+  static async countStats() {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(`
+      SELECT
+        COUNT(*) AS total_orders,
+        SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) AS active_cases,
+        SUM(
+          CASE
+            WHEN status IN ('Ready', 'Ready to Pickup') THEN 1
+            ELSE 0
+          END
+        ) AS ready_to_pickup,
+        SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
+      FROM orders
+    `);
+
+    return rows[0] || {};
   }
 
   static async findById(id) {

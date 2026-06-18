@@ -53,6 +53,11 @@ exports.getAll = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { orders });
 });
 
+exports.getStats = asyncHandler(async (_req, res) => {
+  const stats = await orderService.getOrderStats();
+  return ApiResponse.success(res, { stats });
+});
+
 exports.getUnprocessed = asyncHandler(async (_req, res) => {
   const items = await batchScanService.getUnprocessedQueue();
   return ApiResponse.success(res, items, "Unprocessed subpoenas retrieved");
