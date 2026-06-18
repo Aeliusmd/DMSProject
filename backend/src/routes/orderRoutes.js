@@ -12,6 +12,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", orderController.getAll);
+router.get("/reminders", orderController.getReminders);
 router.get("/unprocessed", orderController.getUnprocessed);
 router.get("/unprocessed/:extractId", orderController.getUnprocessedById);
 router.post(

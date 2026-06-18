@@ -63,6 +63,24 @@ class ActivityLog {
 
     return rows[0] || null;
   }
+
+  static async findByOrderId(orderId, { limit = 200 } = {}) {
+    const pool = getPool();
+    const orderTag = `%order_id:${Number(orderId)}%`;
+
+    const [rows] = await pool.execute(
+      `SELECT id, log_date, log_time, action, module, company_name, facility_id,
+              performed_by, performer_name, performer_initials, details, created_at
+       FROM activity_logs
+       WHERE module = 'Orders'
+         AND details LIKE :orderTag
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${Number(limit)}`,
+      { orderTag }
+    );
+
+    return rows;
+  }
 }
 
 module.exports = ActivityLog;
