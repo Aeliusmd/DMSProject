@@ -179,14 +179,35 @@ class Order {
     return rows[0] || null;
   }
 
-  static async findPaymentsByOrderId(orderId) {
-    const pool = getPool();
+  static async findPaymentsByOrderId(orderId, connection = null) {
+    const db = connection || getPool();
 
-    const [rows] = await pool.execute(
+    const [rows] = await db.execute(
       `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
        FROM order_payments
        WHERE order_id = :orderId`,
       { orderId }
+    );
+
+    return rows;
+  }
+
+  static async findPaymentsByOrderIds(orderIds = []) {
+    if (!orderIds.length) return [];
+
+    const pool = getPool();
+
+    const placeholders = orderIds.map((_, index) => `:id${index}`).join(", ");
+    const params = orderIds.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await pool.execute(
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
+       FROM order_payments
+       WHERE order_id IN (${placeholders})`,
+      params
     );
 
     return rows;

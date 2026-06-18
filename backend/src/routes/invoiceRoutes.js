@@ -13,6 +13,7 @@ router.get("/xray/order/:orderId", invoiceController.getXrayByOrder);
 router.post("/xray", invoiceController.createXray);
 router.post("/send", invoiceController.send);
 router.post("/resend", invoiceController.resend);
+router.post("/order/:orderId/email", invoiceController.emailByOrder);
 router.post("/write-off", invoiceController.writeOff);
 router.get("/:id", invoiceController.getById);
 router.post("/", invoiceController.create);

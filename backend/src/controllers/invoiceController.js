@@ -42,6 +42,11 @@ exports.resend = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, "Invoices resent successfully");
 });
 
+exports.emailByOrder = asyncHandler(async (req, res) => {
+  const result = await invoiceService.emailInvoiceByOrderId(req.params.orderId);
+  return ApiResponse.success(res, result, "Invoice emailed successfully");
+});
+
 exports.createXray = asyncHandler(async (req, res) => {
   const xray = await invoiceService.createOrUpdateXrayInvoice(req.body, req.user?.id);
   return ApiResponse.success(res, xray, "X-Ray invoice saved successfully");
