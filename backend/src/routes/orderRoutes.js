@@ -26,6 +26,7 @@ router.post(
   uploadSinglePdf("file"),
   orderController.batchScan
 );
+router.get("/:id/subpoena/file", orderController.getSubpoenaFile);
 router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);

@@ -59,7 +59,12 @@ export default function NewOrderField({
           }`}
         >
           {options.map((option) => (
-            <option key={option.label} value={option.value}>
+            <option
+              key={`${option.value}-${option.label}`}
+              value={option.value}
+              disabled={option.disabled}
+              hidden={option.hidden}
+            >
               {option.label}
             </option>
           ))}

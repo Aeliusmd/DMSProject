@@ -5,6 +5,7 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import UnprocessedSubpoenaCard from "@/components/orders/unprocessed/UnprocessedSubpoenaCard";
 import PdfPreviewDrawer from "@/components/orders/unprocessed/PdfPreviewDrawer";
 import { getUnprocessedSubpoenas } from "@/lib/orders/orderApi";
+import { mapUnprocessedSubpoenaItem } from "@/lib/orders/unprocessedUtils";
 
 export default function UnprocessedSubpoenasPage() {
   const [subpoenas, setSubpoenas] = useState([]);
@@ -18,18 +19,7 @@ export default function UnprocessedSubpoenasPage() {
     getUnprocessedSubpoenas()
       .then((items) => {
         if (!active) return;
-        setSubpoenas(
-          items.map((item) => ({
-            id: item.id,
-            fileName: item.fileName,
-            uploadedAt: item.uploadedAt,
-            pages: item.pages,
-            size: item.size,
-            referenceCode: item.referenceCode,
-            applicantName: item.applicantName,
-            caseName: item.caseName,
-          }))
-        );
+        setSubpoenas(items.map(mapUnprocessedSubpoenaItem));
       })
       .catch((err) => {
         if (active) {

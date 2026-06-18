@@ -101,6 +101,17 @@ exports.getById = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { order });
 });
 
+exports.getSubpoenaFile = asyncHandler(async (req, res) => {
+  const fileInfo = await orderService.getOrderSubpoenaFile(req.params.id);
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
+  );
+  return res.sendFile(fileInfo.absolutePath);
+});
+
 exports.getReminders = asyncHandler(async (req, res) => {
   const reminders = await orderService.getOrderReminders(req.user, {
     scope: req.query.scope,

@@ -12,6 +12,7 @@ const ORDER_TYPE_LABELS = {
   billing: "Billing Records",
   employment: "Employment Records",
   xrays: "X-Rays",
+  other: "Other",
 };
 
 function trimOrNull(value) {
