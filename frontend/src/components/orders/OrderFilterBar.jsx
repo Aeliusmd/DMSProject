@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 
 const defaultFilters = {
@@ -13,6 +13,12 @@ const defaultFilters = {
 export default function OrderFilterBar({ filters, onFiltersChange }) {
   const [localFilters, setLocalFilters] = useState(defaultFilters);
   const [facilities, setFacilities] = useState([]);
+
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+
+    return Array.from({ length: 8 }, (_, index) => String(currentYear - index));
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -63,7 +69,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           onChange={(e) => updateFilter("facility", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
-          <option value="">Facility</option>
+          <option value="">All Facility</option>
           {facilities.map((facility) => (
             <option key={facility.id} value={String(facility.id)}>
               {facility.facility || facility.facilityName || facility.name}
@@ -76,10 +82,12 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           onChange={(e) => updateFilter("year", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
-          <option value="">Year</option>
-          <option value="2026">2026</option>
-          <option value="2025">2025</option>
-          <option value="2024">2024</option>
+          <option value="">All Year</option>
+          {yearOptions.map((year) => (
+            <option key={year} value={year}>
+              {year}
+            </option>
+          ))}
         </select>
 
         <select
@@ -87,7 +95,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           onChange={(e) => updateFilter("status", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
-          <option value="">Status</option>
+          <option value="">All Status</option>
           <option value="active">Active</option>
           <option value="ready">Ready</option>
           <option value="completed">Completed</option>

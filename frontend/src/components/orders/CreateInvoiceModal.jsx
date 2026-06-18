@@ -3,18 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
-
-const createInvoiceTypes = [
-  "Create Invoice",
-  "Create Insurance Bill",
-  "Create Custodian Invoice",
-];
-
-const editInvoiceTypes = [
-  "Edit Invoice",
-  "Create Insurance Bill",
-  "Create Custodian Invoice",
-];
+import {
+  createInvoice,
+  getInvoice,
+  getXrayInvoiceByOrderId,
+  updateInvoice,
+} from "@/lib/invoices/invoiceApi";
 
 const initialFormData = {
   invoiceDate: "2026-06-02",
@@ -37,19 +31,17 @@ export default function CreateInvoiceModal({
   isOpen,
   order,
   onClose,
+  onSaved,
   mode = "create",
 }) {
   const mounted = useIsClient();
   const isEditMode = mode === "edit";
 
-  const invoiceTypes = isEditMode ? editInvoiceTypes : createInvoiceTypes;
-
-  const [activeType, setActiveType] = useState(
-    isEditMode ? "Edit Invoice" : "Create Invoice"
-  );
-
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [loadingInvoice, setLoadingInvoice] = useState(false);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -59,11 +51,63 @@ export default function CreateInvoiceModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
-      setActiveType(isEditMode ? "Edit Invoice" : "Create Invoice");
       setFormData(getInitialInvoiceFormData(order, isEditMode));
       setErrors({});
     }
   }
+
+  useEffect(() => {
+    if (!isOpen || !order?.dbId) return;
+
+    let cancelled = false;
+
+    async function loadInvoice() {
+      setLoadingInvoice(true);
+      setSubmitError("");
+
+      try {
+        const xrayData = await getXrayInvoiceByOrderId(order.dbId);
+        const xrayFee = moneyToInput(xrayData?.xray?.payment, "0.00");
+        const invoiceId = order.invoiceId || order.invoice?.invoiceId;
+
+        if (isEditMode && invoiceId) {
+          const invoice = await getInvoice(invoiceId);
+          if (cancelled) return;
+
+          setFormData({
+            ...mapInvoiceToFormData(invoice, order),
+            xrayFee,
+          });
+          return;
+        }
+
+        if (cancelled) return;
+
+        setFormData({
+          ...getInitialInvoiceFormData(order, isEditMode),
+          xrayFee,
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setSubmitError(error.message || "Failed to load invoice");
+          setFormData({
+            ...getInitialInvoiceFormData(order, isEditMode),
+            xrayFee: "0.00",
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingInvoice(false);
+        }
+      }
+    }
+
+    loadInvoice();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, order, isEditMode]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -146,34 +190,39 @@ export default function CreateInvoiceModal({
     }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const validationErrors = validateInvoiceForm(formData);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    if (isEditMode) {
-      console.log("Edit invoice:", {
-        type: activeType,
-        order,
-        formData,
-        pagesAmount,
-        totalAmount,
-      });
-
-      onClose();
-      return;
-    }
-
-    console.log("Create invoice:", {
-      type: activeType,
-      order,
-      formData,
+    const payload = {
+      orderId: order.dbId,
+      activeType: isEditMode ? "Edit Invoice" : "Create Invoice",
+      ...formData,
       pagesAmount,
       totalAmount,
-    });
+    };
 
-    onClose();
+    setSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const invoiceId = order.invoiceId || order.invoice?.invoiceId;
+
+      if (isEditMode && invoiceId) {
+        await updateInvoice(invoiceId, payload);
+      } else {
+        await createInvoice(payload);
+      }
+
+      onSaved?.();
+      onClose();
+    } catch (error) {
+      setSubmitError(error.message || "Failed to save invoice");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return createPortal(
@@ -219,29 +268,6 @@ export default function CreateInvoiceModal({
             {isEditMode && order.invoice?.paid && (
               <MetaItem label="Paid" value={order.invoice.paid} />
             )}
-          </div>
-        </div>
-
-        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5">
-          <div className="flex flex-wrap items-center gap-6">
-            {invoiceTypes.map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setActiveType(type)}
-                className={`relative h-[42px] text-[11px] font-semibold transition ${
-                  activeType === type
-                    ? "text-[#007F96]"
-                    : "text-[#475569] hover:text-[#007F96]"
-                }`}
-              >
-                {type}
-
-                {activeType === type && (
-                  <span className="absolute bottom-0 left-0 h-[2px] w-full rounded-full bg-[#0097B2]" />
-                )}
-              </button>
-            ))}
           </div>
         </div>
 
@@ -296,12 +322,9 @@ export default function CreateInvoiceModal({
             <SectionTitle title="Additional Charges" />
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <MoneyField
+              <ReadOnlyMoneyField
                 label="X-Ray Fee"
-                name="xrayFee"
-                value={formData.xrayFee}
-                onChange={handleMoneyChange}
-                error={errors.xrayFee}
+                value={toNumber(formData.xrayFee)}
               />
 
               <MoneyField
@@ -415,12 +438,21 @@ export default function CreateInvoiceModal({
             </div>
 
             <div className="mt-auto pt-6">
+              {submitError && (
+                <p className="mb-3 text-[11px] text-red-500">{submitError}</p>
+              )}
+
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937]"
+                disabled={submitting || loadingInvoice}
+                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitLabel}
+                {submitting
+                  ? "Saving..."
+                  : loadingInvoice
+                    ? "Loading..."
+                    : submitLabel}
               </button>
 
               <button
@@ -441,7 +473,10 @@ export default function CreateInvoiceModal({
 
 function getInitialInvoiceFormData(order, isEditMode) {
   if (!isEditMode) {
-    return initialFormData;
+    return {
+      ...initialFormData,
+      invoiceDate: new Date().toISOString().slice(0, 10),
+    };
   }
 
   const invoice = order?.invoice || {};
@@ -450,19 +485,42 @@ function getInitialInvoiceFormData(order, isEditMode) {
   return {
     ...initialFormData,
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
-    serviceDate: toDateInput(invoice.sentDate) || "",
-    servedAmount: "0.00",
-    serviceFee: invoiceAmount,
-    custodianFee: "0.00",
+    serviceDate: toDateInput(invoice.sentDateRaw || invoice.sentDate) || "",
+    servedAmount: invoice.servedAmount || "0.00",
+    serviceFee: invoice.serviceFee || invoiceAmount,
+    custodianFee: invoice.custodianFee || "0.00",
     xrayFee: "0.00",
-    mileage: "0.00",
-    parking: "0.00",
-    other: "0.00",
-    pages: "0",
-    perPageAmount: "0.00",
-    notes: `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
-    sendOrderDetails: true,
-    rushOrder: false,
+    mileage: invoice.mileage || "0.00",
+    parking: invoice.parking || "0.00",
+    other: invoice.other || "0.00",
+    pages: invoice.pages || "0",
+    perPageAmount: invoice.perPageAmount || "0.00",
+    notes: invoice.notes || `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
+    sendOrderDetails: invoice.sendOrderDetails ?? true,
+    rushOrder: invoice.rushOrder ?? false,
+  };
+}
+
+function mapInvoiceToFormData(invoice, order) {
+  if (!invoice) {
+    return getInitialInvoiceFormData(order, true);
+  }
+
+  return {
+    invoiceDate: invoice.invoiceDate || initialFormData.invoiceDate,
+    serviceDate: invoice.serviceDate || "",
+    servedAmount: invoice.servedAmount || "0.00",
+    serviceFee: invoice.serviceFee || "0.00",
+    custodianFee: invoice.custodianFee || "0.00",
+    xrayFee: "0.00",
+    mileage: invoice.mileage || "0.00",
+    parking: invoice.parking || "0.00",
+    other: invoice.other || "0.00",
+    pages: invoice.pages || "0",
+    perPageAmount: invoice.perPageAmount || "0.00",
+    notes: invoice.notes || "",
+    sendOrderDetails: Boolean(invoice.sendOrderDetails),
+    rushOrder: Boolean(invoice.rushOrder),
   };
 }
 
@@ -658,7 +716,6 @@ function validateInvoiceForm(data) {
     "servedAmount",
     "serviceFee",
     "custodianFee",
-    "xrayFee",
     "mileage",
     "parking",
     "other",

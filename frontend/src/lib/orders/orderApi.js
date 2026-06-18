@@ -1,4 +1,6 @@
-import { request } from "@/lib/auth/authApi";
+import { request, ApiRequestError } from "@/lib/auth/authApi";
+import { API_BASE_URL } from "@/config/api";
+import { getAccessToken } from "@/lib/auth/authStorage";
 
 function buildOrdersQuery(filters = {}) {
   const params = new URLSearchParams();
@@ -152,4 +154,63 @@ export async function updateOrderNote(
 export async function getOrderActivityLogs(id) {
   const data = await request(`/orders/${id}/activity-logs`, { auth: true });
   return data?.data?.logs || [];
+}
+
+export async function uploadBatchScan(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const data = await request("/orders/batch-scan", {
+    method: "POST",
+    auth: true,
+    body: formData,
+  });
+
+  return data?.data || null;
+}
+
+export async function uploadSingleSubpoena(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const data = await request("/orders/subpoena/upload", {
+    method: "POST",
+    auth: true,
+    body: formData,
+  });
+
+  return data?.data || null;
+}
+
+export async function getUnprocessedSubpoenas() {
+  const data = await request("/orders/unprocessed", { auth: true });
+  return Array.isArray(data?.data) ? data.data : [];
+}
+
+export async function getUnprocessedSubpoenaById(extractId) {
+  const data = await request(`/orders/unprocessed/${extractId}`, { auth: true });
+  return data?.data || null;
+}
+
+export async function fetchUnprocessedSubpoenaPdf(extractId) {
+  const token = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/orders/unprocessed/${extractId}/file`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+
+  if (!response.ok) {
+    let message = "Failed to load subpoena PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
 }

@@ -121,8 +121,10 @@ class Order {
     }
 
     if (filters.year) {
-      conditions.push("YEAR(o.subpoena_date) = :year");
-      params.year = filters.year;
+      conditions.push(
+        "YEAR(COALESCE(o.subpoena_date, o.created_at)) = :year"
+      );
+      params.year = Number(filters.year);
     }
 
     if (filters.search) {

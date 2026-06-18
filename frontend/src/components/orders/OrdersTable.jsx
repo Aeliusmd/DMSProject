@@ -65,7 +65,7 @@ function toRenderOrder(order) {
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
     status: mapWorkflowStages(order.workflowStages),
-    invoice: { createOnly: true },
+    invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
     dobSsn: order.dobSsn || [],
@@ -77,6 +77,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [invoiceModalMode, setInvoiceModalMode] = useState("create");
   const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
   const [selectedCoverSheetOrder, setSelectedCoverSheetOrder] = useState(null);
   const [selectedXrayCoverSheetOrder, setSelectedXrayCoverSheetOrder] =
@@ -330,8 +331,23 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     <td className="px-4 py-5 align-top">
                       <InvoiceBlock
                         invoice={order.invoice}
-                        onCreateInvoice={() => setSelectedInvoiceOrder(order)}
+                        onCreateInvoice={() => {
+                          setInvoiceModalMode("create");
+                          setSelectedInvoiceOrder(order);
+                        }}
+                        onReviewInvoice={() => {
+                          setInvoiceModalMode("edit");
+                          setSelectedInvoiceOrder({
+                            ...order,
+                            invoiceId: order.invoice?.invoiceId,
+                            invoice: {
+                              ...order.invoice,
+                              invoiceId: order.invoice?.invoiceId,
+                            },
+                          });
+                        }}
                         onCreateXrayInvoice={() => setSelectedXrayOrder(order)}
+                        onReviewXrayInvoice={() => setSelectedXrayOrder(order)}
                         onCoverSheet={() => setSelectedCoverSheetOrder(order)}
                         onXrayCoverSheet={() =>
                           setSelectedXrayCoverSheetOrder(order)
@@ -423,14 +439,17 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
       <CreateInvoiceModal
         isOpen={Boolean(selectedInvoiceOrder)}
+        mode={invoiceModalMode}
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
+        onSaved={fetchOrders}
       />
 
       <CreateXrayInvoiceModal
         isOpen={Boolean(selectedXrayOrder)}
         order={selectedXrayOrder}
         onClose={() => setSelectedXrayOrder(null)}
+        onSaved={fetchOrders}
       />
 
       <CoverSheetModal
@@ -483,10 +502,34 @@ function WorkflowStageItem({ stage }) {
 function InvoiceBlock({
   invoice,
   onCreateInvoice,
+  onReviewInvoice,
   onCreateXrayInvoice,
+  onReviewXrayInvoice,
   onCoverSheet,
   onXrayCoverSheet,
 }) {
+  const xrayReviewLine = invoice.hasXray ? (
+    <p className="text-[#334155]">
+      <button
+        type="button"
+        onClick={onReviewXrayInvoice}
+        className="text-[#007F96] underline"
+      >
+        Review Xray Invoice
+      </button>{" "}
+      <span className="text-[#94A3B8]">{invoice.xrayReviewDate}</span>{" "}
+      <span className="text-[#111827]">{invoice.xrayReviewAmount}</span>
+    </p>
+  ) : (
+    <button
+      type="button"
+      onClick={onCreateXrayInvoice}
+      className="block text-[#007F96] underline"
+    >
+      Create Xray Invoice
+    </button>
+  );
+
   if (invoice.createOnly) {
     return (
       <div className="space-y-1 text-[10px]">
@@ -513,6 +556,8 @@ function InvoiceBlock({
         >
           X-ray Cover Sheet
         </button>
+
+        {xrayReviewLine}
       </div>
     );
   }
@@ -520,7 +565,11 @@ function InvoiceBlock({
   return (
     <div className="space-y-1 text-[10px]">
       <p className="text-[#334155]">
-        <button type="button" className="text-[#007F96] underline">
+        <button
+          type="button"
+          onClick={onReviewInvoice}
+          className="text-[#007F96] underline"
+        >
           Review Invoice
         </button>{" "}
         <span className="text-[#94A3B8]">{invoice.reviewDate}</span>{" "}
@@ -563,15 +612,7 @@ function InvoiceBlock({
         X-ray Cover Sheet
       </button>
 
-      {invoice.showXray && (
-        <button
-          type="button"
-          onClick={onCreateXrayInvoice}
-          className="block text-[#007F96] underline"
-        >
-          Create Xray Invoice
-        </button>
-      )}
+      {xrayReviewLine}
 
       {invoice.showEmail && (
         <button type="button" className="block text-[#007F96] underline">
