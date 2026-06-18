@@ -9,6 +9,7 @@ function buildOrdersQuery(filters = {}) {
   if (filters.year) params.set("year", filters.year);
   if (filters.status) params.set("status", filters.status);
   if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.limit) params.set("limit", String(filters.limit));
 
   const queryString = params.toString();
   return queryString ? `?${queryString}` : "";
@@ -55,6 +56,11 @@ export async function getOrders(filters = {}) {
   });
 
   return data?.data?.orders || [];
+}
+
+export async function getOrderStats() {
+  const data = await request("/orders/stats", { auth: true });
+  return data?.data?.stats || null;
 }
 
 export async function getOrder(id) {

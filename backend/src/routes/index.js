@@ -10,6 +10,7 @@ const reportRoutes = require("./reportRoutes");
 const notificationRoutes = require("./notificationRoutes");
 const activityLogRoutes = require("./activityLogRoutes");
 const settingsRoutes = require("./settingsRoutes");
+const dashboardRoutes = require("./dashboardRoutes");
 
 const router = express.Router();
 
@@ -23,5 +24,6 @@ router.use("/reports", reportRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/activity-log", activityLogRoutes);
 router.use("/settings", settingsRoutes);
+router.use("/dashboard", dashboardRoutes);
 
 module.exports = router;

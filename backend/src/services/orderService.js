@@ -280,6 +280,54 @@ function buildRecordsBlock(row) {
   return { title, lines, links: [] };
 }
 
+function calculateRushLevel(createdAt) {
+  if (!createdAt) {
+    return { level: null, label: null };
+  }
+
+  const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
+  if (Number.isNaN(created.getTime())) {
+    return { level: null, label: null };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  created.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor(
+    (today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays < 0) {
+    return { level: null, label: null };
+  }
+
+  const weeks = Math.floor(diffDays / 7);
+
+  // Rush 1: new through ~1 week (0–13 days), Rush 2: 2 weeks, Rush 3: 3+ weeks
+  if (weeks < 2) {
+    return { level: 1, label: "Rush 1" };
+  }
+
+  if (weeks === 2) {
+    return { level: 2, label: "Rush 2" };
+  }
+
+  return { level: 3, label: "Rush 3" };
+}
+
+function deriveInvoiceDisplayStatus(invoiceRow) {
+  if (!invoiceRow) {
+    return "Pending";
+  }
+
+  if (String(invoiceRow.status || "").toLowerCase() === "paid") {
+    return "Paid";
+  }
+
+  return "Created";
+}
+
 function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = null) {
   const subpoenaYear = row.subpoena_date
     ? String(new Date(row.subpoena_date).getFullYear())
@@ -290,6 +338,8 @@ function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = 
   const dobSsn = [];
   if (row.dob) dobSsn.push(toShortDate(row.dob));
   if (row.ssn_last_four) dobSsn.push(`XXX-XX-${row.ssn_last_four}`);
+
+  const rush = calculateRushLevel(row.created_at);
 
   return {
     id: row.order_number,
@@ -308,7 +358,15 @@ function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = 
       row.applicant_middle_name,
       row.applicant_last_name
     ),
+    caseNumber: row.case_number || "",
     orderRef: row.order_ref || "",
+    providerName: row.serve_company_name || row.provider_name || "",
+    subpoenaDate: toInputDate(row.subpoena_date),
+    subpoenaDateDisplay: toShortDate(row.subpoena_date),
+    createdAt: row.created_at || null,
+    rushLevel: rush.level,
+    rushLabel: rush.label,
+    invoiceStatus: deriveInvoiceDisplayStatus(invoiceRow),
     records: buildRecordsBlock(row),
     company: buildCompanyBlock(row),
     dobSsn,
@@ -554,6 +612,13 @@ async function getAllOrders(query = {}) {
     filters.search = `${query.search}`.trim();
   }
 
+  if (query.limit) {
+    const limit = Number(query.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      filters.limit = limit;
+    }
+  }
+
   const rows = await Order.findAll(filters);
 
   const orderIds = rows.map((row) => row.id);
@@ -578,6 +643,17 @@ async function getAllOrders(query = {}) {
       xrayRow
     );
   });
+}
+
+async function getOrderStats() {
+  const row = await Order.countStats();
+
+  return {
+    totalOrders: Number(row.total_orders) || 0,
+    activeCases: Number(row.active_cases) || 0,
+    readyToPickup: Number(row.ready_to_pickup) || 0,
+    completed: Number(row.completed) || 0,
+  };
 }
 
 async function getOrderById(id) {
@@ -1100,6 +1176,7 @@ async function deleteOrder(id) {
 
 module.exports = {
   getAllOrders,
+  getOrderStats,
   getOrderById,
   getOrderReminders,
   createOrder,
