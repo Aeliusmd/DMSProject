@@ -16,7 +16,7 @@ function getFromAddress() {
     return from;
   }
 
-  return `DMS <${from}>`;
+  return `DMS Custodian <${from}>`;
 }
 
 function getTransporter() {
@@ -107,10 +107,15 @@ async function sendInvoiceEmail({
   paid,
   due,
   isResend = false,
+  sendOrderDetails = false,
+  isRushOrder = false,
+  rushLevel = null,
+  orderDetailsText = "",
 }) {
-  const subject = isResend
+  const baseSubject = isResend
     ? `Resent Invoice - Case ${caseNo}`
     : `Invoice - Case ${caseNo}`;
+  const subject = isRushOrder ? `RUSH - ${baseSubject}` : baseSubject;
 
   const text = [
     `Dear ${companyName},`,
@@ -119,6 +124,13 @@ async function sendInvoiceEmail({
       ? "Please find the resent invoice details below:"
       : "Please find the invoice details below:",
     "",
+    ...(isRushOrder
+      ? [
+          "This is a rush order.",
+          rushLevel ? `Rush Level: ${rushLevel}` : "",
+          "",
+        ].filter(Boolean)
+      : []),
     `Case Number: ${caseNo}`,
     `Applicant: ${applicant || "N/A"}`,
     `Invoice Date: ${invoiceDate || "N/A"}`,
@@ -126,6 +138,9 @@ async function sendInvoiceEmail({
     `Invoiced: ${invoiced}`,
     `Paid: ${paid}`,
     `Due: ${due}`,
+    ...(sendOrderDetails && orderDetailsText
+      ? ["", "Order Details:", orderDetailsText]
+      : []),
     "",
     "Thank you,",
     "DMS",

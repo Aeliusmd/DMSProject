@@ -10,6 +10,8 @@ const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag } = require("./activityLogService");
 const invoiceService = require("./invoiceService");
+const Invoice = require("../models/Invoice");
+const InvoiceXray = require("../models/InvoiceXray");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
 const batchScanRepository = require("../repositories/batchScanRepository");
@@ -329,6 +331,13 @@ function deriveInvoiceDisplayStatus(invoiceRow) {
 }
 
 function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = null) {
+function mapOrderListRow(
+  row,
+  workflowStages = [],
+  invoiceRow = null,
+  xrayRow = null,
+  orderPayments = []
+) {
   const subpoenaYear = row.subpoena_date
     ? String(new Date(row.subpoena_date).getFullYear())
     : row.created_at
@@ -371,7 +380,11 @@ function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = 
     company: buildCompanyBlock(row),
     dobSsn,
     forms: DEFAULT_ORDER_FORMS,
-    invoice: invoiceService.mapOrderInvoiceSummary(invoiceRow, xrayRow),
+    invoice: invoiceService.mapOrderInvoiceSummary(
+      invoiceRow,
+      xrayRow,
+      orderPayments
+    ),
   };
 }
 
@@ -505,7 +518,9 @@ function mapOrderDetail(
   payments = [],
   documents = [],
   workflowStages = [],
-  notes = []
+  notes = [],
+  invoiceRow = null,
+  xrayRow = null
 ) {
   return {
     id: row.id,
@@ -586,6 +601,8 @@ function mapOrderDetail(
     cnrMemo: Boolean(row.cnr_memo),
 
     ...mapPaymentsToForm(payments),
+    ...invoiceService.mapOrderPaymentsSummary(payments),
+    invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow),
   };
 }
 
@@ -625,10 +642,17 @@ async function getAllOrders(query = {}) {
   const stages = await Order.findWorkflowStagesByOrderIds(orderIds);
   const invoicesByOrderId = await invoiceService.getStandardInvoicesByOrderIds(orderIds);
   const xrayByOrderId = await invoiceService.getXrayDetailsByOrderIds(orderIds);
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
 
   const stagesByOrderId = stages.reduce((acc, stage) => {
     if (!acc[stage.order_id]) acc[stage.order_id] = [];
     acc[stage.order_id].push(stage);
+    return acc;
+  }, {});
+
+  const paymentsByOrderId = paymentRows.reduce((acc, payment) => {
+    if (!acc[payment.order_id]) acc[payment.order_id] = [];
+    acc[payment.order_id].push(payment);
     return acc;
   }, {});
 
@@ -640,7 +664,8 @@ async function getAllOrders(query = {}) {
       row,
       stagesByOrderId[row.id] || [],
       invoiceRow,
-      xrayRow
+      xrayRow,
+      paymentsByOrderId[row.id] || []
     );
   });
 }
@@ -667,7 +692,18 @@ async function getOrderById(id) {
   const documents = await Order.findDocumentsByOrderId(order.id);
   const workflowStages = await Order.findWorkflowStagesByOrderId(order.id);
   const notes = await Order.findNotesByOrderId(order.id);
-  return mapOrderDetail(order, payments, documents, workflowStages, notes);
+  const invoiceRow = await Invoice.findByOrderId(order.id);
+  const xrayRow = await InvoiceXray.findByOrderId(order.id);
+
+  return mapOrderDetail(
+    order,
+    payments,
+    documents,
+    workflowStages,
+    notes,
+    invoiceRow,
+    xrayRow
+  );
 }
 
 async function resolveAuthorName(actorId) {
@@ -1143,6 +1179,8 @@ async function updateOrder(id, data, actorId, files) {
         orderId: existing.id,
       });
     }
+
+    await invoiceService.syncInvoiceAmountPaidFromOrder(connection, existing.id);
 
     await saveOrderDocuments(connection, {
       orderId: existing.id,

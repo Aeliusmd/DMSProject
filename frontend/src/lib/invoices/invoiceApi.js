@@ -148,3 +148,12 @@ export async function resendInvoices(invoiceIds = []) {
 
   return data?.data || { resentCount: 0 };
 }
+
+export async function emailInvoiceByOrderId(orderId) {
+  const data = await request(`/invoices/order/${orderId}/email`, {
+    method: "POST",
+    auth: true,
+  });
+
+  return data?.data || { emailed: false };
+}
