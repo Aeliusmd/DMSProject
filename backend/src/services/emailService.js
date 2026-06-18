@@ -96,4 +96,73 @@ async function sendTwoFactorCode({ to, name, code }) {
   }
 }
 
-module.exports = { sendTwoFactorCode };
+async function sendInvoiceEmail({
+  to,
+  companyName,
+  caseNo,
+  applicant,
+  invoiceDate,
+  sentDate,
+  invoiced,
+  paid,
+  due,
+  isResend = false,
+}) {
+  const subject = isResend
+    ? `Resent Invoice - Case ${caseNo}`
+    : `Invoice - Case ${caseNo}`;
+
+  const text = [
+    `Dear ${companyName},`,
+    "",
+    isResend
+      ? "Please find the resent invoice details below:"
+      : "Please find the invoice details below:",
+    "",
+    `Case Number: ${caseNo}`,
+    `Applicant: ${applicant || "N/A"}`,
+    `Invoice Date: ${invoiceDate || "N/A"}`,
+    `Sent Date: ${sentDate || "N/A"}`,
+    `Invoiced: ${invoiced}`,
+    `Paid: ${paid}`,
+    `Due: ${due}`,
+    "",
+    "Thank you,",
+    "DMS",
+  ].join("\n");
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Invoice email", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = {
+    from: getFromAddress(),
+    to,
+    subject,
+    text,
+  };
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("Invoice email sent", { to, caseNo, isResend });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send invoice email", { to, error: error.message });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Invoice email fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
+module.exports = { sendTwoFactorCode, sendInvoiceEmail };

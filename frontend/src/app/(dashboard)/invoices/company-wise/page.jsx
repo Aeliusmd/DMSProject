@@ -1,228 +1,69 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
+import { getCompanyWiseInvoices } from "@/lib/invoices/invoiceApi";
 
-const companyInvoices = [
-  {
-    id: 1,
-    company: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-    cases: 4,
-    needsResend: 1,
-    invoiced: "$5,175.00",
-    paid: "$1,800.00",
-    due: "$3,375.00",
-  },
-  {
-    id: 2,
-    company: "Martinez Legal Group",
-    email: "invoices@martinezlegal.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$5,450.00",
-    paid: "$2,500.00",
-    due: "$2,950.00",
-  },
-  {
-    id: 3,
-    company: "Pacific Law Partners",
-    email: "billing@pacificlaw.com, ar@pacificlaw.com",
-    cases: 5,
-    needsResend: 1,
-    invoiced: "$6,990.00",
-    paid: "$2,950.00",
-    due: "$4,040.00",
-  },
-  {
-    id: 4,
-    company: "Williams & Co.",
-    email: "finance@williamsco.com",
-    cases: 2,
-    needsResend: 1,
-    invoiced: "$5,600.00",
-    paid: "$1,500.00",
-    due: "$4,100.00",
-  },
-  {
-    id: 5,
-    company: "Brown Family Trust",
-    email: "trustee@brownfamilytrust.com",
-    cases: 4,
-    needsResend: 0,
-    invoiced: "$4,600.00",
-    paid: "$800.00",
-    due: "$3,800.00",
-  },
-  {
-    id: 6,
-    company: "Davis Law Firm",
-    email: "billing@davislawfirm.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$6,050.00",
-    paid: "$3,000.00",
-    due: "$3,050.00",
-  },
-  {
-    id: 7,
-    company: "Rodriguez & Partners",
-    email: "ar@rodriguezpartners.com",
-    cases: 2,
-    needsResend: 1,
-    invoiced: "$3,550.00",
-    paid: "$1,000.00",
-    due: "$2,550.00",
-  },
-  {
-    id: 8,
-    company: "Thompson Industries",
-    email: "ap@thompsonindustries.com, billing@thompsonindustries.com",
-    cases: 4,
-    needsResend: 0,
-    invoiced: "$6,850.00",
-    paid: "$2,500.00",
-    due: "$4,350.00",
-  },
-  {
-    id: 9,
-    company: "Garcia Legal Services",
-    email: "payments@garcialegal.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$4,970.00",
-    paid: "$1,800.00",
-    due: "$3,170.00",
-  },
-  {
-    id: 10,
-    company: "Lee Tech Holdings",
-    email: "finance@leetech.com",
-    cases: 5,
-    needsResend: 1,
-    invoiced: "$9,400.00",
-    paid: "$4,500.00",
-    due: "$4,900.00",
-  },
-  {
-    id: 11,
-    company: "Anderson Accounting",
-    email: "bills@andersonaccounting.com",
-    cases: 3,
-    needsResend: 0,
-    invoiced: "$3,850.00",
-    paid: "$1,200.00",
-    due: "$2,650.00",
-  },
-  {
-    id: 12,
-    company: "Taylor Financial Group",
-    email: "invoices@taylorfinancial.com, ar@taylorfinancial.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$5,480.00",
-    paid: "$2,000.00",
-    due: "$3,480.00",
-  },
-  {
-    id: 13,
-    company: "Kim & Associates",
-    email: "billing@kimassociates.com",
-    cases: 2,
-    needsResend: 0,
-    invoiced: "$2,750.00",
-    paid: "$900.00",
-    due: "$1,850.00",
-  },
-  {
-    id: 14,
-    company: "Patel Law Office",
-    email: "payments@patellaw.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$4,150.00",
-    paid: "$1,000.00",
-    due: "$3,150.00",
-  },
-  {
-    id: 15,
-    company: "Johnson & Hayes",
-    email: "ar@johnsonhayes.com, billing@johnsonhayes.com",
-    cases: 4,
-    needsResend: 0,
-    invoiced: "$7,650.00",
-    paid: "$3,500.00",
-    due: "$4,150.00",
-  },
-  {
-    id: 16,
-    company: "Wilson Legal Corp",
-    email: "finance@wilsonlegal.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$4,700.00",
-    paid: "$1,500.00",
-    due: "$3,200.00",
-  },
-  {
-    id: 17,
-    company: "Chen & Associates",
-    email: "billing@chenassociates.com",
-    cases: 3,
-    needsResend: 0,
-    invoiced: "$5,550.00",
-    paid: "$2,200.00",
-    due: "$3,350.00",
-  },
-  {
-    id: 18,
-    company: "Miller Law Partners",
-    email: "invoices@millerlaw.com",
-    cases: 4,
-    needsResend: 1,
-    invoiced: "$4,450.00",
-    paid: "$1,000.00",
-    due: "$3,450.00",
-  },
-  {
-    id: 19,
-    company: "Harrison & Brooks",
-    email: "ap@harrisonbrooks.com",
-    cases: 3,
-    needsResend: 0,
-    invoiced: "$6,300.00",
-    paid: "$2,500.00",
-    due: "$3,800.00",
-  },
-  {
-    id: 20,
-    company: "Adams Legal Group",
-    email: "billing@adamslegal.com",
-    cases: 3,
-    needsResend: 1,
-    invoiced: "$4,950.00",
-    paid: "$1,700.00",
-    due: "$3,250.00",
-  },
-];
+const EMPTY_SUMMARY = {
+  companies: 0,
+  totalCases: 0,
+  needsResend: 0,
+  invoiced: "$0.00",
+  paid: "$0.00",
+  due: "$0.00",
+};
 
 export default function CompanyWiseInvoicesPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [companies, setCompanies] = useState([]);
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCompanies() {
+      setLoading(true);
+
+      try {
+        const data = await getCompanyWiseInvoices();
+        if (cancelled) return;
+
+        setCompanies(data.companies);
+        setSummary(data.summary);
+      } catch {
+        if (!cancelled) {
+          setCompanies([]);
+          setSummary(EMPTY_SUMMARY);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadCompanies();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredCompanies = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    if (!query) return companyInvoices;
+    if (!query) return companies;
 
-    return companyInvoices.filter((company) => {
+    return companies.filter((company) => {
       return (
         company.company.toLowerCase().includes(query) ||
         company.email.toLowerCase().includes(query)
       );
     });
-  }, [searchQuery]);
+  }, [companies, searchQuery]);
 
   return (
     <DashboardShell>
@@ -269,24 +110,45 @@ export default function CompanyWiseInvoicesPage() {
           </div>
         </div>
 
-        <SummaryStrip />
+        <SummaryStrip summary={summary} loading={loading} />
 
-        <CompanyWiseTable companies={filteredCompanies} />
+        <CompanyWiseTable companies={filteredCompanies} loading={loading} />
       </div>
     </DashboardShell>
   );
 }
 
-function SummaryStrip() {
+function SummaryStrip({ summary, loading }) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-4 shadow-sm">
       <div className="grid grid-cols-2 gap-x-10 gap-y-4 sm:grid-cols-3 lg:grid-cols-6">
-        <SummaryItem label="Companies" value="20" />
-        <SummaryItem label="Total Cases" value="66" />
-        <SummaryItem label="Needs Resend" value="13" orange />
-        <SummaryItem label="Total Invoiced" value="$108,065.00" />
-        <SummaryItem label="Total Paid" value="$39,450.00" green />
-        <SummaryItem label="Total Due" value="$68,615.00" red />
+        <SummaryItem
+          label="Companies"
+          value={loading ? "..." : String(summary.companies)}
+        />
+        <SummaryItem
+          label="Total Cases"
+          value={loading ? "..." : String(summary.totalCases)}
+        />
+        <SummaryItem
+          label="Needs Resend"
+          value={loading ? "..." : String(summary.needsResend)}
+          orange
+        />
+        <SummaryItem
+          label="Total Invoiced"
+          value={loading ? "..." : summary.invoiced}
+        />
+        <SummaryItem
+          label="Total Paid"
+          value={loading ? "..." : summary.paid}
+          green
+        />
+        <SummaryItem
+          label="Total Due"
+          value={loading ? "..." : summary.due}
+          red
+        />
       </div>
     </section>
   );
@@ -314,7 +176,7 @@ function SummaryItem({ label, value, green = false, red = false, orange = false 
   );
 }
 
-function CompanyWiseTable({ companies }) {
+function CompanyWiseTable({ companies, loading }) {
   return (
     <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
       <div className="h-full max-h-[calc(100vh-265px)] overflow-auto">
@@ -333,7 +195,19 @@ function CompanyWiseTable({ companies }) {
           </thead>
 
           <tbody>
-            {companies.map((company) => (
+            {loading && (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                >
+                  Loading companies...
+                </td>
+              </tr>
+            )}
+
+            {!loading &&
+              companies.map((company) => (
               <tr
                 key={company.id}
                 className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
@@ -391,7 +265,7 @@ function CompanyWiseTable({ companies }) {
               </tr>
             ))}
 
-            {companies.length === 0 && (
+            {!loading && companies.length === 0 && (
               <tr>
                 <td
                   colSpan={8}
