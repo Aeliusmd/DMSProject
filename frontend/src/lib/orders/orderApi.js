@@ -89,8 +89,19 @@ export async function deleteOrder(id) {
   });
 }
 
-export async function getOrderNotes(id) {
-  const data = await request(`/orders/${id}/notes`, { auth: true });
+export async function getOrderReminders(scope = "my") {
+  const data = await request(`/orders/reminders?scope=${scope}`, {
+    auth: true,
+  });
+  return data?.data?.reminders || [];
+}
+
+export async function getOrderNotes(id, { includeCalled = false, noteId = null } = {}) {
+  const params = new URLSearchParams();
+  if (includeCalled) params.set("includeCalled", "1");
+  if (noteId) params.set("noteId", String(noteId));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const data = await request(`/orders/${id}/notes${query}`, { auth: true });
   return data?.data?.notes || [];
 }
 

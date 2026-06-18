@@ -127,12 +127,77 @@ function appendTargetEmployee(details, targetEmployeeId) {
   return `${base} | target_employee_id:${targetEmployeeId}`;
 }
 
-function formatDisplayDate(logDate, logTime) {
-  if (!logDate) return "";
+function stripOrderIdTag(details) {
+  return String(details || "")
+    .replace(/\s*\|\s*order_id:\d+\s*$/i, "")
+    .trim();
+}
 
-  const datePart = String(logDate).slice(0, 10);
-  const timePart = logTime ? String(logTime).slice(0, 5) : "00:00";
-  const date = new Date(`${datePart}T${timePart}:00`);
+function appendOrderId(details, orderId) {
+  const base = stripOrderIdTag(details);
+
+  if (!orderId) {
+    return base;
+  }
+
+  return `${base} | order_id:${orderId}`;
+}
+
+function normalizeDateValue(value) {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const str = String(value).trim();
+  const isoMatch = str.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  if (isoMatch) {
+    return isoMatch[1];
+  }
+
+  const parsed = new Date(str);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeTimeValue(value) {
+  if (!value) return "";
+
+  const str = String(value).trim();
+  const timeMatch = str.match(/(\d{2}:\d{2})/);
+
+  if (timeMatch) {
+    return timeMatch[1];
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toTimeString().slice(0, 5);
+  }
+
+  return "";
+}
+
+function formatDisplayDate(logDate, logTime) {
+  const datePart = normalizeDateValue(logDate);
+  const timePart = normalizeTimeValue(logTime);
+
+  if (!datePart) return "";
+
+  const date = new Date(`${datePart}T${timePart || "00:00"}:00`);
 
   if (Number.isNaN(date.getTime())) {
     return `${datePart} ${timePart}`;
@@ -150,8 +215,8 @@ function formatDisplayDate(logDate, logTime) {
 
 function mapLogRow(row) {
   const details = stripTargetTag(row.details);
-  const logDate = row.log_date ? String(row.log_date).slice(0, 10) : "";
-  const logTime = row.log_time ? String(row.log_time).slice(0, 5) : "";
+  const logDate = normalizeDateValue(row.log_date);
+  const logTime = normalizeTimeValue(row.log_time);
 
   return {
     id: row.id,
@@ -310,4 +375,6 @@ module.exports = {
   getAllLogs,
   getLogById,
   mapLogRow,
+  appendOrderId,
+  stripOrderIdTag,
 };

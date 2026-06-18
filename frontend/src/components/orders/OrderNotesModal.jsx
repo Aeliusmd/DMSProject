@@ -45,7 +45,15 @@ const ALLOWED_FILE_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 
-export default function OrderNotesModal({ isOpen, order, onClose }) {
+export default function OrderNotesModal({
+  isOpen,
+  order,
+  onClose,
+  initialNoteId = null,
+  disableCreate = false,
+  includeCalled = false,
+  singleNoteMode = false,
+}) {
   const mounted = useIsClient();
   const [noteText, setNoteText] = useState("");
   const [callbackDate, setCallbackDate] = useState("");
@@ -61,6 +69,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
 
   const orderId = order?.dbId ?? order?.id ?? null;
   const isEditing = selectedNoteId !== null;
+  const fromReminder = singleNoteMode && Boolean(initialNoteId);
 
   const resetForm = () => {
     setNoteText("");
@@ -80,7 +89,10 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
     setLoadError("");
     setLoading(true);
 
-    getOrderNotes(orderId)
+    getOrderNotes(orderId, {
+      includeCalled: fromReminder ? true : includeCalled,
+      noteId: fromReminder ? initialNoteId : null,
+    })
       .then((notes) => {
         if (active) setHistory(toHistoryItems(notes));
       })
@@ -97,7 +109,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
     return () => {
       active = false;
     };
-  }, [isOpen, orderId]);
+  }, [isOpen, orderId, includeCalled, initialNoteId, singleNoteMode]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -109,6 +121,23 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
       document.body.style.overflow = originalOverflow;
     };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !initialNoteId || history.length === 0) return;
+
+    const initial = history.find(
+      (item) => Number(item.id) === Number(initialNoteId)
+    );
+
+    if (!initial) return;
+
+    setSelectedNoteId(initial.id);
+    setNoteText(initial.note);
+    setCallbackDate(initial.callbackDate || "");
+    setExistingAttachmentUrl(initial.attachmentUrl || "");
+    setAttachment(null);
+    setErrors({});
+  }, [isOpen, initialNoteId, history]);
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -206,6 +235,11 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
         attachment,
       });
 
+      if (fromReminder) {
+        onClose();
+        return;
+      }
+
       setHistory(toHistoryItems(result.notes));
       resetForm();
     } catch (err) {
@@ -291,7 +325,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
               {isEditing ? "Editing note" : "New note"}
             </span>
 
-            {isEditing && (
+            {isEditing && !disableCreate && (
               <button
                 type="button"
                 onClick={resetForm}
@@ -422,7 +456,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
                   Call
                 </button>
               </>
-            ) : (
+            ) : !disableCreate ? (
               <button
                 type="button"
                 onClick={handleSaveNewNote}
@@ -431,9 +465,10 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
               >
                 {saving ? "Saving..." : "Save Note"}
               </button>
-            )}
+            ) : null}
           </div>
 
+          {!fromReminder ? (
           <div className="mt-5">
             <h3 className="mb-2 text-[11px] font-semibold text-[#475569]">
               Note History
@@ -517,6 +552,7 @@ export default function OrderNotesModal({ isOpen, order, onClose }) {
               </table>
             </div>
           </div>
+          ) : null}
         </div>
       </section>
     </div>,

@@ -340,6 +340,32 @@ class Order {
     return rows;
   }
 
+  static async findReminders({ createdBy = null, limit = 500 } = {}) {
+    const pool = getPool();
+    const conditions = [];
+    const params = {};
+
+    if (createdBy) {
+      conditions.push("n.created_by = :createdBy");
+      params.createdBy = createdBy;
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
+              n.author_name, n.note, n.callback_date, n.attachment_path, n.is_called,
+              o.order_number, o.case_number,
+              o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
+       FROM order_notes n
+       INNER JOIN orders o ON o.id = n.order_id
+       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
+       ORDER BY n.callback_date ASC, n.note_date DESC
+       LIMIT ${Number(limit)}`,
+      params
+    );
+
+    return rows;
+  }
+
   static async createNote(data) {
     const pool = getPool();
 
@@ -375,8 +401,10 @@ class Order {
     );
   }
 
-  static async createActivityLog(connection, data) {
-    const [result] = await connection.execute(
+  static async createActivityLog(data, connection = null) {
+    const db = connection || getPool();
+
+    const [result] = await db.execute(
       `INSERT INTO order_activity_logs
         (order_id, activity_date, performed_by, author_name,
          callback_date, note, attachment_path, created_at)

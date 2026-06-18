@@ -16,9 +16,36 @@ function getOrderLogContext(order) {
 
   return {
     facilityId: Number.isFinite(facilityId) ? facilityId : null,
-    companyName:
-      order?.facilityName || order?.serveCompanyName || "System",
+    companyName: order?.facilityName || order?.serveCompanyName || "System",
   };
+}
+
+async function logOrderActivity(
+  req,
+  order,
+  { action, details, callbackDate = null, attachmentPath = null, skipOrderLog = false }
+) {
+  const logContext = getOrderLogContext(order);
+  const taggedDetails = activityLogService.appendOrderId(details, order.id);
+
+  await activityLogService.recordFromRequest(req, {
+    context: "orders",
+    action,
+    details: taggedDetails,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+    targetEmployeeId: req.user.id,
+  });
+
+  if (!skipOrderLog) {
+    await orderService.addOrderActivityLog({
+      orderId: order.id,
+      actorId: req.user.id,
+      note: details,
+      callbackDate,
+      attachmentPath,
+    });
+  }
 }
 
 exports.getAll = asyncHandler(async (req, res) => {
@@ -74,6 +101,13 @@ exports.getById = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { order });
 });
 
+exports.getReminders = asyncHandler(async (req, res) => {
+  const reminders = await orderService.getOrderReminders(req.user, {
+    scope: req.query.scope,
+  });
+  return ApiResponse.success(res, { reminders });
+});
+
 exports.create = asyncHandler(async (req, res) => {
   const validation = validateCreateOrder(req.body);
 
@@ -87,15 +121,9 @@ exports.create = asyncHandler(async (req, res) => {
     req.files
   );
 
-  const logContext = getOrderLogContext(order);
-
-  await activityLogService.recordFromRequest(req, {
-    context: "orders",
+  await logOrderActivity(req, order, {
     action: "create",
-    details: `Created order ${order.orderNumber} for ${logContext.companyName}`,
-    facilityId: logContext.facilityId,
-    companyName: logContext.companyName,
-    targetEmployeeId: req.user.id,
+    details: `Created order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
   });
 
   return ApiResponse.created(res, { order }, "Order created successfully");
@@ -115,15 +143,9 @@ exports.update = asyncHandler(async (req, res) => {
     req.files
   );
 
-  const logContext = getOrderLogContext(order);
-
-  await activityLogService.recordFromRequest(req, {
-    context: "orders",
+  await logOrderActivity(req, order, {
     action: "update",
-    details: `Updated order ${order.orderNumber} for ${logContext.companyName}`,
-    facilityId: logContext.facilityId,
-    companyName: logContext.companyName,
-    targetEmployeeId: req.user.id,
+    details: `Updated order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
   });
 
   return ApiResponse.success(res, { order }, "Order updated successfully");
@@ -132,22 +154,24 @@ exports.update = asyncHandler(async (req, res) => {
 exports.remove = asyncHandler(async (req, res) => {
   const order = await orderService.getOrderById(req.params.id);
   const result = await orderService.deleteOrder(req.params.id);
-  const logContext = getOrderLogContext(order);
 
-  await activityLogService.recordFromRequest(req, {
-    context: "orders",
+  await logOrderActivity(req, order, {
     action: "delete",
-    details: `Deleted order ${order.orderNumber} for ${logContext.companyName}`,
-    facilityId: logContext.facilityId,
-    companyName: logContext.companyName,
-    targetEmployeeId: req.user.id,
+    details: `Deleted order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
   });
 
   return ApiResponse.success(res, result, result.message);
 });
 
 exports.getNotes = asyncHandler(async (req, res) => {
-  const notes = await orderService.getOrderNotes(req.params.id);
+  const notes = await orderService.getOrderNotes(req.params.id, {
+    includeCalled:
+      String(req.query.includeCalled || "").toLowerCase() === "true" ||
+      String(req.query.includeCalled || "") === "1",
+    noteId: req.query.noteId || null,
+    actorId: req.user.id,
+    actorRole: req.user.role,
+  });
   return ApiResponse.success(res, { notes });
 });
 
@@ -166,15 +190,10 @@ exports.createNote = asyncHandler(async (req, res) => {
     req.file
   );
 
-  const logContext = getOrderLogContext(order);
-
-  await activityLogService.recordFromRequest(req, {
-    context: "orders",
+  await logOrderActivity(req, order, {
     action: "create_note",
     details: `Added note to order ${order.orderNumber}`,
-    facilityId: logContext.facilityId,
-    companyName: logContext.companyName,
-    targetEmployeeId: req.user.id,
+    skipOrderLog: true,
   });
 
   return ApiResponse.created(res, { notes }, "Note added successfully");
@@ -196,15 +215,10 @@ exports.updateNote = asyncHandler(async (req, res) => {
     req.file
   );
 
-  const logContext = getOrderLogContext(order);
-
-  await activityLogService.recordFromRequest(req, {
-    context: "orders",
+  await logOrderActivity(req, order, {
     action: "update_note",
     details: `Saved callback note on order ${order.orderNumber}`,
-    facilityId: logContext.facilityId,
-    companyName: logContext.companyName,
-    targetEmployeeId: req.user.id,
+    skipOrderLog: true,
   });
 
   return ApiResponse.success(res, result, "Note updated successfully");
@@ -234,15 +248,9 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
     req.body.stageStatus
   );
 
-  const logContext = getOrderLogContext(order);
-
-  await activityLogService.recordFromRequest(req, {
-    context: "orders",
+  await logOrderActivity(req, order, {
     action: "workflow_update",
     details: `Updated "${req.body.stageName}" workflow stage to ${req.body.stageStatus} on order ${order.orderNumber}`,
-    facilityId: logContext.facilityId,
-    companyName: logContext.companyName,
-    targetEmployeeId: req.user.id,
   });
 
   return ApiResponse.success(res, { stages }, "Workflow stage updated");

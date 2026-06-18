@@ -7,6 +7,8 @@ const Order = require("../models/Order");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const Employee = require("../models/Employee");
+const ActivityLog = require("../models/ActivityLog");
+const { stripOrderIdTag } = require("./activityLogService");
 const invoiceService = require("./invoiceService");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
@@ -342,16 +344,60 @@ function normalizeNoteText(text) {
 }
 
 function mapActivityLog(log) {
+  const callbackDate = log.callback_date ? toShortDate(log.callback_date) : "";
+
   return {
     id: log.id,
     date: toShortDate(log.activity_date),
     by: log.author_name || "—",
-    callback: toShortDate(log.callback_date),
+    callback: callbackDate || log.action_label || "",
     note: log.note || "",
     attachmentUrl: log.attachment_path
       ? `/uploads/${log.attachment_path}`
       : "",
+    activityDate: log.activity_date,
   };
+}
+
+function mapGlobalOrderActivityLog(row) {
+  const details = stripOrderIdTag(row.details);
+
+  return {
+    id: `global-${row.id}`,
+    date: toShortDate(row.created_at),
+    by: row.performer_name || "—",
+    callback: row.action || "",
+    note: details,
+    attachmentUrl: "",
+    activityDate: row.created_at,
+  };
+}
+
+function getActivityTimestamp(log) {
+  const value = log.activityDate || log.activity_date || log.created_at;
+
+  if (!value) return 0;
+
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function mergeOrderActivityLogs(orderLogs = [], globalLogs = []) {
+  const seen = new Set();
+
+  orderLogs.forEach((log) => {
+    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}`;
+    seen.add(key);
+  });
+
+  const supplemental = globalLogs.filter((log) => {
+    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}`;
+    return !seen.has(key);
+  });
+
+  return [...orderLogs, ...supplemental].sort(
+    (a, b) => getActivityTimestamp(b) - getActivityTimestamp(a)
+  );
 }
 
 function mapNote(note) {
@@ -359,6 +405,7 @@ function mapNote(note) {
     id: note.id,
     note: note.note || "",
     authorName: note.author_name || "",
+    createdBy: note.created_by || null,
     noteDate: note.note_date || null,
     callbackDate: toInputDate(note.callback_date),
     isCalled: Boolean(note.is_called),
@@ -366,6 +413,32 @@ function mapNote(note) {
     attachmentUrl: note.attachment_path
       ? `/uploads/${note.attachment_path}`
       : "",
+  };
+}
+
+function mapReminderRow(row) {
+  const applicant = buildFullName(
+    row.applicant_first_name,
+    row.applicant_middle_name,
+    row.applicant_last_name
+  );
+
+  return {
+    noteId: row.note_id,
+    orderId: row.order_id,
+    orderNumber: row.order_number || "",
+    caseNumber: row.case_number || row.order_number || "",
+    date: toShortDate(row.note_date),
+    by: row.author_name || "—",
+    createdBy: row.created_by || null,
+    note: row.note || "",
+    applicant: applicant || "—",
+    callbackDate: toInputDate(row.callback_date),
+    callbackDateDisplay: toShortDate(row.callback_date),
+    isCalled: Boolean(row.is_called),
+    status: Boolean(row.is_called) ? "callbacked" : "not_callbacked",
+    attachmentPath: row.attachment_path || "",
+    attachmentUrl: row.attachment_path ? `/uploads/${row.attachment_path}` : "",
   };
 }
 
@@ -532,15 +605,50 @@ async function resolveAuthorName(actorId) {
   }
 }
 
-async function getOrderNotes(orderId) {
+async function getOrderNotes(
+  orderId,
+  { includeCalled = false, noteId = null, actorId = null, actorRole = null } = {}
+) {
   const order = await Order.findById(orderId);
 
   if (!order) {
     throw new ApiError(404, "Order not found");
   }
 
-  const notes = await Order.findNotesByOrderId(order.id, true);
+  if (noteId) {
+    const note = await Order.findNoteById(noteId);
+
+    if (!note || String(note.order_id) !== String(order.id)) {
+      throw new ApiError(404, "Note not found");
+    }
+
+    const isAdmin = String(actorRole || "").toLowerCase() === "admin";
+    if (
+      !isAdmin &&
+      actorId &&
+      Number(note.created_by) !== Number(actorId)
+    ) {
+      throw new ApiError(403, "You can only access your own notes");
+    }
+
+    return [mapNote(note)];
+  }
+
+  const notes = await Order.findNotesByOrderId(order.id, includeCalled ? false : true);
   return notes.map(mapNote);
+}
+
+async function getOrderReminders(user, { scope = "my", limit = 500 } = {}) {
+  const isAdmin = String(user?.role || "").toLowerCase() === "admin";
+  const normalizedScope = String(scope || "my").toLowerCase();
+  const includeAll = isAdmin && normalizedScope === "all";
+
+  const rows = await Order.findReminders({
+    createdBy: includeAll ? null : user?.id || null,
+    limit,
+  });
+
+  return rows.map(mapReminderRow);
 }
 
 async function addOrderNote(orderId, data, actorId, file) {
@@ -568,6 +676,15 @@ async function addOrderNote(orderId, data, actorId, file) {
     isCalled: 0,
   });
 
+  await addOrderActivityLog({
+    orderId: order.id,
+    actorId,
+    authorName,
+    note: noteText,
+    callbackDate: dateOrNull(data.callbackDate),
+    attachmentPath: toRelativeStoragePath(file),
+  });
+
   const notes = await Order.findNotesByOrderId(order.id, true);
   return notes.map(mapNote);
 }
@@ -583,6 +700,13 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
 
   if (!note || String(note.order_id) !== String(order.id)) {
     throw new ApiError(404, "Note not found");
+  }
+
+  const employee = await Employee.findById(actorId);
+  const isAdmin = String(employee?.role || "").toLowerCase() === "admin";
+
+  if (!isAdmin && Number(note.created_by) !== Number(actorId)) {
+    throw new ApiError(403, "You can only update your own notes");
   }
 
   const noteText = trimOrNull(data.note);
@@ -609,15 +733,19 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
 
     const updatedNote = await Order.findNoteById(note.id, connection);
 
-    await Order.createActivityLog(connection, {
-      orderId: order.id,
-      activityDate: new Date(),
-      performedBy: actorId || null,
-      authorName,
-      callbackDate: dateOrNull(data.callbackDate) || updatedNote?.callback_date || null,
-      note: noteText,
-      attachmentPath: updatedNote?.attachment_path || null,
-    });
+    await Order.createActivityLog(
+      {
+        orderId: order.id,
+        activityDate: new Date(),
+        performedBy: actorId || null,
+        authorName,
+        callbackDate:
+          dateOrNull(data.callbackDate) || updatedNote?.callback_date || null,
+        note: noteText,
+        attachmentPath: updatedNote?.attachment_path || null,
+      },
+      connection
+    );
 
     await connection.commit();
   } catch (error) {
@@ -644,9 +772,10 @@ async function getOrderActivityLogs(orderId) {
   }
 
   const logs = await Order.findActivityLogsByOrderId(order.id);
+  const globalLogs = await ActivityLog.findByOrderId(order.id);
   const notes = await Order.findNotesByOrderId(order.id, false);
 
-  return logs.map((log) => {
+  const mappedOrderLogs = logs.map((log) => {
     let attachmentPath = log.attachment_path;
 
     if (!attachmentPath) {
@@ -663,6 +792,36 @@ async function getOrderActivityLogs(orderId) {
     }
 
     return mapActivityLog({ ...log, attachment_path: attachmentPath });
+  });
+
+  const mappedGlobalLogs = globalLogs.map(mapGlobalOrderActivityLog);
+
+  return mergeOrderActivityLogs(mappedOrderLogs, mappedGlobalLogs);
+}
+
+async function addOrderActivityLog({
+  orderId,
+  actorId,
+  authorName = null,
+  note,
+  callbackDate = null,
+  attachmentPath = null,
+}) {
+  if (!orderId || !note) {
+    return null;
+  }
+
+  const resolvedAuthorName =
+    authorName || (await resolveAuthorName(actorId));
+
+  return Order.createActivityLog({
+    orderId,
+    activityDate: new Date(),
+    performedBy: actorId || null,
+    authorName: resolvedAuthorName,
+    callbackDate,
+    note,
+    attachmentPath,
   });
 }
 
@@ -942,6 +1101,7 @@ async function deleteOrder(id) {
 module.exports = {
   getAllOrders,
   getOrderById,
+  getOrderReminders,
   createOrder,
   updateOrder,
   deleteOrder,
@@ -949,6 +1109,7 @@ module.exports = {
   addOrderNote,
   updateOrderNote,
   getOrderActivityLogs,
+  addOrderActivityLog,
   getWorkflowStages,
   updateOrderWorkflowStage,
 };
