@@ -4,6 +4,7 @@ const ApiError = require("../utils/ApiError");
 const orderService = require("../services/orderService");
 const batchScanService = require("../services/batchScanService");
 const activityLogService = require("../services/activityLogService");
+const notificationService = require("../services/notificationService");
 const {
   validateCreateOrder,
   validateUpdateOrder,
@@ -18,6 +19,78 @@ function getOrderLogContext(order) {
     facilityId: Number.isFinite(facilityId) ? facilityId : null,
     companyName: order?.facilityName || order?.serveCompanyName || "System",
   };
+}
+
+const PAYMENT_PREFIXES = ["prepayment", "custodian", "xray"];
+const PAYMENT_LABELS = {
+  prepayment: "Prepayment",
+  custodian: "Custodian",
+  xray: "X-Ray Fee",
+};
+
+function requestIncludesPayments(body = {}) {
+  return PAYMENT_PREFIXES.some((prefix) =>
+    [`${prefix}Check`, `${prefix}Date`, `${prefix}Paid`, `${prefix}Memo`].some(
+      (field) => body[field] !== undefined && `${body[field]}`.trim() !== ""
+    )
+  );
+}
+
+function formatCurrency(amount) {
+  const num = Number(amount);
+  if (!Number.isFinite(num)) return "$0.00";
+
+  return `$${num.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function buildPaymentLogDetails(order) {
+  const lines = PAYMENT_PREFIXES.map((prefix) => {
+    const amount = Number(order[`${prefix}Paid`]);
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    return `${PAYMENT_LABELS[prefix]} ${formatCurrency(amount)}`;
+  }).filter(Boolean);
+
+  if (!lines.length && Number(order.orderAmountPaid) > 0) {
+    return `Total payments ${formatCurrency(order.orderAmountPaid)}`;
+  }
+
+  return lines.join(", ");
+}
+
+async function logBillingPaymentActivity(req, order, body) {
+  if (!requestIncludesPayments(body)) {
+    return;
+  }
+
+  const logContext = getOrderLogContext(order);
+  const paymentDetails = buildPaymentLogDetails(order);
+
+  if (!paymentDetails) {
+    return;
+  }
+
+  const taggedDetails = activityLogService.appendOrderId(
+    `Recorded payments on order ${order.orderNumber}: ${paymentDetails}`,
+    order.id
+  );
+
+  await activityLogService.recordFromRequest(req, {
+    context: "billing",
+    module: activityLogService.MODULES.BILLING,
+    action: "record_payment",
+    details: taggedDetails,
+    facilityId: logContext.facilityId,
+    companyName: logContext.companyName,
+  });
+
+  await notificationService.notifyInvoiceEvent({
+    title: `Payment Recorded — ${order.orderNumber}`,
+    description: paymentDetails,
+    orderId: order.id,
+  });
 }
 
 async function logOrderActivity(
@@ -113,6 +186,11 @@ exports.getReminders = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { reminders });
 });
 
+exports.getDueRemindersToday = asyncHandler(async (req, res) => {
+  const data = await notificationService.getDueRemindersForUser(req.user);
+  return ApiResponse.success(res, data, "Due reminders retrieved");
+});
+
 exports.create = asyncHandler(async (req, res) => {
   const validation = validateCreateOrder(req.body);
 
@@ -129,6 +207,14 @@ exports.create = asyncHandler(async (req, res) => {
   await logOrderActivity(req, order, {
     action: "create",
     details: `Created order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
+  });
+
+  await logBillingPaymentActivity(req, order, req.body);
+
+  await notificationService.notifyOrderCreated({
+    orderNumber: order.orderNumber,
+    companyName: getOrderLogContext(order).companyName,
+    orderId: order.id,
   });
 
   return ApiResponse.created(res, { order }, "Order created successfully");
@@ -153,6 +239,14 @@ exports.update = asyncHandler(async (req, res) => {
     details: `Updated order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
   });
 
+  await logBillingPaymentActivity(req, order, req.body);
+
+  await notificationService.notifyOrderStatusChange({
+    orderNumber: order.orderNumber,
+    details: `Order updated for ${getOrderLogContext(order).companyName}`,
+    orderId: order.id,
+  });
+
   return ApiResponse.success(res, { order }, "Order updated successfully");
 });
 
@@ -163,6 +257,12 @@ exports.remove = asyncHandler(async (req, res) => {
   await logOrderActivity(req, order, {
     action: "delete",
     details: `Deleted order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
+  });
+
+  await notificationService.notifyOrderStatusChange({
+    orderNumber: order.orderNumber,
+    details: `Order deleted for ${getOrderLogContext(order).companyName}`,
+    orderId: order.id,
   });
 
   return ApiResponse.success(res, result, result.message);
@@ -256,6 +356,12 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
   await logOrderActivity(req, order, {
     action: "workflow_update",
     details: `Updated "${req.body.stageName}" workflow stage to ${req.body.stageStatus} on order ${order.orderNumber}`,
+  });
+
+  await notificationService.notifyOrderStatusChange({
+    orderNumber: order.orderNumber,
+    details: `Workflow "${req.body.stageName}" updated to ${req.body.stageStatus}`,
+    orderId: order.id,
   });
 
   return ApiResponse.success(res, { stages }, "Workflow stage updated");

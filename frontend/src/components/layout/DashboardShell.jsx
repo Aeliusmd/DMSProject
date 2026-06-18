@@ -3,12 +3,14 @@
 import { useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
+import DailyReminderPopup from "@/components/notifications/DailyReminderPopup";
 
 export default function DashboardShell({ children }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#111827]">
+      <DailyReminderPopup />
       <Sidebar isCollapsed={isSidebarCollapsed} />
 
       <div

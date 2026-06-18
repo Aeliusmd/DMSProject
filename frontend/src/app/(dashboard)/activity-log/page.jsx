@@ -29,10 +29,17 @@ export default function ActivityLogPage() {
   useEffect(() => {
     let cancelled = false;
 
+    setLogsLoading(true);
+
     getActivityLogs()
       .then((logs) => {
         if (!cancelled) {
           setActivityLogs(logs);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActivityLogs([]);
         }
       })
       .finally(() => {

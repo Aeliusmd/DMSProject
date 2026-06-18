@@ -389,7 +389,7 @@ class Order {
 
   static async findReminders({ createdBy = null, limit = 500 } = {}) {
     const pool = getPool();
-    const conditions = [];
+    const conditions = ["n.callback_date IS NOT NULL"];
     const params = {};
 
     if (createdBy) {
@@ -404,9 +404,38 @@ class Order {
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
        FROM order_notes n
        INNER JOIN orders o ON o.id = n.order_id
-       ${conditions.length ? `WHERE ${conditions.join(" AND ")}` : ""}
+       WHERE ${conditions.join(" AND ")}
        ORDER BY n.callback_date ASC, n.note_date DESC
        LIMIT ${Number(limit)}`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findDueRemindersOnDate({ createdBy = null, date }) {
+    const pool = getPool();
+    const conditions = [
+      "n.callback_date IS NOT NULL",
+      "n.is_called = 0",
+      "DATE(n.callback_date) = :dueDate",
+    ];
+    const params = { dueDate: date };
+
+    if (createdBy) {
+      conditions.push("n.created_by = :createdBy");
+      params.createdBy = createdBy;
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
+              n.author_name, n.note, n.callback_date, n.attachment_path, n.is_called,
+              o.order_number, o.case_number,
+              o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
+       FROM order_notes n
+       INNER JOIN orders o ON o.id = n.order_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY n.callback_date ASC, o.order_number ASC`,
       params
     );
 

@@ -102,6 +102,14 @@ export async function getOrderReminders(scope = "my") {
   return data?.data?.reminders || [];
 }
 
+export async function getDueRemindersToday() {
+  const data = await request("/orders/reminders/due-today", { auth: true });
+  return {
+    reminders: data?.data?.reminders || [],
+    enabled: data?.data?.enabled !== false,
+  };
+}
+
 export async function getOrderNotes(id, { includeCalled = false, noteId = null } = {}) {
   const params = new URLSearchParams();
   if (includeCalled) params.set("includeCalled", "1");

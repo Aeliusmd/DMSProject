@@ -24,3 +24,45 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes bell-unread-glow {
+  0%,
+  100% {
+    color: #64748b;
+    background-color: transparent;
+  }
+
+  50% {
+    color: #f87171;
+    background-color: #fff1f2;
+  }
+}
+
+@keyframes bell-unread-dot {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+
+.notification-bell-unread {
+  animation: bell-unread-glow 2.4s ease-in-out infinite;
+}
+
+.notification-bell-dot {
+  background-color: #fb7185;
+  animation: bell-unread-dot 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-bell-unread,
+  .notification-bell-dot {
+    animation: none;
+  }
+}

@@ -13,6 +13,7 @@ router.use(authenticate);
 
 router.get("/", orderController.getAll);
 router.get("/stats", orderController.getStats);
+router.get("/reminders/due-today", orderController.getDueRemindersToday);
 router.get("/reminders", orderController.getReminders);
 router.get("/unprocessed", orderController.getUnprocessed);
 router.get("/unprocessed/:extractId/file", orderController.getUnprocessedFile);
