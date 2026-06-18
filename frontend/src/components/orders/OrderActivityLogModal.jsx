@@ -77,12 +77,20 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
     if (!search) return logs;
 
     return logs.filter((log) => {
-      return (
-        log.date.toLowerCase().includes(search) ||
-        log.by.toLowerCase().includes(search) ||
-        log.callback.toLowerCase().includes(search) ||
-        log.note.toLowerCase().includes(search)
-      );
+      const searchable = [
+        log.displayDate,
+        log.date,
+        log.by,
+        log.action,
+        log.callback,
+        log.note,
+        log.module,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchable.includes(search);
     });
   }, [logs, searchValue]);
 
@@ -137,13 +145,14 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[720px] border-collapse">
+          <table className="w-full min-w-[860px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
-                <th className="w-[90px] px-5 py-3">Date</th>
-                <th className="w-[150px] px-5 py-3">By</th>
-                <th className="w-[110px] px-5 py-3">Callback</th>
-                <th className="px-5 py-3">Note</th>
+                <th className="w-[120px] px-5 py-3">Date</th>
+                <th className="w-[160px] px-5 py-3">Action</th>
+                <th className="w-[140px] px-5 py-3">By</th>
+                <th className="w-[100px] px-5 py-3">Callback</th>
+                <th className="px-5 py-3">Details</th>
               </tr>
             </thead>
 
@@ -151,7 +160,7 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
               {loading && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
                   >
                     Loading activity logs...
@@ -162,7 +171,7 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
               {!loading && loadError && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-5 py-14 text-center text-[13px] font-medium text-red-500"
                   >
                     {loadError}
@@ -178,41 +187,53 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
                   className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
                 >
                   <td className="px-5 py-4 align-top text-[#475569]">
-                    {log.date}
+                    {log.displayDate || log.date}
+                  </td>
+
+                  <td className="px-5 py-4 align-top">
+                    <div className="flex flex-col gap-1">
+                      <span className="font-semibold text-[#111827]">
+                        {log.action || "—"}
+                      </span>
+                      {log.module && log.module !== "Orders" ? (
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[#94A3B8]">
+                          {log.module}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
 
                   <td className="px-5 py-4 align-top font-semibold text-[#111827]">
                     {log.by}
                   </td>
 
-                  <td className="px-5 py-4 align-top text-[#CBD5E1]">
+                  <td className="px-5 py-4 align-top text-[#64748B]">
                     {log.callback || "–"}
                   </td>
 
                   <td className="px-5 py-4 align-top leading-[18px] text-[#334155]">
-  <div>{renderNote(log.note)}</div>
+                    <div>{renderNote(log.note)}</div>
 
-  {log.attachmentUrl && (
-    <div className="mt-2">
-      <a
-        href={toFileUrl(log.attachmentUrl)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center text-[11px] font-semibold text-[#0097B2] underline"
-      >
-        View attachment
-      </a>
-    </div>
-  )}
-</td>
-                 
+                    {log.attachmentUrl && (
+                      <div className="mt-2">
+                        <a
+                          href={toFileUrl(log.attachmentUrl)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center text-[11px] font-semibold text-[#0097B2] underline"
+                        >
+                          View attachment
+                        </a>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
 
               {!loading && !loadError && filteredLogs.length === 0 && (
                 <tr>
                   <td
-                    colSpan={4}
+                    colSpan={5}
                     className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
                   >
                     No activity logs found.

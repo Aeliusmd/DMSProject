@@ -6,8 +6,10 @@ import Link from "next/link";
 export default function NotificationsModal({
   open,
   notifications = [],
+  unreadCount = 0,
   onClose,
   triggerRef,
+  onRefresh,
 }) {
   const modalRef = useRef(null);
 
@@ -40,7 +42,8 @@ export default function NotificationsModal({
 
   if (!open) return null;
 
-  const unreadCount = notifications.filter((item) => !item.read).length;
+  const resolvedUnreadCount =
+    unreadCount || notifications.filter((item) => !item.read).length;
 
   return (
     <div
@@ -53,7 +56,7 @@ export default function NotificationsModal({
         </h2>
 
         <span className="rounded-full bg-[#E6F7FA] px-2 py-[3px] text-[10px] font-semibold text-[#007F96]">
-          {unreadCount} new
+          {resolvedUnreadCount} new
         </span>
       </div>
 
@@ -72,7 +75,10 @@ export default function NotificationsModal({
       <div className="border-t border-[#F1F5F9] bg-[#F8FAFC] px-4 py-3 text-center">
   <Link
     href="/notifications"
-    onClick={onClose}
+    onClick={() => {
+      onRefresh?.();
+      onClose?.();
+    }}
     className="text-[11px] font-semibold text-[#0097B2] hover:underline"
   >
     View all notifications
@@ -83,14 +89,15 @@ export default function NotificationsModal({
 }
 
 function NotificationItem({ notification }) {
+  const iconType = String(notification.type || "").toLowerCase();
+
   return (
     <button
       type="button"
-      onClick={() => console.log("Notification clicked:", notification)}
       className="flex w-full gap-3 border-b border-[#F8FAFC] px-4 py-3 text-left hover:bg-[#F8FBFC] last:border-b-0"
     >
       <div className="mt-[2px] flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full bg-[#F1F5F9] text-[#64748B]">
-        <NotificationIcon type={notification.type} />
+        <NotificationIcon type={iconType} />
       </div>
 
       <div className="min-w-0 flex-1">
@@ -153,7 +160,7 @@ function NotificationIcon({ type }) {
     );
   }
 
-  if (type === "employee") {
+  if (type === "activity") {
     return (
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
         <circle

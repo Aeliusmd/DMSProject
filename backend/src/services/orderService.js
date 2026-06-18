@@ -8,7 +8,7 @@ const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
-const { stripOrderIdTag } = require("./activityLogService");
+const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
 const invoiceService = require("./invoiceService");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
@@ -330,7 +330,6 @@ function deriveInvoiceDisplayStatus(invoiceRow) {
   return "Created";
 }
 
-function mapOrderListRow(row, workflowStages = [], invoiceRow = null, xrayRow = null) {
 function mapOrderListRow(
   row,
   workflowStages = [],
@@ -418,11 +417,15 @@ function mapActivityLog(log) {
   const callbackDate = log.callback_date ? toShortDate(log.callback_date) : "";
 
   return {
-    id: log.id,
+    id: `order-${log.id}`,
+    source: "order",
     date: toShortDate(log.activity_date),
+    displayDate: toShortDate(log.activity_date),
     by: log.author_name || "—",
-    callback: callbackDate || log.action_label || "",
+    action: callbackDate ? "Reminder" : "Note",
+    callback: callbackDate || "",
     note: log.note || "",
+    module: "Orders",
     attachmentUrl: log.attachment_path
       ? `/uploads/${log.attachment_path}`
       : "",
@@ -431,16 +434,21 @@ function mapActivityLog(log) {
 }
 
 function mapGlobalOrderActivityLog(row) {
-  const details = stripOrderIdTag(row.details);
+  const mapped = mapLogRow(row);
+  const details = stripOrderIdTag(mapped.details);
 
   return {
-    id: `global-${row.id}`,
-    date: toShortDate(row.created_at),
-    by: row.performer_name || "—",
-    callback: row.action || "",
+    id: `global-${mapped.id}`,
+    source: "global",
+    date: mapped.date,
+    displayDate: mapped.displayDate || mapped.date,
+    by: mapped.performedBy || "—",
+    action: mapped.action || "",
+    callback: "",
     note: details,
+    module: mapped.module || "Orders",
     attachmentUrl: "",
-    activityDate: row.created_at,
+    activityDate: mapped.createdAt,
   };
 }
 
@@ -457,12 +465,17 @@ function mergeOrderActivityLogs(orderLogs = [], globalLogs = []) {
   const seen = new Set();
 
   orderLogs.forEach((log) => {
-    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}`;
+    seen.add(String(log.id));
+    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}|${log.action}`;
     seen.add(key);
   });
 
   const supplemental = globalLogs.filter((log) => {
-    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}`;
+    if (seen.has(String(log.id))) {
+      return false;
+    }
+
+    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}|${log.action}`;
     return !seen.has(key);
   });
 
@@ -884,7 +897,9 @@ async function getOrderActivityLogs(orderId) {
   }
 
   const logs = await Order.findActivityLogsByOrderId(order.id);
-  const globalLogs = await ActivityLog.findByOrderId(order.id);
+  const globalLogs = await ActivityLog.findByOrderId(order.id, {
+    orderNumber: order.order_number || null,
+  });
   const notes = await Order.findNotesByOrderId(order.id, false);
 
   const mappedOrderLogs = logs.map((log) => {
