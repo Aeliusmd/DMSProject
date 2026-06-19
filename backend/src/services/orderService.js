@@ -121,6 +121,18 @@ function boolToInt(value) {
   return value ? 1 : 0;
 }
 
+function hasMedicalRecordsRequested(data) {
+  return boolToInt(data?.medicalRecords) === 1;
+}
+
+function resolveOrderFlags(data, hasSubpoenaFile, existing = null) {
+  return {
+    isSubpoena: hasSubpoenaFile ? 1 : 0,
+    isRecords: hasMedicalRecordsRequested(data) ? 1 : 0,
+    isWriteOffs: existing ? Number(existing.is_write_offs) || 0 : 0,
+  };
+}
+
 function enumOrNull(value, allowed) {
   const trimmed = trimOrNull(value);
   if (!trimmed) return null;
@@ -326,20 +338,6 @@ async function syncOrderWorkflowFromState(
   }
 }
 
-async function syncReviewRecordsStage(connection, orderId, orderStatus) {
-  if (orderStatus !== "Completed") {
-    return;
-  }
-
-  await Order.upsertWorkflowStage(
-    orderId,
-    "Review Records",
-    "complete",
-    new Date(),
-    connection
-  );
-}
-
 async function markOrderWorkflowSent(orderId, connection = null) {
   await Order.upsertWorkflowStage(
     orderId,
@@ -408,9 +406,7 @@ function mapPaymentsToForm(payments = []) {
 
 function deriveFilterStatus(status) {
   if (status === "Completed") return "completed";
-  if (["Cancelled", "No Records", "No Subpoena", "Write Offs"].includes(status)) {
-    return "cancelled";
-  }
+  if (status === "Cancelled") return "cancelled";
   if (status === "Ready" || status === "Ready to Pickup") return "ready";
   return "active";
 }
@@ -493,7 +489,10 @@ function mapOrderListRow(
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
-    subpoena: Boolean(row.has_subpoena),
+    subpoena: Boolean(row.is_subpoena ?? row.has_subpoena),
+    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
+    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -673,6 +672,10 @@ function mapOrderDetail(
   return {
     id: row.id,
     orderNumber: row.order_number || "",
+    status: row.status || "",
+    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
+    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",
@@ -681,6 +684,9 @@ function mapOrderDetail(
     providerName: row.provider_name || "",
     type: resolveOrderTypeForForm(row),
     status: row.status || "",
+    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
+    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     caseNumber: row.case_number || "",
     orderRef: row.order_ref || "",
@@ -1280,16 +1286,19 @@ async function createOrder(data, actorId, files) {
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
-    const orderStatus = hasSubpoenaFile ? "Active" : "No Subpoena";
+    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
     const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     const orderId = await Order.create(connection, {
       ...payload,
       subpoenaStoragePath,
       orderNumber,
-      status: orderStatus,
+      status: "Active",
       hasNote: 0,
-      hasSubpoena: hasSubpoenaFile ? 1 : 0,
+      hasSubpoena: orderFlags.isSubpoena,
+      isSubpoena: orderFlags.isSubpoena,
+      isRecords: orderFlags.isRecords,
+      isWriteOffs: orderFlags.isWriteOffs,
       createdBy: actorId || null,
     });
 
@@ -1365,32 +1374,18 @@ async function updateOrder(id, data, actorId, files) {
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
+    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile, existing);
     const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     await Order.update(connection, existing.id, {
       ...payload,
       subpoenaStoragePath,
-      hasSubpoena: hasSubpoenaFile ? 1 : 0,
+      hasSubpoena: orderFlags.isSubpoena,
+      isSubpoena: orderFlags.isSubpoena,
+      isRecords: orderFlags.isRecords,
+      isWriteOffs: orderFlags.isWriteOffs,
       orderNumber,
     });
-
-    if (!hasSubpoenaFile) {
-      if (
-        !["Completed", "Cancelled", "Write Offs", "No Records"].includes(
-          existing.status
-        )
-      ) {
-        await connection.execute(
-          `UPDATE orders SET status = 'No Subpoena', updated_at = NOW() WHERE id = :id`,
-          { id: existing.id }
-        );
-      }
-    } else if (existing.status === "No Subpoena") {
-      await connection.execute(
-        `UPDATE orders SET status = 'Active', updated_at = NOW() WHERE id = :id`,
-        { id: existing.id }
-      );
-    }
 
     for (const payment of payments) {
       await Order.upsertPayment(connection, {
@@ -1411,15 +1406,6 @@ async function updateOrder(id, data, actorId, files) {
     const invoiceRow = await Invoice.findByOrderId(existing.id);
     const invoiceServiceFee = invoiceRow ? Number(invoiceRow.service_fee) : 0;
     const invoiceCustodianFee = invoiceRow ? Number(invoiceRow.custodian_fee) : 0;
-    const nextOrderStatus =
-      !hasSubpoenaFile &&
-      !["Completed", "Cancelled", "Write Offs", "No Records"].includes(
-        existing.status
-      )
-        ? "No Subpoena"
-        : existing.status === "No Subpoena" && hasSubpoenaFile
-          ? "Active"
-          : existing.status;
 
     await syncOrderWorkflowFromState(connection, existing.id, {
       payments,
@@ -1427,8 +1413,6 @@ async function updateOrder(id, data, actorId, files) {
       invoiceServiceFee,
       invoiceCustodianFee,
     });
-
-    await syncReviewRecordsStage(connection, existing.id, nextOrderStatus);
 
     await connection.commit();
 
@@ -1543,6 +1527,13 @@ async function getOrderMedicalRecordsFile(orderId) {
   if (!absolutePath || !fs.existsSync(absolutePath)) {
     throw new ApiError(404, "Medical records PDF file not found on disk");
   }
+
+  await Order.upsertWorkflowStage(
+    orderId,
+    "Review Records",
+    "complete",
+    new Date()
+  );
 
   return {
     absolutePath,

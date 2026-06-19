@@ -4,6 +4,16 @@
 
 const { getPool } = require("../config/database");
 
+const REQUIRED_WORKFLOW_COMPLETION = {
+  "Upload Records": "complete",
+  "Review Records": "complete",
+  Serve: "complete",
+  Custodian: "complete",
+  SENT: "sent",
+};
+
+const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set(["Cancelled", "Completed"]);
+
 const ORDER_COLUMNS = `
   order_number, facility_id, provider_id, order_type, status, court,
   case_number, order_ref, ssn_last_four, dob,
@@ -19,7 +29,7 @@ const ORDER_COLUMNS = `
   flag_xrays, flag_other_record,
   specific_record, specific_doctor, full_address,
   certificate_no_records, cnr_reason, cnr_delivery, cnr_date_sent, cnr_memo,
-  subpoena_storage_path, has_note, has_subpoena, created_by`;
+  subpoena_storage_path, has_note, has_subpoena, is_subpoena, is_records, is_write_offs, created_by`;
 
 const ORDER_VALUES = `
   :orderNumber, :facilityId, :providerId, :orderType, :status, :court,
@@ -36,7 +46,7 @@ const ORDER_VALUES = `
   :flagXrays, :flagOtherRecord,
   :specificRecord, :specificDoctor, :fullAddress,
   :certificateNoRecords, :cnrReason, :cnrDelivery, :cnrDateSent, :cnrMemo,
-  :subpoenaStoragePath, :hasNote, :hasSubpoena, :createdBy`;
+  :subpoenaStoragePath, :hasNote, :hasSubpoena, :isSubpoena, :isRecords, :isWriteOffs, :createdBy`;
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
@@ -94,6 +104,9 @@ const ORDER_UPDATE_SET = `
   cnr_memo = :cnrMemo,
   subpoena_storage_path = :subpoenaStoragePath,
   has_subpoena = :hasSubpoena,
+  is_subpoena = :isSubpoena,
+  is_records = :isRecords,
+  is_write_offs = :isWriteOffs,
   updated_at = NOW()`;
 
 const ORDER_DETAIL_SELECT = `
@@ -422,6 +435,58 @@ class Order {
     return rows;
   }
 
+  static isWorkflowFullyComplete(stages = []) {
+    const statusByName = new Map(
+      stages.map((stage) => [stage.stage_name, stage.stage_status])
+    );
+
+    return Object.entries(REQUIRED_WORKFLOW_COMPLETION).every(
+      ([stageName, requiredStatus]) =>
+        statusByName.get(stageName) === requiredStatus
+    );
+  }
+
+  static async syncOrderStatusFromWorkflow(orderId, connection = null) {
+    const db = connection || getPool();
+
+    const [orders] = await db.execute(
+      `SELECT id, status, is_write_offs
+       FROM orders
+       WHERE id = :orderId
+       LIMIT 1`,
+      { orderId }
+    );
+    const order = orders[0];
+
+    if (!order || WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES.has(order.status)) {
+      return false;
+    }
+
+    if (Number(order.is_write_offs) === 1) {
+      return false;
+    }
+
+    const [stageRows] = await db.execute(
+      `SELECT stage_name, stage_status
+       FROM order_workflow_stages
+       WHERE order_id = :orderId`,
+      { orderId }
+    );
+
+    if (!Order.isWorkflowFullyComplete(stageRows)) {
+      return false;
+    }
+
+    await db.execute(
+      `UPDATE orders
+       SET status = 'Completed', updated_at = NOW()
+       WHERE id = :orderId`,
+      { orderId }
+    );
+
+    return true;
+  }
+
   static async upsertWorkflowStage(
     orderId,
     stageName,
@@ -441,6 +506,8 @@ class Order {
         updated_at = NOW()`,
       { orderId, stageName, stageStatus, completedAt }
     );
+
+    await Order.syncOrderStatusFromWorkflow(orderId, connection);
   }
 
   static async findNotesByOrderId(orderId, pendingOnly = false) {

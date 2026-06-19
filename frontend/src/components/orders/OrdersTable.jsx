@@ -48,19 +48,12 @@ const WORKFLOW_STATUS_STYLES = {
   sent: { text: "text-[#2563EB]", dot: "bg-[#3B82F6]" },
 };
 
-function mapWorkflowStages(stages = [], orderStatus = "") {
+function mapWorkflowStages(stages = []) {
   const byName = new Map(
     stages.map((stage) => [stage.stageName, stage.stageStatus])
   );
 
   return WORKFLOW_STAGES.map((stageName) => {
-    if (stageName === "Review Records") {
-      return {
-        label: stageName,
-        status: orderStatus === "Completed" ? "complete" : "pending",
-      };
-    }
-
     const status = byName.get(stageName) || "pending";
 
     return {
@@ -75,13 +68,16 @@ function toRenderOrder(order) {
     id: order.id,
     dbId: order.dbId,
     orderStatus: order.status || "",
+    isSubpoena: Boolean(order.isSubpoena),
+    isRecords: Boolean(order.isRecords),
+    isWriteOffs: Boolean(order.isWriteOffs),
     hasMedicalRecords: Boolean(order.records?.hasMedicalRecords),
     note: order.note,
     subpoena: order.subpoena,
     court: order.court || "",
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
-    status: mapWorkflowStages(order.workflowStages, order.status),
+    status: mapWorkflowStages(order.workflowStages),
     invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
@@ -367,9 +363,27 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      {order.orderStatus === "No Subpoena" && (
+                      {!order.isSubpoena && (
                         <p className="mb-2 text-[10px] font-semibold text-[#475569]">
                           No Subpoena
+                        </p>
+                      )}
+
+                      {!order.isRecords && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#475569]">
+                          No Records
+                        </p>
+                      )}
+
+                      {order.isWriteOffs && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#DC2626]">
+                          Write Offs
+                        </p>
+                      )}
+
+                      {order.orderStatus === "Completed" && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#059669]">
+                          Completed
                         </p>
                       )}
 
