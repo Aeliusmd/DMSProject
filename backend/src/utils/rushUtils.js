@@ -12,6 +12,43 @@ function parseDateOnly(value) {
   return parsed;
 }
 
+/** Rush based on order age (created_at) — matches orders list / dashboard. */
+function calculateOrderRushLevel(createdAt) {
+  if (!createdAt) {
+    return { level: null, label: null };
+  }
+
+  const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
+  if (Number.isNaN(created.getTime())) {
+    return { level: null, label: null };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  created.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor(
+    (today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays < 0) {
+    return { level: null, label: null };
+  }
+
+  const weeks = Math.floor(diffDays / 7);
+
+  if (weeks < 2) {
+    return { level: 1, label: "Rush 1" };
+  }
+
+  if (weeks === 2) {
+    return { level: 2, label: "Rush 2" };
+  }
+
+  return { level: 3, label: "Rush 3" };
+}
+
+/** Rush based on subpoena date — used for invoice display. */
 function calculateRushLevel(dateValue) {
   const orderDate = parseDateOnly(dateValue);
   if (!orderDate) return null;
@@ -30,6 +67,7 @@ function calculateRushLevel(dateValue) {
 }
 
 module.exports = {
+  calculateOrderRushLevel,
   calculateRushLevel,
   parseDateOnly,
 };

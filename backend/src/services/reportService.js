@@ -3,8 +3,17 @@
  */
 
 const { getPool } = require("../config/database");
+const Order = require("../models/Order");
+const { calculateOrderRushLevel } = require("../utils/rushUtils");
 
 const PRODUCED_STATUSES = new Set(["Ready", "Ready to Pickup", "Completed"]);
+
+const RECORD_TITLES = {
+  medical: "Medical Records",
+  billing: "Billing Records",
+  employment: "Employment Records",
+  xrays: "X-Ray Films",
+};
 
 function toNumber(value) {
   const num = Number(value);
@@ -27,6 +36,132 @@ function normalizeDate(value) {
   const str = String(value).trim();
   const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : "";
+}
+
+function toShortDate(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
+
+  return `${month}/${day}/${year}`;
+}
+
+function buildRecordsRequested(row) {
+  const type = RECORD_TITLES[row.order_type] || "Records";
+  const parts = [];
+
+  if (row.specific_record) parts.push(row.specific_record);
+  if (row.specific_doctor) parts.push(row.specific_doctor);
+
+  if (parts.length) {
+    return parts.join(" ");
+  }
+
+  return type;
+}
+
+function buildAddress(row) {
+  const address = [
+    row.serve_address,
+    [row.serve_city, row.serve_state].filter(Boolean).join(", "),
+    row.serve_zip,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return address || row.full_address || "";
+}
+
+function mapReportOrderRow(row) {
+  const totalAmount = toNumber(row.total_amount);
+  const invoiced = Boolean(row.invoice_id && totalAmount > 0);
+  const rush = calculateOrderRushLevel(row.created_at);
+
+  return {
+    id: row.id,
+    dbId: row.id,
+    orderNo: row.order_number || "",
+    subNo: row.order_ref || "",
+    status: row.status || "",
+    invoiced,
+    invoicePaid: row.invoice_status === "Paid",
+    invoiceStatus: row.invoice_status || null,
+    invoiceAmount: invoiced ? formatMoney(totalAmount) : "$0.00",
+    subpoenaDate: normalizeDate(row.subpoena_date),
+    dateServed: normalizeDate(row.date_served),
+    applicant: buildFullName(
+      row.applicant_first_name,
+      row.applicant_middle_name,
+      row.applicant_last_name
+    ),
+    caseNumber: row.case_number || "",
+    dob: toShortDate(row.dob),
+    ssn: row.ssn_last_four ? `XXX-XX-${row.ssn_last_four}` : "",
+    provider: row.serve_company_name || row.provider_name || "",
+    recordsRequested: buildRecordsRequested(row),
+    doctor: row.specific_doctor || "",
+    address: buildAddress(row),
+    createdAt: row.created_at || null,
+    rushLevel: rush.label,
+    rushLabel: rush.label,
+    subpoenaUrl: row.subpoena_storage_path
+      ? `/uploads/${row.subpoena_storage_path}`
+      : "",
+  };
+}
+
+function dedupeByOrderNumber(orders = []) {
+  const seen = new Set();
+
+  return orders.filter((order) => {
+    const key = order.orderNo || String(order.id);
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+async function getOrdersReport({
+  orderNo = "",
+  caseNumber = "",
+  doctor = "",
+  dateFrom = null,
+  dateTo = null,
+  rushLevel = "",
+  unpaidOnly = false,
+  showDuplicates = true,
+} = {}) {
+  const rows = await Order.findForReport({
+    orderNo: orderNo?.trim() || null,
+    caseNumber: caseNumber?.trim() || null,
+    doctor: doctor?.trim() || null,
+    dateFrom: dateFrom || null,
+    dateTo: dateTo || null,
+    unpaidOnly: Boolean(unpaidOnly),
+  });
+
+  let orders = rows.map(mapReportOrderRow);
+
+  if (rushLevel) {
+    orders = orders.filter((order) => order.rushLevel === rushLevel);
+  }
+
+  if (!showDuplicates) {
+    orders = dedupeByOrderNumber(orders);
+  }
+
+  return {
+    orders,
+    count: orders.length,
+  };
 }
 
 function deriveCaseActivities(row) {
@@ -235,5 +370,6 @@ async function getActivityReport({
 }
 
 module.exports = {
+  getOrdersReport,
   getActivityReport,
 };

@@ -7,6 +7,10 @@ const { formatEmployee } = require("../views/responses");
 
 const ALLOWED_CREATE_ROLES = ["Manager", "Employee"];
 
+function isAdminRole(role) {
+  return String(role || "").trim().toLowerCase() === "admin";
+}
+
 function formatLastLogin(value) {
   if (!value) {
     return "Never";
@@ -88,6 +92,10 @@ async function terminateEmployee(id, actorId) {
 
   if (employee.is_terminated) {
     throw new ApiError(400, "Employee is already terminated");
+  }
+
+  if (isAdminRole(employee.role)) {
+    throw new ApiError(400, "Admin accounts cannot be terminated");
   }
 
   await Employee.terminate(id);

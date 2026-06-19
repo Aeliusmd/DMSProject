@@ -6,6 +6,10 @@ import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import { getEmployeeActivityLogs } from "@/lib/activityLog/activityLogApi";
 
+function isAdminRole(role) {
+  return String(role || "").trim().toLowerCase() === "admin";
+}
+
 export default function MatrixEmployeesTable({
   employees,
   onTerminateEmployee,
@@ -260,6 +264,8 @@ export default function MatrixEmployeesTable({
                         <ActivateIcon />
                         Activate User
                       </button>
+                    ) : isAdminRole(employee.role) ? (
+                      <span className="text-[11px] text-[#94A3B8]">—</span>
                     ) : (
                       <button
                         type="button"

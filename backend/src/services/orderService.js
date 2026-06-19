@@ -14,6 +14,7 @@ const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
+const { calculateOrderRushLevel } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 
 const WORKFLOW_STAGE_NAMES = ["Review Records", "Serve", "Custodian", "SENT"];
@@ -282,42 +283,6 @@ function buildRecordsBlock(row) {
   return { title, lines, links: [] };
 }
 
-function calculateRushLevel(createdAt) {
-  if (!createdAt) {
-    return { level: null, label: null };
-  }
-
-  const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
-  if (Number.isNaN(created.getTime())) {
-    return { level: null, label: null };
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  created.setHours(0, 0, 0, 0);
-
-  const diffDays = Math.floor(
-    (today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
-  );
-
-  if (diffDays < 0) {
-    return { level: null, label: null };
-  }
-
-  const weeks = Math.floor(diffDays / 7);
-
-  // Rush 1: new through ~1 week (0–13 days), Rush 2: 2 weeks, Rush 3: 3+ weeks
-  if (weeks < 2) {
-    return { level: 1, label: "Rush 1" };
-  }
-
-  if (weeks === 2) {
-    return { level: 2, label: "Rush 2" };
-  }
-
-  return { level: 3, label: "Rush 3" };
-}
-
 function deriveInvoiceDisplayStatus(invoiceRow) {
   if (!invoiceRow) {
     return "Pending";
@@ -347,7 +312,7 @@ function mapOrderListRow(
   if (row.dob) dobSsn.push(toShortDate(row.dob));
   if (row.ssn_last_four) dobSsn.push(`XXX-XX-${row.ssn_last_four}`);
 
-  const rush = calculateRushLevel(row.created_at);
+  const rush = calculateOrderRushLevel(row.created_at);
 
   return {
     id: row.order_number,
