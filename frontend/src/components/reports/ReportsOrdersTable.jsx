@@ -601,5 +601,6 @@ function formatDob(dateValue) {
   const parts = dateValue.split("/");
   if (parts.length !== 3) return dateValue;
 
-  return `${parts[0]}/${parts[1]}/${parts[2].slice(-4)}`;
+  const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2].slice(-4);
+  return `${parts[0]}/${parts[1]}/${year}`;
 }

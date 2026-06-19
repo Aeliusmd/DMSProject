@@ -21,7 +21,7 @@ import {
   sumPaymentLineAmounts,
 } from "@/lib/orders/paymentUtils";
 import {
-  calculateRushLevel,
+  calculateOrderRushLevel,
 } from "@/lib/orders/rushUtils";
 import { getOrder } from "@/lib/orders/orderApi";
 
@@ -29,8 +29,8 @@ const initialFormData = {
   invoiceDate: "2026-06-02",
   serviceDate: "",
   servedAmount: "10.00",
-  serviceFee: "250.00",
-  custodianFee: "100.00",
+  serviceFee: "0.00",
+  custodianFee: "0.00",
   xrayFee: "0.00",
   mileage: "0.00",
   parking: "0.00",
@@ -92,7 +92,7 @@ export default function CreateInvoiceModal({
 
         if (cancelled) return;
 
-        const derivedRushLevel = calculateRushLevel(orderData.subpoenaDate);
+        const derivedRushLevel = calculateOrderRushLevel(orderData.createdAt);
         setRushLevel(derivedRushLevel);
         const loadedPaymentLines = buildPaymentLinesFromOrder(orderData);
         setPaymentLines(loadedPaymentLines);
@@ -124,30 +124,20 @@ export default function CreateInvoiceModal({
         }
 
         setPersistedInvoiceMeta(null);
-        setFormData(
-          mapInvoiceFeesToDueForm(
-            {
-              ...getInitialInvoiceFormData(order, isEditMode),
-              xrayFee,
-              rushOrder: Boolean(derivedRushLevel),
-            },
-            loadedPaymentLines
-          )
-        );
+        setFormData({
+          ...getInitialInvoiceFormData(order, isEditMode),
+          xrayFee,
+          rushOrder: Boolean(derivedRushLevel),
+        });
       } catch (error) {
         if (!cancelled) {
           setSubmitError(error.message || "Failed to load invoice");
           const fallbackLines = buildPaymentLinesFromOrder(order);
           setPaymentLines(fallbackLines);
-          setFormData(
-            mapInvoiceFeesToDueForm(
-              {
-                ...getInitialInvoiceFormData(order, isEditMode),
-                xrayFee: "0.00",
-              },
-              fallbackLines
-            )
-          );
+          setFormData({
+            ...getInitialInvoiceFormData(order, isEditMode),
+            xrayFee: "0.00",
+          });
         }
       } finally {
         if (!cancelled) {
@@ -186,10 +176,17 @@ export default function CreateInvoiceModal({
     return toNumber(formData.pages) * toNumber(formData.perPageAmount);
   }, [formData.pages, formData.perPageAmount]);
 
-  const fullFees = useMemo(
-    () => resolveFullFeeAmounts(formData, paymentLines),
-    [formData, paymentLines]
-  );
+  const fullFees = useMemo(() => {
+    if (!isEditMode) {
+      return {
+        serviceFee: toNumber(formData.serviceFee),
+        custodianFee: toNumber(formData.custodianFee),
+        xrayFee: toNumber(formData.xrayFee),
+      };
+    }
+
+    return resolveFullFeeAmounts(formData, paymentLines);
+  }, [formData, paymentLines, isEditMode]);
 
   const totalAmount = useMemo(() => {
     return (
@@ -323,7 +320,14 @@ export default function CreateInvoiceModal({
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    const feePayload = mapDueFormToInvoiceFees(formData, paymentLines);
+    const feePayload = isEditMode
+      ? mapDueFormToInvoiceFees(formData, paymentLines)
+      : {
+          ...formData,
+          serviceFee: toNumber(formData.serviceFee).toFixed(2),
+          custodianFee: toNumber(formData.custodianFee).toFixed(2),
+          xrayFee: toNumber(formData.xrayFee).toFixed(2),
+        };
 
     const payload = {
       orderId: order.dbId,
@@ -664,14 +668,13 @@ function getInitialInvoiceFormData(order, isEditMode) {
   }
 
   const invoice = order?.invoice || {};
-  const invoiceAmount = moneyToInput(invoice.invoiced, "250.00");
 
   return {
     ...initialFormData,
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
     serviceDate: toDateInput(invoice.sentDateRaw || invoice.sentDate) || "",
     servedAmount: invoice.servedAmount || "0.00",
-    serviceFee: invoice.serviceFee || invoiceAmount,
+    serviceFee: invoice.serviceFee || "0.00",
     custodianFee: invoice.custodianFee || "0.00",
     xrayFee: "0.00",
     mileage: invoice.mileage || "0.00",

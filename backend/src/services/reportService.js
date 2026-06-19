@@ -31,24 +31,11 @@ function buildFullName(first, middle, last) {
   return [first, middle, last].filter(Boolean).join(" ").trim();
 }
 
-function normalizeDate(value) {
-  if (!value) return "";
-  const str = String(value).trim();
-  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : "";
-}
-
-function toShortDate(value) {
-  if (!value) return "";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const year = String(date.getFullYear()).slice(-2);
-
-  return `${month}/${day}/${year}`;
-}
+const {
+  normalizeDate,
+  formatDobDisplay,
+  formatSsnLastFourDisplay,
+} = require("../utils/dateUtils");
 
 function buildRecordsRequested(row) {
   const type = RECORD_TITLES[row.order_type] || "Records";
@@ -99,8 +86,8 @@ function mapReportOrderRow(row) {
       row.applicant_last_name
     ),
     caseNumber: row.case_number || "",
-    dob: toShortDate(row.dob),
-    ssn: row.ssn_last_four ? `XXX-XX-${row.ssn_last_four}` : "",
+    dob: formatDobDisplay(row.dob),
+    ssn: formatSsnLastFourDisplay(row.ssn_last_four),
     provider: row.serve_company_name || row.provider_name || "",
     recordsRequested: buildRecordsRequested(row),
     doctor: row.specific_doctor || "",

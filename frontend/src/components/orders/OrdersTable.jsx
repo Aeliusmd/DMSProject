@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
@@ -27,10 +26,7 @@ const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
   "Copy Center",
   "Certification",
-  "Records",
   "CNR",
-  "Called",
-  "Edit Order",
 ];
 
 const WORKFLOW_STAGES = [
@@ -81,13 +77,15 @@ function toRenderOrder(order) {
     invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
+    year: order.year || "",
+    dob: order.dob || "",
+    ssn: order.ssn || "",
     dobSsn: order.dobSsn || [],
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
   };
 }
 
 export default function OrdersTable({ filters = defaultOrderFilters }) {
-  const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [invoiceModalMode, setInvoiceModalMode] = useState("create");
@@ -106,6 +104,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [, setRelativeTimeTick] = useState(0);
 
   // Guards a silent refetch from running too often, and discards responses
   // from stale requests so a late silent fetch never overwrites fresh data.
@@ -150,6 +150,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
         if (requestId !== requestIdRef.current) return;
         setOrders(data.map(toRenderOrder));
+        setLastUpdatedAt(new Date());
         setError("");
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
@@ -173,6 +174,16 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    if (!lastUpdatedAt) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      setRelativeTimeTick((tick) => tick + 1);
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, [lastUpdatedAt]);
 
   const handleEmailInvoice = useCallback(
     async (order) => {
@@ -255,7 +266,23 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
             All Orders
           </h2>
 
-          <p className="text-[11px] text-[#94A3B8]">Last updated: 6/2/2026</p>
+          <p
+            className="text-[11px] text-[#94A3B8]"
+            title={
+              lastUpdatedAt
+                ? lastUpdatedAt.toLocaleString(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })
+                : undefined
+            }
+          >
+            {loading && !lastUpdatedAt
+              ? "Updating..."
+              : lastUpdatedAt
+                ? `Last updated: ${formatLastUpdatedLabel(lastUpdatedAt)}`
+                : ""}
+          </p>
         </div>
 
         {emailError && (
@@ -322,6 +349,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       >
                         {order.id}
                       </Link>
+
+                      {order.year && (
+                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                          {order.year}
+                        </p>
+                      )}
 
                       <button
                         type="button"
@@ -453,9 +486,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
                     <td className="px-4 py-5 align-top">
                       <div className="space-y-1 text-[11px] text-[#334155]">
-                        {order.dobSsn.map((item) => (
-                          <p key={item}>{item}</p>
-                        ))}
+                        {order.dob ? <p>{order.dob}</p> : null}
+                        {order.ssn ? <p>{order.ssn}</p> : null}
+                        {!order.dob && !order.ssn ? (
+                          <p className="text-[#94A3B8]">—</p>
+                        ) : null}
                       </div>
                     </td>
 
@@ -463,13 +498,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <FormsList
                         forms={order.forms}
                         onCnrClick={() => setSelectedCnrOrder(order)}
-                        onEditClick={() =>
-                          router.push(
-                            `/orders/new?mode=edit&orderId=${encodeURIComponent(
-                              order.dbId
-                            )}`
-                          )
-                        }
                       />
                     </td>
                   </tr>
@@ -865,10 +893,9 @@ function CompanyBlock({ company }) {
   );
 }
 
-function FormsList({ forms, onCnrClick, onEditClick }) {
+function FormsList({ forms, onCnrClick }) {
   const handlers = {
     CNR: onCnrClick,
-    "Edit Order": onEditClick,
   };
 
   return (
@@ -885,4 +912,24 @@ function FormsList({ forms, onCnrClick, onEditClick }) {
       ))}
     </div>
   );
+}
+
+function formatLastUpdatedLabel(date) {
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+
+  if (diffSeconds < 15) return "just now";
+  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `${diffMinutes} min${diffMinutes === 1 ? "" : "s"} ago`;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

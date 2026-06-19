@@ -67,10 +67,12 @@ export default function PaymentChargeCard({
   amountsReadOnly = false,
   dueReadOnly,
   paidReadOnly,
+  fieldsReadOnly = false,
 }) {
   const colors = paymentThemes[theme];
   const lockDue = dueReadOnly ?? amountsReadOnly;
   const lockPaid = paidReadOnly ?? amountsReadOnly;
+  const lockFields = fieldsReadOnly || lockPaid;
   const charge = parsePaymentAmount(chargeAmount);
   const paid = parsePaymentAmount(paidAmount);
   const paidBracket = formatPaidBracket(paid);
@@ -143,7 +145,8 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="Check number"
-          required={!lockPaid}
+          required={!lockFields}
+          disabled={lockFields}
           inputMode="numeric"
           maxLength={12}
           error={getError(`${prefix}Check`)}
@@ -156,7 +159,8 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           type="date"
-          required={!lockPaid}
+          required={!lockFields}
+          disabled={lockFields}
           error={getError(`${prefix}Date`)}
         />
 
@@ -193,6 +197,7 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="Memo"
+          disabled={lockFields}
         />
       </div>
     </div>
