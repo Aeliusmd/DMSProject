@@ -27,6 +27,31 @@ const paymentThemes = {
   },
 };
 
+function AmountField({ label, value, onChange, onBlur, readOnly, colors, error }) {
+  return (
+    <div>
+      <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">{label}</p>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+        readOnly={readOnly}
+        placeholder="0.00"
+        className={`flex h-[38px] w-full items-center rounded-[6px] border px-3 text-[14px] font-semibold outline-none focus:ring-2 ${colors.due} ${
+          readOnly
+            ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+            : error
+              ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+              : "border-[#CBD5E1] bg-white focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+        }`}
+      />
+      {error && <p className="mt-1 text-[11px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 export default function PaymentChargeCard({
   title,
   chargeAmount,
@@ -37,14 +62,27 @@ export default function PaymentChargeCard({
   onChange,
   onBlur,
   getError,
+  showPaidField = false,
+  mirrorPaidDue = false,
+  amountsReadOnly = false,
+  dueReadOnly,
+  paidReadOnly,
 }) {
   const colors = paymentThemes[theme];
+  const lockDue = dueReadOnly ?? amountsReadOnly;
+  const lockPaid = paidReadOnly ?? amountsReadOnly;
   const charge = parsePaymentAmount(chargeAmount);
   const paid = parsePaymentAmount(paidAmount);
   const paidBracket = formatPaidBracket(paid);
-  const dueAmount = dueAmountFromFee(charge, paid);
+  const dueAmount = mirrorPaidDue
+    ? charge
+    : dueAmountFromFee(charge, paid);
+  const paidDisplay = mirrorPaidDue ? charge : paid;
+  const displayValue = (amount) => amount.toFixed(2);
 
   const handleDueChange = (event) => {
+    if (lockDue) return;
+
     const rawDue = event.target.value
       .replace(/[^\d.]/g, "")
       .replace(/(\..*)\./g, "$1")
@@ -56,6 +94,22 @@ export default function PaymentChargeCard({
       target: {
         name: `${prefix}Paid`,
         value: nextPaid > 0 ? nextPaid.toFixed(2) : "",
+      },
+    });
+  };
+
+  const handlePaidChange = (event) => {
+    if (lockPaid) return;
+
+    const rawPaid = event.target.value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+
+    onChange({
+      target: {
+        name: `${prefix}Paid`,
+        value: rawPaid,
       },
     });
   };
@@ -89,7 +143,7 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="Check number"
-          required
+          required={!lockPaid}
           inputMode="numeric"
           maxLength={12}
           error={getError(`${prefix}Check`)}
@@ -102,34 +156,35 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           type="date"
-          required
+          required={!lockPaid}
           error={getError(`${prefix}Date`)}
         />
 
-        <div>
-          <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">
-            Due
-          </p>
-          <input
-            type="text"
-            inputMode="decimal"
-            name={`${prefix}Due`}
-            value={dueAmount.toFixed(2)}
-            onChange={handleDueChange}
+        {showPaidField && (
+          <AmountField
+            label="Paid"
+            value={
+              lockPaid
+                ? displayValue(paidDisplay)
+                : formData[`${prefix}Paid`] ?? ""
+            }
+            onChange={handlePaidChange}
             onBlur={onBlur}
-            placeholder="0.00"
-            className={`flex h-[38px] w-full items-center rounded-[6px] border bg-white px-3 text-[14px] font-semibold outline-none focus:ring-2 ${colors.due} ${
-              getError(`${prefix}Paid`)
-                ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-                : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-            }`}
+            readOnly={lockPaid}
+            colors={colors}
+            error={getError(`${prefix}Paid`)}
           />
-          {getError(`${prefix}Paid`) && (
-            <p className="mt-1 text-[11px] text-red-500">
-              {getError(`${prefix}Paid`)}
-            </p>
-          )}
-        </div>
+        )}
+
+        <AmountField
+          label="Due"
+          value={displayValue(dueAmount)}
+          onChange={handleDueChange}
+          onBlur={onBlur}
+          readOnly={lockDue}
+          colors={colors}
+          error={!showPaidField ? getError(`${prefix}Paid`) : ""}
+        />
 
         <NewOrderField
           label="Memo"

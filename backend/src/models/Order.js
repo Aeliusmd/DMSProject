@@ -367,7 +367,13 @@ class Order {
   }
 
   static async seedWorkflowStages(connection, orderId) {
-    const stages = ["Review Records", "Serve", "Custodian", "SENT"];
+    const stages = [
+      "Upload Records",
+      "Review Records",
+      "Serve",
+      "Custodian",
+      "SENT",
+    ];
 
     for (const stageName of stages) {
       await connection.execute(
@@ -387,7 +393,7 @@ class Order {
       `SELECT id, order_id, stage_name, stage_status, completed_at
        FROM order_workflow_stages
        WHERE order_id = :orderId
-       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'Custodian', 'SENT')`,
+       ORDER BY FIELD(stage_name, 'Upload Records', 'Review Records', 'Serve', 'Custodian', 'SENT')`,
       { orderId }
     );
 
@@ -409,17 +415,23 @@ class Order {
       `SELECT id, order_id, stage_name, stage_status, completed_at
        FROM order_workflow_stages
        WHERE order_id IN (${placeholders})
-       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'Custodian', 'SENT')`,
+       ORDER BY FIELD(stage_name, 'Upload Records', 'Review Records', 'Serve', 'Custodian', 'SENT')`,
       params
     );
 
     return rows;
   }
 
-  static async upsertWorkflowStage(orderId, stageName, stageStatus, completedAt) {
-    const pool = getPool();
+  static async upsertWorkflowStage(
+    orderId,
+    stageName,
+    stageStatus,
+    completedAt,
+    connection = null
+  ) {
+    const db = connection || getPool();
 
-    await pool.execute(
+    await db.execute(
       `INSERT INTO order_workflow_stages
         (order_id, stage_name, stage_status, completed_at, created_at, updated_at)
        VALUES (:orderId, :stageName, :stageStatus, :completedAt, NOW(), NOW())

@@ -915,6 +915,30 @@ async function createOrUpdateXrayInvoice(body, userId) {
   }
 }
 
+async function syncInvoicePrepayment(connection, orderId, prepaymentAmount) {
+  if (prepaymentAmount === undefined || prepaymentAmount === null) {
+    return;
+  }
+
+  const amount = toNumber(prepaymentAmount);
+  const existingPayments = await Order.findPaymentsByOrderId(orderId, connection);
+  const existingPrepayment = existingPayments.find(
+    (payment) => payment.payment_type === "prepayment"
+  );
+
+  await Order.upsertPayment(connection, {
+    orderId,
+    paymentType: "prepayment",
+    checkNumber: existingPrepayment?.check_number || null,
+    paymentDate: existingPrepayment?.payment_date || null,
+    amount,
+    isPaid: amount > 0 ? 1 : 0,
+    memo: existingPrepayment?.memo || null,
+  });
+
+  await syncInvoiceAmountPaidFromOrder(connection, orderId);
+}
+
 async function createInvoice(body, userId) {
   const orderId = Number(body.orderId);
 
@@ -943,6 +967,8 @@ async function createInvoice(body, userId) {
 
   try {
     await connection.beginTransaction();
+
+    await syncInvoicePrepayment(connection, orderId, body.prepaymentAmount);
 
     const [xrayRow, orderPayments] = await Promise.all([
       InvoiceXray.findByOrderId(orderId, connection),
@@ -1017,6 +1043,8 @@ async function updateInvoice(id, body) {
 
   try {
     await connection.beginTransaction();
+
+    await syncInvoicePrepayment(connection, existing.order_id, body.prepaymentAmount);
 
     const xrayRow = await InvoiceXray.findByOrderId(existing.order_id, connection);
     const orderPayments = await Order.findPaymentsByOrderId(existing.order_id, connection);
@@ -1273,6 +1301,13 @@ async function sendInvoices(invoiceIds = []) {
     throw new ApiError(400, "Selected invoices are already sent");
   }
 
+  for (const invoiceId of unsentIds) {
+    const invoice = await Invoice.findById(invoiceId);
+    if (invoice?.order_id) {
+      await Order.upsertWorkflowStage(invoice.order_id, "SENT", "sent", new Date());
+    }
+  }
+
   return { sentCount };
 }
 
@@ -1329,6 +1364,10 @@ async function resendInvoices(invoiceIds = []) {
       throw new ApiError(400, "Unable to update emailed invoice");
     }
 
+    if (invoice.order_id) {
+      await Order.upsertWorkflowStage(invoice.order_id, "SENT", "sent", new Date());
+    }
+
     resent.push(invoiceId);
   }
 
@@ -1358,6 +1397,8 @@ async function emailInvoiceByOrderId(orderId) {
   if (!sentCount) {
     throw new ApiError(400, "Invoice is already marked as sent");
   }
+
+  await Order.upsertWorkflowStage(normalizedOrderId, "SENT", "sent", new Date());
 
   return {
     invoiceId,
@@ -1433,6 +1474,14 @@ async function writeOffInvoices(body = {}, userId) {
            SET status = 'Completed', updated_at = NOW()
            WHERE id = :orderId`,
           { orderId: invoice.order_id }
+        );
+
+        await Order.upsertWorkflowStage(
+          invoice.order_id,
+          "Review Records",
+          "complete",
+          new Date(),
+          connection
         );
       }
 

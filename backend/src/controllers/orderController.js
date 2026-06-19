@@ -190,6 +190,35 @@ exports.getSubpoenaFile = asyncHandler(async (req, res) => {
   return res.sendFile(fileInfo.absolutePath);
 });
 
+exports.scanMedicalRecords = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ApiError(400, "PDF file is required");
+  }
+
+  const order = await orderService.scanMedicalRecords(
+    req.params.id,
+    req.file,
+    req.user.id
+  );
+
+  return ApiResponse.success(
+    res,
+    { order },
+    "Medical records uploaded successfully"
+  );
+});
+
+exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
+  const fileInfo = await orderService.getOrderMedicalRecordsFile(req.params.id);
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
+  );
+  return res.sendFile(fileInfo.absolutePath);
+});
+
 exports.getReminders = asyncHandler(async (req, res) => {
   const reminders = await orderService.getOrderReminders(req.user, {
     scope: req.query.scope,

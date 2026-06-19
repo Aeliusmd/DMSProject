@@ -108,6 +108,11 @@ export function normalizeAutofillCheckNumber(value) {
   return text.trim();
 }
 
+export function normalizeAutofillAmount(value) {
+  if (!value) return "";
+  return String(value).replace(/[^\d.]/g, "");
+}
+
 export function normalizeAutofillSSN(value) {
   if (!value) return "";
   return formatMaskedSSN(String(value).trim());
@@ -134,7 +139,13 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
   if (hints.depoDueDate) updates.depoDueDate = hints.depoDueDate;
   if (hints.requestedRecord) updates.specificRecord = hints.requestedRecord;
-  if (hints.amount) updates.prepaymentPaid = hints.amount;
+  if (hints.amount) {
+    const amount = normalizeAutofillAmount(hints.amount);
+    if (amount) {
+      updates.subpoenaPrepaymentAmount = amount;
+      updates.prepaymentPaid = amount;
+    }
+  }
   if (hints.chequeDate) updates.prepaymentDate = hints.chequeDate;
   if (hints.chequeNumber) {
     const checkNumber = normalizeAutofillCheckNumber(hints.chequeNumber);

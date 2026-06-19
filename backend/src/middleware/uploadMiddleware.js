@@ -27,6 +27,7 @@ const ORDER_UPLOAD_DIRS = {
   processed: path.join(ORDER_UPLOADS_ROOT, "processed"),
   additionalDocuments: path.join(ORDER_UPLOADS_ROOT, "additional-documents"),
   orderNotes: path.join(ORDER_UPLOADS_ROOT, "notes_attachments"),
+  medicalRecords: path.join(ORDER_UPLOADS_ROOT, "medical-records"),
 };
 
 const FIELD_DESTINATIONS = {
@@ -153,6 +154,32 @@ const uploadOrderFiles = orderUpload.fields([
 
 const uploadNoteAttachment = orderUpload.single("attachment");
 
+const medicalRecordsStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    fs.mkdirSync(ORDER_UPLOAD_DIRS.medicalRecords, { recursive: true });
+    cb(null, ORDER_UPLOAD_DIRS.medicalRecords);
+  },
+  filename(req, file, cb) {
+    const orderId = req.params.id || "order";
+    const unique = `${orderId}-${Date.now()}`;
+    cb(null, `${unique}-${sanitizeFileName(file.originalname)}`);
+  },
+});
+
+const uploadMedicalRecordsScan = multer({
+  storage: medicalRecordsStorage,
+  fileFilter(_req, file, cb) {
+    if (file.mimetype === PDF_MIME || (file.originalname || "").toLowerCase().endsWith(".pdf")) {
+      cb(null, true);
+      return;
+    }
+    cb(new ApiError(400, "Only PDF files are allowed"));
+  },
+  limits: {
+    fileSize: Number(process.env.UPLOAD_MAX_FILE_SIZE_MB || 50) * 1024 * 1024,
+  },
+}).single("file");
+
 function toRelativeStoragePath(file) {
   if (!file) return null;
   return path.relative(ORDER_UPLOADS_ROOT, file.path).split(path.sep).join("/");
@@ -190,4 +217,5 @@ module.exports = {
   uploadNoteAttachment,
   toRelativeStoragePath,
   uploadSinglePdf,
+  uploadMedicalRecordsScan,
 };

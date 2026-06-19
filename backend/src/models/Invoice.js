@@ -85,7 +85,10 @@ class Invoice {
 
   static async findOutstanding(filters = {}) {
     const pool = getPool();
-    const conditions = ["i.status NOT IN ('Paid', 'Needs Resend')"];
+    const conditions = [
+      "i.status NOT IN ('Paid', 'Needs Resend')",
+      "i.sent_date IS NULL",
+    ];
     const params = {};
 
     if (filters.dateFrom) {
@@ -150,6 +153,7 @@ class Invoice {
     const conditions = [
       "i.facility_id = :facilityId",
       "i.status NOT IN ('Paid', 'Needs Resend')",
+      "i.sent_date IS NULL",
     ];
     const params = { facilityId };
 
