@@ -1362,10 +1362,15 @@ function ServeInfoForm({
 
 import {
   PAYMENT_CHARGE_AMOUNTS,
-  formatPaymentDue,
+  getPaymentChargeForType,
 } from "@/lib/orders/paymentUtils";
 
 function PaymentForm({ formData, onChange, onBlur, getError }) {
+  const invoiceFees = formData.invoiceFees;
+  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+  const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
+  const xrayCharge = getPaymentChargeForType("xray", invoiceFees);
+
   return (
     <div className="space-y-5">
       <h3 className="text-[14px] font-semibold text-[#111827]">
@@ -1374,11 +1379,8 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Prepayment Fee"
-        amount="$15.00"
-        due={formatPaymentDue(
-          PAYMENT_CHARGE_AMOUNTS.prepayment,
-          formData.prepaymentPaid
-        )}
+        chargeAmount={prepaymentCharge}
+        paidAmount={formData.prepaymentPaid}
         theme="green"
         prefix="prepayment"
         formData={formData}
@@ -1389,11 +1391,8 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Custodian Charge"
-        amount="$15.00"
-        due={formatPaymentDue(
-          PAYMENT_CHARGE_AMOUNTS.custodian,
-          formData.custodianPaid
-        )}
+        chargeAmount={custodianCharge}
+        paidAmount={formData.custodianPaid}
         theme="purple"
         prefix="custodian"
         formData={formData}
@@ -1404,8 +1403,8 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Xray Charge"
-        amount="$0.00"
-        due={formatPaymentDue(PAYMENT_CHARGE_AMOUNTS.xray, formData.xrayPaid)}
+        chargeAmount={xrayCharge}
+        paidAmount={formData.xrayPaid}
         theme="blue"
         prefix="xray"
         formData={formData}

@@ -8,6 +8,67 @@ export function parsePaymentAmount(value) {
   return Number(String(value ?? "").replace(/[^\d.]/g, "")) || 0;
 }
 
+export function getPaymentLineAmount(paymentLines = [], type) {
+  const line = paymentLines.find((entry) => entry.type === type);
+  return parsePaymentAmount(line?.amount);
+}
+
+export function formatPaidBracket(paidAmount) {
+  const paid = parsePaymentAmount(paidAmount);
+  if (paid <= 0) return null;
+  return `(${formatMoneyAmount(paid)})`;
+}
+
+export function feeAmountFromDue(dueAmount, paidAmount) {
+  return parsePaymentAmount(dueAmount) + parsePaymentAmount(paidAmount);
+}
+
+export function dueAmountFromFee(feeAmount, paidAmount) {
+  return Math.max(0, parsePaymentAmount(feeAmount) - parsePaymentAmount(paidAmount));
+}
+
+export function dueMoneyInputFromFee(feeAmount, paidAmount) {
+  return dueAmountFromFee(feeAmount, paidAmount).toFixed(2);
+}
+
+export function mapInvoiceFeesToDueForm(feeFormData, paymentLines = []) {
+  const prepaymentPaid = getPaymentLineAmount(paymentLines, "prepayment");
+  const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
+  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
+
+  return {
+    ...feeFormData,
+    serviceFee: dueMoneyInputFromFee(feeFormData.serviceFee, prepaymentPaid),
+    custodianFee: dueMoneyInputFromFee(feeFormData.custodianFee, custodianPaid),
+    xrayFee: dueMoneyInputFromFee(feeFormData.xrayFee, xrayPaid),
+  };
+}
+
+export function mapDueFormToInvoiceFees(formData, paymentLines = []) {
+  const prepaymentPaid = getPaymentLineAmount(paymentLines, "prepayment");
+  const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
+  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
+
+  return {
+    ...formData,
+    serviceFee: feeAmountFromDue(formData.serviceFee, prepaymentPaid).toFixed(2),
+    custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid).toFixed(2),
+    xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid).toFixed(2),
+  };
+}
+
+export function resolveFullFeeAmounts(formData, paymentLines = []) {
+  const prepaymentPaid = getPaymentLineAmount(paymentLines, "prepayment");
+  const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
+  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
+
+  return {
+    serviceFee: feeAmountFromDue(formData.serviceFee, prepaymentPaid),
+    custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid),
+    xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid),
+  };
+}
+
 export function formatPaymentDue(chargeAmount, paidValue, options = {}) {
   const paid = parsePaymentAmount(paidValue);
   const charge = parsePaymentAmount(chargeAmount);
@@ -16,13 +77,18 @@ export function formatPaymentDue(chargeAmount, paidValue, options = {}) {
     return formatMoneyAmount(Math.max(0, charge - paid));
   }
 
-  if (paid <= 0) return "$0.00";
+  if (paid <= 0) {
+    return formatMoneyAmount(charge);
+  }
 
   return formatMoneyAmount(Math.max(0, charge - paid));
 }
 
 export function getPaymentChargeForType(type, invoiceFees) {
   if (invoiceFees?.hasInvoice) {
+    if (type === "prepayment") {
+      return parsePaymentAmount(invoiceFees.serviceFee);
+    }
     if (type === "custodian") return parsePaymentAmount(invoiceFees.custodianFee);
     if (type === "xray") return parsePaymentAmount(invoiceFees.xrayFee);
   }
@@ -30,21 +96,38 @@ export function getPaymentChargeForType(type, invoiceFees) {
   return PAYMENT_CHARGE_AMOUNTS[type] ?? 0;
 }
 
-export function deriveInvoiceStatusLabel(totalAmount, amountPaid) {
+export function deriveInvoiceStatusLabel(totalAmount, amountPaid, writeoffAmount = 0) {
   const total = parsePaymentAmount(totalAmount);
   const paid = parsePaymentAmount(amountPaid);
+  const writeoff = parsePaymentAmount(writeoffAmount);
+  const amountDue = Math.max(0, total - paid - writeoff);
 
-  if (paid <= 0) return "Unpaid";
-  if (total <= 0 || paid >= total) return "Paid";
+  if (amountDue <= 0) {
+    if (paid >= total) {
+      return "Paid";
+    }
+
+    if (writeoff > 0 && paid < total) {
+      return "Written Off";
+    }
+
+    return paid > 0 ? "Paid" : writeoff > 0 ? "Written Off" : "Unpaid";
+  }
+
+  if (paid <= 0) {
+    return "Unpaid";
+  }
+
   return "Partial";
 }
 
-export function resolveInvoiceAmounts(totalAmount, amountPaid) {
+export function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 0) {
   const total = parsePaymentAmount(totalAmount);
   const paid = parsePaymentAmount(amountPaid);
-  const amountDue = Math.max(0, total - paid);
+  const writeoff = parsePaymentAmount(writeoffAmount);
+  const amountDue = Math.max(0, total - paid - writeoff);
   const overpayment = Math.max(0, paid - total);
-  const status = deriveInvoiceStatusLabel(total, paid);
+  const status = deriveInvoiceStatusLabel(total, paid, writeoff);
 
   return {
     amountDue,
@@ -52,6 +135,24 @@ export function resolveInvoiceAmounts(totalAmount, amountPaid) {
     status,
     isOverpaid: overpayment > 0,
   };
+}
+
+export function resolvePersistedInvoiceAmounts(
+  totalAmount,
+  amountPaid,
+  { writeoffAmount = 0, persistedStatus = null } = {}
+) {
+  const totals = resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount);
+
+  if (persistedStatus === "Needs Resend") {
+    return { ...totals, status: "Needs Resend" };
+  }
+
+  if (persistedStatus === "Written Off" && totals.amountDue <= 0) {
+    return { ...totals, status: "Written Off" };
+  }
+
+  return totals;
 }
 
 export function formatMoneyAmount(amount) {

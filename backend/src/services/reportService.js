@@ -40,14 +40,24 @@ function deriveCaseActivities(row) {
     activities.add("Invoiced");
   }
 
+  if (invoiceStatus === "Written Off") {
+    activities.add("Written Off");
+  }
+
   if (
     row.invoice_id &&
-    (invoiceStatus === "Paid" || amountPaid >= totalAmount)
+    (invoiceStatus === "Paid" || amountPaid >= totalAmount) &&
+    invoiceStatus !== "Written Off"
   ) {
     activities.add("Paid");
   }
 
-  if (row.invoice_id && amountDue > 0 && invoiceStatus !== "Paid") {
+  if (
+    row.invoice_id &&
+    amountDue > 0 &&
+    invoiceStatus !== "Paid" &&
+    invoiceStatus !== "Written Off"
+  ) {
     activities.add("Unpaid");
   }
 
@@ -60,6 +70,7 @@ function deriveCaseActivities(row) {
 
 function getPrimaryActivity(activities = []) {
   if (activities.includes("Paid")) return "Paid";
+  if (activities.includes("Written Off")) return "Written Off";
   if (activities.includes("Unpaid")) return "Unpaid";
   if (activities.includes("Invoiced")) return "Invoiced";
   if (activities.includes("Produced")) return "Produced";
@@ -69,6 +80,10 @@ function getPrimaryActivity(activities = []) {
 function getCaseAmount(row, activity) {
   if (activity === "Paid") {
     return toNumber(row.amount_paid);
+  }
+
+  if (activity === "Written Off") {
+    return toNumber(row.writeoff_amount);
   }
 
   if (activity === "Unpaid") {
@@ -141,6 +156,7 @@ async function getActivityReport({
       i.total_amount,
       i.amount_paid,
       i.amount_due,
+      i.writeoff_amount,
       i.status AS invoice_status,
       i.invoice_date
     FROM orders o

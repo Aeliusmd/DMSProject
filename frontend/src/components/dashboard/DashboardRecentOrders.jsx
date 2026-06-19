@@ -215,14 +215,17 @@ function RushBadge({ rush }) {
 function InvoiceBadge({ status }) {
   const styles = {
     Pending: "bg-[#F1F5F9] text-[#64748B]",
-    Created: "bg-[#E6F7FA] text-[#007F96]",
+    Unpaid: "bg-[#FEE2E2] text-red-500",
+    Partial: "bg-[#DBEAFE] text-[#2563EB]",
     Paid: "bg-[#ECFDF5] text-[#059669]",
+    "Written Off": "bg-[#F3E8FF] text-[#7C3AED]",
+    "Needs Resend": "bg-[#FEF3C7] text-[#D97706]",
   };
 
   return (
     <span
       className={`inline-flex h-[22px] items-center rounded-full px-3 text-[10px] font-semibold ${
-        styles[status] || styles.Pending
+        styles[status] || "bg-[#E6F7FA] text-[#007F96]"
       }`}
     >
       {status || "Pending"}

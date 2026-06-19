@@ -1,4 +1,10 @@
 import NewOrderField from "@/components/orders/new-order/NewOrderField";
+import {
+  dueAmountFromFee,
+  formatMoneyAmount,
+  formatPaidBracket,
+  parsePaymentAmount,
+} from "@/lib/orders/paymentUtils";
 
 const paymentThemes = {
   green: {
@@ -23,8 +29,8 @@ const paymentThemes = {
 
 export default function PaymentChargeCard({
   title,
-  amount,
-  due,
+  chargeAmount,
+  paidAmount = 0,
   theme = "green",
   prefix,
   formData,
@@ -33,6 +39,26 @@ export default function PaymentChargeCard({
   getError,
 }) {
   const colors = paymentThemes[theme];
+  const charge = parsePaymentAmount(chargeAmount);
+  const paid = parsePaymentAmount(paidAmount);
+  const paidBracket = formatPaidBracket(paid);
+  const dueAmount = dueAmountFromFee(charge, paid);
+
+  const handleDueChange = (event) => {
+    const rawDue = event.target.value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+    const nextDue = parsePaymentAmount(rawDue);
+    const nextPaid = Math.max(0, charge - nextDue);
+
+    onChange({
+      target: {
+        name: `${prefix}Paid`,
+        value: nextPaid > 0 ? nextPaid.toFixed(2) : "",
+      },
+    });
+  };
 
   return (
     <div className={`rounded-[10px] border ${colors.border} ${colors.bg} p-4`}>
@@ -40,9 +66,10 @@ export default function PaymentChargeCard({
         <div>
           <h3 className={`text-[14px] font-semibold ${colors.title}`}>
             {title}
+            {paidBracket ? ` ${paidBracket}` : ""}
           </h3>
           <p className={`mt-[2px] text-[11px] ${colors.title}`}>
-            Amount: {amount}
+            Charge: {formatMoneyAmount(charge)}
           </p>
         </div>
 
@@ -79,27 +106,29 @@ export default function PaymentChargeCard({
           error={getError(`${prefix}Date`)}
         />
 
-        <NewOrderField
-          label="Paid"
-          name={`${prefix}Paid`}
-          value={formData[`${prefix}Paid`]}
-          onChange={onChange}
-          onBlur={onBlur}
-          placeholder="$ 0.00"
-          required
-          inputMode="decimal"
-          error={getError(`${prefix}Paid`)}
-        />
-
         <div>
           <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">
             Due
           </p>
-          <div
-            className={`flex h-[38px] items-center rounded-[6px] bg-white/50 px-3 text-[14px] font-semibold ${colors.due}`}
-          >
-            {due}
-          </div>
+          <input
+            type="text"
+            inputMode="decimal"
+            name={`${prefix}Due`}
+            value={dueAmount.toFixed(2)}
+            onChange={handleDueChange}
+            onBlur={onBlur}
+            placeholder="0.00"
+            className={`flex h-[38px] w-full items-center rounded-[6px] border bg-white px-3 text-[14px] font-semibold outline-none focus:ring-2 ${colors.due} ${
+              getError(`${prefix}Paid`)
+                ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+            }`}
+          />
+          {getError(`${prefix}Paid`) && (
+            <p className="mt-1 text-[11px] text-red-500">
+              {getError(`${prefix}Paid`)}
+            </p>
+          )}
         </div>
 
         <NewOrderField
