@@ -44,7 +44,7 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   }
 
   if (data.ssn && !isValidSSN(data.ssn)) {
-    errors.ssn = "Enter SSN as XXX-XX-XXXX";
+    errors.ssn = "Enter SSN as XXX-XX-1234";
   }
 
   if (data.dob && isFutureDate(data.dob)) {
@@ -128,7 +128,9 @@ export function isValidEmail(email) {
 }
 
 export function isValidSSN(ssn) {
-  return /^\d{3}-\d{2}-\d{4}$/.test(ssn);
+  const trimmed = String(ssn || "").trim();
+  if (/^XXX-XX-\d{4}$/i.test(trimmed)) return true;
+  return /^\d{3}-\d{2}-\d{4}$/.test(trimmed);
 }
 
 export function isValidMoney(value) {
@@ -165,6 +167,13 @@ export function formatSSN(value) {
   if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
 
   return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
+
+export function formatMaskedSSN(value) {
+  const digits = getDigits(value);
+  if (digits.length < 4) return "";
+
+  return `XXX-XX-${digits.slice(-4)}`;
 }
 
 export function formatMoneyInput(value) {
