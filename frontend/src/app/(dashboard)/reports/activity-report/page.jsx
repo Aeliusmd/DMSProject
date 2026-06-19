@@ -280,6 +280,7 @@ export default function ActivityReportPage() {
                 { value: "Invoiced", label: "Invoiced" },
                 { value: "Paid", label: "Paid" },
                 { value: "Unpaid", label: "Unpaid" },
+                { value: "Written Off", label: "Written Off" },
                 { value: "Produced", label: "Produced" },
               ]}
             />

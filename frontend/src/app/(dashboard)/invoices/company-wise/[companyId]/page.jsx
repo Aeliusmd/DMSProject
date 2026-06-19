@@ -583,7 +583,8 @@ function CompanyInvoiceTable({
                     <button
                       type="button"
                       onClick={() => onWriteOffSingle(invoice)}
-                      className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                      disabled={invoice.isWrittenOff}
+                      className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Write Off
                     </button>
@@ -614,6 +615,8 @@ function StatusBadge({ status }) {
     Partial: "bg-[#DBEAFE] text-[#2563EB]",
     "Needs Resend": "bg-[#FEF3C7] text-[#D97706]",
     Unpaid: "bg-[#FEE2E2] text-red-500",
+    Paid: "bg-[#ECFDF5] text-[#059669]",
+    "Written Off": "bg-[#F3E8FF] text-[#7C3AED]",
   };
 
   return (

@@ -1,4 +1,4 @@
-const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays"];
+const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays", "other"];
 const WORKFLOW_STAGE_NAMES = ["Review Records", "Serve", "Custodian", "SENT"];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const MAX_NOTE_LENGTH = 1000;

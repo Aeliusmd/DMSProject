@@ -11,12 +11,17 @@ import {
 } from "@/lib/invoices/invoiceApi";
 import {
   buildPaymentLinesFromOrder,
-  resolveInvoiceAmounts,
+  formatMoneyAmount,
+  formatPaidBracket,
+  getPaymentLineAmount,
+  mapDueFormToInvoiceFees,
+  mapInvoiceFeesToDueForm,
+  resolveFullFeeAmounts,
+  resolvePersistedInvoiceAmounts,
   sumPaymentLineAmounts,
 } from "@/lib/orders/paymentUtils";
 import {
   calculateRushLevel,
-  RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
 import { getOrder } from "@/lib/orders/orderApi";
 
@@ -54,6 +59,7 @@ export default function CreateInvoiceModal({
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [paymentLines, setPaymentLines] = useState([]);
   const [rushLevel, setRushLevel] = useState(null);
+  const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -87,7 +93,8 @@ export default function CreateInvoiceModal({
 
         const derivedRushLevel = calculateRushLevel(orderData.subpoenaDate);
         setRushLevel(derivedRushLevel);
-        setPaymentLines(buildPaymentLinesFromOrder(orderData));
+        const loadedPaymentLines = buildPaymentLinesFromOrder(orderData);
+        setPaymentLines(loadedPaymentLines);
 
         const xrayFee = moneyToInput(xrayData?.xray?.payment, "0.00");
         const invoiceId = order.invoiceId || order.invoice?.invoiceId;
@@ -96,27 +103,48 @@ export default function CreateInvoiceModal({
           const invoice = await getInvoice(invoiceId);
           if (cancelled) return;
 
-          setFormData({
-            ...mapInvoiceToFormData(invoice, order),
-            xrayFee,
+          setFormData(
+            mapInvoiceFeesToDueForm(
+              {
+                ...mapInvoiceToFormData(invoice, order),
+                xrayFee,
+              },
+              loadedPaymentLines
+            )
+          );
+          setPersistedInvoiceMeta({
+            status: invoice.status,
+            writeoffAmount: invoice.writeoffAmount || 0,
           });
           setRushLevel(invoice.rushLevel || derivedRushLevel);
           return;
         }
 
-        setFormData({
-          ...getInitialInvoiceFormData(order, isEditMode),
-          xrayFee,
-          rushOrder: Boolean(derivedRushLevel),
-        });
+        setPersistedInvoiceMeta(null);
+        setFormData(
+          mapInvoiceFeesToDueForm(
+            {
+              ...getInitialInvoiceFormData(order, isEditMode),
+              xrayFee,
+              rushOrder: Boolean(derivedRushLevel),
+            },
+            loadedPaymentLines
+          )
+        );
       } catch (error) {
         if (!cancelled) {
           setSubmitError(error.message || "Failed to load invoice");
-          setPaymentLines(buildPaymentLinesFromOrder(order));
-          setFormData({
-            ...getInitialInvoiceFormData(order, isEditMode),
-            xrayFee: "0.00",
-          });
+          const fallbackLines = buildPaymentLinesFromOrder(order);
+          setPaymentLines(fallbackLines);
+          setFormData(
+            mapInvoiceFeesToDueForm(
+              {
+                ...getInitialInvoiceFormData(order, isEditMode),
+                xrayFee: "0.00",
+              },
+              fallbackLines
+            )
+          );
         }
       } finally {
         if (!cancelled) {
@@ -154,23 +182,33 @@ export default function CreateInvoiceModal({
     return toNumber(formData.pages) * toNumber(formData.perPageAmount);
   }, [formData.pages, formData.perPageAmount]);
 
+  const fullFees = useMemo(
+    () => resolveFullFeeAmounts(formData, paymentLines),
+    [formData, paymentLines]
+  );
+
   const totalAmount = useMemo(() => {
     return (
       toNumber(formData.servedAmount) +
-      toNumber(formData.serviceFee) +
-      toNumber(formData.custodianFee) +
-      toNumber(formData.xrayFee) +
+      fullFees.serviceFee +
+      fullFees.custodianFee +
+      fullFees.xrayFee +
       toNumber(formData.mileage) +
       toNumber(formData.parking) +
       toNumber(formData.other) +
       pagesAmount
     );
-  }, [formData, pagesAmount]);
+  }, [formData, fullFees, pagesAmount]);
 
   const paymentHints = useMemo(
     () => ({
-      custodian: getPaymentHint(paymentLines, "custodian"),
-      xray: getPaymentHint(paymentLines, "xray"),
+      prepayment: formatPaidBracket(
+        getPaymentLineAmount(paymentLines, "prepayment")
+      ),
+      custodian: formatPaidBracket(
+        getPaymentLineAmount(paymentLines, "custodian")
+      ),
+      xray: formatPaidBracket(getPaymentLineAmount(paymentLines, "xray")),
     }),
     [paymentLines]
   );
@@ -186,8 +224,12 @@ export default function CreateInvoiceModal({
   );
 
   const invoiceTotals = useMemo(
-    () => resolveInvoiceAmounts(totalAmount, amountPaid),
-    [totalAmount, amountPaid]
+    () =>
+      resolvePersistedInvoiceAmounts(totalAmount, amountPaid, {
+        writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+        persistedStatus: persistedInvoiceMeta?.status || null,
+      }),
+    [totalAmount, amountPaid, persistedInvoiceMeta]
   );
 
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
@@ -252,10 +294,12 @@ export default function CreateInvoiceModal({
 
     if (Object.keys(validationErrors).length > 0) return;
 
+    const feePayload = mapDueFormToInvoiceFees(formData, paymentLines);
+
     const payload = {
       orderId: order.dbId,
       activeType: isEditMode ? "Edit Invoice" : "Create Invoice",
-      ...formData,
+      ...feePayload,
       pagesAmount,
       totalAmount,
     };
@@ -319,6 +363,12 @@ export default function CreateInvoiceModal({
 
             <MetaItem label="Paid" value={formatMoney(amountPaid)} />
             <MetaItem label="Due" value={formatMoney(amountDue)} />
+            {persistedInvoiceMeta?.writeoffAmount > 0 && (
+              <MetaItem
+                label="Written Off"
+                value={formatMoney(persistedInvoiceMeta.writeoffAmount)}
+              />
+            )}
             {isOverpaid && (
               <MetaItem label="Credit" value={formatMoney(overpayment)} />
             )}
@@ -364,6 +414,8 @@ export default function CreateInvoiceModal({
                 value={formData.serviceFee}
                 onChange={handleMoneyChange}
                 error={errors.serviceFee}
+                paymentHint={paymentHints.prepayment}
+                
               />
 
               <MoneyField
@@ -373,6 +425,7 @@ export default function CreateInvoiceModal({
                 onChange={handleMoneyChange}
                 error={errors.custodianFee}
                 paymentHint={paymentHints.custodian}
+               
               />
             </div>
 
@@ -383,6 +436,7 @@ export default function CreateInvoiceModal({
                 label="X-Ray Fee"
                 value={toNumber(formData.xrayFee)}
                 paymentHint={paymentHints.xray}
+              
               />
 
               <MoneyField
@@ -454,22 +508,15 @@ export default function CreateInvoiceModal({
                   onChange={handleChange}
                 />
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <CheckboxField
-                    label="Rush Order"
-                    name="rushOrder"
-                    checked={formData.rushOrder}
-                    onChange={handleChange}
-                  />
-                  {rushLevel && <RushLevelBadge rushLevel={rushLevel} />}
-                </div>
+                <CheckboxField
+                  label="Rush Order"
+                  name="rushOrder"
+                  checked={formData.rushOrder}
+                  onChange={handleChange}
+                />
               </div>
 
-              <p className="text-[10px] leading-relaxed text-[#64748B]">
-                Send Order Details includes case and serve information when the
-                invoice is emailed. Rush Order marks the invoice as rush using
-                the rush level calculated from the order subpoena date.
-              </p>
+              
             </div>
           </div>
 
@@ -485,11 +532,15 @@ export default function CreateInvoiceModal({
               />
               <SummaryRow
                 label="Service Fee"
-                value={formatMoney(toNumber(formData.serviceFee))}
+                value={formatMoney(fullFees.serviceFee)}
               />
               <SummaryRow
                 label="Custodian Fee"
-                value={formatMoney(toNumber(formData.custodianFee))}
+                value={formatMoney(fullFees.custodianFee)}
+              />
+              <SummaryRow
+                label="X-Ray Fee"
+                value={formatMoney(fullFees.xrayFee)}
               />
               <SummaryRow label="Pages" value={formatMoney(pagesAmount)} />
             </div>
@@ -502,6 +553,12 @@ export default function CreateInvoiceModal({
                 />
               )}
               <SummaryRow label="Amount Paid" value={formatMoney(amountPaid)} />
+              {persistedInvoiceMeta?.writeoffAmount > 0 && (
+                <SummaryRow
+                  label="Written Off"
+                  value={formatMoney(persistedInvoiceMeta.writeoffAmount)}
+                />
+              )}
               <SummaryRow label="Due" value={formatMoney(amountDue)} />
               {isOverpaid && (
                 <SummaryRow
@@ -690,29 +747,34 @@ function DateField({ label, name, value, onChange, error = "" }) {
   );
 }
 
-function getPaymentHint(paymentLines, type) {
-  const line = paymentLines.find((entry) => entry.type === type);
-  if (!line?.amount) return null;
-
-  const amount = toNumber(line.amount);
-  if (amount <= 0) return null;
-
-  return `(${formatMoney(amount)})`;
-}
-
-function FieldLabel({ label, paymentHint }) {
+function FieldLabel({ label, paymentHint, helperText }) {
   return (
     <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
       {label}
       {paymentHint ? ` ${paymentHint}` : ""}
+      {helperText ? (
+        <span className="ml-1 font-normal text-[#94A3B8]">· {helperText}</span>
+      ) : null}
     </label>
   );
 }
 
-function MoneyField({ label, name, value, onChange, error = "", paymentHint }) {
+function MoneyField({
+  label,
+  name,
+  value,
+  onChange,
+  error = "",
+  paymentHint,
+  helperText,
+}) {
   return (
     <div>
-      <FieldLabel label={label} paymentHint={paymentHint} />
+      <FieldLabel
+        label={label}
+        paymentHint={paymentHint}
+        helperText={helperText}
+      />
 
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#94A3B8]">
@@ -738,10 +800,14 @@ function MoneyField({ label, name, value, onChange, error = "", paymentHint }) {
   );
 }
 
-function ReadOnlyMoneyField({ label, value, paymentHint }) {
+function ReadOnlyMoneyField({ label, value, paymentHint, helperText }) {
   return (
     <div>
-      <FieldLabel label={label} paymentHint={paymentHint} />
+      <FieldLabel
+        label={label}
+        paymentHint={paymentHint}
+        helperText={helperText}
+      />
 
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#94A3B8]">
@@ -796,19 +862,6 @@ function CheckboxField({ label, name, checked, onChange }) {
       />
       {label}
     </label>
-  );
-}
-
-function RushLevelBadge({ rushLevel }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-        RUSH_LEVEL_STYLES[rushLevel] ||
-        "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
-      }`}
-    >
-      {rushLevel}
-    </span>
   );
 }
 

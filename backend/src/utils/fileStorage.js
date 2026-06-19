@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
+const { ORDER_UPLOAD_DIRS } = require("../middleware/uploadMiddleware");
 
 function getFileServerRoot() {
   const root = config.fileServer;
@@ -55,6 +56,39 @@ function resolveAbsolutePath(relativePath) {
   return path.join(getFileServerRoot(), ...relativePath.split("/"));
 }
 
+function isUploadsRelativePath(relativePath) {
+  const normalized = String(relativePath || "").replace(/\\/g, "/");
+  return (
+    normalized.startsWith("processed/") ||
+    normalized.startsWith("unprocessed-subpoenas/") ||
+    normalized.startsWith("additional-documents/") ||
+    normalized.startsWith("notes_attachments/")
+  );
+}
+
+/**
+ * Move a batch-scan subpoena PDF from FILE_SERVER into uploads/processed/.
+ * Returns the relative path stored on orders.subpoena_storage_path.
+ */
+function archiveBatchScanSubpoenaToProcessed(batchScanRelativePath, orderNumber) {
+  const sourceAbsolute = resolveAbsolutePath(batchScanRelativePath);
+  if (!fs.existsSync(sourceAbsolute)) {
+    throw new Error(`Subpoena file not found: ${batchScanRelativePath}`);
+  }
+
+  fs.mkdirSync(ORDER_UPLOAD_DIRS.processed, { recursive: true });
+
+  const stem = path.basename(batchScanRelativePath, path.extname(batchScanRelativePath));
+  const safeStem = stem.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "subpoena";
+  const safeOrder = String(orderNumber || "order").replace(/[^\w.\-]+/g, "_");
+  const fileName = `${safeOrder}_${Date.now()}_${safeStem}.pdf`;
+  const destAbsolute = path.join(ORDER_UPLOAD_DIRS.processed, fileName);
+
+  fs.renameSync(sourceAbsolute, destAbsolute);
+
+  return `processed/${fileName}`.replace(/\\/g, "/");
+}
+
 module.exports = {
   getFileServerRoot,
   ensureFileServerReady,
@@ -62,4 +96,6 @@ module.exports = {
   sanitizeFileStem,
   saveBatchScanFile,
   resolveAbsolutePath,
+  isUploadsRelativePath,
+  archiveBatchScanSubpoenaToProcessed,
 };

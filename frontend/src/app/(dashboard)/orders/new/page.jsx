@@ -33,8 +33,10 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import { getProviders } from "@/lib/providers/providerApi";
+import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { API_BASE_URL } from "@/config/api";
 
 function toFileUrl(path) {
@@ -131,79 +133,6 @@ const initialFormData = {
   xrayMemo: "",
 };
 
-function mapOrderHintsToForm(hints, facilityList = []) {
-  if (!hints) return {};
-
-  const updates = {};
-
-  if (hints.orderNumber) updates.orderNumber = hints.orderNumber;
-  if (hints.caseName) updates.caseNumber = hints.caseName;
-  if (hints.ssn) updates.ssn = hints.ssn;
-  if (hints.dateOfBirth) updates.dob = hints.dateOfBirth;
-  if (hints.companyName) updates.serveCompanyName = hints.companyName;
-  if (hints.companyAddress) updates.address = hints.companyAddress;
-  if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
-  if (hints.doctorAddress) updates.fullAddress = hints.doctorAddress;
-  if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
-  if (hints.depoDueDate) updates.depoDueDate = hints.depoDueDate;
-  if (hints.requestedRecord) updates.specificRecord = hints.requestedRecord;
-  if (hints.amount) updates.prepaymentPaid = hints.amount;
-  if (hints.chequeDate) updates.prepaymentDate = hints.chequeDate;
-  if (hints.chequeNumber) updates.prepaymentCheck = hints.chequeNumber;
-
-  if (hints.applicantName) {
-    const parts = hints.applicantName.trim().split(/\s+/);
-    if (parts.length === 1) {
-      updates.firstName = parts[0];
-    } else if (parts.length === 2) {
-      updates.firstName = parts[0];
-      updates.lastName = parts[1];
-    } else {
-      updates.firstName = parts[0];
-      updates.middleName = parts.slice(1, -1).join(" ");
-      updates.lastName = parts[parts.length - 1];
-    }
-  }
-
-  const facilityName = hints.customer || hints.companyName;
-  if (facilityName && facilityList.length) {
-    const normalized = facilityName.toLowerCase();
-    const match = facilityList.find((facility) => {
-      const name = (
-        facility.facility ||
-        facility.facilityName ||
-        facility.name ||
-        ""
-      ).toLowerCase();
-      return name && (normalized.includes(name) || name.includes(normalized));
-    });
-    if (match) {
-      updates.facility = String(match.id);
-    }
-  }
-
-  const recordText = `${hints.recordType || ""} ${hints.requestedRecord || ""}`.toLowerCase();
-  if (recordText.includes("medical")) updates.medicalRecords = true;
-  if (recordText.includes("billing")) updates.billingRecords = true;
-  if (recordText.includes("employment")) updates.employmentRecords = true;
-  if (recordText.includes("xray") || recordText.includes("x-ray")) {
-    updates.xrays = true;
-  }
-
-  return updates;
-}
-
-function buildFormFromExtract(extract, facilityList, subpoenaFile) {
-  const orderHints = extract?.orderHints || {};
-  return {
-    ...mapOrderHintsToForm(orderHints, facilityList),
-    ...(subpoenaFile ? { subpoenaFile } : {}),
-    ...(extract?.id || extract?.extractId
-      ? { subpoenaExtractId: String(extract.id || extract.extractId) }
-      : {}),
-  };
-}
-
 export default function NewOrderPage() {
   return (
     <Suspense
@@ -251,6 +180,11 @@ function NewOrderPageContent() {
   const [saveError, setSaveError] = useState("");
   const [extractingSubpoena, setExtractingSubpoena] = useState(false);
   const [extractError, setExtractError] = useState("");
+  const [extractionMeta, setExtractionMeta] = useState({
+    facilityName: "",
+    providerName: "",
+  });
+  const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -317,6 +251,41 @@ function NewOrderPageContent() {
   }, [isEditMode, orderId, subpoenaId]);
 
   useEffect(() => {
+    if (!isEditMode || !orderId) {
+      setEditSubpoenaSrc("");
+      return undefined;
+    }
+
+    if (!formData.subpoenaStoragePath || formData.subpoenaFile) {
+      setEditSubpoenaSrc("");
+      return undefined;
+    }
+
+    let active = true;
+    let objectUrl = "";
+
+    (async () => {
+      try {
+        const blob = await fetchOrderSubpoenaPdf(orderId);
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setEditSubpoenaSrc(objectUrl);
+      } catch {
+        if (active) {
+          setEditSubpoenaSrc(formData.subpoenaUrl ? toFileUrl(formData.subpoenaUrl) : "");
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [isEditMode, orderId, formData.subpoenaStoragePath, formData.subpoenaFile, formData.subpoenaUrl]);
+
+  useEffect(() => {
     if (isEditMode || !subpoenaId) {
       return undefined;
     }
@@ -329,6 +298,7 @@ function NewOrderPageContent() {
     (async () => {
       try {
         const facilityList = facilities.length ? facilities : await getFacilities();
+        const providerList = await getProviders();
         if (!active) return;
 
         if (!facilities.length) {
@@ -355,10 +325,17 @@ function NewOrderPageContent() {
           // Prefill can still proceed without the PDF attachment.
         }
 
+        const { formUpdates, meta } = buildFormFromExtract(
+          extract,
+          { facilityList, providerList },
+          subpoenaFile
+        );
+
         setFormData({
           ...initialFormData,
-          ...buildFormFromExtract(extract, facilityList, subpoenaFile),
+          ...formUpdates,
         });
+        setExtractionMeta(meta);
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -382,11 +359,13 @@ function NewOrderPageContent() {
   }, [isEditMode, subpoenaId]);
 
   const facilityOptions = useMemo(
-    () =>
-      facilities.map((facility) => ({
+    () => [
+      { label: "Select facility", value: "", disabled: true, hidden: true },
+      ...facilities.map((facility) => ({
         label: facility.facility || facility.facilityName || facility.name,
         value: String(facility.id),
       })),
+    ],
     [facilities]
   );
 
@@ -399,7 +378,9 @@ function NewOrderPageContent() {
     (field) => errors[field]
   );
 
-  const hasSubpoena = Boolean(formData.subpoenaFile || formData.subpoenaUrl);
+  const hasSubpoena = Boolean(
+    formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath
+  );
 
   const visiblePanelKeys = hasSubpoena
     ? ["subpoena", "order", "serve", "payment"]
@@ -482,10 +463,16 @@ function NewOrderPageContent() {
     setFormData((prev) => ({
       ...prev,
       [name]: nextValue,
+      ...(name === "type" && nextValue === "other" ? { otherRecord: true } : {}),
     }));
+
+    if (name === "facility") {
+      setExtractionMeta((prev) => ({ ...prev, facilityName: "" }));
+    }
   };
 
   const handleProviderInput = (companyName) => {
+    setExtractionMeta((prev) => ({ ...prev, providerName: "" }));
     setFormData((prev) => ({
       ...prev,
       providerId: "",
@@ -546,6 +533,7 @@ function NewOrderPageContent() {
 
       try {
         const facilityList = facilities.length ? facilities : await getFacilities();
+        const providerList = await getProviders();
         if (!facilities.length) {
           setFacilities(facilityList);
         }
@@ -553,14 +541,17 @@ function NewOrderPageContent() {
         const result = await uploadSingleSubpoena(file);
         const extract = result?.extract || result;
 
+        const { formUpdates, meta } = buildFormFromExtract(
+          { ...extract, extractId: result?.extractId },
+          { facilityList, providerList },
+          file
+        );
+
         setFormData((prev) => ({
           ...prev,
-          ...buildFormFromExtract(
-            { ...extract, extractId: result?.extractId },
-            facilityList,
-            file
-          ),
+          ...formUpdates,
         }));
+        setExtractionMeta(meta);
         setExpandedPanels((prev) => ({
           ...prev,
           subpoena: true,
@@ -653,7 +644,7 @@ function NewOrderPageContent() {
               </span>
             )}
 
-            {(formData.subpoenaFile || formData.subpoenaUrl) && (
+            {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#E6F7FA] px-4 py-2 text-[12px] font-semibold text-[#007F96]">
                 <SubpoenaIcon />
                 Subpoena attached
@@ -671,7 +662,7 @@ function NewOrderPageContent() {
         </div>
 
         <div className="flex flex-col gap-4 xl:h-[calc(100vh-170px)] xl:flex-row xl:items-stretch">
-          {(formData.subpoenaFile || formData.subpoenaUrl) && (
+          {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
             <CollapsibleOrderPanel
               title="Subpoena"
               color="subpoena"
@@ -684,7 +675,7 @@ function NewOrderPageContent() {
                 src={
                   formData.subpoenaFile
                     ? undefined
-                    : toFileUrl(formData.subpoenaUrl)
+                    : editSubpoenaSrc || toFileUrl(formData.subpoenaUrl)
                 }
                 name={subpoenaFileName(formData.subpoenaStoragePath)}
               />
@@ -708,6 +699,7 @@ function NewOrderPageContent() {
               facilityOptions={facilityOptions}
               extractingSubpoena={extractingSubpoena}
               extractError={extractError}
+              extractionMeta={extractionMeta}
             />
           </CollapsibleOrderPanel>
 
@@ -735,6 +727,7 @@ function NewOrderPageContent() {
               saveError={saveError}
               onProviderInput={handleProviderInput}
               onProviderSelect={handleProviderSelect}
+              extractionMeta={extractionMeta}
             />
           </CollapsibleOrderPanel>
 
@@ -768,6 +761,7 @@ function OrderDetailsForm({
   facilityOptions = [],
   extractingSubpoena = false,
   extractError = "",
+  extractionMeta = {},
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -793,6 +787,11 @@ function OrderDetailsForm({
           error={getError("facility")}
           options={facilityOptions}
         />
+        {extractionMeta.facilityName && formData.facility && (
+          <p className="-mt-2 text-[10px] font-medium text-[#059669]">
+            Matched from subpoena: {extractionMeta.facilityName}
+          </p>
+        )}
 
         <NewOrderField
           label="Type"
@@ -803,10 +802,12 @@ function OrderDetailsForm({
           required
           error={getError("type")}
           options={[
+            { label: "Select type", value: "", disabled: true, hidden: true },
             { label: "Medical Records", value: "medical" },
             { label: "Billing Records", value: "billing" },
             { label: "Employment Records", value: "employment" },
             { label: "X-Rays", value: "xrays" },
+            { label: "Other", value: "other" },
           ]}
         />
 
@@ -825,7 +826,7 @@ function OrderDetailsForm({
           value={formData.ssn}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="XXX-XX-XXXX"
+          placeholder="XXX-XX-1234"
           inputMode="numeric"
           maxLength={11}
           hint="SSN required if you have one"
@@ -1040,6 +1041,7 @@ function ServeInfoForm({
   saveError = "",
   onProviderInput,
   onProviderSelect,
+  extractionMeta = {},
 }) {
   return (
     <div className="space-y-5">
@@ -1079,6 +1081,11 @@ function ServeInfoForm({
         error={getError("serveCompanyName")}
         hint="Search existing providers or type a new company name"
       />
+      {extractionMeta.providerName && formData.providerId && (
+        <p className="-mt-3 text-[10px] font-medium text-[#059669]">
+          Matched existing provider: {extractionMeta.providerName}
+        </p>
+      )}
 
       <NewOrderField
         label="Address"
@@ -1355,10 +1362,15 @@ function ServeInfoForm({
 
 import {
   PAYMENT_CHARGE_AMOUNTS,
-  formatPaymentDue,
+  getPaymentChargeForType,
 } from "@/lib/orders/paymentUtils";
 
 function PaymentForm({ formData, onChange, onBlur, getError }) {
+  const invoiceFees = formData.invoiceFees;
+  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+  const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
+  const xrayCharge = getPaymentChargeForType("xray", invoiceFees);
+
   return (
     <div className="space-y-5">
       <h3 className="text-[14px] font-semibold text-[#111827]">
@@ -1367,11 +1379,8 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Prepayment Fee"
-        amount="$15.00"
-        due={formatPaymentDue(
-          PAYMENT_CHARGE_AMOUNTS.prepayment,
-          formData.prepaymentPaid
-        )}
+        chargeAmount={prepaymentCharge}
+        paidAmount={formData.prepaymentPaid}
         theme="green"
         prefix="prepayment"
         formData={formData}
@@ -1382,11 +1391,8 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Custodian Charge"
-        amount="$15.00"
-        due={formatPaymentDue(
-          PAYMENT_CHARGE_AMOUNTS.custodian,
-          formData.custodianPaid
-        )}
+        chargeAmount={custodianCharge}
+        paidAmount={formData.custodianPaid}
         theme="purple"
         prefix="custodian"
         formData={formData}
@@ -1397,8 +1403,8 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Xray Charge"
-        amount="$0.00"
-        due={formatPaymentDue(PAYMENT_CHARGE_AMOUNTS.xray, formData.xrayPaid)}
+        chargeAmount={xrayCharge}
+        paidAmount={formData.xrayPaid}
         theme="blue"
         prefix="xray"
         formData={formData}

@@ -155,7 +155,7 @@ function PdfPreviewDrawerContent({ subpoena, onClose }) {
 
             <div className="min-w-0">
               <h2 className="truncate text-[15px] font-semibold text-[#111827]">
-                {subpoena.fileName}
+                {subpoena.displayTitle || subpoena.fileName}
               </h2>
               <p className="mt-[3px] text-[12px] text-[#94A3B8]">
                 {subpoena.pages} pages
