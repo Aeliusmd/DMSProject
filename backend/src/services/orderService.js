@@ -385,11 +385,7 @@ function deriveInvoiceDisplayStatus(invoiceRow) {
     return "Pending";
   }
 
-  if (String(invoiceRow.status || "").toLowerCase() === "paid") {
-    return "Paid";
-  }
-
-  return "Created";
+  return invoiceRow.status || "Unpaid";
 }
 
 function mapOrderListRow(

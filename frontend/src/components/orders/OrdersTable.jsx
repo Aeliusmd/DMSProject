@@ -657,8 +657,41 @@ function InvoiceBlock({
         </button>
       )}
 
-      {invoice.paid && <p className="font-semibold text-[#059669]">Paid ✓</p>}
+      <InvoiceStatusLine invoice={invoice} />
+
+      {invoice.paid && (
+        <p className="font-semibold text-[#059669]">Paid {invoice.paid}</p>
+      )}
+
+      {invoice.isWrittenOff && invoice.writeoffAmount && (
+        <p className="font-semibold text-[#7C3AED]">
+          Written Off {invoice.writeoffAmount}
+        </p>
+      )}
+
+      {invoice.due && invoice.due !== "$0.00" && (
+        <p className="font-semibold text-red-500">Due {invoice.due}</p>
+      )}
     </div>
+  );
+}
+
+function InvoiceStatusLine({ invoice }) {
+  if (!invoice?.status || invoice.status === "Unpaid") {
+    return null;
+  }
+
+  const styles = {
+    Partial: "text-[#2563EB]",
+    Paid: "text-[#059669]",
+    "Written Off": "text-[#7C3AED]",
+    "Needs Resend": "text-[#D97706]",
+  };
+
+  return (
+    <p className={`font-semibold ${styles[invoice.status] || "text-[#64748B]"}`}>
+      {invoice.status}
+    </p>
   );
 }
 
