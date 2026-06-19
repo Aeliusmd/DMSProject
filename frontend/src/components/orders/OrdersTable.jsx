@@ -171,7 +171,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         await emailInvoiceByOrderId(order.dbId);
         await fetchOrders({ silent: true });
       } catch (err) {
-        setEmailError(err.message || "Failed to email invoice");
+        setEmailError(err.message || "Failed to mark invoice as sent");
       } finally {
         setEmailingOrderId(null);
       }
@@ -646,14 +646,14 @@ function InvoiceBlock({
 
       {xrayReviewLine}
 
-      {invoice.showEmail && (
+      {invoice.showEmail && !invoice.sentDate && (
         <button
           type="button"
           onClick={onEmailInvoice}
           disabled={emailing}
           className="block text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {emailing ? "Sending..." : "Email Invoice"}
+          {emailing ? "Marking..." : "Mark Sent"}
         </button>
       )}
 

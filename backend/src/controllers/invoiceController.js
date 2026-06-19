@@ -114,15 +114,15 @@ exports.send = asyncHandler(async (req, res) => {
 
   await logBillingActivity(req, {
     action: "send_invoices",
-    details: `Sent ${result.sentCount} invoice(s) by email`,
+    details: `Marked ${result.sentCount} invoice(s) as sent`,
   });
 
   await notificationService.notifyInvoiceEvent({
-    title: `Invoice${result.sentCount === 1 ? "" : "s"} Sent`,
-    description: `${result.sentCount} invoice(s) emailed successfully`,
+    title: `Invoice${result.sentCount === 1 ? "" : "s"} Marked Sent`,
+    description: `${result.sentCount} invoice(s) marked as sent`,
   });
 
-  return ApiResponse.success(res, result, "Invoices sent successfully");
+  return ApiResponse.success(res, result, "Invoices marked as sent successfully");
 });
 
 exports.resend = asyncHandler(async (req, res) => {
@@ -147,21 +147,19 @@ exports.emailByOrder = asyncHandler(async (req, res) => {
 
   await logBillingActivity(req, {
     action: "email_invoice",
-    details: `${result.isResend ? "Resent" : "Emailed"} invoice for order ${context.orderNumber} to ${result.recipient}`,
+    details: `Marked invoice for order ${context.orderNumber} as sent`,
     facilityId: context.facilityId,
     companyName: context.companyName,
     orderId: result.orderId,
   });
 
   await notificationService.notifyInvoiceEvent({
-    title: result.isResend
-      ? `Invoice Resent — ${context.orderNumber}`
-      : `Invoice Emailed — ${context.orderNumber}`,
-    description: `Sent to ${result.recipient}`,
+    title: `Invoice Marked Sent — ${context.orderNumber}`,
+    description: "Invoice marked as sent. Email it from the Resend tab.",
     orderId: result.orderId,
   });
 
-  return ApiResponse.success(res, result, "Invoice emailed successfully");
+  return ApiResponse.success(res, result, "Invoice marked as sent successfully");
 });
 
 exports.createXray = asyncHandler(async (req, res) => {
