@@ -507,6 +507,21 @@ class Order {
       { orderId, stageName, stageStatus, completedAt }
     );
 
+    if (stageName === "Upload Records" && stageStatus === "complete") {
+      const reviewCompletedAt = completedAt || new Date();
+
+      await db.execute(
+        `INSERT INTO order_workflow_stages
+          (order_id, stage_name, stage_status, completed_at, created_at, updated_at)
+         VALUES (:orderId, 'Review Records', 'complete', :completedAt, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+          stage_status = 'complete',
+          completed_at = VALUES(completed_at),
+          updated_at = NOW()`,
+        { orderId, completedAt: reviewCompletedAt }
+      );
+    }
+
     await Order.syncOrderStatusFromWorkflow(orderId, connection);
   }
 

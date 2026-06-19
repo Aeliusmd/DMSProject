@@ -120,7 +120,7 @@ export default function ScanMedicalRecordsPage() {
     try {
       await uploadMedicalRecordsScan(orderId, selectedFile);
       setSuccessMessage(
-        "Medical records uploaded. Upload Records workflow is complete."
+        "Medical records uploaded. Upload Records and Review Records are complete."
       );
       setSelectedFile(null);
       if (fileInputRef.current) {
