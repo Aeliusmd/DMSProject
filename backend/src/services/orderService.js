@@ -20,8 +20,17 @@ const { calculateOrderRushLevel } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const fileStorage = require("../utils/fileStorage");
 
-const WORKFLOW_STAGE_NAMES = ["Review Records", "Serve", "Custodian", "SENT"];
+const WORKFLOW_STAGE_NAMES = [
+  "Upload Records",
+  "Review Records",
+  "Serve",
+  "Custodian",
+  "SENT",
+];
+const LEGACY_UPLOAD_STAGE = "Review Records";
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
+const DEFAULT_PREPAYMENT_CHARGE = 15;
+const DEFAULT_CUSTODIAN_CHARGE = 15;
 
 const STATUS_FILTER_MAP = {
   active: "Active",
@@ -110,6 +119,18 @@ function boolToInt(value) {
       : 0;
   }
   return value ? 1 : 0;
+}
+
+function hasMedicalRecordsRequested(data) {
+  return boolToInt(data?.medicalRecords) === 1;
+}
+
+function resolveOrderFlags(data, hasSubpoenaFile, existing = null) {
+  return {
+    isSubpoena: hasSubpoenaFile ? 1 : 0,
+    isRecords: hasMedicalRecordsRequested(data) ? 1 : 0,
+    isWriteOffs: existing ? Number(existing.is_write_offs) || 0 : 0,
+  };
 }
 
 function enumOrNull(value, allowed) {
@@ -247,6 +268,86 @@ function getUploadedFile(files, field) {
   return entry || null;
 }
 
+function normalizeWorkflowStageName(stageName) {
+  if (stageName === LEGACY_UPLOAD_STAGE) {
+    return "Upload Records";
+  }
+
+  return stageName;
+}
+
+function parsePaymentAmount(value) {
+  const amount = Number(`${value ?? ""}`.replace(/[^\d.]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function getPrepaymentPayment(payments = []) {
+  return getPaymentByType(payments, "prepayment");
+}
+
+function getPaymentByType(payments = [], paymentType) {
+  return payments.find((payment) => payment.paymentType === paymentType) || null;
+}
+
+async function syncOrderWorkflowFromState(
+  connection,
+  orderId,
+  {
+    payments = [],
+    subpoenaPrepaymentAmount = 0,
+    invoiceServiceFee = 0,
+    invoiceCustodianFee = 0,
+  } = {}
+) {
+  const prepayment = getPrepaymentPayment(payments);
+  const paidAmount = parsePaymentAmount(prepayment?.amount);
+
+  let chargeAmount = parsePaymentAmount(subpoenaPrepaymentAmount);
+  if (chargeAmount <= 0) {
+    chargeAmount = parsePaymentAmount(invoiceServiceFee);
+  }
+  if (chargeAmount <= 0) {
+    chargeAmount = DEFAULT_PREPAYMENT_CHARGE;
+  }
+
+  if (chargeAmount > 0 && paidAmount >= chargeAmount) {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Serve",
+      "complete",
+      new Date(),
+      connection
+    );
+  }
+
+  const custodian = getPaymentByType(payments, "custodian");
+  const custodianPaid = parsePaymentAmount(custodian?.amount);
+  let custodianCharge = parsePaymentAmount(invoiceCustodianFee);
+  if (custodianCharge <= 0) {
+    custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
+  }
+
+  if (custodianCharge > 0 && custodianPaid >= custodianCharge) {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Custodian",
+      "complete",
+      new Date(),
+      connection
+    );
+  }
+}
+
+async function markOrderWorkflowSent(orderId, connection = null) {
+  await Order.upsertWorkflowStage(
+    orderId,
+    "SENT",
+    "sent",
+    new Date(),
+    connection
+  );
+}
+
 function collectPayments(data) {
   return PAYMENT_PREFIXES.map((prefix) => {
     const checkNumber = trimOrNull(data[`${prefix}Check`]);
@@ -305,9 +406,7 @@ function mapPaymentsToForm(payments = []) {
 
 function deriveFilterStatus(status) {
   if (status === "Completed") return "completed";
-  if (["Cancelled", "No Records", "No Subpoena", "Write Offs"].includes(status)) {
-    return "cancelled";
-  }
+  if (status === "Cancelled") return "cancelled";
   if (status === "Ready" || status === "Ready to Pickup") return "ready";
   return "active";
 }
@@ -342,7 +441,15 @@ function buildRecordsBlock(row) {
   if (row.specific_record) lines.push(row.specific_record);
   if (row.specific_doctor) lines.push(row.specific_doctor);
 
-  return { title, lines, links: [] };
+  const medicalRecordsUrl = buildSubpoenaUrl(row.medical_records_storage_path);
+
+  return {
+    title,
+    lines,
+    links: medicalRecordsUrl ? ["View Medical Records"] : [],
+    hasMedicalRecords: Boolean(row.medical_records_storage_path),
+    medicalRecordsUrl,
+  };
 }
 
 function deriveInvoiceDisplayStatus(invoiceRow) {
@@ -382,7 +489,10 @@ function mapOrderListRow(
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
-    subpoena: Boolean(row.has_subpoena),
+    subpoena: Boolean(row.is_subpoena ?? row.has_subpoena),
+    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
+    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -426,7 +536,7 @@ function mapDocument(doc) {
 function mapWorkflowStage(stage) {
   return {
     id: stage.id,
-    stageName: stage.stage_name,
+    stageName: normalizeWorkflowStageName(stage.stage_name),
     stageStatus: stage.stage_status,
     completedAt: stage.completed_at || null,
   };
@@ -556,11 +666,16 @@ function mapOrderDetail(
   workflowStages = [],
   notes = [],
   invoiceRow = null,
-  xrayRow = null
+  xrayRow = null,
+  subpoenaPrepaymentDue = 0
 ) {
   return {
     id: row.id,
     orderNumber: row.order_number || "",
+    status: row.status || "",
+    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
+    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",
@@ -569,6 +684,9 @@ function mapOrderDetail(
     providerName: row.provider_name || "",
     type: resolveOrderTypeForForm(row),
     status: row.status || "",
+    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
+    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     caseNumber: row.case_number || "",
     orderRef: row.order_ref || "",
@@ -587,6 +705,8 @@ function mapOrderDetail(
     additionalDocumentFile: null,
     subpoenaStoragePath: row.subpoena_storage_path || null,
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
+    medicalRecordsStoragePath: row.medical_records_storage_path || null,
+    medicalRecordsUrl: buildSubpoenaUrl(row.medical_records_storage_path),
     documents: documents.map(mapDocument),
 
     serveCompanyName: row.serve_company_name || "",
@@ -637,6 +757,8 @@ function mapOrderDetail(
     ...mapPaymentsToForm(payments),
     ...invoiceService.mapOrderPaymentsSummary(payments),
     invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow),
+    subpoenaPrepaymentAmount:
+      subpoenaPrepaymentDue > 0 ? String(subpoenaPrepaymentDue) : "",
   };
 }
 
@@ -715,6 +837,28 @@ async function getOrderStats() {
   };
 }
 
+async function resolveSubpoenaPrepaymentDue(orderId, invoiceRow) {
+  if (invoiceRow) {
+    const fee = Number(invoiceRow.service_fee);
+    if (Number.isFinite(fee) && fee > 0) {
+      return fee;
+    }
+  }
+
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT amount
+     FROM batch_scan_extracts
+     WHERE order_id = :orderId AND is_deleted = 0
+     ORDER BY id DESC
+     LIMIT 1`,
+    { orderId }
+  );
+
+  const amount = Number(rows[0]?.amount);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
 async function getOrderById(id) {
   const order = await Order.findById(id);
 
@@ -728,6 +872,9 @@ async function getOrderById(id) {
   const notes = await Order.findNotesByOrderId(order.id);
   const invoiceRow = await Invoice.findByOrderId(order.id);
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
+  const subpoenaPrepaymentDue = order.subpoena_storage_path
+    ? await resolveSubpoenaPrepaymentDue(order.id, invoiceRow)
+    : 0;
 
   return mapOrderDetail(
     order,
@@ -736,7 +883,8 @@ async function getOrderById(id) {
     workflowStages,
     notes,
     invoiceRow,
-    xrayRow
+    xrayRow,
+    subpoenaPrepaymentDue
   );
 }
 
@@ -1041,7 +1189,11 @@ async function saveOrderDocuments(
       fileSizeBytes: additionalDocFile.size || null,
       uploadedBy: actorId || null,
     });
+
+    return true;
   }
+
+  return false;
 }
 
 async function resolveOrderNumber(rawOrderNumber, excludeId = null) {
@@ -1133,6 +1285,9 @@ async function createOrder(data, actorId, files) {
 
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
+    const hasSubpoenaFile = Boolean(subpoenaStoragePath);
+    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
+    const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     const orderId = await Order.create(connection, {
       ...payload,
@@ -1140,7 +1295,10 @@ async function createOrder(data, actorId, files) {
       orderNumber,
       status: "Active",
       hasNote: 0,
-      hasSubpoena: subpoenaStoragePath ? 1 : payload.hasSubpoena,
+      hasSubpoena: orderFlags.isSubpoena,
+      isSubpoena: orderFlags.isSubpoena,
+      isRecords: orderFlags.isRecords,
+      isWriteOffs: orderFlags.isWriteOffs,
       createdBy: actorId || null,
     });
 
@@ -1163,6 +1321,13 @@ async function createOrder(data, actorId, files) {
     }
 
     await Order.seedWorkflowStages(connection, orderId);
+
+    await syncOrderWorkflowFromState(connection, orderId, {
+      payments,
+      subpoenaPrepaymentAmount,
+      invoiceServiceFee: 0,
+      invoiceCustodianFee: 0,
+    });
 
     await connection.commit();
 
@@ -1208,11 +1373,17 @@ async function updateOrder(id, data, actorId, files) {
 
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
+    const hasSubpoenaFile = Boolean(subpoenaStoragePath);
+    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile, existing);
+    const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     await Order.update(connection, existing.id, {
       ...payload,
       subpoenaStoragePath,
-      hasSubpoena: subpoenaStoragePath ? 1 : payload.hasSubpoena,
+      hasSubpoena: orderFlags.isSubpoena,
+      isSubpoena: orderFlags.isSubpoena,
+      isRecords: orderFlags.isRecords,
+      isWriteOffs: orderFlags.isWriteOffs,
       orderNumber,
     });
 
@@ -1230,6 +1401,17 @@ async function updateOrder(id, data, actorId, files) {
       additionalDocFile,
       documentName: data.documentName,
       actorId,
+    });
+
+    const invoiceRow = await Invoice.findByOrderId(existing.id);
+    const invoiceServiceFee = invoiceRow ? Number(invoiceRow.service_fee) : 0;
+    const invoiceCustodianFee = invoiceRow ? Number(invoiceRow.custodian_fee) : 0;
+
+    await syncOrderWorkflowFromState(connection, existing.id, {
+      payments,
+      subpoenaPrepaymentAmount,
+      invoiceServiceFee,
+      invoiceCustodianFee,
     });
 
     await connection.commit();
@@ -1278,6 +1460,87 @@ async function getOrderSubpoenaFile(orderId) {
   };
 }
 
+async function scanMedicalRecords(orderId, file, _actorId) {
+  if (!file) {
+    throw new ApiError(400, "Medical records PDF is required");
+  }
+
+  const existing = await Order.findById(orderId);
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (existing.medical_records_storage_path) {
+    throw new ApiError(
+      409,
+      "Medical records were already uploaded for this order"
+    );
+  }
+
+  const storagePath = toRelativeStoragePath(file);
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    await connection.execute(
+      `UPDATE orders
+       SET medical_records_storage_path = :storagePath, updated_at = NOW()
+       WHERE id = :orderId`,
+      { storagePath, orderId }
+    );
+
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Upload Records",
+      "complete",
+      new Date(),
+      connection
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
+  return getOrderById(orderId);
+}
+
+async function getOrderMedicalRecordsFile(orderId) {
+  const order = await Order.findById(orderId);
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (!order.medical_records_storage_path) {
+    throw new ApiError(404, "Medical records file not found for this order");
+  }
+
+  const absolutePath = resolveOrderSubpoenaAbsolutePath(
+    order.medical_records_storage_path
+  );
+
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
+    throw new ApiError(404, "Medical records PDF file not found on disk");
+  }
+
+  await Order.upsertWorkflowStage(
+    orderId,
+    "Review Records",
+    "complete",
+    new Date()
+  );
+
+  return {
+    absolutePath,
+    fileName: path.basename(absolutePath),
+  };
+}
+
 module.exports = {
   getAllOrders,
   getOrderStats,
@@ -1293,5 +1556,8 @@ module.exports = {
   addOrderActivityLog,
   getWorkflowStages,
   updateOrderWorkflowStage,
+  markOrderWorkflowSent,
   getOrderSubpoenaFile,
+  scanMedicalRecords,
+  getOrderMedicalRecordsFile,
 };

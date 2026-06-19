@@ -121,6 +121,7 @@ const initialFormData = {
   prepaymentDate: "",
   prepaymentPaid: "",
   prepaymentMemo: "",
+  subpoenaPrepaymentAmount: "",
 
   custodianCheck: "",
   custodianDate: "",
@@ -156,6 +157,7 @@ function NewOrderPageContent() {
   const mode = searchParams.get("mode");
   const orderId = searchParams.get("orderId");
   const subpoenaId = searchParams.get("subpoenaId");
+  const panel = searchParams.get("panel");
 
   const isEditMode = mode === "edit" && Boolean(orderId);
 
@@ -249,6 +251,15 @@ function NewOrderPageContent() {
       active = false;
     };
   }, [isEditMode, orderId, subpoenaId]);
+
+  useEffect(() => {
+    if (panel !== "upload" || !isEditMode) return;
+
+    setExpandedPanels((prev) => ({
+      ...prev,
+      order: true,
+    }));
+  }, [panel, isEditMode]);
 
   useEffect(() => {
     if (!isEditMode || !orderId) {
@@ -743,6 +754,7 @@ function NewOrderPageContent() {
               onChange={handleChange}
               onBlur={handleBlur}
               getError={getError}
+              isEditMode={isEditMode}
             />
           </CollapsibleOrderPanel>
         </div>
@@ -1361,13 +1373,24 @@ function ServeInfoForm({
 }
 
 import {
-  PAYMENT_CHARGE_AMOUNTS,
   getPaymentChargeForType,
+  parsePaymentAmount,
 } from "@/lib/orders/paymentUtils";
 
-function PaymentForm({ formData, onChange, onBlur, getError }) {
+function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false }) {
   const invoiceFees = formData.invoiceFees;
-  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+  const hasSubpoenaUploaded = Boolean(
+    formData.subpoenaFile ||
+      formData.subpoenaExtractId ||
+      formData.subpoenaStoragePath ||
+      formData.subpoenaUrl
+  );
+  const subpoenaAmount = parsePaymentAmount(formData.subpoenaPrepaymentAmount);
+  const lockPrepaymentFromSubpoena =
+    !isEditMode && hasSubpoenaUploaded && subpoenaAmount > 0;
+  const prepaymentCharge = lockPrepaymentFromSubpoena
+    ? subpoenaAmount
+    : getPaymentChargeForType("prepayment", invoiceFees);
   const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
   const xrayCharge = getPaymentChargeForType("xray", invoiceFees);
 
@@ -1381,6 +1404,10 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
         title="Prepayment Fee"
         chargeAmount={prepaymentCharge}
         paidAmount={formData.prepaymentPaid}
+        showPaidField
+        mirrorPaidDue={lockPrepaymentFromSubpoena}
+        dueReadOnly={lockPrepaymentFromSubpoena}
+        paidReadOnly={lockPrepaymentFromSubpoena}
         theme="green"
         prefix="prepayment"
         formData={formData}
@@ -1393,6 +1420,9 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
         title="Custodian Charge"
         chargeAmount={custodianCharge}
         paidAmount={formData.custodianPaid}
+        showPaidField
+        dueReadOnly={false}
+        paidReadOnly={false}
         theme="purple"
         prefix="custodian"
         formData={formData}
@@ -1405,6 +1435,9 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
         title="Xray Charge"
         chargeAmount={xrayCharge}
         paidAmount={formData.xrayPaid}
+        showPaidField
+        dueReadOnly={false}
+        paidReadOnly={false}
         theme="blue"
         prefix="xray"
         formData={formData}

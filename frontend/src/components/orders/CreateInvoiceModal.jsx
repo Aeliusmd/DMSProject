@@ -58,6 +58,7 @@ export default function CreateInvoiceModal({
   const [submitError, setSubmitError] = useState("");
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [paymentLines, setPaymentLines] = useState([]);
+  const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
   const [rushLevel, setRushLevel] = useState(null);
   const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
 
@@ -95,6 +96,8 @@ export default function CreateInvoiceModal({
         setRushLevel(derivedRushLevel);
         const loadedPaymentLines = buildPaymentLinesFromOrder(orderData);
         setPaymentLines(loadedPaymentLines);
+        const loadedPrepayment = getPaymentLineAmount(loadedPaymentLines, "prepayment");
+        setPrepaymentAmount(loadedPrepayment > 0 ? loadedPrepayment.toFixed(2) : "0.00");
 
         const xrayFee = moneyToInput(xrayData?.xray?.payment, "0.00");
         const invoiceId = order.invoiceId || order.invoice?.invoiceId;
@@ -163,6 +166,7 @@ export default function CreateInvoiceModal({
   useEffect(() => {
     if (!openSession) {
       setPaymentLines([]);
+      setPrepaymentAmount("0.00");
       setRushLevel(null);
     }
   }, [openSession]);
@@ -288,6 +292,31 @@ export default function CreateInvoiceModal({
     }));
   };
 
+  const handlePrepaymentChange = (e) => {
+    const cleanValue = e.target.value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+
+    const amount = toNumber(cleanValue);
+    setPrepaymentAmount(cleanValue);
+
+    setPaymentLines((prev) => {
+      const others = prev.filter((line) => line.type !== "prepayment");
+      if (amount <= 0) return others;
+
+      return [
+        ...others,
+        {
+          type: "prepayment",
+          label: "Prepayment",
+          amount,
+          bracketLabel: `Prepayment (${formatMoney(amount)})`,
+        },
+      ];
+    });
+  };
+
   const handleSubmit = async () => {
     const validationErrors = validateInvoiceForm(formData);
     setErrors(validationErrors);
@@ -302,6 +331,7 @@ export default function CreateInvoiceModal({
       ...feePayload,
       pagesAmount,
       totalAmount,
+      prepaymentAmount: toNumber(prepaymentAmount),
     };
 
     setSubmitting(true);
@@ -398,6 +428,15 @@ export default function CreateInvoiceModal({
             </div>
 
             <SectionTitle title="Fees" />
+
+            <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <MoneyField
+                label="Prepayment"
+                name="prepaymentAmount"
+                value={prepaymentAmount}
+                onChange={handlePrepaymentChange}
+              />
+            </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <MoneyField

@@ -10,8 +10,9 @@ import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
-import { getOrders } from "@/lib/orders/orderApi";
+import { getOrders, fetchOrderMedicalRecordsPdf } from "@/lib/orders/orderApi";
 import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
+import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
 const ORDERS_PER_PAGE = 6;
 
@@ -32,7 +33,13 @@ const DEFAULT_ORDER_FORMS = [
   "Edit Order",
 ];
 
-const WORKFLOW_STAGES = ["Review Records", "Serve", "Custodian", "SENT"];
+const WORKFLOW_STAGES = [
+  "Upload Records",
+  "Review Records",
+  "Serve",
+  "Custodian",
+  "SENT",
+];
 
 const WORKFLOW_STATUS_STYLES = {
   complete: { text: "text-[#059669]", dot: "bg-[#10B981]" },
@@ -60,6 +67,11 @@ function toRenderOrder(order) {
   return {
     id: order.id,
     dbId: order.dbId,
+    orderStatus: order.status || "",
+    isSubpoena: Boolean(order.isSubpoena),
+    isRecords: Boolean(order.isRecords),
+    isWriteOffs: Boolean(order.isWriteOffs),
+    hasMedicalRecords: Boolean(order.records?.hasMedicalRecords),
     note: order.note,
     subpoena: order.subpoena,
     court: order.court || "",
@@ -86,6 +98,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
+  const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
+    useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
   const [emailError, setEmailError] = useState("");
 
@@ -349,11 +363,55 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     </td>
 
                     <td className="px-4 py-5 align-top">
+                      {!order.isSubpoena && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#475569]">
+                          No Subpoena
+                        </p>
+                      )}
+
+                      {!order.isRecords && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#475569]">
+                          No Records
+                        </p>
+                      )}
+
+                      {order.isWriteOffs && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#DC2626]">
+                          Write Offs
+                        </p>
+                      )}
+
+                      {order.orderStatus === "Completed" && (
+                        <p className="mb-2 text-[10px] font-semibold text-[#059669]">
+                          Completed
+                        </p>
+                      )}
+
                       <div className="space-y-1">
                         {order.status.map((stage) => (
-                          <WorkflowStageItem key={stage.label} stage={stage} />
+                          <WorkflowStageItem
+                            key={stage.label}
+                            stage={stage}
+                            onClick={
+                              stage.label === "Review Records" &&
+                              order.hasMedicalRecords
+                                ? () => setSelectedMedicalRecordsOrder(order)
+                                : undefined
+                            }
+                          />
                         ))}
                       </div>
+
+                      {!order.hasMedicalRecords && (
+                        <Link
+                          href={`/orders/scan-medical-records?orderId=${encodeURIComponent(
+                            order.dbId
+                          )}`}
+                          className="mt-2 block text-[10px] font-semibold text-[#007F96] underline"
+                        >
+                          Scan Medical Record
+                        </Link>
+                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -511,22 +569,119 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         order={selectedNoteOrder}
         onClose={() => setSelectedNoteOrder(null)}
       />
+
+      <MedicalRecordsPreviewModal
+        isOpen={Boolean(selectedMedicalRecordsOrder)}
+        order={selectedMedicalRecordsOrder}
+        onClose={() => setSelectedMedicalRecordsOrder(null)}
+      />
     </>
   );
 }
 
-function WorkflowStageItem({ stage }) {
-  const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
+  const [src, setSrc] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isOpen || !order?.dbId) {
+      setSrc("");
+      setError("");
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let objectUrl = "";
+
+    setLoading(true);
+    setError("");
+
+    fetchOrderMedicalRecordsPdf(order.dbId)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || "Failed to load medical records PDF.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [isOpen, order?.dbId]);
+
+  if (!isOpen) return null;
 
   return (
-    <div
-      className={`flex items-center gap-1.5 text-left text-[10px] font-semibold ${style.text}`}
-    >
-      <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="flex max-h-[92vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[10px] bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
+          <div>
+            <h2 className="text-[14px] font-semibold text-[#111827]">
+              Medical Records
+            </h2>
+            <p className="text-[11px] text-[#64748B]">
+              Order #{order?.id || order?.dbId}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-[6px] px-3 py-1.5 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
+          >
+            Close
+          </button>
+        </div>
 
-      {stage.label}
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {loading ? (
+            <p className="text-[12px] text-[#64748B]">Loading medical records...</p>
+          ) : error ? (
+            <p className="text-[12px] font-medium text-red-500">{error}</p>
+          ) : (
+            <SubpoenaPreviewContent src={src} name="Medical Records.pdf" />
+          )}
+        </div>
+      </div>
     </div>
   );
+}
+
+function WorkflowStageItem({ stage, onClick }) {
+  const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+  const className = `flex items-center gap-1.5 text-left text-[10px] font-semibold ${style.text} ${
+    onClick ? "cursor-pointer hover:underline" : ""
+  }`;
+
+  const content = (
+    <>
+      <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
+      {stage.label}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={className}>{content}</div>;
 }
 
 function InvoiceBlock({
@@ -622,12 +777,6 @@ function InvoiceBlock({
         </p>
       )}
 
-      {invoice.sentDate && (
-        <p className="font-semibold text-[#059669]">
-          ✓ SENT {invoice.sentDate}
-        </p>
-      )}
-
       <button
         type="button"
         onClick={onCoverSheet}
@@ -656,42 +805,7 @@ function InvoiceBlock({
           {emailing ? "Marking..." : "Mark Sent"}
         </button>
       )}
-
-      <InvoiceStatusLine invoice={invoice} />
-
-      {invoice.paid && (
-        <p className="font-semibold text-[#059669]">Paid {invoice.paid}</p>
-      )}
-
-      {invoice.isWrittenOff && invoice.writeoffAmount && (
-        <p className="font-semibold text-[#7C3AED]">
-          Written Off {invoice.writeoffAmount}
-        </p>
-      )}
-
-      {invoice.due && invoice.due !== "$0.00" && (
-        <p className="font-semibold text-red-500">Due {invoice.due}</p>
-      )}
     </div>
-  );
-}
-
-function InvoiceStatusLine({ invoice }) {
-  if (!invoice?.status || invoice.status === "Unpaid") {
-    return null;
-  }
-
-  const styles = {
-    Partial: "text-[#2563EB]",
-    Paid: "text-[#059669]",
-    "Written Off": "text-[#7C3AED]",
-    "Needs Resend": "text-[#D97706]",
-  };
-
-  return (
-    <p className={`font-semibold ${styles[invoice.status] || "text-[#64748B]"}`}>
-      {invoice.status}
-    </p>
   );
 }
 
@@ -704,16 +818,6 @@ function RecordsBlock({ records }) {
         <p key={line} className="text-[#334155]">
           {line}
         </p>
-      ))}
-
-      {records.links.map((link) => (
-        <button
-          key={link}
-          type="button"
-          className="block text-left text-[#007F96] underline"
-        >
-          {link}
-        </button>
       ))}
     </div>
   );

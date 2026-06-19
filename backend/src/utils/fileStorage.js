@@ -62,7 +62,8 @@ function isUploadsRelativePath(relativePath) {
     normalized.startsWith("processed/") ||
     normalized.startsWith("unprocessed-subpoenas/") ||
     normalized.startsWith("additional-documents/") ||
-    normalized.startsWith("notes_attachments/")
+    normalized.startsWith("notes_attachments/") ||
+    normalized.startsWith("medical-records/")
   );
 }
 
