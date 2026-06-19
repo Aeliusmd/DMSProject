@@ -106,6 +106,15 @@ function formatActionLabel(action, context) {
           : "Note Added",
     update_note: "Order Note Callback",
     workflow_update: "Order Workflow Updated",
+    create_invoice: "Invoice Created",
+    update_invoice: "Invoice Updated",
+    send_invoices: "Invoice Sent",
+    resend_invoices: "Invoice Resent",
+    email_invoice: "Invoice Emailed",
+    save_xray_invoice: "X-Ray Invoice Saved",
+    write_off: "Invoice Written Off",
+    record_payment: "Payment Recorded",
+    sync_payment: "Invoice Payment Updated",
   };
 
   return labels[action] || String(action || "Activity");
@@ -214,7 +223,7 @@ function formatDisplayDate(logDate, logTime) {
 }
 
 function mapLogRow(row) {
-  const details = stripTargetTag(row.details);
+  const details = stripOrderIdTag(stripTargetTag(row.details));
   const logDate = normalizeDateValue(row.log_date);
   const logTime = normalizeTimeValue(row.log_time);
 

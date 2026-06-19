@@ -10,7 +10,7 @@ const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
-const { stripOrderIdTag } = require("./activityLogService");
+const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
 const invoiceService = require("./invoiceService");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
@@ -344,6 +344,54 @@ function buildRecordsBlock(row) {
   return { title, lines, links: [] };
 }
 
+function calculateRushLevel(createdAt) {
+  if (!createdAt) {
+    return { level: null, label: null };
+  }
+
+  const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
+  if (Number.isNaN(created.getTime())) {
+    return { level: null, label: null };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  created.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor(
+    (today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays < 0) {
+    return { level: null, label: null };
+  }
+
+  const weeks = Math.floor(diffDays / 7);
+
+  // Rush 1: new through ~1 week (0–13 days), Rush 2: 2 weeks, Rush 3: 3+ weeks
+  if (weeks < 2) {
+    return { level: 1, label: "Rush 1" };
+  }
+
+  if (weeks === 2) {
+    return { level: 2, label: "Rush 2" };
+  }
+
+  return { level: 3, label: "Rush 3" };
+}
+
+function deriveInvoiceDisplayStatus(invoiceRow) {
+  if (!invoiceRow) {
+    return "Pending";
+  }
+
+  if (String(invoiceRow.status || "").toLowerCase() === "paid") {
+    return "Paid";
+  }
+
+  return "Created";
+}
+
 function mapOrderListRow(
   row,
   workflowStages = [],
@@ -360,6 +408,8 @@ function mapOrderListRow(
   const dobSsn = [];
   if (row.dob) dobSsn.push(toShortDate(row.dob));
   if (row.ssn_last_four) dobSsn.push(`XXX-XX-${row.ssn_last_four}`);
+
+  const rush = calculateRushLevel(row.created_at);
 
   return {
     id: row.order_number,
@@ -378,7 +428,15 @@ function mapOrderListRow(
       row.applicant_middle_name,
       row.applicant_last_name
     ),
+    caseNumber: row.case_number || "",
     orderRef: row.order_ref || "",
+    providerName: row.serve_company_name || row.provider_name || "",
+    subpoenaDate: toInputDate(row.subpoena_date),
+    subpoenaDateDisplay: toShortDate(row.subpoena_date),
+    createdAt: row.created_at || null,
+    rushLevel: rush.level,
+    rushLabel: rush.label,
+    invoiceStatus: deriveInvoiceDisplayStatus(invoiceRow),
     records: buildRecordsBlock(row),
     company: buildCompanyBlock(row),
     dobSsn,
@@ -421,11 +479,15 @@ function mapActivityLog(log) {
   const callbackDate = log.callback_date ? toShortDate(log.callback_date) : "";
 
   return {
-    id: log.id,
+    id: `order-${log.id}`,
+    source: "order",
     date: toShortDate(log.activity_date),
+    displayDate: toShortDate(log.activity_date),
     by: log.author_name || "—",
-    callback: callbackDate || log.action_label || "",
+    action: callbackDate ? "Reminder" : "Note",
+    callback: callbackDate || "",
     note: log.note || "",
+    module: "Orders",
     attachmentUrl: log.attachment_path
       ? `/uploads/${log.attachment_path}`
       : "",
@@ -434,16 +496,21 @@ function mapActivityLog(log) {
 }
 
 function mapGlobalOrderActivityLog(row) {
-  const details = stripOrderIdTag(row.details);
+  const mapped = mapLogRow(row);
+  const details = stripOrderIdTag(mapped.details);
 
   return {
-    id: `global-${row.id}`,
-    date: toShortDate(row.created_at),
-    by: row.performer_name || "—",
-    callback: row.action || "",
+    id: `global-${mapped.id}`,
+    source: "global",
+    date: mapped.date,
+    displayDate: mapped.displayDate || mapped.date,
+    by: mapped.performedBy || "—",
+    action: mapped.action || "",
+    callback: "",
     note: details,
+    module: mapped.module || "Orders",
     attachmentUrl: "",
-    activityDate: row.created_at,
+    activityDate: mapped.createdAt,
   };
 }
 
@@ -460,12 +527,17 @@ function mergeOrderActivityLogs(orderLogs = [], globalLogs = []) {
   const seen = new Set();
 
   orderLogs.forEach((log) => {
-    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}`;
+    seen.add(String(log.id));
+    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}|${log.action}`;
     seen.add(key);
   });
 
   const supplemental = globalLogs.filter((log) => {
-    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}`;
+    if (seen.has(String(log.id))) {
+      return false;
+    }
+
+    const key = `${normalizeNoteText(log.note)}|${log.date}|${log.by}|${log.action}`;
     return !seen.has(key);
   });
 
@@ -630,6 +702,13 @@ async function getAllOrders(query = {}) {
     filters.search = `${query.search}`.trim();
   }
 
+  if (query.limit) {
+    const limit = Number(query.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      filters.limit = limit;
+    }
+  }
+
   const rows = await Order.findAll(filters);
 
   const orderIds = rows.map((row) => row.id);
@@ -662,6 +741,17 @@ async function getAllOrders(query = {}) {
       paymentsByOrderId[row.id] || []
     );
   });
+}
+
+async function getOrderStats() {
+  const row = await Order.countStats();
+
+  return {
+    totalOrders: Number(row.total_orders) || 0,
+    activeCases: Number(row.active_cases) || 0,
+    readyToPickup: Number(row.ready_to_pickup) || 0,
+    completed: Number(row.completed) || 0,
+  };
 }
 
 async function getOrderById(id) {
@@ -867,7 +957,9 @@ async function getOrderActivityLogs(orderId) {
   }
 
   const logs = await Order.findActivityLogsByOrderId(order.id);
-  const globalLogs = await ActivityLog.findByOrderId(order.id);
+  const globalLogs = await ActivityLog.findByOrderId(order.id, {
+    orderNumber: order.order_number || null,
+  });
   const notes = await Order.findNotesByOrderId(order.id, false);
 
   const mappedOrderLogs = logs.map((log) => {
@@ -1227,6 +1319,7 @@ async function getOrderSubpoenaFile(orderId) {
 
 module.exports = {
   getAllOrders,
+  getOrderStats,
   getOrderById,
   getOrderReminders,
   createOrder,

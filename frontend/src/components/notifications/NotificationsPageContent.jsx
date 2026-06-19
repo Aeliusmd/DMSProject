@@ -1,218 +1,91 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-
-const defaultNotifications = [
-  {
-    id: 1,
-    type: "Order",
-    title: "New Order Added — ORD-2026-012",
-    description: "Taylor Bankruptcy Filing",
-    time: "5 min ago",
-    read: false,
-  },
-  {
-    id: 2,
-    type: "Invoice",
-    title: "Invoice Generated — INV-019 for Thompson Industries",
-    description: "",
-    time: "18 min ago",
-    read: false,
-  },
-  {
-    id: 3,
-    type: "Reminder",
-    title: "Reminder Alert — Smith vs. Johnson forms due in 2 days",
-    description: "",
-    time: "1 hour ago",
-    read: false,
-  },
-  {
-    id: 4,
-    type: "Activity",
-    title: "Employee Activity — Sarah J. updated case ORD-2026-003",
-    description: "",
-    time: "2 hours ago",
-    read: false,
-  },
-  {
-    id: 5,
-    type: "Order",
-    title: "Order Status Changed — ORD-2026-005 marked as Completed",
-    description: "",
-    time: "3 hours ago",
-    read: true,
-  },
-  {
-    id: 6,
-    type: "Invoice",
-    title: "Payment Received — $2,450 for INV-008 (Brown Family Trust)",
-    description: "",
-    time: "5 hours ago",
-    read: true,
-  },
-  {
-    id: 7,
-    type: "Order",
-    title: "Subpoena Served — ORD-2026-001 (Smith vs. Johnson)",
-    description: "",
-    time: "Yesterday, 4:30 PM",
-    read: true,
-  },
-  {
-    id: 8,
-    type: "Activity",
-    title: "New Employee Added — Michael R. joined the team",
-    description: "",
-    time: "Yesterday, 2:15 PM",
-    read: true,
-  },
-  {
-    id: 9,
-    type: "Invoice",
-    title: "Write Off Approved — INV-015 for Lee Tech Holdings",
-    description: "",
-    time: "Yesterday, 11:00 AM",
-    read: true,
-  },
-  {
-    id: 10,
-    type: "Reminder",
-    title: "Reminder Alert — Pickup due for Williams Criminal Defense",
-    description: "",
-    time: "Yesterday, 9:30 AM",
-    read: true,
-  },
-  {
-    id: 11,
-    type: "Order",
-    title: "Order Cancelled — ORD-2026-007 (Rodriguez Divorce)",
-    description: "",
-    time: "Yesterday, 8:50 AM",
-    read: true,
-  },
-  {
-    id: 12,
-    type: "Invoice",
-    title: "Invoice Resent — INV-021 to Davis Law Firm",
-    description: "",
-    time: "2 days ago",
-    read: true,
-  },
-  {
-    id: 13,
-    type: "Order",
-    title: "Records Uploaded — ORD-2026-009",
-    description: "",
-    time: "2 days ago",
-    read: true,
-  },
-  {
-    id: 14,
-    type: "Activity",
-    title: "Employee Activity — John Doe updated settings",
-    description: "",
-    time: "2 days ago",
-    read: true,
-  },
-  {
-    id: 15,
-    type: "Reminder",
-    title: "Reminder Alert — Invoice follow-up due tomorrow",
-    description: "",
-    time: "2 days ago",
-    read: true,
-  },
-  {
-    id: 16,
-    type: "Invoice",
-    title: "Invoice Generated — INV-022 for Pacific Law Partners",
-    description: "",
-    time: "3 days ago",
-    read: true,
-  },
-  {
-    id: 17,
-    type: "Order",
-    title: "New Order Added — ORD-2026-014",
-    description: "Martinez Legal Group",
-    time: "3 days ago",
-    read: true,
-  },
-  {
-    id: 18,
-    type: "Activity",
-    title: "Employee Activity — Lisa T. added note history",
-    description: "",
-    time: "3 days ago",
-    read: true,
-  },
-  {
-    id: 19,
-    type: "Reminder",
-    title: "Reminder Alert — Serve payment check pending",
-    description: "",
-    time: "4 days ago",
-    read: true,
-  },
-  {
-    id: 20,
-    type: "Invoice",
-    title: "Payment Received — INV-017 marked as paid",
-    description: "",
-    time: "4 days ago",
-    read: true,
-  },
-];
+import {
+  getNotifications,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+} from "@/lib/notifications/notificationsApi";
 
 const notificationTypes = ["All", "Order", "Invoice", "Reminder", "Activity"];
 
-export default function NotificationsPageContent({
-  notificationsSeed = defaultNotifications,
-}) {
+export default function NotificationsPageContent() {
   const router = useRouter();
 
-  const [notifications, setNotifications] = useState(notificationsSeed);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [activeType, setActiveType] = useState("All");
   const [searchValue, setSearchValue] = useState("");
 
-  const unreadCount = notifications.filter((item) => !item.read).length;
+  const loadNotifications = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-  const filteredNotifications = useMemo(() => {
-    const search = searchValue.trim().toLowerCase();
+    try {
+      const data = await getNotifications({
+        type: activeType,
+        search: searchValue,
+        limit: 200,
+      });
 
-    return notifications.filter((notification) => {
-      const matchesType =
-        activeType === "All" || notification.type === activeType;
+      setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
+    } catch (err) {
+      setNotifications([]);
+      setUnreadCount(0);
+      setError(err.message || "Failed to load notifications");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeType, searchValue]);
 
-      const matchesSearch =
-        !search ||
-        notification.title.toLowerCase().includes(search) ||
-        notification.description.toLowerCase().includes(search) ||
-        notification.type.toLowerCase().includes(search);
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      loadNotifications();
+    }, 250);
 
-      return matchesType && matchesSearch;
-    });
-  }, [notifications, activeType, searchValue]);
+    return () => clearTimeout(timeout);
+  }, [loadNotifications]);
 
-  const handleToggleRead = (notificationId) => {
-    setNotifications((prev) =>
-      prev.map((notification) =>
-        notification.id === notificationId
-          ? { ...notification, read: !notification.read }
-          : notification
-      )
-    );
+  const filteredNotifications = useMemo(() => notifications, [notifications]);
+
+  const handleToggleRead = async (notificationId) => {
+    const target = notifications.find((item) => item.id === notificationId);
+    if (!target || target.read) {
+      return;
+    }
+
+    try {
+      const result = await markNotificationAsRead(notificationId);
+      setUnreadCount(result.unreadCount);
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === notificationId
+            ? { ...notification, read: true }
+            : notification
+        )
+      );
+    } catch {
+      setError("Failed to update notification");
+    }
   };
 
-  const handleMarkAllAsRead = () => {
-    setNotifications((prev) =>
-      prev.map((notification) => ({
-        ...notification,
-        read: true,
-      }))
-    );
+  const handleMarkAllAsRead = async () => {
+    try {
+      await markAllNotificationsAsRead();
+      setUnreadCount(0);
+      setNotifications((prev) =>
+        prev.map((notification) => ({
+          ...notification,
+          read: true,
+        }))
+      );
+    } catch {
+      setError("Failed to mark all notifications as read");
+    }
   };
 
   return (
@@ -224,8 +97,11 @@ export default function NotificationsPageContent({
           </h1>
 
           <p className="mt-1 text-[12px] text-[#64748B]">
-            You have {unreadCount} unread notification
-            {unreadCount === 1 ? "" : "s"}
+            {loading
+              ? "Loading notifications..."
+              : `You have ${unreadCount} unread notification${
+                  unreadCount === 1 ? "" : "s"
+                }`}
           </p>
         </div>
 
@@ -289,14 +165,30 @@ export default function NotificationsPageContent({
         </div>
 
         <p className="justify-self-start text-[11px] text-[#64748B] xl:justify-self-end">
-          Showing {filteredNotifications.length} of {notifications.length}{" "}
-          notifications
+          {loading
+            ? "Loading..."
+            : `Showing ${filteredNotifications.length} notification${
+                filteredNotifications.length === 1 ? "" : "s"
+              }`}
         </p>
       </div>
 
+      {error && (
+        <div className="rounded-[8px] border border-[#FEE2E2] bg-[#FEF2F2] px-4 py-3 text-[12px] font-medium text-red-600">
+          {error}
+        </div>
+      )}
+
       <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="h-full overflow-auto">
-          {filteredNotifications.map((notification) => (
+          {loading && (
+            <div className="px-5 py-16 text-center text-[13px] text-[#94A3B8]">
+              Loading notifications...
+            </div>
+          )}
+
+          {!loading &&
+            filteredNotifications.map((notification) => (
             <NotificationRow
               key={notification.id}
               notification={notification}
@@ -304,7 +196,7 @@ export default function NotificationsPageContent({
             />
           ))}
 
-          {filteredNotifications.length === 0 && (
+          {!loading && filteredNotifications.length === 0 && (
             <div className="px-5 py-16 text-center text-[13px] text-[#94A3B8]">
               No notifications found.
             </div>
@@ -347,18 +239,26 @@ function NotificationRow({ notification, onToggleRead }) {
           {notification.title}
         </p>
 
+        {notification.description ? (
+          <p className="mt-1 truncate text-[11px] text-[#64748B]">
+            {notification.description}
+          </p>
+        ) : null}
+
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <span className="text-[10px] text-[#94A3B8]">
             {notification.time}
           </span>
 
-          <button
-            type="button"
-            onClick={() => onToggleRead(notification.id)}
-            className="text-[10px] font-semibold text-[#0097B2] hover:underline"
-          >
-            {notification.read ? "Mark unread" : "Mark read"}
-          </button>
+          {!notification.read && (
+            <button
+              type="button"
+              onClick={() => onToggleRead(notification.id)}
+              className="text-[10px] font-semibold text-[#0097B2] hover:underline"
+            >
+              Mark read
+            </button>
+          )}
         </div>
       </div>
 

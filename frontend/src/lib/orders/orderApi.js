@@ -9,6 +9,7 @@ function buildOrdersQuery(filters = {}) {
   if (filters.year) params.set("year", filters.year);
   if (filters.status) params.set("status", filters.status);
   if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.limit) params.set("limit", String(filters.limit));
 
   const queryString = params.toString();
   return queryString ? `?${queryString}` : "";
@@ -57,6 +58,11 @@ export async function getOrders(filters = {}) {
   return data?.data?.orders || [];
 }
 
+export async function getOrderStats() {
+  const data = await request("/orders/stats", { auth: true });
+  return data?.data?.stats || null;
+}
+
 export async function getOrder(id) {
   const data = await request(`/orders/${id}`, { auth: true });
   return data?.data?.order || null;
@@ -94,6 +100,14 @@ export async function getOrderReminders(scope = "my") {
     auth: true,
   });
   return data?.data?.reminders || [];
+}
+
+export async function getDueRemindersToday() {
+  const data = await request("/orders/reminders/due-today", { auth: true });
+  return {
+    reminders: data?.data?.reminders || [],
+    enabled: data?.data?.enabled !== false,
+  };
 }
 
 export async function getOrderNotes(id, { includeCalled = false, noteId = null } = {}) {

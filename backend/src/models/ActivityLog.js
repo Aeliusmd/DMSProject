@@ -64,19 +64,29 @@ class ActivityLog {
     return rows[0] || null;
   }
 
-  static async findByOrderId(orderId, { limit = 200 } = {}) {
+  static async findByOrderId(orderId, { limit = 200, orderNumber = null } = {}) {
     const pool = getPool();
-    const orderTag = `%order_id:${Number(orderId)}%`;
+    const normalizedOrderId = Number(orderId);
+    const orderTag = `%order_id:${normalizedOrderId}%`;
+    const conditions = ["details LIKE :orderTag"];
+    const params = { orderTag };
+
+    if (orderNumber) {
+      conditions.push(
+        "(module = 'Orders' AND (details LIKE :orderNumberTag OR details LIKE :orderLabelTag))"
+      );
+      params.orderNumberTag = `%${orderNumber}%`;
+      params.orderLabelTag = `%order ${orderNumber}%`;
+    }
 
     const [rows] = await pool.execute(
       `SELECT id, log_date, log_time, action, module, company_name, facility_id,
               performed_by, performer_name, performer_initials, details, created_at
        FROM activity_logs
-       WHERE module = 'Orders'
-         AND details LIKE :orderTag
+       WHERE ${conditions.join(" OR ")}
        ORDER BY created_at DESC, id DESC
        LIMIT ${Number(limit)}`,
-      { orderTag }
+      params
     );
 
     return rows;
