@@ -1,22 +1,47 @@
 const nodemailer = require("nodemailer");
 const config = require("../config");
-const { renderTemplate } = require("../views/emails");
+const {
+  renderTwoFactorEmail,
+  renderInvoiceEmail,
+} = require("../views/emails");
 const logger = require("../utils/logger");
 
 let transporter = null;
 
 function getFromAddress() {
-  const from = config.smtp.from || config.smtp.user;
+  const configuredFrom = (config.smtp.from || config.smtp.user || "").trim();
+  const smtpUser = (config.smtp.user || "").trim();
 
-  if (!from) {
+  if (!configuredFrom && !smtpUser) {
     return "DMS <no-reply@localhost>";
   }
 
-  if (from.includes("<")) {
-    return from;
+  if (configuredFrom.includes("<")) {
+    return configuredFrom;
   }
 
-  return `DMS Custodian <${from}>`;
+  const isGmail = String(config.smtp.host || "").includes("gmail.com");
+  const fromAddress =
+    isGmail && configuredFrom && !configuredFrom.endsWith("@gmail.com")
+      ? smtpUser
+      : configuredFrom || smtpUser;
+
+  return `DMS Custodian <${fromAddress}>`;
+}
+
+function getReplyToAddress() {
+  const configuredFrom = (config.smtp.from || "").trim();
+  const smtpUser = (config.smtp.user || "").trim();
+
+  if (!configuredFrom || configuredFrom === smtpUser) {
+    return undefined;
+  }
+
+  if (configuredFrom.includes("<")) {
+    return configuredFrom;
+  }
+
+  return configuredFrom;
 }
 
 function getTransporter() {
@@ -36,9 +61,23 @@ function getTransporter() {
       user: config.smtp.user,
       pass: config.smtp.pass,
     },
+    ...(config.smtp.host.includes("gmail.com")
+      ? { tls: { rejectUnauthorized: true } }
+      : {}),
   });
 
   return transporter;
+}
+
+function buildMailOptions({ to, subject, text, html }) {
+  return {
+    from: getFromAddress(),
+    ...(getReplyToAddress() ? { replyTo: getReplyToAddress() } : {}),
+    to,
+    subject,
+    text,
+    html,
+  };
 }
 
 function logDevCode(to, code) {
@@ -67,18 +106,13 @@ async function sendTwoFactorCode({ to, name, code }) {
   }
 
   const subject = "Your DMS verification code";
-  const text = renderTemplate("twoFactorCode", {
+  const { text, html } = renderTwoFactorEmail({
     name: name || "User",
     code,
     expiresInMinutes: config.twoFactor.expiresMinutes,
   });
 
-  const mailOptions = {
-    from: getFromAddress(),
-    to,
-    subject,
-    text,
-  };
+  const mailOptions = buildMailOptions({ to, subject, text, html });
 
   try {
     await mailTransporter.sendMail(mailOptions);
@@ -117,34 +151,23 @@ async function sendInvoiceEmail({
     : `Invoice - Case ${caseNo}`;
   const subject = isRushOrder ? `RUSH - ${baseSubject}` : baseSubject;
 
-  const text = [
-    `Dear ${companyName},`,
-    "",
-    isResend
-      ? "Please find the resent invoice details below:"
-      : "Please find the invoice details below:",
-    "",
-    ...(isRushOrder
-      ? [
-          "This is a rush order.",
-          rushLevel ? `Rush Level: ${rushLevel}` : "",
-          "",
-        ].filter(Boolean)
-      : []),
-    `Case Number: ${caseNo}`,
-    `Applicant: ${applicant || "N/A"}`,
-    `Invoice Date: ${invoiceDate || "N/A"}`,
-    `Sent Date: ${sentDate || "N/A"}`,
-    `Invoiced: ${invoiced}`,
-    `Paid: ${paid}`,
-    `Due: ${due}`,
-    ...(sendOrderDetails && orderDetailsText
-      ? ["", "Order Details:", orderDetailsText]
-      : []),
-    "",
-    "Thank you,",
-    "DMS",
-  ].join("\n");
+  const templateData = {
+    companyName,
+    caseNo,
+    applicant,
+    invoiceDate,
+    sentDate,
+    invoiced,
+    paid,
+    due,
+    isResend,
+    sendOrderDetails,
+    isRushOrder,
+    rushLevel,
+    orderDetailsText,
+  };
+
+  const { text, html } = renderInvoiceEmail(templateData);
 
   const mailTransporter = getTransporter();
 
@@ -157,12 +180,7 @@ async function sendInvoiceEmail({
     throw new Error("SMTP is not configured");
   }
 
-  const mailOptions = {
-    from: getFromAddress(),
-    to,
-    subject,
-    text,
-  };
+  const mailOptions = buildMailOptions({ to, subject, text, html });
 
   try {
     await mailTransporter.sendMail(mailOptions);
