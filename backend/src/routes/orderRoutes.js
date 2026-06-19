@@ -5,6 +5,7 @@ const {
   uploadOrderFiles,
   uploadNoteAttachment,
   uploadSinglePdf,
+  uploadMedicalRecordsScan,
 } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
@@ -29,6 +30,12 @@ router.post(
   orderController.batchScan
 );
 router.get("/:id/subpoena/file", orderController.getSubpoenaFile);
+router.get("/:id/medical-records/file", orderController.getMedicalRecordsFile);
+router.post(
+  "/:id/scan-medical-records",
+  uploadMedicalRecordsScan,
+  orderController.scanMedicalRecords
+);
 router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);

@@ -183,6 +183,19 @@ export async function uploadBatchScan(file) {
   return data?.data || null;
 }
 
+export async function uploadMedicalRecordsScan(orderId, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const data = await request(`/orders/${orderId}/scan-medical-records`, {
+    method: "POST",
+    auth: true,
+    body: formData,
+  });
+
+  return data?.data?.order || null;
+}
+
 export async function uploadSingleSubpoena(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -237,6 +250,29 @@ export async function fetchOrderSubpoenaPdf(orderId) {
 
   if (!response.ok) {
     let message = "Failed to load order subpoena PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function fetchOrderMedicalRecordsPdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/orders/${orderId}/medical-records/file`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+
+  if (!response.ok) {
+    let message = "Failed to load medical records PDF";
     try {
       const body = await response.json();
       message = body?.message || message;
