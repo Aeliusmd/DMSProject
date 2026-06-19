@@ -1267,14 +1267,6 @@ async function sendInvoices(invoiceIds = []) {
     .map((row) => normalizeInvoiceId(row.id))
     .filter(Boolean);
 
-  for (const invoiceId of unsentIds) {
-    const invoice = await Invoice.findById(invoiceId);
-
-    if (!invoice) continue;
-
-    await deliverInvoiceEmail(invoice, { isResend: false });
-  }
-
   const sentCount = await Invoice.markAsSent(unsentIds);
 
   if (!sentCount) {
@@ -1282,6 +1274,20 @@ async function sendInvoices(invoiceIds = []) {
   }
 
   return { sentCount };
+}
+
+function canDeliverInvoiceEmail(invoice) {
+  if (!invoice) return false;
+
+  if (["Paid", "Written Off"].includes(invoice.status)) {
+    return false;
+  }
+
+  if (invoice.status === "Needs Resend") {
+    return true;
+  }
+
+  return Boolean(invoice.sent_date);
 }
 
 async function resendInvoices(invoiceIds = []) {
@@ -1306,16 +1312,21 @@ async function resendInvoices(invoiceIds = []) {
       throw new ApiError(404, `Invoice ${invoiceId} not found`);
     }
 
-    if (invoice.status !== "Needs Resend") {
-      throw new ApiError(400, "Only invoices marked for resend can be emailed again");
+    if (!canDeliverInvoiceEmail(invoice)) {
+      throw new ApiError(
+        400,
+        "Only sent invoices awaiting email or marked for resend can be emailed"
+      );
     }
 
-    await deliverInvoiceEmail(invoice, { isResend: true });
+    await deliverInvoiceEmail(invoice, {
+      isResend: invoice.status === "Needs Resend",
+    });
 
-    const updated = await Invoice.markAsResent([invoiceId]);
+    const updated = await Invoice.markAsEmailSent([invoiceId]);
 
     if (!updated) {
-      throw new ApiError(400, "Unable to update resent invoice");
+      throw new ApiError(400, "Unable to update emailed invoice");
     }
 
     resent.push(invoiceId);
@@ -1337,21 +1348,23 @@ async function emailInvoiceByOrderId(orderId) {
     throw new ApiError(404, "No invoice found for this order");
   }
 
-  const invoiceId = normalizeInvoiceId(invoice.id);
-  const isResend = Boolean(invoice.sent_date);
-  const delivery = await deliverInvoiceEmail(invoice, { isResend });
+  if (invoice.sent_date) {
+    throw new ApiError(400, "Invoice is already marked as sent");
+  }
 
-  if (!isResend) {
-    await Invoice.markAsSent([invoiceId]);
-  } else if (invoice.status === "Needs Resend") {
-    await Invoice.markAsResent([invoiceId]);
+  const invoiceId = normalizeInvoiceId(invoice.id);
+  const sentCount = await Invoice.markAsSent([invoiceId]);
+
+  if (!sentCount) {
+    throw new ApiError(400, "Invoice is already marked as sent");
   }
 
   return {
     invoiceId,
     orderId: normalizedOrderId,
-    isResend,
-    recipient: delivery.recipient,
+    isResend: false,
+    recipient: null,
+    emailed: false,
   };
 }
 

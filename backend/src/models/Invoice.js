@@ -112,7 +112,15 @@ class Invoice {
 
   static async findResend(filters = {}) {
     const pool = getPool();
-    const conditions = ["i.status = 'Needs Resend'"];
+    const conditions = [
+      `(
+        i.status = 'Needs Resend'
+        OR (
+          i.sent_date IS NOT NULL
+          AND i.status NOT IN ('Paid', 'Written Off', 'Needs Resend')
+        )
+      )`,
+    ];
     const params = {};
 
     if (filters.dateFrom) {
@@ -275,7 +283,6 @@ class Invoice {
     const [result] = await pool.execute(
       `UPDATE invoices
        SET sent_date = CURDATE(),
-           status = 'Needs Resend',
            updated_at = NOW()
        WHERE id IN (${placeholders})
          AND sent_date IS NULL`,
@@ -285,7 +292,7 @@ class Invoice {
     return result.affectedRows || 0;
   }
 
-  static async markAsResent(ids = []) {
+  static async markAsEmailSent(ids = []) {
     if (!ids.length) return 0;
 
     const pool = getPool();
@@ -297,13 +304,19 @@ class Invoice {
 
     const [result] = await pool.execute(
       `UPDATE invoices
-       SET sent_date = CURDATE(), updated_at = NOW()
+       SET sent_date = CURDATE(),
+           status = 'Needs Resend',
+           updated_at = NOW()
        WHERE id IN (${placeholders})
-         AND status = 'Needs Resend'`,
+         AND status NOT IN ('Paid', 'Written Off')`,
       params
     );
 
     return result.affectedRows || 0;
+  }
+
+  static async markAsResent(ids = []) {
+    return Invoice.markAsEmailSent(ids);
   }
 }
 
