@@ -1,4 +1,4 @@
-import { formatSSN } from "@/lib/validations/newOrderValidation";
+import { formatMaskedSSN } from "@/lib/validations/newOrderValidation";
 
 const ORDER_TYPE_KEYWORDS = {
   billing: ["billing"],
@@ -110,7 +110,7 @@ export function normalizeAutofillCheckNumber(value) {
 
 export function normalizeAutofillSSN(value) {
   if (!value) return "";
-  return formatSSN(String(value).trim());
+  return formatMaskedSSN(String(value).trim());
 }
 
 export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [] } = {}) {
