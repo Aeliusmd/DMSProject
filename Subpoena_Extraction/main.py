@@ -60,8 +60,13 @@ async def serve_ui():
 # ─── Document AI Client ────────────────────────────────────────────────────────
 
 def get_client() -> documentai.DocumentProcessorServiceClient:
-    if os.path.exists(CREDENTIALS_PATH):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
+    if not os.path.exists(CREDENTIALS_PATH):
+        raise FileNotFoundError(
+            f"Google Document AI credentials not found at '{CREDENTIALS_PATH}'. "
+            "Copy the service account JSON into the Subpoena_Extraction folder."
+        )
+
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = CREDENTIALS_PATH
     opts = ClientOptions(api_endpoint=f"{LOCATION}-documentai.googleapis.com")
     return documentai.DocumentProcessorServiceClient(client_options=opts)
 

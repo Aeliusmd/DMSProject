@@ -3,6 +3,8 @@
  */
 
 const ApiError = require("../utils/ApiError");
+const fs = require("fs");
+const path = require("path");
 const Order = require("../models/Order");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
@@ -13,8 +15,9 @@ const invoiceService = require("./invoiceService");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const { getPool } = require("../config/database");
-const { toRelativeStoragePath } = require("../middleware/uploadMiddleware");
+const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 const batchScanRepository = require("../repositories/batchScanRepository");
+const fileStorage = require("../utils/fileStorage");
 
 const WORKFLOW_STAGE_NAMES = ["Review Records", "Serve", "Custodian", "SENT"];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
@@ -36,7 +39,42 @@ const RECORD_TITLES = {
   billing: "Billing Records",
   employment: "Employment Records",
   xrays: "X-Ray Films",
+  other: "Other",
 };
+
+function isOtherOnlyOrderType(row) {
+  return (
+    Boolean(row.flag_other_record) &&
+    !row.flag_medical_records &&
+    !row.flag_billing_records &&
+    !row.flag_employment_records &&
+    !row.flag_xrays
+  );
+}
+
+function resolveOrderTypeForForm(row) {
+  if (isOtherOnlyOrderType(row)) {
+    return "other";
+  }
+
+  return row.order_type || "";
+}
+
+function resolveOrderTypeForDb(data) {
+  const type = trimOrNull(data.type);
+
+  if (type === "other") {
+    return {
+      orderType: "medical",
+      flagOtherRecord: 1,
+    };
+  }
+
+  return {
+    orderType: type,
+    flagOtherRecord: boolToInt(data.otherRecord),
+  };
+}
 
 const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
@@ -118,11 +156,35 @@ function generateOrderNumber() {
   return `${stamp}-1`;
 }
 
+function buildSubpoenaUrl(storagePath) {
+  const normalized = String(storagePath || "").replace(/\\/g, "/");
+  if (!normalized) return "";
+
+  if (fileStorage.isUploadsRelativePath(normalized)) {
+    return `/uploads/${normalized}`;
+  }
+
+  return "";
+}
+
+function resolveOrderSubpoenaAbsolutePath(storagePath) {
+  const normalized = String(storagePath || "").replace(/\\/g, "/");
+  if (!normalized) return null;
+
+  if (fileStorage.isUploadsRelativePath(normalized)) {
+    return path.join(ORDER_UPLOADS_ROOT, normalized);
+  }
+
+  return fileStorage.resolveAbsolutePath(normalized);
+}
+
 function buildOrderDbPayload(data) {
+  const { orderType, flagOtherRecord } = resolveOrderTypeForDb(data);
+
   return {
     facilityId: Number(data.facility),
     providerId: data.providerId ? Number(data.providerId) : null,
-    orderType: trimOrNull(data.type),
+    orderType,
     court: trimOrNull(data.court) || "WCAB",
     caseNumber: trimOrNull(data.caseNumber),
     orderRef: trimOrNull(data.orderRef),
@@ -163,7 +225,7 @@ function buildOrderDbPayload(data) {
     flagBillingRecords: boolToInt(data.billingRecords),
     flagEmploymentRecords: boolToInt(data.employmentRecords),
     flagXrays: boolToInt(data.xrays),
-    flagOtherRecord: boolToInt(data.otherRecord),
+    flagOtherRecord: flagOtherRecord,
     specificRecord: trimOrNull(data.specificRecord),
     specificDoctor: trimOrNull(data.specificDoctor),
     fullAddress: trimOrNull(data.fullAddress),
@@ -544,7 +606,7 @@ function mapOrderDetail(
     facilityName: row.facility_name || "",
     providerId: row.provider_id ? String(row.provider_id) : "",
     providerName: row.provider_name || "",
-    type: row.order_type || "",
+    type: resolveOrderTypeForForm(row),
     status: row.status || "",
     court: row.court || "",
     caseNumber: row.case_number || "",
@@ -563,9 +625,7 @@ function mapOrderDetail(
     subpoenaFile: null,
     additionalDocumentFile: null,
     subpoenaStoragePath: row.subpoena_storage_path || null,
-    subpoenaUrl: row.subpoena_storage_path
-      ? `/uploads/${row.subpoena_storage_path}`
-      : "",
+    subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
     documents: documents.map(mapDocument),
 
     serveCompanyName: row.serve_company_name || "",
@@ -1092,7 +1152,14 @@ async function createOrder(data, actorId, files) {
     if (extract.is_processed) {
       throw new ApiError(409, "This subpoena extract was already processed into an order");
     }
-    subpoenaStoragePath = extract.storage_path;
+    try {
+      subpoenaStoragePath = fileStorage.archiveBatchScanSubpoenaToProcessed(
+        extract.storage_path,
+        orderNumber
+      );
+    } catch (error) {
+      throw new ApiError(404, error.message || "Subpoena PDF not found on disk");
+    }
   } else {
     subpoenaStoragePath = toRelativeStoragePath(subpoenaFile);
   }
@@ -1227,6 +1294,29 @@ async function deleteOrder(id) {
   return { message: "Order deleted successfully" };
 }
 
+async function getOrderSubpoenaFile(orderId) {
+  const order = await Order.findById(orderId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (!order.subpoena_storage_path) {
+    throw new ApiError(404, "Order subpoena not found");
+  }
+
+  const absolutePath = resolveOrderSubpoenaAbsolutePath(order.subpoena_storage_path);
+
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
+    throw new ApiError(404, "Subpoena PDF file not found on disk");
+  }
+
+  return {
+    absolutePath,
+    fileName: path.basename(absolutePath),
+  };
+}
+
 module.exports = {
   getAllOrders,
   getOrderStats,
@@ -1242,4 +1332,5 @@ module.exports = {
   addOrderActivityLog,
   getWorkflowStages,
   updateOrderWorkflowStage,
+  getOrderSubpoenaFile,
 };

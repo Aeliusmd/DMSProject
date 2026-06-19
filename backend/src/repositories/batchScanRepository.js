@@ -87,8 +87,9 @@ async function listUnprocessedExtracts() {
     INNER JOIN unprocessed_subpoenas p ON p.id = e.parent_id
     WHERE e.is_deleted = 0
       AND e.is_processed = 0
+      AND e.order_id IS NULL
       AND p.is_deleted = 0
-    ORDER BY e.created_at DESC`
+    ORDER BY p.created_at DESC, e.subpoena_index ASC, e.id ASC`
   );
 }
 

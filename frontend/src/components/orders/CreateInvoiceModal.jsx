@@ -465,11 +465,7 @@ export default function CreateInvoiceModal({
                 </div>
               </div>
 
-              <p className="text-[10px] leading-relaxed text-[#64748B]">
-                Send Order Details includes case and serve information when the
-                invoice is emailed. Rush Order marks the invoice as rush using
-                the rush level calculated from the order subpoena date.
-              </p>
+              
             </div>
           </div>
 

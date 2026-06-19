@@ -28,6 +28,7 @@ Subpoena_Extraction/*.json
 Subpoena_Extraction/.env
 Subpoena_Extraction/.venv/
 Subpoena_Extraction/venv/
+Subpoena_Extraction/'platinum-honor-468520-e6-43ba2ce59daf.json
 
 # Python
 *.pyc

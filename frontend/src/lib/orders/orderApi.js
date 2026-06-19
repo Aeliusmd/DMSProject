@@ -228,3 +228,23 @@ export async function fetchUnprocessedSubpoenaPdf(extractId) {
 
   return response.blob();
 }
+
+export async function fetchOrderSubpoenaPdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/orders/${orderId}/subpoena/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    let message = "Failed to load order subpoena PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}

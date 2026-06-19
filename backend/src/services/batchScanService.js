@@ -269,6 +269,7 @@ async function getUnprocessedQueue() {
     id: row.id,
     parentId: row.parent_id,
     referenceCode: row.reference_code,
+    subpoenaIndex: row.subpoena_index,
     fileName: row.file_name,
     uploadedAt: formatUploadDate(row.uploaded_at),
     pages: row.page_count,
@@ -277,12 +278,13 @@ async function getUnprocessedQueue() {
     caseName: row.case_name,
     orderNumber: row.order_number,
     batchReferenceCode: row.batch_reference_code,
+    batchFileName: row.batch_file_name,
   }));
 }
 
 async function getUnprocessedExtract(extractId) {
   const row = await batchScanRepository.getExtractById(extractId);
-  if (!row) {
+  if (!row || row.is_processed) {
     throw new ApiError(404, "Unprocessed subpoena not found");
   }
   return mapExtractRowToApi(row);
@@ -290,7 +292,7 @@ async function getUnprocessedExtract(extractId) {
 
 async function getUnprocessedExtractFile(extractId) {
   const row = await batchScanRepository.getExtractById(extractId);
-  if (!row) {
+  if (!row || row.is_processed) {
     throw new ApiError(404, "Unprocessed subpoena not found");
   }
 
