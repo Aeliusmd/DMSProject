@@ -668,7 +668,7 @@ function WorkflowStageItem({ stage, onClick }) {
 
   const content = (
     <>
-      <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
+      <WorkflowStageIcon status={stage.status} />
       {stage.label}
     </>
   );
@@ -682,6 +682,37 @@ function WorkflowStageItem({ stage, onClick }) {
   }
 
   return <div className={className}>{content}</div>;
+}
+
+function WorkflowStageIcon({ status }) {
+  if (status === "complete" || status === "sent") {
+    const color = status === "sent" ? "text-[#2563EB]" : "text-[#059669]";
+
+    return (
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={`shrink-0 ${color}`}
+      >
+        <path
+          d="M5 12l4 4L19 6"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  const style = WORKFLOW_STATUS_STYLES[status] || WORKFLOW_STATUS_STYLES.pending;
+
+  return (
+    <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
+  );
 }
 
 function InvoiceBlock({

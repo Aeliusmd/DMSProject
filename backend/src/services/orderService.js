@@ -27,7 +27,6 @@ const WORKFLOW_STAGE_NAMES = [
   "Custodian",
   "SENT",
 ];
-const LEGACY_UPLOAD_STAGE = "Review Records";
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const DEFAULT_PREPAYMENT_CHARGE = 15;
 const DEFAULT_CUSTODIAN_CHARGE = 15;
@@ -266,14 +265,6 @@ function getUploadedFile(files, field) {
   const entry = files[field];
   if (Array.isArray(entry)) return entry[0] || null;
   return entry || null;
-}
-
-function normalizeWorkflowStageName(stageName) {
-  if (stageName === LEGACY_UPLOAD_STAGE) {
-    return "Upload Records";
-  }
-
-  return stageName;
 }
 
 function parsePaymentAmount(value) {
@@ -536,7 +527,7 @@ function mapDocument(doc) {
 function mapWorkflowStage(stage) {
   return {
     id: stage.id,
-    stageName: normalizeWorkflowStageName(stage.stage_name),
+    stageName: stage.stage_name,
     stageStatus: stage.stage_status,
     completedAt: stage.completed_at || null,
   };
