@@ -5,7 +5,7 @@ const Order = require("../models/Order");
 const Provider = require("../models/Provider");
 const config = require("../config");
 const { getPool } = require("../config/database");
-const { calculateRushLevel } = require("../utils/rushUtils");
+const { calculateOrderRushLevel } = require("../utils/rushUtils");
 
 const ORDER_TYPE_LABELS = {
   medical: "Medical Records",
@@ -39,11 +39,6 @@ async function resolveInvoiceRecipientFromOrder(order, connection = null) {
 
 function getXrayPayment(xrayRow) {
   return xrayRow ? toNumber(xrayRow.payment) : 0;
-}
-
-function getXrayPrepaymentPaid(invoice, xrayRow) {
-  if (!invoice || !xrayRow) return 0;
-  return Math.min(toNumber(invoice.amount_paid), getXrayPayment(xrayRow));
 }
 
 const ORDER_PAYMENT_TYPES = ["prepayment", "custodian", "xray"];
@@ -322,7 +317,7 @@ function mapInvoiceDetail(row) {
     notes: row.notes || "",
     sendOrderDetails: Boolean(row.send_order_details),
     rushOrder: Boolean(row.is_rush_order),
-    rushLevel: calculateRushLevel(row.subpoena_date),
+    rushLevel: calculateOrderRushLevel(row.order_created_at).label,
     subpoenaDate: toInputDate(row.subpoena_date),
     applicant: buildApplicantName(row),
   };
@@ -369,11 +364,24 @@ function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 0) {
   };
 }
 
-function mapXrayDetail(row, invoice = null) {
-  if (!row) return null;
+function mapXrayDetail(row, orderPayments = []) {
+  const xrayPaidEarlier = getOrderPaymentAmount(orderPayments, "xray");
+
+  if (!row) {
+    return {
+      xrayInvoiceDate: "",
+      examDate: "",
+      views: "0",
+      perViewAmount: "0.00",
+      payment: "0.00",
+      xrayPaidEarlier: xrayPaidEarlier.toFixed(2),
+      prepayment: xrayPaidEarlier.toFixed(2),
+      checkNumber: "",
+      description: "",
+    };
+  }
 
   const payment = getXrayPayment(row);
-  const prepayment = getXrayPrepaymentPaid(invoice, row);
 
   return {
     xrayInvoiceDate: toInputDate(row.xray_invoice_date),
@@ -381,7 +389,8 @@ function mapXrayDetail(row, invoice = null) {
     views: String(row.view_count ?? 0),
     perViewAmount: toNumber(row.per_view_amount).toFixed(2),
     payment: payment.toFixed(2),
-    prepayment: prepayment.toFixed(2),
+    xrayPaidEarlier: xrayPaidEarlier.toFixed(2),
+    prepayment: xrayPaidEarlier.toFixed(2),
     checkNumber: row.check_number || "",
     description: row.description || "",
   };
@@ -400,12 +409,12 @@ function hasStandardInvoiceFields(row) {
   );
 }
 
-function mapXrayReviewAmount(xrayRow, invoiceRow = null) {
+function mapXrayReviewAmount(xrayRow, orderPayments = []) {
   if (!xrayRow) return null;
 
   const payment = getXrayPayment(xrayRow);
-  const prepayment = getXrayPrepaymentPaid(invoiceRow, xrayRow);
-  const balanceDue = Math.max(0, payment - prepayment);
+  const xrayPaidEarlier = getOrderPaymentAmount(orderPayments, "xray");
+  const balanceDue = Math.max(0, payment - xrayPaidEarlier);
 
   return formatMoney(balanceDue);
 }
@@ -497,7 +506,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
       toNumber(row.custodian_fee) > 0 ? formatMoney(row.custodian_fee) : null,
     sentDate: row.sent_date ? toShortDate(row.sent_date) : null,
     xrayReviewDate: hasXray ? toShortDate(xrayRow.xray_invoice_date) : "",
-    xrayReviewAmount: mapXrayReviewAmount(xrayRow, row),
+    xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
     showEmail: Boolean(getInvoiceRecipientEmail(row)),
     paid:
       toNumber(row.amount_paid) > 0 ? formatMoney(row.amount_paid) : null,
@@ -525,7 +534,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     notes: row.notes || "",
     sendOrderDetails: Boolean(row.send_order_details),
     rushOrder: Boolean(row.is_rush_order),
-    rushLevel: calculateRushLevel(row.subpoena_date),
+    rushLevel: calculateOrderRushLevel(row.order_created_at).label,
     subpoenaDate: toInputDate(row.subpoena_date),
   };
 }
@@ -739,12 +748,15 @@ async function getXrayInvoiceByOrderId(orderId) {
     throw new ApiError(404, "Order not found");
   }
 
-  const invoice = await Invoice.findByOrderId(normalizedOrderId);
-  const xray = await InvoiceXray.findByOrderId(normalizedOrderId);
+  const [invoice, xray, orderPayments] = await Promise.all([
+    Invoice.findByOrderId(normalizedOrderId),
+    InvoiceXray.findByOrderId(normalizedOrderId),
+    Order.findPaymentsByOrderId(normalizedOrderId),
+  ]);
 
   return {
     invoiceId: invoice?.id || null,
-    xray: mapXrayDetail(xray, invoice),
+    xray: mapXrayDetail(xray, orderPayments),
   };
 }
 
@@ -781,16 +793,11 @@ async function createOrUpdateXrayInvoice(body, userId) {
     let invoice = await Invoice.findByOrderId(orderId);
     const existingXray = await InvoiceXray.findByOrderId(orderId, connection);
     const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
-    const orderXrayPaid = getOrderPaymentAmount(orderPayments, "xray");
-    const prepaymentInput = trimOrNull(body.prepayment);
-    const prepayment =
-      prepaymentInput !== null ? toNumber(body.prepayment) : orderXrayPaid;
-    const oldPrepayment = getXrayPrepaymentPaid(invoice, existingXray);
     const xrayFee = viewsAmount;
 
     if (!invoice) {
       const totalAmount = xrayFee;
-      const amountPaid = prepayment > 0 ? prepayment : orderXrayPaid;
+      const amountPaid = sumOrderPayments(orderPayments);
       const { amountDue, status } = resolveInvoiceAmounts(totalAmount, amountPaid);
       const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
@@ -841,14 +848,7 @@ async function createOrUpdateXrayInvoice(body, userId) {
         parking +
         otherFee +
         pagesAmount;
-      const basePaid = Math.max(0, toNumber(invoice.amount_paid) - oldPrepayment);
-      const alreadyIncludedOrderXray =
-        !existingXray ? Math.min(basePaid, orderXrayPaid) : 0;
-      const incrementalPrepayment = Math.max(
-        0,
-        prepayment - alreadyIncludedOrderXray
-      );
-      const amountPaid = basePaid + incrementalPrepayment;
+      const amountPaid = sumOrderPayments(orderPayments);
       const writeoffAmount = toNumber(invoice.writeoff_amount);
       const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
         totalAmount,
@@ -1253,7 +1253,7 @@ async function deliverInvoiceEmail(invoice, { isResend = false } = {}) {
     isResend,
     sendOrderDetails: Boolean(invoice.send_order_details),
     isRushOrder: Boolean(invoice.is_rush_order),
-    rushLevel: calculateRushLevel(invoice.subpoena_date),
+    rushLevel: calculateOrderRushLevel(invoice.order_created_at).label,
     orderDetailsText: Boolean(invoice.send_order_details)
       ? buildOrderDetailsText(invoice)
       : "",

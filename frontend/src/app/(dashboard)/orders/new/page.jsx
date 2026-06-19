@@ -1386,9 +1386,8 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
       formData.subpoenaUrl
   );
   const subpoenaAmount = parsePaymentAmount(formData.subpoenaPrepaymentAmount);
-  const lockPrepaymentFromSubpoena =
-    !isEditMode && hasSubpoenaUploaded && subpoenaAmount > 0;
-  const prepaymentCharge = lockPrepaymentFromSubpoena
+  const lockPrepaymentFromSubpoena = !isEditMode && hasSubpoenaUploaded;
+  const prepaymentCharge = lockPrepaymentFromSubpoena && subpoenaAmount > 0
     ? subpoenaAmount
     : getPaymentChargeForType("prepayment", invoiceFees);
   const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
@@ -1405,9 +1404,10 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         chargeAmount={prepaymentCharge}
         paidAmount={formData.prepaymentPaid}
         showPaidField
-        mirrorPaidDue={lockPrepaymentFromSubpoena}
+        mirrorPaidDue={lockPrepaymentFromSubpoena && subpoenaAmount > 0}
         dueReadOnly={lockPrepaymentFromSubpoena}
         paidReadOnly={lockPrepaymentFromSubpoena}
+        fieldsReadOnly={lockPrepaymentFromSubpoena}
         theme="green"
         prefix="prepayment"
         formData={formData}
@@ -1420,7 +1420,7 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         title="Custodian Charge"
         chargeAmount={custodianCharge}
         paidAmount={formData.custodianPaid}
-        showPaidField
+        showPaidField={isEditMode || !hasSubpoenaUploaded}
         dueReadOnly={false}
         paidReadOnly={false}
         theme="purple"
@@ -1435,7 +1435,7 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         title="Xray Charge"
         chargeAmount={xrayCharge}
         paidAmount={formData.xrayPaid}
-        showPaidField
+        showPaidField={isEditMode || !hasSubpoenaUploaded}
         dueReadOnly={false}
         paidReadOnly={false}
         theme="blue"

@@ -9,12 +9,12 @@ import {
 } from "@/lib/invoices/invoiceApi";
 
 const initialFormData = {
-  xrayInvoiceDate: "2026-06-02",
+  xrayInvoiceDate: new Date().toISOString().slice(0, 10),
   examDate: "",
   views: "0",
-  perViewAmount: "15.00",
-  prepayment: "15.00",
-  checkNumber: "9805",
+  perViewAmount: "0.00",
+  xrayPaidEarlier: "0.00",
+  checkNumber: "",
   description: "",
 };
 
@@ -55,16 +55,21 @@ export default function CreateXrayInvoiceModal({
 
       try {
         const data = await getXrayInvoiceByOrderId(order.dbId);
-        if (cancelled || !data?.xray) return;
+        if (cancelled) return;
+
+        const xray = data?.xray;
+        const xrayPaidEarlier =
+          xray?.xrayPaidEarlier ?? xray?.prepayment ?? "0.00";
 
         setFormData({
-          xrayInvoiceDate: data.xray.xrayInvoiceDate || initialFormData.xrayInvoiceDate,
-          examDate: data.xray.examDate || "",
-          views: data.xray.views ?? initialFormData.views,
-          perViewAmount: data.xray.perViewAmount || initialFormData.perViewAmount,
-          prepayment: data.xray.prepayment || initialFormData.prepayment,
-          checkNumber: data.xray.checkNumber || initialFormData.checkNumber,
-          description: data.xray.description || "",
+          xrayInvoiceDate:
+            xray?.xrayInvoiceDate || initialFormData.xrayInvoiceDate,
+          examDate: xray?.examDate || "",
+          views: xray?.views ?? initialFormData.views,
+          perViewAmount: xray?.perViewAmount ?? initialFormData.perViewAmount,
+          xrayPaidEarlier,
+          checkNumber: xray?.checkNumber ?? "",
+          description: xray?.description || "",
         });
       } catch {
         if (!cancelled) {
@@ -100,8 +105,8 @@ export default function CreateXrayInvoiceModal({
   }, [formData.views, formData.perViewAmount]);
 
   const totalInvoiced = useMemo(() => {
-    return viewsAmount - toNumber(formData.prepayment);
-  }, [viewsAmount, formData.prepayment]);
+    return viewsAmount - toNumber(formData.xrayPaidEarlier);
+  }, [viewsAmount, formData.xrayPaidEarlier]);
 
   const balanceDue = totalInvoiced;
 
@@ -170,7 +175,6 @@ export default function CreateXrayInvoiceModal({
         examDate: formData.examDate,
         views: formData.views,
         perViewAmount: formData.perViewAmount,
-        prepayment: formData.prepayment,
         checkNumber: formData.checkNumber,
         description: formData.description,
       });
@@ -216,7 +220,7 @@ export default function CreateXrayInvoiceModal({
 
         <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5 py-3">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
-            <MetaItem label="Ref #" value={order.orderRef || "W-2785-3"} />
+            <MetaItem label="Ref #" value={order.orderRef || "—"} />
 
             <MetaItem
               label=""
@@ -326,14 +330,16 @@ export default function CreateXrayInvoiceModal({
               />
 
               <SummaryRow
-                label="Prepayment"
-                value={`-${formatMoney(toNumber(formData.prepayment))}`}
+                label="X-Ray Paid Earlier"
+                value={`-${formatMoney(toNumber(formData.xrayPaidEarlier))}`}
                 danger
               />
 
-              <p className="text-[10px] font-semibold text-[#059669]">
-                ✓ CHK #{formData.checkNumber}
-              </p>
+              {formData.checkNumber ? (
+                <p className="text-[10px] font-semibold text-[#059669]">
+                  ✓ CHK #{formData.checkNumber}
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-5 space-y-3">
@@ -471,10 +477,6 @@ function validateXrayInvoiceForm(data) {
     errors.perViewAmount = "Required";
   } else if (Number.isNaN(Number(data.perViewAmount))) {
     errors.perViewAmount = "Invalid amount";
-  }
-
-  if (data.prepayment === "" || Number.isNaN(Number(data.prepayment))) {
-    errors.prepayment = "Invalid prepayment";
   }
 
   return errors;

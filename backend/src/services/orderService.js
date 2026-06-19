@@ -19,6 +19,13 @@ const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/upl
 const { calculateOrderRushLevel } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const fileStorage = require("../utils/fileStorage");
+const {
+  toInputDate,
+  toShortDate,
+  formatDobDisplay,
+  extractYear,
+  formatSsnLastFourDisplay,
+} = require("../utils/dateUtils");
 
 const WORKFLOW_STAGE_NAMES = [
   "Upload Records",
@@ -89,10 +96,7 @@ const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
   "Copy Center",
   "Certification",
-  "Records",
   "CNR",
-  "Called",
-  "Edit Order",
 ];
 
 function trimOrNull(value) {
@@ -139,33 +143,17 @@ function enumOrNull(value, allowed) {
 }
 
 function ssnLastFour(ssn) {
-  const digits = `${ssn || ""}`.replace(/\D/g, "");
+  const trimmed = `${ssn || ""}`.trim();
+  const masked = trimmed.match(/^XXX-XX-(\d{4})$/i);
+
+  if (masked) {
+    return masked[1];
+  }
+
+  const digits = trimmed.replace(/\D/g, "");
   if (digits.length < 4) return null;
-  return digits.slice(-4);
-}
 
-function toInputDate(value) {
-  if (!value) return "";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-function toShortDate(value) {
-  if (!value) return "";
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const year = String(date.getFullYear()).slice(-2);
-
-  return `${month}/${day}/${year}`;
+  return digits.slice(-4).padStart(4, "0");
 }
 
 function buildFullName(first, middle, last) {
@@ -458,15 +446,10 @@ function mapOrderListRow(
   xrayRow = null,
   orderPayments = []
 ) {
-  const subpoenaYear = row.subpoena_date
-    ? String(new Date(row.subpoena_date).getFullYear())
-    : row.created_at
-    ? String(new Date(row.created_at).getFullYear())
-    : "";
-
-  const dobSsn = [];
-  if (row.dob) dobSsn.push(toShortDate(row.dob));
-  if (row.ssn_last_four) dobSsn.push(`XXX-XX-${row.ssn_last_four}`);
+  const orderYear = extractYear(row.subpoena_date) || extractYear(row.created_at) || "";
+  const dob = formatDobDisplay(row.dob);
+  const ssn = formatSsnLastFourDisplay(row.ssn_last_four);
+  const dobSsn = [dob, ssn].filter(Boolean);
 
   const rush = calculateOrderRushLevel(row.created_at);
 
@@ -475,7 +458,7 @@ function mapOrderListRow(
     dbId: row.id,
     facility: row.facility_id ? String(row.facility_id) : "",
     facilityName: row.facility_name || "",
-    year: subpoenaYear,
+    year: orderYear,
     status: row.status,
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
@@ -501,6 +484,8 @@ function mapOrderListRow(
     invoiceStatus: deriveInvoiceDisplayStatus(invoiceRow),
     records: buildRecordsBlock(row),
     company: buildCompanyBlock(row),
+    dob,
+    ssn,
     dobSsn,
     forms: DEFAULT_ORDER_FORMS,
     invoice: invoiceService.mapOrderInvoiceSummary(
@@ -725,6 +710,7 @@ function mapOrderDetail(
     depoDueDate: toInputDate(row.depo_due_date),
     deliveryDate: toInputDate(row.delivery_date),
     subpoenaDate: toInputDate(row.subpoena_date),
+    createdAt: row.created_at || null,
     readyDate: toInputDate(row.ready_date),
     invoiceDate: toInputDate(row.invoice_date),
     xrayInvoiceDate: toInputDate(row.xray_invoice_date),

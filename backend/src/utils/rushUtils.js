@@ -48,22 +48,9 @@ function calculateOrderRushLevel(createdAt) {
   return { level: 3, label: "Rush 3" };
 }
 
-/** Rush based on subpoena date — used for invoice display. */
-function calculateRushLevel(dateValue) {
-  const orderDate = parseDateOnly(dateValue);
-  if (!orderDate) return null;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const diffInMs = today.getTime() - orderDate.getTime();
-  const daysOld = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-  if (daysOld < 0) return null;
-  if (daysOld <= 7) return "Rush 3";
-  if (daysOld <= 21) return "Rush 2";
-
-  return "Rush 1";
+/** @deprecated Use calculateOrderRushLevel — rush is based on order created date. */
+function calculateRushLevel(createdAt) {
+  return calculateOrderRushLevel(createdAt).label;
 }
 
 module.exports = {

@@ -7,6 +7,7 @@ const INVOICE_SELECT = `
          o.defendant,
          o.order_type,
          o.subpoena_date,
+         o.created_at AS order_created_at,
          o.depo_due_date,
          o.date_served,
          o.serve_company_name,
