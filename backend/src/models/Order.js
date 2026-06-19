@@ -158,6 +158,70 @@ class Order {
     return rows;
   }
 
+  static async findForReport(filters = {}) {
+    const pool = getPool();
+    const conditions = [];
+    const params = {};
+
+    if (filters.orderNo) {
+      conditions.push("o.order_number LIKE :orderNo");
+      params.orderNo = `%${filters.orderNo}%`;
+    }
+
+    if (filters.caseNumber) {
+      conditions.push("o.case_number LIKE :caseNumber");
+      params.caseNumber = `%${filters.caseNumber}%`;
+    }
+
+    if (filters.doctor) {
+      conditions.push("o.specific_doctor LIKE :doctor");
+      params.doctor = `%${filters.doctor}%`;
+    }
+
+    if (filters.dateFrom) {
+      conditions.push("DATE(o.subpoena_date) >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("DATE(o.subpoena_date) <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    if (filters.unpaidOnly) {
+      conditions.push("(i.id IS NULL OR COALESCE(i.total_amount, 0) <= 0)");
+    }
+
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+
+    const [rows] = await pool.execute(
+      `SELECT o.*, f.facility_name, f.slug AS facility_slug,
+              p.company_name AS provider_name,
+              i.id AS invoice_id,
+              i.total_amount,
+              i.amount_paid,
+              i.amount_due,
+              i.status AS invoice_status
+       FROM orders o
+       LEFT JOIN facilities f ON f.id = o.facility_id
+       LEFT JOIN providers p ON p.id = o.provider_id
+       LEFT JOIN invoices i ON i.id = (
+         SELECT i2.id
+         FROM invoices i2
+         WHERE i2.order_id = o.id
+         ORDER BY i2.id DESC
+         LIMIT 1
+       )
+       ${whereClause}
+       ORDER BY o.subpoena_date DESC, o.id DESC`,
+      params
+    );
+
+    return rows;
+  }
+
   static async countStats() {
     const pool = getPool();
 
