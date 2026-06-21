@@ -406,3 +406,36 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, { stages }, "Workflow stage updated");
 });
+
+exports.mailCompletedOrder = asyncHandler(async (req, res) => {
+  const result = await orderService.mailCompletedOrder(
+    req.params.id,
+    req.body.email
+  );
+
+  const order = await orderService.getOrderById(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "order_mail",
+    details: `Records ready email sent to ${result.recipient} for order ${order.orderNumber}`,
+  });
+
+  return ApiResponse.success(res, result, "Email sent");
+});
+
+exports.recordPickup = asyncHandler(async (req, res) => {
+  const result = await orderService.recordOrderPickup(req.params.id, {
+    pickupDate: req.body.pickupDate,
+    notes: req.body.notes,
+  });
+
+  const order = await orderService.getOrderById(req.params.id);
+  const noteSuffix = result.notes ? ` — ${result.notes}` : "";
+
+  await logOrderActivity(req, order, {
+    action: "order_pickup",
+    details: `Pickup recorded on ${result.pickupDate} for order ${order.orderNumber}${noteSuffix}`,
+  });
+
+  return ApiResponse.success(res, result, "Pickup recorded");
+});

@@ -198,4 +198,68 @@ async function sendInvoiceEmail({
   }
 }
 
-module.exports = { sendTwoFactorCode, sendInvoiceEmail };
+async function sendOrderCompletedMail({
+  to,
+  orderNumber,
+  applicant,
+  providerName,
+}) {
+  const subject = `Records Ready — Order ${orderNumber}`;
+  const text = [
+    `Hello,`,
+    ``,
+    `Medical records for order ${orderNumber} are ready.`,
+    applicant ? `Applicant: ${applicant}` : "",
+    providerName ? `Provider: ${providerName}` : "",
+    ``,
+    `Please contact us if you have any questions.`,
+    ``,
+    `DMS Custodian`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
+      <p>Hello,</p>
+      <p>Medical records for order <strong>${orderNumber}</strong> are ready.</p>
+      ${applicant ? `<p><strong>Applicant:</strong> ${applicant}</p>` : ""}
+      ${providerName ? `<p><strong>Provider:</strong> ${providerName}</p>` : ""}
+      <p>Please contact us if you have any questions.</p>
+      <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
+    </div>
+  `;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Order completed mail", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = buildMailOptions({ to, subject, text, html });
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("Order completed mail sent", { to, orderNumber });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send order completed mail", {
+      to,
+      error: error.message,
+    });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Order completed mail fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
+module.exports = { sendTwoFactorCode, sendInvoiceEmail, sendOrderCompletedMail };

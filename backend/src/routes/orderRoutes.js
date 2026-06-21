@@ -53,5 +53,7 @@ router.get("/:id/activity-logs", orderController.getActivityLogs);
 
 router.get("/:id/workflow-stages", orderController.getWorkflowStages);
 router.patch("/:id/workflow-stages", orderController.updateWorkflowStage);
+router.post("/:id/mail", orderController.mailCompletedOrder);
+router.post("/:id/pickup", orderController.recordPickup);
 
 module.exports = router;

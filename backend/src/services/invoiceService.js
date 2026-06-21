@@ -1468,21 +1468,15 @@ async function writeOffInvoices(body = {}, userId) {
         writeoffReason,
       });
 
+      const newOrderStatus =
+        orderAction === "close_order" ? "Completed" : "Write Offs";
+
       await connection.execute(
         `UPDATE orders
-         SET is_write_offs = 1, updated_at = NOW()
+         SET status = :status, updated_at = NOW()
          WHERE id = :orderId`,
-        { orderId: invoice.order_id }
+        { status: newOrderStatus, orderId: invoice.order_id }
       );
-
-      if (orderAction === "close_order") {
-        await connection.execute(
-          `UPDATE orders
-           SET status = 'Completed', updated_at = NOW()
-           WHERE id = :orderId`,
-          { orderId: invoice.order_id }
-        );
-      }
 
       writtenOff.push({
         invoiceId,

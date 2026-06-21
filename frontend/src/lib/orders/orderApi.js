@@ -284,3 +284,23 @@ export async function fetchOrderMedicalRecordsPdf(orderId) {
 
   return response.blob();
 }
+
+export async function mailCompletedOrder(orderId, email) {
+  const data = await request(`/orders/${orderId}/mail`, {
+    method: "POST",
+    auth: true,
+    body: { email },
+  });
+
+  return data?.data || {};
+}
+
+export async function recordOrderPickup(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/pickup`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
+}

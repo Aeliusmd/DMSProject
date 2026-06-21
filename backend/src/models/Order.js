@@ -12,7 +12,11 @@ const REQUIRED_WORKFLOW_COMPLETION = {
   SENT: "sent",
 };
 
-const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set(["Cancelled", "Completed"]);
+const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
+  "Cancelled",
+  "Completed",
+  "Write Offs",
+]);
 
 const ORDER_COLUMNS = `
   order_number, facility_id, provider_id, order_type, status, court,
@@ -29,7 +33,7 @@ const ORDER_COLUMNS = `
   flag_xrays, flag_other_record,
   specific_record, specific_doctor, full_address,
   certificate_no_records, cnr_reason, cnr_delivery, cnr_date_sent, cnr_memo,
-  subpoena_storage_path, has_note, has_subpoena, is_subpoena, is_records, is_write_offs, created_by`;
+  subpoena_storage_path, has_note, is_subpoena, created_by`;
 
 const ORDER_VALUES = `
   :orderNumber, :facilityId, :providerId, :orderType, :status, :court,
@@ -46,7 +50,7 @@ const ORDER_VALUES = `
   :flagXrays, :flagOtherRecord,
   :specificRecord, :specificDoctor, :fullAddress,
   :certificateNoRecords, :cnrReason, :cnrDelivery, :cnrDateSent, :cnrMemo,
-  :subpoenaStoragePath, :hasNote, :hasSubpoena, :isSubpoena, :isRecords, :isWriteOffs, :createdBy`;
+  :subpoenaStoragePath, :hasNote, :isSubpoena, :createdBy`;
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
@@ -103,15 +107,13 @@ const ORDER_UPDATE_SET = `
   cnr_date_sent = :cnrDateSent,
   cnr_memo = :cnrMemo,
   subpoena_storage_path = :subpoenaStoragePath,
-  has_subpoena = :hasSubpoena,
   is_subpoena = :isSubpoena,
-  is_records = :isRecords,
-  is_write_offs = :isWriteOffs,
   updated_at = NOW()`;
 
 const ORDER_DETAIL_SELECT = `
   SELECT o.*, f.facility_name, f.slug AS facility_slug,
-         p.company_name AS provider_name
+         p.company_name AS provider_name,
+         p.email AS provider_email
   FROM orders o
   LEFT JOIN facilities f ON f.id = o.facility_id
   LEFT JOIN providers p ON p.id = o.provider_id`;
@@ -450,7 +452,7 @@ class Order {
     const db = connection || getPool();
 
     const [orders] = await db.execute(
-      `SELECT id, status, is_write_offs
+      `SELECT id, status
        FROM orders
        WHERE id = :orderId
        LIMIT 1`,
@@ -459,10 +461,6 @@ class Order {
     const order = orders[0];
 
     if (!order || WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES.has(order.status)) {
-      return false;
-    }
-
-    if (Number(order.is_write_offs) === 1) {
       return false;
     }
 

@@ -124,15 +124,19 @@ function boolToInt(value) {
   return value ? 1 : 0;
 }
 
-function hasMedicalRecordsRequested(data) {
-  return boolToInt(data?.medicalRecords) === 1;
+function hasAnyRecordsRequested(row) {
+  return Boolean(
+    Number(row?.flag_medical_records) ||
+      Number(row?.flag_billing_records) ||
+      Number(row?.flag_employment_records) ||
+      Number(row?.flag_xrays) ||
+      Number(row?.flag_other_record)
+  );
 }
 
-function resolveOrderFlags(data, hasSubpoenaFile, existing = null) {
+function resolveOrderFlags(data, hasSubpoenaFile) {
   return {
     isSubpoena: hasSubpoenaFile ? 1 : 0,
-    isRecords: hasMedicalRecordsRequested(data) ? 1 : 0,
-    isWriteOffs: existing ? Number(existing.is_write_offs) || 0 : 0,
   };
 }
 
@@ -244,7 +248,6 @@ function buildOrderDbPayload(data) {
     cnrDateSent: dateOrNull(data.cnrDateSent),
     cnrMemo: boolToInt(data.cnrMemo),
     subpoenaStoragePath: null,
-    hasSubpoena: data.subpoenaDate ? 1 : 0,
   };
 }
 
@@ -410,6 +413,7 @@ function buildCompanyBlock(row) {
     address,
     phone: phoneParts.join(" | "),
     email: row.serve_email ? `Email: ${row.serve_email}` : "",
+    emailAddress: trimOrNull(row.serve_email) || trimOrNull(row.provider_email) || "",
   };
 }
 
@@ -463,10 +467,12 @@ function mapOrderListRow(
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
-    subpoena: Boolean(row.is_subpoena ?? row.has_subpoena),
-    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
-    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
-    isWriteOffs: Boolean(Number(row.is_write_offs)),
+    subpoena: Boolean(Number(row.is_subpoena)),
+    isSubpoena: Boolean(Number(row.is_subpoena)),
+    hasSubpoenaFile: Boolean(row.subpoena_storage_path),
+    subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
+    isRecords: hasAnyRecordsRequested(row),
+    isWriteOffs: row.status === "Write Offs",
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -649,9 +655,9 @@ function mapOrderDetail(
     id: row.id,
     orderNumber: row.order_number || "",
     status: row.status || "",
-    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
-    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
-    isWriteOffs: Boolean(Number(row.is_write_offs)),
+    isSubpoena: Boolean(Number(row.is_subpoena)),
+    isRecords: hasAnyRecordsRequested(row),
+    isWriteOffs: row.status === "Write Offs",
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",
@@ -659,10 +665,6 @@ function mapOrderDetail(
     providerId: row.provider_id ? String(row.provider_id) : "",
     providerName: row.provider_name || "",
     type: resolveOrderTypeForForm(row),
-    status: row.status || "",
-    isSubpoena: Boolean(Number(row.is_subpoena ?? row.has_subpoena)),
-    isRecords: Boolean(Number(row.is_records ?? row.flag_medical_records)),
-    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     caseNumber: row.case_number || "",
     orderRef: row.order_ref || "",
@@ -1272,10 +1274,7 @@ async function createOrder(data, actorId, files) {
       orderNumber,
       status: "Active",
       hasNote: 0,
-      hasSubpoena: orderFlags.isSubpoena,
       isSubpoena: orderFlags.isSubpoena,
-      isRecords: orderFlags.isRecords,
-      isWriteOffs: orderFlags.isWriteOffs,
       createdBy: actorId || null,
     });
 
@@ -1351,16 +1350,13 @@ async function updateOrder(id, data, actorId, files) {
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
-    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile, existing);
+    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
     const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     await Order.update(connection, existing.id, {
       ...payload,
       subpoenaStoragePath,
-      hasSubpoena: orderFlags.isSubpoena,
       isSubpoena: orderFlags.isSubpoena,
-      isRecords: orderFlags.isRecords,
-      isWriteOffs: orderFlags.isWriteOffs,
       orderNumber,
     });
 
@@ -1518,6 +1514,89 @@ async function getOrderMedicalRecordsFile(orderId) {
   };
 }
 
+function buildApplicantName(row) {
+  return buildFullName(
+    row.applicant_first_name,
+    row.applicant_middle_name,
+    row.applicant_last_name
+  );
+}
+
+function assertCompletedOrder(order) {
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (order.status !== "Completed") {
+    throw new ApiError(400, "Mail and pickup actions are only available for completed orders");
+  }
+}
+
+async function mailCompletedOrder(orderId, email) {
+  const normalizedId = Number(orderId);
+  const recipient = trimOrNull(email);
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  if (!recipient) {
+    throw new ApiError(400, "Email is required");
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(recipient)) {
+    throw new ApiError(400, "Enter a valid email address");
+  }
+
+  const order = await Order.findById(normalizedId);
+  assertCompletedOrder(order);
+
+  const { sendOrderCompletedMail } = require("./emailService");
+  const result = await sendOrderCompletedMail({
+    to: recipient,
+    orderNumber: order.order_number,
+    applicant: buildApplicantName(order),
+    providerName: order.serve_company_name || order.provider_name || "",
+  });
+
+  if (!result.delivered && !result.devLogged) {
+    throw new ApiError(500, "Failed to send email");
+  }
+
+  return {
+    recipient,
+    delivered: result.delivered,
+    devLogged: Boolean(result.devLogged),
+  };
+}
+
+async function recordOrderPickup(orderId, { pickupDate, notes } = {}) {
+  const normalizedId = Number(orderId);
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const order = await Order.findById(normalizedId);
+  assertCompletedOrder(order);
+
+  const resolvedDate = dateOrNull(pickupDate) || new Date().toISOString().slice(0, 10);
+  const pool = getPool();
+
+  await pool.execute(
+    `UPDATE orders
+     SET delivery_date = :pickupDate, updated_at = NOW()
+     WHERE id = :orderId`,
+    { pickupDate: resolvedDate, orderId: normalizedId }
+  );
+
+  return {
+    orderId: normalizedId,
+    pickupDate: resolvedDate,
+    notes: trimOrNull(notes) || "",
+  };
+}
+
 module.exports = {
   getAllOrders,
   getOrderStats,
@@ -1537,4 +1616,6 @@ module.exports = {
   getOrderSubpoenaFile,
   scanMedicalRecords,
   getOrderMedicalRecordsFile,
+  mailCompletedOrder,
+  recordOrderPickup,
 };

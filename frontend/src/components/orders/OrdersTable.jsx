@@ -9,7 +9,9 @@ import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
-import { getOrders, fetchOrderMedicalRecordsPdf } from "@/lib/orders/orderApi";
+import OrderMailModal from "@/components/orders/OrderMailModal";
+import OrderPickupModal from "@/components/orders/OrderPickupModal";
+import { getOrders, fetchOrderMedicalRecordsPdf, fetchOrderSubpoenaPdf, mailCompletedOrder, recordOrderPickup } from "@/lib/orders/orderApi";
 import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
@@ -70,6 +72,7 @@ function toRenderOrder(order) {
     hasMedicalRecords: Boolean(order.records?.hasMedicalRecords),
     note: order.note,
     subpoena: order.subpoena,
+    hasSubpoenaFile: Boolean(order.hasSubpoenaFile),
     court: order.court || "",
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
@@ -98,6 +101,9 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
     useState(null);
+  const [selectedSubpoenaOrder, setSelectedSubpoenaOrder] = useState(null);
+  const [selectedMailOrder, setSelectedMailOrder] = useState(null);
+  const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
   const [emailError, setEmailError] = useState("");
 
@@ -371,18 +377,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       >
                         Order Log
                       </button>
-
-                      {order.subpoena && (
-                        <p className="mt-1 text-[10px] font-semibold text-[#059669]">
-                          ✓ Subpoena
-                        </p>
-                      )}
-
-                      {order.court && (
-                        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
-                          {order.court}
-                        </p>
-                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -393,6 +387,26 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <p className="mt-1 text-[10px] text-[#64748B]">
                         {order.orderRef}
                       </p>
+
+                      {order.hasSubpoenaFile ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSubpoenaOrder(order)}
+                          className="mt-2 block text-left text-[10px] font-semibold text-[#059669] hover:underline"
+                        >
+                          ✓ Subpoena
+                        </button>
+                      ) : (
+                        <p className="mt-2 text-[10px] font-semibold text-[#94A3B8]">
+                          No Subpoena
+                        </p>
+                      )}
+
+                      {order.court && (
+                        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
+                          {order.court}
+                        </p>
+                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -434,6 +448,25 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                           />
                         ))}
                       </div>
+
+                      {order.orderStatus === "Completed" && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMailOrder(order)}
+                            className="inline-flex h-[22px] items-center rounded-[5px] border border-[#CBD5E1] bg-white px-2 text-[10px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+                          >
+                            Mail
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPickupOrder(order)}
+                            className="inline-flex h-[22px] items-center rounded-[5px] border border-[#CBD5E1] bg-white px-2 text-[10px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+                          >
+                            Pickup
+                          </button>
+                        </div>
+                      )}
 
                       {!order.hasMedicalRecords && (
                         <Link
@@ -603,11 +636,52 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         order={selectedMedicalRecordsOrder}
         onClose={() => setSelectedMedicalRecordsOrder(null)}
       />
+
+      <OrderPdfPreviewModal
+        isOpen={Boolean(selectedSubpoenaOrder)}
+        order={selectedSubpoenaOrder}
+        onClose={() => setSelectedSubpoenaOrder(null)}
+        title="Subpoena"
+        fileName="Subpoena.pdf"
+        fetchPdf={fetchOrderSubpoenaPdf}
+        loadingLabel="Loading subpoena..."
+      />
+
+      <OrderMailModal
+        isOpen={Boolean(selectedMailOrder)}
+        order={selectedMailOrder}
+        onClose={() => setSelectedMailOrder(null)}
+        onSent={async ({ email }) => {
+          await mailCompletedOrder(selectedMailOrder.dbId, email);
+          await fetchOrders({ silent: true });
+        }}
+      />
+
+      <OrderPickupModal
+        isOpen={Boolean(selectedPickupOrder)}
+        order={selectedPickupOrder}
+        onClose={() => setSelectedPickupOrder(null)}
+        onConfirm={async ({ pickupDate, notes }) => {
+          await recordOrderPickup(selectedPickupOrder.dbId, {
+            pickupDate,
+            notes,
+          });
+          await fetchOrders({ silent: true });
+        }}
+      />
     </>
   );
 }
 
-function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
+function OrderPdfPreviewModal({
+  isOpen,
+  order,
+  onClose,
+  title,
+  fileName,
+  fetchPdf,
+  loadingLabel = "Loading...",
+}) {
   const [src, setSrc] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -626,7 +700,7 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
     setLoading(true);
     setError("");
 
-    fetchOrderMedicalRecordsPdf(order.dbId)
+    fetchPdf(order.dbId)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
@@ -634,7 +708,7 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err.message || "Failed to load medical records PDF.");
+          setError(err.message || "Failed to load PDF.");
         }
       })
       .finally(() => {
@@ -649,7 +723,7 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [isOpen, order?.dbId]);
+  }, [isOpen, order?.dbId, fetchPdf]);
 
   if (!isOpen) return null;
 
@@ -658,9 +732,7 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
       <div className="flex max-h-[92vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[10px] bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
           <div>
-            <h2 className="text-[14px] font-semibold text-[#111827]">
-              Medical Records
-            </h2>
+            <h2 className="text-[14px] font-semibold text-[#111827]">{title}</h2>
             <p className="text-[11px] text-[#64748B]">
               Order #{order?.id || order?.dbId}
             </p>
@@ -676,15 +748,29 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {loading ? (
-            <p className="text-[12px] text-[#64748B]">Loading medical records...</p>
+            <p className="text-[12px] text-[#64748B]">{loadingLabel}</p>
           ) : error ? (
             <p className="text-[12px] font-medium text-red-500">{error}</p>
           ) : (
-            <SubpoenaPreviewContent src={src} name="Medical Records.pdf" />
+            <SubpoenaPreviewContent src={src} name={fileName} />
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
+  return (
+    <OrderPdfPreviewModal
+      isOpen={isOpen}
+      order={order}
+      onClose={onClose}
+      title="Medical Records"
+      fileName="Medical Records.pdf"
+      fetchPdf={fetchOrderMedicalRecordsPdf}
+      loadingLabel="Loading medical records..."
+    />
   );
 }
 
