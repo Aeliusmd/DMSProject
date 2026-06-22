@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import { resolveProviderEmail } from "@/lib/orders/deliveryActions";
 
 export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
@@ -13,15 +14,12 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   const [submitting, setSubmitting] = useState(false);
 
   const needsEmail = order ? !resolveProviderEmail(order) : true;
-  const needsDeliveryDate = order ? !order.deliveryDate : true;
 
   useEffect(() => {
     if (!isOpen || !order) return;
 
     setEmail(resolveProviderEmail(order) || "");
-    setDeliveryDate(
-      order.deliveryDate || new Date().toISOString().slice(0, 10)
-    );
+    setDeliveryDate(getTodayInputDate());
     setError("");
   }, [isOpen, order]);
 
@@ -39,8 +37,8 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   if (!mounted || !isOpen || !order) return null;
 
   const handleSubmit = async () => {
-    if (needsDeliveryDate && !deliveryDate) {
-      setError("Delivery date is required");
+    if (!deliveryDate) {
+      setError("Mail sent date is required");
       return;
     }
 
@@ -66,7 +64,7 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
     try {
       await onSent?.({
         email: trimmed,
-        deliveryDate: needsDeliveryDate ? deliveryDate : undefined,
+        deliveryDate,
       });
       onClose();
     } catch (err) {
@@ -87,25 +85,23 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
         </div>
 
         <div className="space-y-3 px-5 py-4">
-          {needsDeliveryDate && (
-            <div>
-              <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
-                Delivery date
-              </label>
-              <input
-                type="date"
-                value={deliveryDate}
-                onChange={(e) => {
-                  setDeliveryDate(e.target.value);
-                  setError("");
-                }}
-                className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-              />
-              <p className="mt-2 text-[10px] text-[#94A3B8]">
-                Saved as the order delivery date and used as the mail sent date.
-              </p>
-            </div>
-          )}
+          <div>
+            <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
+              Mail sent date
+            </label>
+            <input
+              type="date"
+              value={deliveryDate}
+              onChange={(e) => {
+                setDeliveryDate(e.target.value);
+                setError("");
+              }}
+              className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+            />
+            <p className="mt-2 text-[10px] text-[#94A3B8]">
+              Saved as ready date and delivery date for this order.
+            </p>
+          </div>
 
           {needsEmail && (
             <div>
@@ -129,14 +125,9 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
             </div>
           )}
 
-          {!needsEmail && !needsDeliveryDate ? null : !needsEmail ? (
+          {!needsEmail ? (
             <p className="text-[10px] text-[#94A3B8]">
               Medical records PDF will be attached to the email.
-            </p>
-          ) : needsEmail && !needsDeliveryDate ? (
-            <p className="text-[10px] text-[#94A3B8]">
-              Sends a records-ready notification with the medical records PDF
-              attached.
             </p>
           ) : null}
 

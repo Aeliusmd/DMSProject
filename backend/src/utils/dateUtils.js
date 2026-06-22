@@ -1,25 +1,27 @@
+function isDateOnlyString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value).trim());
+}
+
 function parseDateOnlyParts(value) {
   if (!value) return null;
 
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return null;
 
+    // mysql2 returns DATE as local midnight — use local calendar parts.
     return {
-      year: value.getUTCFullYear(),
-      month: value.getUTCMonth() + 1,
-      day: value.getUTCDate(),
+      year: value.getFullYear(),
+      month: value.getMonth() + 1,
+      day: value.getDate(),
     };
   }
 
   const trimmed = String(value).trim();
-  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
-  if (iso) {
-    return {
-      year: Number(iso[1]),
-      month: Number(iso[2]),
-      day: Number(iso[3]),
-    };
+  // Literal YYYY-MM-DD — do not parse through Date (avoids UTC off-by-one).
+  if (isDateOnlyString(trimmed)) {
+    const [year, month, day] = trimmed.split("-").map(Number);
+    return { year, month, day };
   }
 
   const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
@@ -43,10 +45,20 @@ function parseDateOnlyParts(value) {
   if (Number.isNaN(parsed.getTime())) return null;
 
   return {
-    year: parsed.getUTCFullYear(),
-    month: parsed.getUTCMonth() + 1,
-    day: parsed.getUTCDate(),
+    year: parsed.getFullYear(),
+    month: parsed.getMonth() + 1,
+    day: parsed.getDate(),
   };
+}
+
+/** Normalize any input to YYYY-MM-DD for MySQL DATE columns (never returns Date objects). */
+function toSqlDateOnly(value) {
+  const parts = parseDateOnlyParts(value);
+  if (!parts) return null;
+
+  const { year, month, day } = parts;
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function toInputDate(value) {
@@ -83,9 +95,8 @@ function extractYear(value) {
 
 function normalizeDate(value) {
   if (!value) return "";
-  const str = String(value).trim();
-  const match = str.match(/^(\d{4}-\d{2}-\d{2})/);
-  return match ? match[1] : toInputDate(value);
+  const sql = toSqlDateOnly(value);
+  return sql || "";
 }
 
 function formatSsnLastFourDisplay(lastFour) {
@@ -95,12 +106,20 @@ function formatSsnLastFourDisplay(lastFour) {
   return `XXX-XX-${digits.padStart(4, "0")}`;
 }
 
+function getTodayInputDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 module.exports = {
+  isDateOnlyString,
   parseDateOnlyParts,
   toInputDate,
+  toSqlDateOnly,
   toShortDate,
   formatDobDisplay,
   extractYear,
   normalizeDate,
   formatSsnLastFourDisplay,
+  getTodayInputDate,
 };

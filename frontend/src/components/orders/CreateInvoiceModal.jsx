@@ -24,9 +24,10 @@ import {
   calculateOrderRushLevel,
 } from "@/lib/orders/rushUtils";
 import { getOrder } from "@/lib/orders/orderApi";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
 
 const initialFormData = {
-  invoiceDate: "2026-06-02",
+  invoiceDate: "",
   serviceDate: "",
   servedAmount: "10.00",
   serviceFee: "0.00",
@@ -663,7 +664,7 @@ function getInitialInvoiceFormData(order, isEditMode) {
   if (!isEditMode) {
     return {
       ...initialFormData,
-      invoiceDate: new Date().toISOString().slice(0, 10),
+      invoiceDate: getTodayInputDate(),
     };
   }
 

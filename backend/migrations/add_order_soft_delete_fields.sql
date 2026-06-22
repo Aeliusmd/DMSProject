@@ -1,0 +1,5 @@
+-- DEPRECATED: use add_order_deleted_status.sql instead.
+-- Soft delete is handled by status = 'Deleted' (not is_deleted).
+--
+-- If you already ran this file, run add_order_deleted_status.sql to migrate
+-- is_deleted rows to status = 'Deleted' and drop is_deleted.

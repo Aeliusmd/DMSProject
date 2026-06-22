@@ -56,7 +56,8 @@ export default function Sidebar({ isCollapsed }) {
           width={54}
           height={34}
           priority
-          className={`h-auto transition-all ${
+          style={{ height: "auto" }}
+          className={`transition-all ${
             isCollapsed ? "w-[36px]" : "w-[54px]"
           } max-md:w-[36px]`}
         />

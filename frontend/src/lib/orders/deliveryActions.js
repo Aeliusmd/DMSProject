@@ -1,16 +1,22 @@
 /**
  * Completed-order delivery actions (Mail / Fax / Pickup).
- * When CNR is enabled, only the selected cnr_delivery option is shown.
- * Otherwise Mail + Pickup are shown (no Fax).
- * After mail or pickup is recorded, the other option is hidden.
+ * Shown when order status is Ready to Pickup (pending) or Completed (done).
+ * ready_date stores the mail sent date or pickup date after completion.
  */
 export function getCompletedDeliveryActions(order) {
-  if (!order || order.orderStatus !== "Completed") {
+  const isDeliveryPhase =
+    order?.orderStatus === "Ready to Pickup" ||
+    order?.orderStatus === "Completed";
+
+  if (!isDeliveryPhase) {
     return { mail: false, fax: false, pickup: false };
   }
 
-  const mailDone = Boolean(order.mailSentDate);
   const pickupDone = Boolean(order.pickupPersonName);
+  const mailDone =
+    order.orderStatus === "Completed" &&
+    Boolean(order.readyDate) &&
+    !pickupDone;
   const faxDone =
     order.cnrDelivery === "fax" && Boolean(order.cnrDateSent);
 
@@ -24,6 +30,10 @@ export function getCompletedDeliveryActions(order) {
 
   if (faxDone) {
     return { mail: false, fax: true, pickup: false };
+  }
+
+  if (order.orderStatus !== "Ready to Pickup") {
+    return { mail: false, fax: false, pickup: false };
   }
 
   if (order.certificateNoRecords && order.cnrDelivery) {
@@ -57,20 +67,26 @@ export function formatDeliveryDate(dateStr) {
 
 export function getDeliveryStatus(order, action) {
   switch (action) {
-    case "mail":
+    case "mail": {
+      const mailCompleted =
+        order.orderStatus === "Completed" &&
+        Boolean(order.readyDate) &&
+        !order.pickupPersonName;
+
       return {
-        completed: Boolean(order.mailSentDate),
-        date: order.mailSentDate || "",
-        hoverText: order.mailSentDate
-          ? formatDeliveryDate(order.mailSentDate)
-          : "",
+        completed: mailCompleted,
+        date: order.readyDate || "",
+        hoverText: order.readyDate ? formatDeliveryDate(order.readyDate) : "",
       };
+    }
     case "pickup":
       return {
         completed: Boolean(order.pickupPersonName),
-        date: order.deliveryDate || "",
+        date: order.readyDate || order.deliveryDate || "",
         hoverText: [
-          order.deliveryDate ? formatDeliveryDate(order.deliveryDate) : "",
+          order.readyDate || order.deliveryDate
+            ? formatDeliveryDate(order.readyDate || order.deliveryDate)
+            : "",
           order.pickupPersonName || "",
         ]
           .filter(Boolean)

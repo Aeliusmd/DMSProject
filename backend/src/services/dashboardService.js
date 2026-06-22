@@ -35,11 +35,13 @@ async function getDashboardStats() {
         SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) AS active_cases,
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
       FROM orders
+      WHERE status NOT IN ('Cancelled', 'Deleted')
     `),
     pool.execute(
       `SELECT COUNT(*) AS rush_orders
        FROM orders
-       WHERE DATEDIFF(CURDATE(), DATE(created_at)) >= :minDays`,
+       WHERE status NOT IN ('Cancelled', 'Deleted')
+         AND DATEDIFF(CURDATE(), DATE(created_at)) >= :minDays`,
       { minDays: RUSH_LEVEL_3_MIN_DAYS }
     ),
     pool.execute(
@@ -136,6 +138,7 @@ async function getTopProviders(limit = 5) {
     FROM orders o
     LEFT JOIN providers p ON p.id = o.provider_id
     LEFT JOIN invoices i ON i.order_id = o.id
+    WHERE o.status NOT IN ('Cancelled', 'Deleted')
     GROUP BY provider_name
     ORDER BY case_count DESC, invoiced_total DESC, provider_name ASC
     LIMIT ${safeLimit}

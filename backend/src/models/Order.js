@@ -14,9 +14,15 @@ const REQUIRED_WORKFLOW_COMPLETION = {
 
 const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
   "Cancelled",
+  "Deleted",
   "Completed",
+  "Ready to Pickup",
   "Write Offs",
 ]);
+
+const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
+const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
+const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
 
 const ORDER_COLUMNS = `
   order_number, facility_id, provider_id, order_type, status, court,
@@ -125,6 +131,13 @@ class Order {
     const conditions = [];
     const params = {};
 
+    if (filters.status) {
+      conditions.push("o.status = :status");
+      params.status = filters.status;
+    } else {
+      conditions.push(ACTIVE_ORDER_ALIAS);
+    }
+
     if (filters.facilityId) {
       conditions.push("o.facility_id = :facilityId");
       params.facilityId = filters.facilityId;
@@ -175,7 +188,7 @@ class Order {
 
   static async findForReport(filters = {}) {
     const pool = getPool();
-    const conditions = [];
+    const conditions = [ACTIVE_ORDER_ALIAS];
     const params = {};
 
     if (filters.orderNo) {
@@ -252,12 +265,26 @@ class Order {
         ) AS ready_to_pickup,
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
       FROM orders
+      WHERE ${ACTIVE_ORDER}
     `);
 
     return rows[0] || {};
   }
 
   static async findById(id) {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(
+      `${ORDER_DETAIL_SELECT}
+       WHERE o.id = :id AND ${ACTIVE_ORDER_ALIAS}
+       LIMIT 1`,
+      { id }
+    );
+
+    return rows[0] || null;
+  }
+
+  static async findByIdRaw(id) {
     const pool = getPool();
 
     const [rows] = await pool.execute(
@@ -454,13 +481,17 @@ class Order {
     const [orders] = await db.execute(
       `SELECT id, status
        FROM orders
-       WHERE id = :orderId
+       WHERE id = :orderId AND ${ACTIVE_ORDER}
        LIMIT 1`,
       { orderId }
     );
     const order = orders[0];
 
     if (!order || WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES.has(order.status)) {
+      return false;
+    }
+
+    if (order.status !== "Active") {
       return false;
     }
 
@@ -477,7 +508,7 @@ class Order {
 
     await db.execute(
       `UPDATE orders
-       SET status = 'Completed', updated_at = NOW()
+       SET status = 'Ready to Pickup', updated_at = NOW()
        WHERE id = :orderId`,
       { orderId }
     );
@@ -559,7 +590,7 @@ class Order {
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
        FROM order_notes n
-       INNER JOIN orders o ON o.id = n.order_id
+       INNER JOIN orders o ON o.id = n.order_id AND ${ACTIVE_ORDER_ALIAS}
        WHERE ${conditions.join(" AND ")}
        ORDER BY n.callback_date ASC, n.note_date DESC
        LIMIT ${Number(limit)}`,
@@ -589,7 +620,7 @@ class Order {
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
        FROM order_notes n
-       INNER JOIN orders o ON o.id = n.order_id
+       INNER JOIN orders o ON o.id = n.order_id AND ${ACTIVE_ORDER_ALIAS}
        WHERE ${conditions.join(" AND ")}
        ORDER BY n.callback_date ASC, o.order_number ASC`,
       params
@@ -679,12 +710,34 @@ class Order {
     return rows[0] || null;
   }
 
-  static async deleteById(id) {
+  static async deleteById(id, { deletedBy } = {}) {
     const pool = getPool();
 
     const [result] = await pool.execute(
-      `DELETE FROM orders WHERE id = :id`,
-      { id }
+      `UPDATE orders
+       SET status = 'Deleted',
+           deleted_at = NOW(),
+           deleted_by = :deletedBy,
+           updated_at = NOW()
+       WHERE id = :id AND ${ACTIVE_ORDER}`,
+      { id, deletedBy: deletedBy || null }
+    );
+
+    return result.affectedRows > 0;
+  }
+
+  static async cancelById(id, { reason, actorId }) {
+    const pool = getPool();
+
+    const [result] = await pool.execute(
+      `UPDATE orders
+       SET status = 'Cancelled',
+           cancel_reason = :reason,
+           cancelled_at = NOW(),
+           cancelled_by = :actorId,
+           updated_at = NOW()
+       WHERE id = :id AND ${ACTIVE_ORDER}`,
+      { id, reason, actorId: actorId || null }
     );
 
     return result.affectedRows > 0;

@@ -40,6 +40,7 @@ router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);
 router.delete("/:id", orderController.remove);
+router.post("/:id/cancel", orderController.cancel);
 
 router.get("/:id/notes", orderController.getNotes);
 router.post("/:id/notes", uploadNoteAttachment, orderController.createNote);

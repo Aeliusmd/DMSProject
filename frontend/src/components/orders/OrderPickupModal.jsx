@@ -3,13 +3,12 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
 
 export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) {
   const mounted = useIsClient();
   const [pickupPersonName, setPickupPersonName] = useState("");
-  const [pickupDate, setPickupDate] = useState(() =>
-    new Date().toISOString().slice(0, 10)
-  );
+  const [pickupDate, setPickupDate] = useState(() => getTodayInputDate());
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -18,9 +17,7 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
     if (!isOpen || !order) return;
 
     setPickupPersonName("");
-    setPickupDate(
-      order.deliveryDate || new Date().toISOString().slice(0, 10)
-    );
+    setPickupDate(getTodayInputDate());
     setNotes("");
     setError("");
   }, [isOpen, order]);

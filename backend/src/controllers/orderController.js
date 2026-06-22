@@ -292,7 +292,10 @@ exports.update = asyncHandler(async (req, res) => {
 
 exports.remove = asyncHandler(async (req, res) => {
   const order = await orderService.getOrderById(req.params.id);
-  const result = await orderService.deleteOrder(req.params.id);
+  const result = await orderService.deleteOrder(req.params.id, {
+    actorId: req.user.id,
+    actorName: req.user.name,
+  });
 
   await logOrderActivity(req, order, {
     action: "delete",
@@ -306,6 +309,27 @@ exports.remove = asyncHandler(async (req, res) => {
   });
 
   return ApiResponse.success(res, result, result.message);
+});
+
+exports.cancel = asyncHandler(async (req, res) => {
+  const order = await orderService.cancelOrder(req.params.id, {
+    reason: req.body.reason,
+    actorId: req.user.id,
+    actorName: req.user.name,
+  });
+
+  await logOrderActivity(req, order, {
+    action: "cancel",
+    details: `Cancelled order ${order.orderNumber} for ${getOrderLogContext(order).companyName}: ${req.body.reason}`,
+  });
+
+  await notificationService.notifyOrderStatusChange({
+    orderNumber: order.orderNumber,
+    details: `Order cancelled for ${getOrderLogContext(order).companyName}`,
+    orderId: order.id,
+  });
+
+  return ApiResponse.success(res, { order }, "Order cancelled successfully");
 });
 
 exports.getNotes = asyncHandler(async (req, res) => {

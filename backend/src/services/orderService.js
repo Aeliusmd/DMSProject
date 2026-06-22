@@ -21,6 +21,7 @@ const batchScanRepository = require("../repositories/batchScanRepository");
 const fileStorage = require("../utils/fileStorage");
 const {
   toInputDate,
+  toSqlDateOnly,
   toShortDate,
   formatDobDisplay,
   extractYear,
@@ -40,9 +41,10 @@ const DEFAULT_CUSTODIAN_CHARGE = 15;
 
 const STATUS_FILTER_MAP = {
   active: "Active",
-  ready: "Ready",
+  ready: "Ready to Pickup",
   completed: "Completed",
   cancelled: "Cancelled",
+  deleted: "Deleted",
 };
 
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
@@ -107,8 +109,7 @@ function trimOrNull(value) {
 
 function dateOrNull(value) {
   if (value === undefined || value === null || value === "") return null;
-  const normalized = toInputDate(value);
-  return normalized || null;
+  return toSqlDateOnly(value);
 }
 
 function boolToInt(value) {
@@ -390,6 +391,7 @@ function mapPaymentsToForm(payments = []) {
 function deriveFilterStatus(status) {
   if (status === "Completed") return "completed";
   if (status === "Cancelled") return "cancelled";
+  if (status === "Deleted") return "deleted";
   if (status === "Ready" || status === "Ready to Pickup") return "ready";
   return "active";
 }
@@ -512,7 +514,8 @@ function mapOrderListRow(
     ),
     certificateNoRecords: Boolean(Number(row.certificate_no_records)),
     cnrDelivery: row.cnr_delivery || "",
-    mailSentDate: toInputDate(row.mail_sent_date),
+    mailSentDate: toInputDate(row.ready_date),
+    readyDate: toInputDate(row.ready_date),
     deliveryDate: toInputDate(row.delivery_date),
     pickupPersonName: row.pickup_person_name || "",
     cnrDateSent: toInputDate(row.cnr_date_sent),
@@ -731,8 +734,10 @@ function mapOrderDetail(
     subpoenaDate: toInputDate(row.subpoena_date),
     createdAt: row.created_at || null,
     readyDate: toInputDate(row.ready_date),
-    invoiceDate: toInputDate(row.invoice_date),
-    xrayInvoiceDate: toInputDate(row.xray_invoice_date),
+    invoiceDate: toInputDate(row.invoice_date || invoiceRow?.invoice_date),
+    xrayInvoiceDate: toInputDate(
+      row.xray_invoice_date || xrayRow?.xray_invoice_date
+    ),
 
     medicalRecords: Boolean(row.flag_medical_records),
     billingRecords: Boolean(row.flag_billing_records),
@@ -1415,16 +1420,90 @@ async function updateOrder(id, data, actorId, files) {
   }
 }
 
-async function deleteOrder(id) {
-  const existing = await Order.findById(id);
+async function deleteOrder(id, { actorId, actorName } = {}) {
+  const existing = await Order.findByIdRaw(id);
 
   if (!existing) {
     throw new ApiError(404, "Order not found");
   }
 
-  await Order.deleteById(existing.id);
+  if (existing.status === "Deleted") {
+    throw new ApiError(400, "Order is already deleted");
+  }
+
+  if (existing.status === "Cancelled") {
+    throw new ApiError(400, "Cannot delete a cancelled order");
+  }
+
+  const deleted = await Order.deleteById(existing.id, {
+    deletedBy: actorId || null,
+  });
+
+  if (!deleted) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  await Order.createActivityLog({
+    orderId: existing.id,
+    activityDate: new Date(),
+    performedBy: actorId || null,
+    authorName: actorName || "System",
+    callbackDate: null,
+    note: "Order deleted",
+    attachmentPath: null,
+  });
 
   return { message: "Order deleted successfully" };
+}
+
+async function cancelOrder(id, { reason, actorId, actorName }) {
+  const existing = await Order.findByIdRaw(id);
+
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (existing.status === "Deleted") {
+    throw new ApiError(400, "Cannot cancel a deleted order");
+  }
+
+  if (existing.status === "Cancelled") {
+    throw new ApiError(400, "Order is already cancelled");
+  }
+
+  const trimmedReason = trimOrNull(reason);
+  if (!trimmedReason) {
+    throw new ApiError(400, "Cancellation reason is required");
+  }
+
+  const cancelled = await Order.cancelById(existing.id, {
+    reason: trimmedReason,
+    actorId: actorId || null,
+  });
+
+  if (!cancelled) {
+    throw new ApiError(400, "Order is already cancelled");
+  }
+
+  await Order.createActivityLog({
+    orderId: existing.id,
+    activityDate: new Date(),
+    performedBy: actorId || null,
+    authorName: actorName || "System",
+    callbackDate: null,
+    note: `Order cancelled: ${trimmedReason}`,
+    attachmentPath: null,
+  });
+
+  return {
+    id: existing.id,
+    orderNumber: existing.order_number,
+    facility: existing.facility_id ? String(existing.facility_id) : "",
+    facilityName: existing.facility_name || "",
+    serveCompanyName: existing.serve_company_name || "",
+    status: "Cancelled",
+    cancelReason: trimmedReason,
+  };
 }
 
 async function getOrderSubpoenaFile(orderId) {
@@ -1539,15 +1618,15 @@ function buildApplicantName(row) {
   );
 }
 
-function assertCompletedOrder(order) {
+function assertReadyForDelivery(order) {
   if (!order) {
     throw new ApiError(404, "Order not found");
   }
 
-  if (order.status !== "Completed") {
+  if (order.status !== "Ready to Pickup") {
     throw new ApiError(
       400,
-      "Mail, fax, and pickup actions are only available for completed orders"
+      "Mail, fax, and pickup actions are only available for orders ready to pickup"
     );
   }
 }
@@ -1593,7 +1672,7 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
   }
 
   const order = await Order.findById(normalizedId);
-  assertCompletedOrder(order);
+  assertReadyForDelivery(order);
 
   const medicalRecordsAttachment = resolveMedicalRecordsAttachment(order);
   if (!medicalRecordsAttachment) {
@@ -1603,23 +1682,15 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
     );
   }
 
+  const mailSentDate = dateOrNull(deliveryDate);
+  if (!mailSentDate) {
+    throw new ApiError(400, "Mail sent date is required");
+  }
+
   const pool = getPool();
-  const incomingDeliveryDate = dateOrNull(deliveryDate);
-  let resolvedDate = toInputDate(order.delivery_date);
 
-  if (incomingDeliveryDate) {
-    resolvedDate = incomingDeliveryDate;
-    await pool.execute(
-      `UPDATE orders
-       SET delivery_date = :deliveryDate, updated_at = NOW()
-       WHERE id = :orderId`,
-      { deliveryDate: incomingDeliveryDate, orderId: normalizedId }
-    );
-  }
-
-  if (!resolvedDate) {
-    throw new ApiError(400, "Delivery date is required before sending mail");
-  }
+  const setCnrDate =
+    Number(order.certificate_no_records) && order.cnr_delivery === "email";
 
   const { sendOrderCompletedMail } = require("./emailService");
   const result = await sendOrderCompletedMail({
@@ -1634,23 +1705,23 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
     throw new ApiError(500, "Failed to send email");
   }
 
-  const setCnrDate =
-    Number(order.certificate_no_records) && order.cnr_delivery === "email";
-
   await pool.execute(
     `UPDATE orders
-     SET mail_sent_date = :sentDate${
-       setCnrDate ? ", cnr_date_sent = :sentDate" : ""
-     }, updated_at = NOW()
+     SET delivery_date = :mailSentDate,
+         ready_date = :mailSentDate,
+         status = 'Completed',
+         ${setCnrDate ? "cnr_date_sent = :mailSentDate," : ""}
+         updated_at = NOW()
      WHERE id = :orderId`,
-    { sentDate: resolvedDate, orderId: normalizedId }
+    { mailSentDate, orderId: normalizedId }
   );
 
   return {
     recipient,
     delivered: result.delivered,
     devLogged: Boolean(result.devLogged),
-    sentDate: resolvedDate,
+    sentDate: mailSentDate,
+    readyDate: mailSentDate,
   };
 }
 
@@ -1667,9 +1738,13 @@ async function recordOrderFax(orderId, { faxNumber, sentDate, notes } = {}) {
   }
 
   const order = await Order.findById(normalizedId);
-  assertCompletedOrder(order);
+  assertReadyForDelivery(order);
 
-  const resolvedDate = dateOrNull(sentDate) || new Date().toISOString().slice(0, 10);
+  const resolvedDate = dateOrNull(sentDate);
+  if (!resolvedDate) {
+    throw new ApiError(400, "Fax sent date is required");
+  }
+
   const pool = getPool();
 
   await pool.execute(
@@ -1700,15 +1775,21 @@ async function recordOrderPickup(orderId, { pickupDate, pickupPersonName, notes 
   }
 
   const order = await Order.findById(normalizedId);
-  assertCompletedOrder(order);
+  assertReadyForDelivery(order);
 
-  const resolvedDate = dateOrNull(pickupDate) || new Date().toISOString().slice(0, 10);
+  const resolvedDate = dateOrNull(pickupDate);
+  if (!resolvedDate) {
+    throw new ApiError(400, "Pickup date is required");
+  }
+
   const pool = getPool();
 
   await pool.execute(
     `UPDATE orders
      SET delivery_date = :pickupDate,
+         ready_date = :pickupDate,
          pickup_person_name = :pickupPersonName,
+         status = 'Completed',
          updated_at = NOW()
      WHERE id = :orderId`,
     {
@@ -1722,6 +1803,7 @@ async function recordOrderPickup(orderId, { pickupDate, pickupPersonName, notes 
     orderId: normalizedId,
     pickupDate: resolvedDate,
     pickupPersonName: resolvedPerson,
+    readyDate: resolvedDate,
     notes: trimOrNull(notes) || "",
   };
 }
@@ -1734,6 +1816,7 @@ module.exports = {
   createOrder,
   updateOrder,
   deleteOrder,
+  cancelOrder,
   getOrderNotes,
   addOrderNote,
   updateOrderNote,

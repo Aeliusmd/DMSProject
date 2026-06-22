@@ -1,5 +1,7 @@
 const { getPool } = require("../config/database");
 
+const ORDER_VISIBLE = "o.status NOT IN ('Cancelled', 'Deleted')";
+
 const INVOICE_SELECT = `
   SELECT i.*,
          o.order_number,
@@ -35,7 +37,7 @@ class Invoice {
 
     const [rows] = await pool.execute(
       `${INVOICE_SELECT}
-       WHERE i.id = :id
+       WHERE i.id = :id AND ${ORDER_VISIBLE}
        LIMIT 1`,
       { id }
     );
@@ -48,7 +50,7 @@ class Invoice {
 
     const [rows] = await pool.execute(
       `${INVOICE_SELECT}
-       WHERE i.order_id = :orderId
+       WHERE i.order_id = :orderId AND ${ORDER_VISIBLE}
        ORDER BY i.id DESC
        LIMIT 1`,
       { orderId }
@@ -69,7 +71,7 @@ class Invoice {
 
     const [rows] = await pool.execute(
       `${INVOICE_SELECT}
-       WHERE i.order_id IN (${placeholders})
+       WHERE i.order_id IN (${placeholders}) AND ${ORDER_VISIBLE}
        ORDER BY i.id DESC`,
       params
     );
@@ -87,6 +89,7 @@ class Invoice {
   static async findOutstanding(filters = {}) {
     const pool = getPool();
     const conditions = [
+      ORDER_VISIBLE,
       "i.status NOT IN ('Written Off', 'Needs Resend')",
       "i.sent_date IS NULL",
     ];
@@ -117,6 +120,7 @@ class Invoice {
   static async findResend(filters = {}) {
     const pool = getPool();
     const conditions = [
+      ORDER_VISIBLE,
       `(
         i.status = 'Needs Resend'
         OR (
@@ -152,6 +156,7 @@ class Invoice {
   static async findByFacilityId(facilityId, filters = {}) {
     const pool = getPool();
     const conditions = [
+      ORDER_VISIBLE,
       "i.facility_id = :facilityId",
       "i.status NOT IN ('Written Off', 'Needs Resend')",
       "i.sent_date IS NULL",
