@@ -166,6 +166,52 @@ function buildFullName(first, middle, last) {
   return [first, middle, last].filter(Boolean).join(" ").trim();
 }
 
+function formatDoiDisplay(row) {
+  if (!row) return "";
+
+  if (row.injury_type === "specific" && row.injury_date) {
+    return toShortDate(row.injury_date);
+  }
+
+  if (row.injury_type === "cumulative" && row.injury_date_begin) {
+    const start = toShortDate(row.injury_date_begin);
+    const end = row.injury_date_end ? toShortDate(row.injury_date_end) : "";
+    return end ? `${start} - ${end}` : start;
+  }
+
+  return "";
+}
+
+function hasDoi(row) {
+  return Boolean(formatDoiDisplay(row));
+}
+
+function buildInjuryDatePayload(data) {
+  const injuryType = enumOrNull(data.injuryType, ALLOWED_INJURY_TYPES);
+
+  if (injuryType === "specific") {
+    return {
+      injuryDate: dateOrNull(data.injuryDate),
+      injuryDateBegin: null,
+      injuryDateEnd: null,
+    };
+  }
+
+  if (injuryType === "cumulative") {
+    return {
+      injuryDate: null,
+      injuryDateBegin: dateOrNull(data.injuryDateBegin),
+      injuryDateEnd: dateOrNull(data.injuryDateEnd),
+    };
+  }
+
+  return {
+    injuryDate: null,
+    injuryDateBegin: null,
+    injuryDateEnd: null,
+  };
+}
+
 function generateOrderNumber() {
   const stamp = Date.now().toString().slice(-7);
   return `${stamp}-1`;
@@ -211,6 +257,7 @@ function buildOrderDbPayload(data) {
     applicantAka: trimOrNull(data.aka),
     defendant: trimOrNull(data.defendant),
     injuryType: enumOrNull(data.injuryType, ALLOWED_INJURY_TYPES),
+    ...buildInjuryDatePayload(data),
     serveCompanyName: trimOrNull(data.serveCompanyName),
     serveAddress: trimOrNull(data.address),
     serveZip: trimOrNull(data.zip),
@@ -466,7 +513,8 @@ function mapOrderListRow(
   const orderYear = extractYear(row.subpoena_date) || extractYear(row.created_at) || "";
   const dob = formatDobDisplay(row.dob);
   const ssn = formatSsnLastFourDisplay(row.ssn_last_four);
-  const dobSsn = [dob, ssn].filter(Boolean);
+  const doiDisplay = formatDoiDisplay(row);
+  const dobSsn = [dob, ssn, doiDisplay].filter(Boolean);
 
   const rush = calculateOrderRushLevel(row.created_at);
 
@@ -506,6 +554,8 @@ function mapOrderListRow(
     dob,
     ssn,
     dobSsn,
+    doiDisplay,
+    hasDoi: hasDoi(row),
     forms: DEFAULT_ORDER_FORMS,
     invoice: invoiceService.mapOrderInvoiceSummary(
       invoiceRow,
@@ -697,6 +747,11 @@ function mapOrderDetail(
     aka: row.applicant_aka || "",
     defendant: row.defendant || "",
     injuryType: row.injury_type || "",
+    injuryDate: toInputDate(row.injury_date),
+    injuryDateBegin: toInputDate(row.injury_date_begin),
+    injuryDateEnd: toInputDate(row.injury_date_end),
+    doiDisplay: formatDoiDisplay(row),
+    hasDoi: hasDoi(row),
 
     documentName: "",
     subpoenaFile: null,

@@ -65,6 +65,9 @@ const initialFormData = {
   aka: "",
   defendant: "",
   injuryType: "",
+  injuryDate: "",
+  injuryDateBegin: "",
+  injuryDateEnd: "",
 
   documentName: "",
   subpoenaFile: null,
@@ -930,29 +933,87 @@ function OrderDetailsForm({
 
       <div>
         <h3 className="text-[13px] font-semibold text-[#111827]">
-          Date Injury
+          Date of Injury (Complete all relevant information):
         </h3>
 
-        <p className="mt-[2px] text-[11px] italic text-[#64748B]">
-          Complete all relevant information
-        </p>
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="flex flex-wrap items-center gap-2 text-[12px] text-[#475569]">
+              <input
+                type="radio"
+                name="injuryType"
+                value="specific"
+                checked={formData.injuryType === "specific"}
+                onChange={onChange}
+                className="h-[13px] w-[13px] border-[#CBD5E1] accent-[#0097B2]"
+              />
+              <span>specific injury on this date:</span>
+              <input
+                type="date"
+                name="injuryDate"
+                value={formData.injuryDate}
+                onChange={onChange}
+                onBlur={onBlur}
+                disabled={formData.injuryType !== "specific"}
+                className={`h-[34px] rounded-[6px] border bg-white px-2 text-[12px] text-[#111827] outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] ${
+                  getError("injuryDate")
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+            </label>
+            {getError("injuryDate") ? (
+              <p className="mt-1 text-[11px] font-medium text-red-500">
+                {getError("injuryDate")}
+              </p>
+            ) : null}
+          </div>
 
-        <div className="mt-3 space-y-2">
-          <RadioOption
-            label="Specific injury on this date"
-            name="injuryType"
-            value="specific"
-            checked={formData.injuryType === "specific"}
-            onChange={onChange}
-          />
-
-          <RadioOption
-            label="Cumulative injury which began on"
-            name="injuryType"
-            value="cumulative"
-            checked={formData.injuryType === "cumulative"}
-            onChange={onChange}
-          />
+          <div>
+            <label className="flex flex-wrap items-center gap-2 text-[12px] text-[#475569]">
+              <input
+                type="radio"
+                name="injuryType"
+                value="cumulative"
+                checked={formData.injuryType === "cumulative"}
+                onChange={onChange}
+                className="h-[13px] w-[13px] border-[#CBD5E1] accent-[#0097B2]"
+              />
+              <span>cumulative injury which began on</span>
+              <input
+                type="date"
+                name="injuryDateBegin"
+                value={formData.injuryDateBegin}
+                onChange={onChange}
+                onBlur={onBlur}
+                disabled={formData.injuryType !== "cumulative"}
+                className={`h-[34px] rounded-[6px] border bg-white px-2 text-[12px] text-[#111827] outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] ${
+                  getError("injuryDateBegin")
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+              <span>through</span>
+              <input
+                type="date"
+                name="injuryDateEnd"
+                value={formData.injuryDateEnd}
+                onChange={onChange}
+                onBlur={onBlur}
+                disabled={formData.injuryType !== "cumulative"}
+                className={`h-[34px] rounded-[6px] border bg-white px-2 text-[12px] text-[#111827] outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] ${
+                  getError("injuryDateEnd")
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+            </label>
+            {getError("injuryDateBegin") || getError("injuryDateEnd") ? (
+              <p className="mt-1 text-[11px] font-medium text-red-500">
+                {getError("injuryDateEnd") || getError("injuryDateBegin")}
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
 

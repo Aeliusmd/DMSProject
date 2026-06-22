@@ -96,6 +96,28 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     errors.additionalDocumentFile = fileErrors.additionalDocumentFile;
   }
 
+  if (data.injuryType === "cumulative") {
+    if (!data.injuryDateBegin) {
+      errors.injuryDateBegin = "Start date is required";
+    }
+
+    if (!data.injuryDateEnd) {
+      errors.injuryDateEnd = "End date is required";
+    }
+
+    if (
+      data.injuryDateBegin &&
+      data.injuryDateEnd &&
+      data.injuryDateEnd < data.injuryDateBegin
+    ) {
+      errors.injuryDateEnd = "End date must be on or after start date";
+    }
+  }
+
+  if (data.injuryType === "specific" && !data.injuryDate) {
+    errors.injuryDate = "Injury date is required";
+  }
+
   return errors;
 }
 
