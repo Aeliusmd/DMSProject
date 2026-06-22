@@ -96,7 +96,9 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   const db = connection || getPool();
 
   const [invoiceRows] = await db.execute(
-    `SELECT id, total_amount, status, writeoff_amount
+    `SELECT id, served_amount, service_fee, custodian_fee, xray_fee,
+            mileage, parking, other_fee, page_count, per_page_amount,
+            total_amount, status, writeoff_amount
      FROM invoices
      WHERE order_id = :orderId
      LIMIT 1`,
@@ -109,32 +111,40 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   }
 
   const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
-  const amountPaid = sumOrderPayments(orderPayments);
-  const totalAmount = toNumber(invoice.total_amount);
-  const writeoffAmount = toNumber(invoice.writeoff_amount);
-  const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
-    totalAmount,
-    amountPaid,
-    writeoffAmount
-  );
+  const financials = resolveRowFinancials(invoice, orderPayments);
   const status = resolveInvoiceStatusForSave(
     invoice,
-    totalAmount,
-    amountPaid,
-    derivedStatus
+    financials.totalAmount,
+    financials.amountPaid,
+    deriveInvoiceStatus(
+      financials.totalAmount,
+      financials.amountPaid,
+      financials.writeoffAmount
+    )
   );
 
-  await connection.execute(
+  await db.execute(
     `UPDATE invoices
-     SET amount_paid = :amountPaid,
+     SET total_amount = :totalAmount,
+         amount_paid = :amountPaid,
          amount_due = :amountDue,
          status = :status,
          updated_at = NOW()
      WHERE id = :id`,
-    { amountPaid, amountDue, status, id: invoice.id }
+    {
+      totalAmount: financials.totalAmount,
+      amountPaid: financials.amountPaid,
+      amountDue: financials.amountDue,
+      status,
+      id: invoice.id,
+    }
   );
 
-  return { amountPaid, amountDue, status };
+  return {
+    amountPaid: financials.amountPaid,
+    amountDue: financials.amountDue,
+    status,
+  };
 }
 
 function toNumber(value) {
@@ -284,6 +294,72 @@ function calculateTotals(payload = {}) {
     pageCount,
     perPageAmount,
     totalAmount,
+  };
+}
+
+function normalizeGrossFee(storedFee, paidAmount) {
+  const stored = toNumber(storedFee);
+  const paid = toNumber(paidAmount);
+  const due = Math.max(0, stored - paid);
+
+  return due + paid;
+}
+
+function groupPaymentsByOrderId(paymentRows = []) {
+  return paymentRows.reduce((acc, payment) => {
+    const orderId = payment.order_id;
+
+    if (!acc[orderId]) {
+      acc[orderId] = [];
+    }
+
+    acc[orderId].push(payment);
+    return acc;
+  }, {});
+}
+
+function calculateTotalsWithPayments(payload = {}, orderPayments = []) {
+  const custodianPaid = getOrderPaymentAmount(orderPayments, "custodian");
+  const xrayPaid = getOrderPaymentAmount(orderPayments, "xray");
+
+  return calculateTotals({
+    ...payload,
+    serviceFee: toNumber(payload.serviceFee),
+    custodianFee: normalizeGrossFee(payload.custodianFee, custodianPaid),
+    xrayFee: normalizeGrossFee(payload.xrayFee, xrayPaid),
+  });
+}
+
+function resolveRowFinancials(row, orderPayments = []) {
+  const totals = calculateTotalsWithPayments(
+    {
+      servedAmount: row.served_amount,
+      serviceFee: row.service_fee,
+      custodianFee: row.custodian_fee,
+      xrayFee: row.xray_fee,
+      mileage: row.mileage,
+      parking: row.parking,
+      other: row.other_fee,
+      pages: row.page_count,
+      perPageAmount: row.per_page_amount,
+    },
+    orderPayments
+  );
+  const amountPaid = orderPayments.length
+    ? sumOrderPayments(orderPayments)
+    : toNumber(row.amount_paid);
+  const writeoffAmount = toNumber(row.writeoff_amount);
+  const { amountDue } = resolveInvoiceAmounts(
+    totals.totalAmount,
+    amountPaid,
+    writeoffAmount
+  );
+
+  return {
+    totalAmount: totals.totalAmount,
+    amountPaid,
+    amountDue,
+    writeoffAmount,
   };
 }
 
@@ -493,6 +569,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
 
   const hasXray = Boolean(xrayRow);
   const hasStandardInvoice = hasStandardInvoiceFields(row);
+  const financials = resolveRowFinancials(row, orderPayments);
 
   return {
     createOnly: !hasStandardInvoice,
@@ -500,8 +577,8 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     hasStandardInvoice,
     invoiceId: row.id,
     reviewDate: toShortDate(row.invoice_date),
-    reviewAmount: formatMoney(row.total_amount),
-    printAmount: formatMoney(row.total_amount),
+    reviewAmount: formatMoney(financials.totalAmount),
+    printAmount: formatMoney(financials.totalAmount),
     custodianAmount:
       toNumber(row.custodian_fee) > 0 ? formatMoney(row.custodian_fee) : null,
     sentDate: row.sent_date ? toShortDate(row.sent_date) : null,
@@ -509,7 +586,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
     showEmail: Boolean(getInvoiceRecipientEmail(row)),
     paid:
-      toNumber(row.amount_paid) > 0 ? formatMoney(row.amount_paid) : null,
+      financials.amountPaid > 0 ? formatMoney(financials.amountPaid) : null,
     status: row.status || "Unpaid",
     isWrittenOff: row.status === "Written Off",
     writeoffAmount:
@@ -518,9 +595,9 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
         : null,
     date: toShortDate(row.invoice_date),
     sentDateRaw: toInputDate(row.sent_date),
-    invoiced: formatMoney(row.total_amount),
-    due: formatMoney(row.amount_due),
-    paidAmount: formatMoney(row.amount_paid),
+    invoiced: formatMoney(financials.totalAmount),
+    due: formatMoney(financials.amountDue),
+    paidAmount: formatMoney(financials.amountPaid),
     ...paymentsSummary,
     servedAmount: toNumber(row.served_amount).toFixed(2),
     serviceFee: toNumber(row.service_fee).toFixed(2),
@@ -544,11 +621,12 @@ function normalizeInvoiceId(value) {
   return Number.isFinite(id) && id > 0 ? id : null;
 }
 
-function mapOutstandingRow(row) {
+function mapOutstandingRow(row, orderPayments = []) {
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.invoice_date;
   const invoiceDbId = normalizeInvoiceId(row.id);
   const isWrittenOff = row.status === "Written Off";
+  const financials = resolveRowFinancials(row, orderPayments);
 
   return {
     id: `${row.facility_id}-${row.order_number}-${invoiceDbId || row.id}`,
@@ -562,16 +640,17 @@ function mapOutstandingRow(row) {
     sentDate: toShortDate(displayDate),
     days: daysSince(displayDate),
     invDate: toShortDate(row.invoice_date),
-    invoiced: formatMoney(row.total_amount),
-    paid: formatMoney(row.amount_paid),
-    due: formatMoney(row.amount_due),
+    invoiced: formatMoney(financials.totalAmount),
+    paid: formatMoney(financials.amountPaid),
+    due: formatMoney(financials.amountDue),
   };
 }
 
-function mapResendRow(row) {
+function mapResendRow(row, orderPayments = []) {
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.invoice_date;
   const invoiceDbId = normalizeInvoiceId(row.id);
+  const financials = resolveRowFinancials(row, orderPayments);
 
   return {
     id: invoiceDbId || row.id,
@@ -585,13 +664,13 @@ function mapResendRow(row) {
     sentDate: toShortDate(displayDate),
     days: daysSince(displayDate),
     invoiceDate: toShortDate(row.invoice_date),
-    invoiced: formatMoney(row.total_amount),
-    paid: formatMoney(row.amount_paid),
-    due: formatMoney(row.amount_due),
+    invoiced: formatMoney(financials.totalAmount),
+    paid: formatMoney(financials.amountPaid),
+    due: formatMoney(financials.amountDue),
   };
 }
 
-function buildSummary(rows = []) {
+function buildSummary(rows = [], paymentsByOrderId = {}) {
   const companies = new Set();
 
   let invoiced = 0;
@@ -599,10 +678,13 @@ function buildSummary(rows = []) {
   let due = 0;
 
   rows.forEach((row) => {
+    const orderPayments = paymentsByOrderId[row.order_id] || [];
+    const financials = resolveRowFinancials(row, orderPayments);
+
     if (row.facility_id) companies.add(row.facility_id);
-    invoiced += toNumber(row.total_amount);
-    paid += toNumber(row.amount_paid);
-    due += toNumber(row.amount_due);
+    invoiced += financials.totalAmount;
+    paid += financials.amountPaid;
+    due += financials.amountDue;
   });
 
   return {
@@ -614,12 +696,14 @@ function buildSummary(rows = []) {
   };
 }
 
-function groupOutstandingRows(rows = []) {
+function groupOutstandingRows(rows = [], paymentsByOrderId = {}) {
   const groups = new Map();
 
   rows.forEach((row) => {
     const company = row.facility_name || "Unknown Company";
-    const mappedRow = mapOutstandingRow(row);
+    const orderPayments = paymentsByOrderId[row.order_id] || [];
+    const mappedRow = mapOutstandingRow(row, orderPayments);
+    const financials = resolveRowFinancials(row, orderPayments);
 
     if (!groups.has(company)) {
       groups.set(company, {
@@ -632,9 +716,9 @@ function groupOutstandingRows(rows = []) {
 
     const group = groups.get(company);
     group.rows.push(mappedRow);
-    group.total.invoiced += toNumber(row.total_amount);
-    group.total.paid += toNumber(row.amount_paid);
-    group.total.due += toNumber(row.amount_due);
+    group.total.invoiced += financials.totalAmount;
+    group.total.paid += financials.amountPaid;
+    group.total.due += financials.amountDue;
   });
 
   return Array.from(groups.values()).map((group) => ({
@@ -650,7 +734,7 @@ function groupOutstandingRows(rows = []) {
 function buildInvoicePayload(body = {}, existing = null, options = {}) {
   const xrayFee =
     options.xrayFee !== undefined ? toNumber(options.xrayFee) : toNumber(body.xrayFee);
-  const totals = calculateTotals({ ...body, xrayFee });
+  const totals = calculateTotalsWithPayments({ ...body, xrayFee }, options.orderPayments || []);
   const amountPaid = resolveAmountPaid(options.orderPayments, existing);
   const writeoffAmount = existing ? toNumber(existing.writeoff_amount) : 0;
   const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
@@ -698,10 +782,13 @@ async function getOutstandingInvoices(query = {}) {
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
   });
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
 
   return {
-    groups: groupOutstandingRows(rows),
-    summary: buildSummary(rows),
+    groups: groupOutstandingRows(rows, paymentsByOrderId),
+    summary: buildSummary(rows, paymentsByOrderId),
     count: rows.length,
   };
 }
@@ -711,10 +798,13 @@ async function getResendInvoices(query = {}) {
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
   });
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
 
   return {
-    invoices: rows.map(mapResendRow),
-    summary: buildSummary(rows),
+    invoices: rows.map((row) => mapResendRow(row, paymentsByOrderId[row.order_id] || [])),
+    summary: buildSummary(rows, paymentsByOrderId),
     count: rows.length,
   };
 }
@@ -1100,10 +1190,17 @@ async function updateInvoice(id, body) {
 
 async function getCompanyWise() {
   const rows = await Invoice.findOutstanding({});
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
   const companiesMap = new Map();
 
   rows.forEach((row) => {
     const facilityId = row.facility_id;
+    const financials = resolveRowFinancials(
+      row,
+      paymentsByOrderId[row.order_id] || []
+    );
 
     if (!companiesMap.has(facilityId)) {
       companiesMap.set(facilityId, {
@@ -1123,9 +1220,9 @@ async function getCompanyWise() {
     if (row.status === "Needs Resend") {
       company.needsResend += 1;
     }
-    company.invoiced += toNumber(row.total_amount);
-    company.paid += toNumber(row.amount_paid);
-    company.due += toNumber(row.amount_due);
+    company.invoiced += financials.totalAmount;
+    company.paid += financials.amountPaid;
+    company.due += financials.amountDue;
   });
 
   const companies = Array.from(companiesMap.values())
@@ -1137,22 +1234,37 @@ async function getCompanyWise() {
     }))
     .sort((a, b) => a.company.localeCompare(b.company));
 
+  let invoiced = 0;
+  let paid = 0;
+  let due = 0;
+
+  rows.forEach((row) => {
+    const financials = resolveRowFinancials(
+      row,
+      paymentsByOrderId[row.order_id] || []
+    );
+    invoiced += financials.totalAmount;
+    paid += financials.amountPaid;
+    due += financials.amountDue;
+  });
+
   const summary = {
     companies: companies.length,
     totalCases: rows.length,
     needsResend: companies.reduce((sum, company) => sum + company.needsResend, 0),
-    invoiced: formatMoney(rows.reduce((sum, row) => sum + toNumber(row.total_amount), 0)),
-    paid: formatMoney(rows.reduce((sum, row) => sum + toNumber(row.amount_paid), 0)),
-    due: formatMoney(rows.reduce((sum, row) => sum + toNumber(row.amount_due), 0)),
+    invoiced: formatMoney(invoiced),
+    paid: formatMoney(paid),
+    due: formatMoney(due),
   };
 
   return { companies, summary };
 }
 
-function mapCompanyInvoiceRow(row) {
+function mapCompanyInvoiceRow(row, orderPayments = []) {
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.invoice_date;
   const isWrittenOff = row.status === "Written Off";
+  const financials = resolveRowFinancials(row, orderPayments);
 
   return {
     id: row.id,
@@ -1164,9 +1276,9 @@ function mapCompanyInvoiceRow(row) {
     status: row.status || "Unpaid",
     isWrittenOff,
     isSent,
-    invoiced: formatMoney(row.total_amount),
-    paid: formatMoney(row.amount_paid),
-    due: formatMoney(row.amount_due),
+    invoiced: formatMoney(financials.totalAmount),
+    paid: formatMoney(financials.amountPaid),
+    due: formatMoney(financials.amountDue),
   };
 }
 
@@ -1201,7 +1313,26 @@ async function getByCompany(facilityId, query = {}) {
   }
 
   const firstRow = rows[0];
-  const invoices = rows.map(mapCompanyInvoiceRow);
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const invoices = rows.map((row) =>
+    mapCompanyInvoiceRow(row, paymentsByOrderId[row.order_id] || [])
+  );
+
+  let totalInvoiced = 0;
+  let totalPaid = 0;
+  let totalDue = 0;
+
+  rows.forEach((row) => {
+    const financials = resolveRowFinancials(
+      row,
+      paymentsByOrderId[row.order_id] || []
+    );
+    totalInvoiced += financials.totalAmount;
+    totalPaid += financials.amountPaid;
+    totalDue += financials.amountDue;
+  });
 
   return {
     company: {
@@ -1213,15 +1344,9 @@ async function getByCompany(facilityId, query = {}) {
     summary: {
       totalCases: invoices.length,
       needsResend: invoices.filter((invoice) => invoice.status === "Needs Resend").length,
-      totalInvoiced: formatMoney(
-        rows.reduce((sum, row) => sum + toNumber(row.total_amount), 0)
-      ),
-      totalPaid: formatMoney(
-        rows.reduce((sum, row) => sum + toNumber(row.amount_paid), 0)
-      ),
-      totalDue: formatMoney(
-        rows.reduce((sum, row) => sum + toNumber(row.amount_due), 0)
-      ),
+      totalInvoiced: formatMoney(totalInvoiced),
+      totalPaid: formatMoney(totalPaid),
+      totalDue: formatMoney(totalDue),
     },
   };
 }
@@ -1445,7 +1570,12 @@ async function writeOffInvoices(body = {}, userId) {
         throw new ApiError(400, "Invoice is already written off");
       }
 
-      const currentDue = toNumber(invoice.amount_due);
+      const orderPayments = await Order.findPaymentsByOrderId(
+        invoice.order_id,
+        connection
+      );
+      const financials = resolveRowFinancials(invoice, orderPayments);
+      const currentDue = financials.amountDue;
       const appliedAmount = Math.min(writeOffAmount, currentDue);
 
       if (appliedAmount <= 0) {
@@ -1468,15 +1598,17 @@ async function writeOffInvoices(body = {}, userId) {
         writeoffReason,
       });
 
-      const newOrderStatus =
-        orderAction === "close_order" ? "Completed" : "Write Offs";
+      if (newDue <= 0) {
+        const newOrderStatus =
+          orderAction === "close_order" ? "Completed" : "Write Offs";
 
-      await connection.execute(
-        `UPDATE orders
-         SET status = :status, updated_at = NOW()
-         WHERE id = :orderId`,
-        { status: newOrderStatus, orderId: invoice.order_id }
-      );
+        await connection.execute(
+          `UPDATE orders
+           SET status = :status, updated_at = NOW()
+           WHERE id = :orderId`,
+          { status: newOrderStatus, orderId: invoice.order_id }
+        );
+      }
 
       writtenOff.push({
         invoiceId,

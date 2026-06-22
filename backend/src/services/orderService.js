@@ -45,6 +45,7 @@ const STATUS_FILTER_MAP = {
   completed: "Completed",
   cancelled: "Cancelled",
   deleted: "Deleted",
+  writeoffs: "Write Offs",
 };
 
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
@@ -439,6 +440,7 @@ function deriveFilterStatus(status) {
   if (status === "Completed") return "completed";
   if (status === "Cancelled") return "cancelled";
   if (status === "Deleted") return "deleted";
+  if (status === "Write Offs") return "writeoffs";
   if (status === "Ready" || status === "Ready to Pickup") return "ready";
   return "active";
 }

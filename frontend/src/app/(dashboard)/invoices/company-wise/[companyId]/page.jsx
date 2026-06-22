@@ -7,6 +7,7 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 import { getCompanyInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
+import { canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
 
 const EMPTY_SUMMARY = {
   totalCases: 0,
@@ -117,6 +118,10 @@ export default function CompanyInvoiceDetailsPage() {
     return invoices.filter((invoice) => selectedIds.includes(invoice.id));
   }, [invoices, selectedIds]);
 
+  const writableSelectedInvoices = useMemo(() => {
+    return selectedInvoices.filter((invoice) => canWriteOffInvoice(invoice));
+  }, [selectedInvoices]);
+
   const filteredInvoiceIds = filteredInvoices.map((invoice) => invoice.id);
 
   const allSelected =
@@ -125,6 +130,8 @@ export default function CompanyInvoiceDetailsPage() {
 
   const selectedCount = selectedIds.length;
   const hasSelectedInvoices = selectedCount > 0;
+  const writableSelectedCount = writableSelectedInvoices.length;
+  const hasWritableSelected = writableSelectedCount > 0;
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -177,9 +184,9 @@ export default function CompanyInvoiceDetailsPage() {
   };
 
   const handleWriteOffSelected = () => {
-    if (selectedInvoices.length === 0) return;
+    if (writableSelectedInvoices.length === 0) return;
 
-    const selectedWriteOffInvoices = selectedInvoices.map((invoice) =>
+    const selectedWriteOffInvoices = writableSelectedInvoices.map((invoice) =>
       buildWriteOffInvoice(company, invoice)
     );
 
@@ -187,6 +194,8 @@ export default function CompanyInvoiceDetailsPage() {
   };
 
   const handleWriteOffSingle = (invoice) => {
+    if (!canWriteOffInvoice(invoice)) return;
+
     setWriteOffInvoices([buildWriteOffInvoice(company, invoice)]);
   };
 
@@ -282,15 +291,15 @@ export default function CompanyInvoiceDetailsPage() {
             <button
               type="button"
               onClick={handleWriteOffSelected}
-              disabled={!hasSelectedInvoices}
+              disabled={!hasWritableSelected}
               className={`inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border px-4 text-[12px] font-semibold transition disabled:cursor-not-allowed ${
-                hasSelectedInvoices
+                hasWritableSelected
                   ? "border-red-500 bg-red-500 text-white shadow-sm hover:bg-red-600"
                   : "border-[#E2E8F0] bg-white text-[#94A3B8] opacity-70"
               }`}
             >
               <CircleIcon />
-              Write Off Selected ({selectedCount})
+              Write Off Selected ({writableSelectedCount})
             </button>
           </div>
         </div>
@@ -583,7 +592,7 @@ function CompanyInvoiceTable({
                     <button
                       type="button"
                       onClick={() => onWriteOffSingle(invoice)}
-                      disabled={invoice.isWrittenOff}
+                      disabled={!canWriteOffInvoice(invoice)}
                       className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Write Off

@@ -18,7 +18,6 @@ import {
   mapInvoiceFeesToDueForm,
   resolveFullFeeAmounts,
   resolvePersistedInvoiceAmounts,
-  sumPaymentLineAmounts,
 } from "@/lib/orders/paymentUtils";
 import {
   calculateOrderRushLevel,
@@ -178,16 +177,8 @@ export default function CreateInvoiceModal({
   }, [formData.pages, formData.perPageAmount]);
 
   const fullFees = useMemo(() => {
-    if (!isEditMode) {
-      return {
-        serviceFee: toNumber(formData.serviceFee),
-        custodianFee: toNumber(formData.custodianFee),
-        xrayFee: toNumber(formData.xrayFee),
-      };
-    }
-
     return resolveFullFeeAmounts(formData, paymentLines);
-  }, [formData, paymentLines, isEditMode]);
+  }, [formData, paymentLines]);
 
   const totalAmount = useMemo(() => {
     return (
@@ -204,9 +195,6 @@ export default function CreateInvoiceModal({
 
   const paymentHints = useMemo(
     () => ({
-      prepayment: formatPaidBracket(
-        getPaymentLineAmount(paymentLines, "prepayment")
-      ),
       custodian: formatPaidBracket(
         getPaymentLineAmount(paymentLines, "custodian")
       ),
@@ -216,14 +204,19 @@ export default function CreateInvoiceModal({
   );
 
   const prepaymentPaid = useMemo(() => {
-    const line = paymentLines.find((entry) => entry.type === "prepayment");
-    return toNumber(line?.amount);
+    return toNumber(prepaymentAmount);
+  }, [prepaymentAmount]);
+
+  const otherAmountPaid = useMemo(() => {
+    return (
+      getPaymentLineAmount(paymentLines, "custodian") +
+      getPaymentLineAmount(paymentLines, "xray")
+    );
   }, [paymentLines]);
 
-  const amountPaid = useMemo(
-    () => sumPaymentLineAmounts(paymentLines),
-    [paymentLines]
-  );
+  const amountPaid = useMemo(() => {
+    return prepaymentPaid + otherAmountPaid;
+  }, [prepaymentPaid, otherAmountPaid]);
 
   const invoiceTotals = useMemo(
     () =>
@@ -321,14 +314,7 @@ export default function CreateInvoiceModal({
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    const feePayload = isEditMode
-      ? mapDueFormToInvoiceFees(formData, paymentLines)
-      : {
-          ...formData,
-          serviceFee: toNumber(formData.serviceFee).toFixed(2),
-          custodianFee: toNumber(formData.custodianFee).toFixed(2),
-          xrayFee: toNumber(formData.xrayFee).toFixed(2),
-        };
+    const feePayload = mapDueFormToInvoiceFees(formData, paymentLines);
 
     const payload = {
       orderId: order.dbId,
@@ -396,6 +382,7 @@ export default function CreateInvoiceModal({
               linkStyle
             />
 
+            <MetaItem label="Invoiced" value={formatMoney(totalAmount)} />
             <MetaItem label="Paid" value={formatMoney(amountPaid)} />
             <MetaItem label="Due" value={formatMoney(amountDue)} />
             {persistedInvoiceMeta?.writeoffAmount > 0 && (
@@ -458,8 +445,6 @@ export default function CreateInvoiceModal({
                 value={formData.serviceFee}
                 onChange={handleMoneyChange}
                 error={errors.serviceFee}
-                paymentHint={paymentHints.prepayment}
-                
               />
 
               <MoneyField
@@ -590,20 +575,29 @@ export default function CreateInvoiceModal({
             </div>
 
             <div className="mt-4 space-y-3 border-t border-[#E2E8F0] pt-4">
+              <SummaryRow label="Subtotal" value={formatMoney(totalAmount)} />
               {prepaymentPaid > 0 && (
                 <SummaryRow
                   label="Prepayment"
-                  value={formatMoney(prepaymentPaid)}
+                  value={`-${formatMoney(prepaymentPaid)}`}
+                  muted
                 />
               )}
-              <SummaryRow label="Amount Paid" value={formatMoney(amountPaid)} />
+              {otherAmountPaid > 0 && (
+                <SummaryRow
+                  label="Paid"
+                  value={`-${formatMoney(otherAmountPaid)}`}
+                  muted
+                />
+              )}
               {persistedInvoiceMeta?.writeoffAmount > 0 && (
                 <SummaryRow
                   label="Written Off"
-                  value={formatMoney(persistedInvoiceMeta.writeoffAmount)}
+                  value={`-${formatMoney(persistedInvoiceMeta.writeoffAmount)}`}
+                  muted
                 />
               )}
-              <SummaryRow label="Due" value={formatMoney(amountDue)} />
+              <SummaryRow label="Due" value={formatMoney(amountDue)} highlight />
               {isOverpaid && (
                 <SummaryRow
                   label="Credit"
@@ -611,7 +605,6 @@ export default function CreateInvoiceModal({
                   highlight
                 />
               )}
-             
             </div>
 
             <div className="mt-5 rounded-[8px] border border-[#E2E8F0] bg-white px-3 py-3">
@@ -621,7 +614,7 @@ export default function CreateInvoiceModal({
                 </span>
 
                 <span className="text-[15px] font-bold text-[#007F96]">
-                  {formatMoney(totalAmount)}
+                  {formatMoney(amountDue)}
                 </span>
               </div>
             </div>
@@ -908,13 +901,17 @@ function CheckboxField({ label, name, checked, onChange }) {
   );
 }
 
-function SummaryRow({ label, value, highlight = false }) {
+function SummaryRow({ label, value, highlight = false, muted = false }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-[10px] text-[#64748B]">{label}</span>
       <span
         className={`text-[11px] font-semibold ${
-          highlight ? "text-[#059669]" : "text-[#334155]"
+          highlight
+            ? "text-[#059669]"
+            : muted
+              ? "text-red-500"
+              : "text-[#334155]"
         }`}
       >
         {value}
