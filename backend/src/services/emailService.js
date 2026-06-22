@@ -69,7 +69,7 @@ function getTransporter() {
   return transporter;
 }
 
-function buildMailOptions({ to, subject, text, html }) {
+function buildMailOptions({ to, subject, text, html, attachments }) {
   return {
     from: getFromAddress(),
     ...(getReplyToAddress() ? { replyTo: getReplyToAddress() } : {}),
@@ -77,6 +77,7 @@ function buildMailOptions({ to, subject, text, html }) {
     subject,
     text,
     html,
+    ...(attachments?.length ? { attachments } : {}),
   };
 }
 
@@ -203,14 +204,20 @@ async function sendOrderCompletedMail({
   orderNumber,
   applicant,
   providerName,
+  attachments = [],
 }) {
   const subject = `Records Ready — Order ${orderNumber}`;
+  const attachmentNote =
+    attachments.length > 0
+      ? "The medical records PDF is attached to this email."
+      : "";
   const text = [
     `Hello,`,
     ``,
     `Medical records for order ${orderNumber} are ready.`,
     applicant ? `Applicant: ${applicant}` : "",
     providerName ? `Provider: ${providerName}` : "",
+    attachmentNote,
     ``,
     `Please contact us if you have any questions.`,
     ``,
@@ -225,6 +232,11 @@ async function sendOrderCompletedMail({
       <p>Medical records for order <strong>${orderNumber}</strong> are ready.</p>
       ${applicant ? `<p><strong>Applicant:</strong> ${applicant}</p>` : ""}
       ${providerName ? `<p><strong>Provider:</strong> ${providerName}</p>` : ""}
+      ${
+        attachments.length
+          ? "<p>The medical records PDF is attached to this email.</p>"
+          : ""
+      }
       <p>Please contact us if you have any questions.</p>
       <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
     </div>
@@ -234,18 +246,27 @@ async function sendOrderCompletedMail({
 
   if (!mailTransporter) {
     if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Order completed mail", { to, subject, text });
+      logger.warn("[DEV] Order completed mail", {
+        to,
+        subject,
+        text,
+        attachments: attachments.map((file) => file.filename || file.path),
+      });
       return { delivered: false, devLogged: true };
     }
 
     throw new Error("SMTP is not configured");
   }
 
-  const mailOptions = buildMailOptions({ to, subject, text, html });
+  const mailOptions = buildMailOptions({ to, subject, text, html, attachments });
 
   try {
     await mailTransporter.sendMail(mailOptions);
-    logger.info("Order completed mail sent", { to, orderNumber });
+    logger.info("Order completed mail sent", {
+      to,
+      orderNumber,
+      attachments: attachments.length,
+    });
     return { delivered: true, devLogged: false };
   } catch (error) {
     logger.error("Failed to send order completed mail", {
@@ -254,7 +275,12 @@ async function sendOrderCompletedMail({
     });
 
     if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Order completed mail fallback", { to, subject, text });
+      logger.warn("[DEV] Order completed mail fallback", {
+        to,
+        subject,
+        text,
+        attachments: attachments.map((file) => file.filename || file.path),
+      });
       return { delivered: false, devLogged: true };
     }
 

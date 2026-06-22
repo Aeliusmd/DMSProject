@@ -55,5 +55,6 @@ router.get("/:id/workflow-stages", orderController.getWorkflowStages);
 router.patch("/:id/workflow-stages", orderController.updateWorkflowStage);
 router.post("/:id/mail", orderController.mailCompletedOrder);
 router.post("/:id/pickup", orderController.recordPickup);
+router.post("/:id/fax", orderController.recordFax);
 
 module.exports = router;

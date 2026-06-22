@@ -11,7 +11,10 @@ import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
 import OrderMailModal from "@/components/orders/OrderMailModal";
 import OrderPickupModal from "@/components/orders/OrderPickupModal";
-import { getOrders, fetchOrderMedicalRecordsPdf, fetchOrderSubpoenaPdf, mailCompletedOrder, recordOrderPickup } from "@/lib/orders/orderApi";
+import OrderFaxModal from "@/components/orders/OrderFaxModal";
+import CompletedDeliveryLink from "@/components/orders/CompletedDeliveryLink";
+import { getOrders, fetchOrderMedicalRecordsPdf, fetchOrderSubpoenaPdf, mailCompletedOrder, recordOrderPickup, recordOrderFax } from "@/lib/orders/orderApi";
+import { getCompletedDeliveryActions, getDeliveryStatus, resolveProviderEmail } from "@/lib/orders/deliveryActions";
 import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
@@ -80,6 +83,12 @@ function toRenderOrder(order) {
     invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
+    certificateNoRecords: Boolean(order.certificateNoRecords),
+    cnrDelivery: order.cnrDelivery || "",
+    mailSentDate: order.mailSentDate || "",
+    deliveryDate: order.deliveryDate || "",
+    pickupPersonName: order.pickupPersonName || "",
+    cnrDateSent: order.cnrDateSent || "",
     year: order.year || "",
     dob: order.dob || "",
     ssn: order.ssn || "",
@@ -104,8 +113,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedSubpoenaOrder, setSelectedSubpoenaOrder] = useState(null);
   const [selectedMailOrder, setSelectedMailOrder] = useState(null);
   const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
+  const [selectedFaxOrder, setSelectedFaxOrder] = useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
+  const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
   const [emailError, setEmailError] = useState("");
+  const [deliveryError, setDeliveryError] = useState("");
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -210,6 +222,61 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     [emailingOrderId, fetchOrders]
   );
 
+  const handleMailDelivery = useCallback(
+    async (order) => {
+      if (!order?.dbId || getDeliveryStatus(order, "mail").completed) return;
+
+      if (!order.hasMedicalRecords) {
+        setDeliveryError("Scan medical records before sending mail");
+        return;
+      }
+
+      const email = resolveProviderEmail(order);
+      const hasDeliveryDate = Boolean(order.deliveryDate);
+
+      if (!email || !hasDeliveryDate) {
+        setSelectedMailOrder(order);
+        return;
+      }
+
+      const key = `${order.dbId}-mail`;
+      setProcessingDeliveryKey(key);
+      setDeliveryError("");
+
+      try {
+        const result = await mailCompletedOrder(order.dbId, { email });
+        const sentDate = result.sentDate || order.deliveryDate;
+        setOrders((prev) =>
+          prev.map((item) =>
+            item.dbId === order.dbId
+              ? { ...item, mailSentDate: sentDate }
+              : item
+          )
+        );
+        await fetchOrders();
+      } catch (err) {
+        setDeliveryError(err.message || "Failed to send mail");
+      } finally {
+        setProcessingDeliveryKey("");
+      }
+    },
+    [fetchOrders]
+  );
+
+  const applyMailSentState = useCallback((order, sentDate, deliveryDate) => {
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.dbId === order.dbId
+          ? {
+              ...item,
+              mailSentDate: sentDate,
+              deliveryDate: deliveryDate || item.deliveryDate,
+            }
+          : item
+      )
+    );
+  }, []);
+
   // Refresh workflow/status changes made elsewhere when the user comes back
   // to the tab or window. No polling, so there is no idle network cost.
   useEffect(() => {
@@ -294,6 +361,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         {emailError && (
           <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
             {emailError}
+          </p>
+        )}
+
+        {deliveryError && (
+          <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
+            {deliveryError}
           </p>
         )}
 
@@ -439,6 +512,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                           <WorkflowStageItem
                             key={stage.label}
                             stage={stage}
+                            href={getWorkflowStageHref(stage, order)}
                             onClick={
                               stage.label === "Review Records" &&
                               order.hasMedicalRecords
@@ -449,24 +523,52 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         ))}
                       </div>
 
-                      {order.orderStatus === "Completed" && (
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedMailOrder(order)}
-                            className="inline-flex h-[22px] items-center rounded-[5px] border border-[#CBD5E1] bg-white px-2 text-[10px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
-                          >
-                            Mail
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPickupOrder(order)}
-                            className="inline-flex h-[22px] items-center rounded-[5px] border border-[#CBD5E1] bg-white px-2 text-[10px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
-                          >
-                            Pickup
-                          </button>
-                        </div>
-                      )}
+                      {order.orderStatus === "Completed" && (() => {
+                        const deliveryActions = getCompletedDeliveryActions(order);
+                        const mailStatus = getDeliveryStatus(order, "mail");
+                        const faxStatus = getDeliveryStatus(order, "fax");
+                        const pickupStatus = getDeliveryStatus(order, "pickup");
+
+                        if (
+                          !deliveryActions.mail &&
+                          !deliveryActions.fax &&
+                          !deliveryActions.pickup
+                        ) {
+                          return null;
+                        }
+
+                        return (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {deliveryActions.mail && (
+                              <CompletedDeliveryLink
+                                label="Mail"
+                                completed={mailStatus.completed}
+                                hoverText={mailStatus.hoverText}
+                                loading={
+                                  processingDeliveryKey === `${order.dbId}-mail`
+                                }
+                                onClick={() => handleMailDelivery(order)}
+                              />
+                            )}
+                            {deliveryActions.fax && (
+                              <CompletedDeliveryLink
+                                label="Fax"
+                                completed={faxStatus.completed}
+                                hoverText={faxStatus.hoverText}
+                                onClick={() => setSelectedFaxOrder(order)}
+                              />
+                            )}
+                            {deliveryActions.pickup && (
+                              <CompletedDeliveryLink
+                                label="Pickup"
+                                completed={pickupStatus.completed}
+                                hoverText={pickupStatus.hoverText}
+                                onClick={() => setSelectedPickupOrder(order)}
+                              />
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {!order.hasMedicalRecords && (
                         <Link
@@ -651,9 +753,18 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedMailOrder)}
         order={selectedMailOrder}
         onClose={() => setSelectedMailOrder(null)}
-        onSent={async ({ email }) => {
-          await mailCompletedOrder(selectedMailOrder.dbId, email);
-          await fetchOrders({ silent: true });
+        onSent={async ({ email, deliveryDate }) => {
+          setDeliveryError("");
+          const result = await mailCompletedOrder(selectedMailOrder.dbId, {
+            email,
+            deliveryDate,
+          });
+          applyMailSentState(
+            selectedMailOrder,
+            result.sentDate,
+            deliveryDate || selectedMailOrder.deliveryDate
+          );
+          await fetchOrders();
         }}
       />
 
@@ -661,9 +772,35 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedPickupOrder)}
         order={selectedPickupOrder}
         onClose={() => setSelectedPickupOrder(null)}
-        onConfirm={async ({ pickupDate, notes }) => {
+        onConfirm={async ({ pickupPersonName, pickupDate, notes }) => {
           await recordOrderPickup(selectedPickupOrder.dbId, {
+            pickupPersonName,
             pickupDate,
+            notes,
+          });
+          setOrders((prev) =>
+            prev.map((item) =>
+              item.dbId === selectedPickupOrder.dbId
+                ? {
+                    ...item,
+                    deliveryDate: pickupDate,
+                    pickupPersonName,
+                  }
+                : item
+            )
+          );
+          await fetchOrders();
+        }}
+      />
+
+      <OrderFaxModal
+        isOpen={Boolean(selectedFaxOrder)}
+        order={selectedFaxOrder}
+        onClose={() => setSelectedFaxOrder(null)}
+        onConfirm={async ({ faxNumber, sentDate, notes }) => {
+          await recordOrderFax(selectedFaxOrder.dbId, {
+            faxNumber,
+            sentDate,
             notes,
           });
           await fetchOrders({ silent: true });
@@ -774,10 +911,24 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
   );
 }
 
-function WorkflowStageItem({ stage, onClick }) {
+function isWorkflowStageComplete(status) {
+  return status === "complete" || status === "sent";
+}
+
+function getWorkflowStageHref(stage, order) {
+  if (stage.label === "Custodian" && !isWorkflowStageComplete(stage.status)) {
+    return `/orders/new?mode=edit&orderId=${encodeURIComponent(
+      order.dbId
+    )}&panel=payment`;
+  }
+
+  return null;
+}
+
+function WorkflowStageItem({ stage, onClick, href }) {
   const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
   const className = `flex items-center gap-1.5 text-left text-[10px] font-semibold ${style.text} ${
-    onClick ? "cursor-pointer hover:underline" : ""
+    onClick || href ? "cursor-pointer hover:underline" : ""
   }`;
 
   const content = (
@@ -786,6 +937,14 @@ function WorkflowStageItem({ stage, onClick }) {
       {stage.label}
     </>
   );
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
+  }
 
   if (onClick) {
     return (
