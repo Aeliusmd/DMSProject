@@ -285,11 +285,11 @@ export async function fetchOrderMedicalRecordsPdf(orderId) {
   return response.blob();
 }
 
-export async function mailCompletedOrder(orderId, email) {
+export async function mailCompletedOrder(orderId, payload = {}) {
   const data = await request(`/orders/${orderId}/mail`, {
     method: "POST",
     auth: true,
-    body: { email },
+    body: payload,
   });
 
   return data?.data || {};
@@ -297,6 +297,16 @@ export async function mailCompletedOrder(orderId, email) {
 
 export async function recordOrderPickup(orderId, payload = {}) {
   const data = await request(`/orders/${orderId}/pickup`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
+}
+
+export async function recordOrderFax(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/fax`, {
     method: "POST",
     auth: true,
     body: payload,

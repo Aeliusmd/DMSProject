@@ -4,12 +4,10 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 
-export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) {
+export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
   const mounted = useIsClient();
-  const [pickupPersonName, setPickupPersonName] = useState("");
-  const [pickupDate, setPickupDate] = useState(() =>
-    new Date().toISOString().slice(0, 10)
-  );
+  const [faxNumber, setFaxNumber] = useState("");
+  const [sentDate, setSentDate] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -17,8 +15,8 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
   useEffect(() => {
     if (!isOpen || !order) return;
 
-    setPickupPersonName("");
-    setPickupDate(new Date().toISOString().slice(0, 10));
+    setFaxNumber(order.company?.faxNumber || "");
+    setSentDate(new Date().toISOString().slice(0, 10));
     setNotes("");
     setError("");
   }, [isOpen, order]);
@@ -37,13 +35,13 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
   if (!mounted || !isOpen || !order) return null;
 
   const handleSubmit = async () => {
-    if (!pickupPersonName.trim()) {
-      setError("Pickup person name is required");
+    if (!faxNumber.trim()) {
+      setError("Fax number is required");
       return;
     }
 
-    if (!pickupDate) {
-      setError("Pickup date is required");
+    if (!sentDate) {
+      setError("Date sent is required");
       return;
     }
 
@@ -51,14 +49,10 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
     setError("");
 
     try {
-      await onConfirm?.({
-        pickupPersonName: pickupPersonName.trim(),
-        pickupDate,
-        notes,
-      });
+      await onConfirm?.({ faxNumber: faxNumber.trim(), sentDate, notes });
       onClose();
     } catch (err) {
-      setError(err.message || "Failed to record pickup");
+      setError(err.message || "Failed to record fax");
     } finally {
       setSubmitting(false);
     }
@@ -68,7 +62,7 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
       <section className="w-full max-w-[420px] overflow-hidden rounded-[10px] bg-white shadow-2xl">
         <div className="border-b border-[#E2E8F0] px-5 py-4">
-          <h2 className="text-[14px] font-semibold text-[#111827]">Record Pickup</h2>
+          <h2 className="text-[14px] font-semibold text-[#111827]">Record Fax</h2>
           <p className="mt-1 text-[11px] text-[#64748B]">
             Order {order.id} • {order.applicant || "N/A"}
           </p>
@@ -77,31 +71,31 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
         <div className="space-y-3 px-5 py-4">
           <div>
             <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
-              Pickup date
+              Fax number
             </label>
             <input
-              type="date"
-              value={pickupDate}
+              type="text"
+              value={faxNumber}
               onChange={(e) => {
-                setPickupDate(e.target.value);
+                setFaxNumber(e.target.value);
                 setError("");
               }}
+              placeholder="Enter fax number"
               className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
             />
           </div>
 
           <div>
             <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
-              Pickup person name
+              Date sent
             </label>
             <input
-              type="text"
-              value={pickupPersonName}
+              type="date"
+              value={sentDate}
               onChange={(e) => {
-                setPickupPersonName(e.target.value);
+                setSentDate(e.target.value);
                 setError("");
               }}
-              placeholder="Enter pickup person name"
               className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
             />
           </div>
@@ -114,7 +108,7 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              placeholder="Pickup details..."
+              placeholder="Fax details..."
               className="w-full resize-none rounded-[6px] border border-[#CBD5E1] bg-white px-3 py-2 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
             />
           </div>
@@ -136,7 +130,7 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
             disabled={submitting}
             className="h-[34px] rounded-[6px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:opacity-60"
           >
-            {submitting ? "Saving..." : "Confirm Pickup"}
+            {submitting ? "Saving..." : "Confirm Fax"}
           </button>
         </div>
       </section>

@@ -408,10 +408,9 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
 });
 
 exports.mailCompletedOrder = asyncHandler(async (req, res) => {
-  const result = await orderService.mailCompletedOrder(
-    req.params.id,
-    req.body.email
-  );
+  const result = await orderService.mailCompletedOrder(req.params.id, {
+    email: req.body.email,
+  });
 
   const order = await orderService.getOrderById(req.params.id);
 
@@ -426,6 +425,7 @@ exports.mailCompletedOrder = asyncHandler(async (req, res) => {
 exports.recordPickup = asyncHandler(async (req, res) => {
   const result = await orderService.recordOrderPickup(req.params.id, {
     pickupDate: req.body.pickupDate,
+    pickupPersonName: req.body.pickupPersonName,
     notes: req.body.notes,
   });
 
@@ -434,8 +434,26 @@ exports.recordPickup = asyncHandler(async (req, res) => {
 
   await logOrderActivity(req, order, {
     action: "order_pickup",
-    details: `Pickup recorded on ${result.pickupDate} for order ${order.orderNumber}${noteSuffix}`,
+    details: `Pickup recorded on ${result.pickupDate} by ${result.pickupPersonName} for order ${order.orderNumber}${noteSuffix}`,
   });
 
   return ApiResponse.success(res, result, "Pickup recorded");
+});
+
+exports.recordFax = asyncHandler(async (req, res) => {
+  const result = await orderService.recordOrderFax(req.params.id, {
+    faxNumber: req.body.faxNumber,
+    sentDate: req.body.sentDate,
+    notes: req.body.notes,
+  });
+
+  const order = await orderService.getOrderById(req.params.id);
+  const noteSuffix = result.notes ? ` — ${result.notes}` : "";
+
+  await logOrderActivity(req, order, {
+    action: "order_fax",
+    details: `CNR fax recorded to ${result.faxNumber} on ${result.sentDate} for order ${order.orderNumber}${noteSuffix}`,
+  });
+
+  return ApiResponse.success(res, result, "Fax recorded");
 });

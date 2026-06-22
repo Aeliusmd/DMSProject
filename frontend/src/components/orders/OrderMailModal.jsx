@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { resolveProviderEmail } from "@/lib/orders/deliveryActions";
 
 export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   const mounted = useIsClient();
@@ -13,7 +14,7 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   useEffect(() => {
     if (!isOpen || !order) return;
 
-    setEmail(order.company?.emailAddress || "");
+    setEmail(resolveProviderEmail(order) || "");
     setError("");
   }, [isOpen, order]);
 

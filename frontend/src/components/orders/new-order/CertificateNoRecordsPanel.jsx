@@ -94,7 +94,11 @@ export default function CertificateNoRecordsPanel({
 
           <div className="mt-5">
             <NewOrderField
-              label="Date Sent"
+              label={
+                formData.cnrDelivery === "pickup"
+                  ? "Pickup date"
+                  : "Date Sent"
+              }
               name="cnrDateSent"
               value={formData.cnrDateSent}
               onChange={onChange}

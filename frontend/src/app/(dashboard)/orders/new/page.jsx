@@ -253,12 +253,22 @@ function NewOrderPageContent() {
   }, [isEditMode, orderId, subpoenaId]);
 
   useEffect(() => {
-    if (panel !== "upload" || !isEditMode) return;
+    if (!isEditMode) return;
 
-    setExpandedPanels((prev) => ({
-      ...prev,
-      order: true,
-    }));
+    if (panel === "upload") {
+      setExpandedPanels((prev) => ({
+        ...prev,
+        order: true,
+      }));
+      return;
+    }
+
+    if (panel === "payment") {
+      setExpandedPanels((prev) => ({
+        ...prev,
+        payment: true,
+      }));
+    }
   }, [panel, isEditMode]);
 
   useEffect(() => {

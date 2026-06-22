@@ -106,8 +106,9 @@ function trimOrNull(value) {
 }
 
 function dateOrNull(value) {
-  const trimmed = trimOrNull(value);
-  return trimmed;
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = toInputDate(value);
+  return normalized || null;
 }
 
 function boolToInt(value) {
@@ -413,7 +414,17 @@ function buildCompanyBlock(row) {
     address,
     phone: phoneParts.join(" | "),
     email: row.serve_email ? `Email: ${row.serve_email}` : "",
-    emailAddress: trimOrNull(row.serve_email) || trimOrNull(row.provider_email) || "",
+    emailAddress:
+      trimOrNull(row.serve_email) ||
+      trimOrNull(row.provider_email) ||
+      trimOrNull(row.contact1_email) ||
+      trimOrNull(row.contact2_email) ||
+      "",
+    faxNumber:
+      trimOrNull(row.serve_fax) ||
+      trimOrNull(row.contact1_fax) ||
+      trimOrNull(row.contact2_fax) ||
+      "",
   };
 }
 
@@ -499,6 +510,12 @@ function mapOrderListRow(
       xrayRow,
       orderPayments
     ),
+    certificateNoRecords: Boolean(Number(row.certificate_no_records)),
+    cnrDelivery: row.cnr_delivery || "",
+    mailSentDate: toInputDate(row.mail_sent_date),
+    deliveryDate: toInputDate(row.delivery_date),
+    pickupPersonName: row.pickup_person_name || "",
+    cnrDateSent: toInputDate(row.cnr_date_sent),
   };
 }
 
@@ -1528,11 +1545,38 @@ function assertCompletedOrder(order) {
   }
 
   if (order.status !== "Completed") {
-    throw new ApiError(400, "Mail and pickup actions are only available for completed orders");
+    throw new ApiError(
+      400,
+      "Mail, fax, and pickup actions are only available for completed orders"
+    );
   }
 }
 
-async function mailCompletedOrder(orderId, email) {
+function resolveMedicalRecordsAttachment(order) {
+  if (!order?.medical_records_storage_path) {
+    return null;
+  }
+
+  const absolutePath = resolveOrderSubpoenaAbsolutePath(
+    order.medical_records_storage_path
+  );
+
+  if (!absolutePath || !fs.existsSync(absolutePath)) {
+    return null;
+  }
+
+  const safeOrderNumber = `${order.order_number || order.id}`.replace(
+    /[^\w.-]+/g,
+    "_"
+  );
+
+  return {
+    filename: `${safeOrderNumber}-medical-records.pdf`,
+    path: absolutePath,
+  };
+}
+
+async function mailCompletedOrder(orderId, { email } = {}) {
   const normalizedId = Number(orderId);
   const recipient = trimOrNull(email);
 
@@ -1551,30 +1595,94 @@ async function mailCompletedOrder(orderId, email) {
   const order = await Order.findById(normalizedId);
   assertCompletedOrder(order);
 
+  const medicalRecordsAttachment = resolveMedicalRecordsAttachment(order);
+  if (!medicalRecordsAttachment) {
+    throw new ApiError(
+      400,
+      "Medical records file not found. Scan medical records before sending mail."
+    );
+  }
+
+  const resolvedDate =
+    toInputDate(order.delivery_date) || new Date().toISOString().slice(0, 10);
+
   const { sendOrderCompletedMail } = require("./emailService");
   const result = await sendOrderCompletedMail({
     to: recipient,
     orderNumber: order.order_number,
     applicant: buildApplicantName(order),
     providerName: order.serve_company_name || order.provider_name || "",
+    attachments: [medicalRecordsAttachment],
   });
 
   if (!result.delivered && !result.devLogged) {
     throw new ApiError(500, "Failed to send email");
   }
 
+  const pool = getPool();
+  const setCnrDate =
+    Number(order.certificate_no_records) && order.cnr_delivery === "email";
+
+  await pool.execute(
+    `UPDATE orders
+     SET mail_sent_date = :sentDate${
+       setCnrDate ? ", cnr_date_sent = :sentDate" : ""
+     }, updated_at = NOW()
+     WHERE id = :orderId`,
+    { sentDate: resolvedDate, orderId: normalizedId }
+  );
+
   return {
     recipient,
     delivered: result.delivered,
     devLogged: Boolean(result.devLogged),
+    sentDate: resolvedDate,
   };
 }
 
-async function recordOrderPickup(orderId, { pickupDate, notes } = {}) {
+async function recordOrderFax(orderId, { faxNumber, sentDate, notes } = {}) {
   const normalizedId = Number(orderId);
 
   if (!Number.isFinite(normalizedId)) {
     throw new ApiError(400, "Invalid order id");
+  }
+
+  const resolvedFax = trimOrNull(faxNumber);
+  if (!resolvedFax) {
+    throw new ApiError(400, "Fax number is required");
+  }
+
+  const order = await Order.findById(normalizedId);
+  assertCompletedOrder(order);
+
+  const resolvedDate = dateOrNull(sentDate) || new Date().toISOString().slice(0, 10);
+  const pool = getPool();
+
+  await pool.execute(
+    `UPDATE orders
+     SET cnr_date_sent = :sentDate, updated_at = NOW()
+     WHERE id = :orderId`,
+    { sentDate: resolvedDate, orderId: normalizedId }
+  );
+
+  return {
+    orderId: normalizedId,
+    faxNumber: resolvedFax,
+    sentDate: resolvedDate,
+    notes: trimOrNull(notes) || "",
+  };
+}
+
+async function recordOrderPickup(orderId, { pickupDate, pickupPersonName, notes } = {}) {
+  const normalizedId = Number(orderId);
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const resolvedPerson = trimOrNull(pickupPersonName);
+  if (!resolvedPerson) {
+    throw new ApiError(400, "Pickup person name is required");
   }
 
   const order = await Order.findById(normalizedId);
@@ -1585,14 +1693,21 @@ async function recordOrderPickup(orderId, { pickupDate, notes } = {}) {
 
   await pool.execute(
     `UPDATE orders
-     SET delivery_date = :pickupDate, updated_at = NOW()
+     SET delivery_date = :pickupDate,
+         pickup_person_name = :pickupPersonName,
+         updated_at = NOW()
      WHERE id = :orderId`,
-    { pickupDate: resolvedDate, orderId: normalizedId }
+    {
+      pickupDate: resolvedDate,
+      pickupPersonName: resolvedPerson,
+      orderId: normalizedId,
+    }
   );
 
   return {
     orderId: normalizedId,
     pickupDate: resolvedDate,
+    pickupPersonName: resolvedPerson,
     notes: trimOrNull(notes) || "",
   };
 }
@@ -1617,5 +1732,6 @@ module.exports = {
   scanMedicalRecords,
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
+  recordOrderFax,
   recordOrderPickup,
 };
