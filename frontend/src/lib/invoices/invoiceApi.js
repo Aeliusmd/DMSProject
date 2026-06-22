@@ -157,3 +157,12 @@ export async function emailInvoiceByOrderId(orderId) {
 
   return data?.data || { emailed: false };
 }
+
+export async function emailXrayInvoiceByOrderId(orderId) {
+  const data = await request(`/invoices/xray/order/${orderId}/email`, {
+    method: "POST",
+    auth: true,
+  });
+
+  return data?.data || { emailed: false };
+}

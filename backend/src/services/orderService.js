@@ -571,6 +571,7 @@ function mapOrderListRow(
     caseNumber: row.case_number || "",
     orderRef: row.order_ref || "",
     providerName: row.serve_company_name || row.provider_name || "",
+    providerEmail: trimOrNull(row.provider_email) || "",
     subpoenaDate: toInputDate(row.subpoena_date),
     subpoenaDateDisplay: toShortDate(row.subpoena_date),
     createdAt: row.created_at || null,
@@ -1612,7 +1613,15 @@ async function getOrderSubpoenaFile(orderId) {
   };
 }
 
-async function scanMedicalRecords(orderId, file, _actorId) {
+function deleteStoredMedicalRecordsFile(storagePath) {
+  const absolutePath = resolveOrderSubpoenaAbsolutePath(storagePath);
+
+  if (absolutePath && fs.existsSync(absolutePath)) {
+    fs.unlinkSync(absolutePath);
+  }
+}
+
+async function scanMedicalRecords(orderId, file, _actorId, { replace = false } = {}) {
   if (!file) {
     throw new ApiError(400, "Medical records PDF is required");
   }
@@ -1622,7 +1631,9 @@ async function scanMedicalRecords(orderId, file, _actorId) {
     throw new ApiError(404, "Order not found");
   }
 
-  if (existing.medical_records_storage_path) {
+  const hasExistingRecords = Boolean(existing.medical_records_storage_path);
+
+  if (hasExistingRecords && !replace) {
     throw new ApiError(
       409,
       "Medical records were already uploaded for this order"
@@ -1636,6 +1647,10 @@ async function scanMedicalRecords(orderId, file, _actorId) {
   try {
     await connection.beginTransaction();
 
+    if (hasExistingRecords) {
+      deleteStoredMedicalRecordsFile(existing.medical_records_storage_path);
+    }
+
     await connection.execute(
       `UPDATE orders
        SET medical_records_storage_path = :storagePath, updated_at = NOW()
@@ -1648,6 +1663,65 @@ async function scanMedicalRecords(orderId, file, _actorId) {
       "Upload Records",
       "complete",
       new Date(),
+      connection
+    );
+
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Review Records",
+      "complete",
+      new Date(),
+      connection
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
+  return getOrderById(orderId);
+}
+
+async function removeMedicalRecords(orderId, _actorId) {
+  const existing = await Order.findById(orderId);
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (!existing.medical_records_storage_path) {
+    throw new ApiError(404, "Medical records file not found for this order");
+  }
+
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    deleteStoredMedicalRecordsFile(existing.medical_records_storage_path);
+
+    await connection.execute(
+      `UPDATE orders
+       SET medical_records_storage_path = NULL, updated_at = NOW()
+       WHERE id = :orderId`,
+      { orderId }
+    );
+
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Upload Records",
+      "pending",
+      null,
+      connection
+    );
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Review Records",
+      "pending",
+      null,
       connection
     );
 
@@ -1893,6 +1967,96 @@ async function sendCopyServiceLetter(
   };
 }
 
+async function getPrintInvoicePdf(orderId) {
+  const normalizedId = Number(orderId);
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const order = await Order.findById(normalizedId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const invoice = await Invoice.findByOrderId(normalizedId);
+
+  if (!invoice) {
+    throw new ApiError(404, "Invoice not found for this order");
+  }
+
+  const payments = await Order.findPaymentsByOrderId(normalizedId);
+  const payload = invoiceService.buildPrintInvoicePdfData(
+    invoice,
+    order,
+    payments
+  );
+
+  if (!payload) {
+    throw new ApiError(404, "Invoice data not available for this order");
+  }
+
+  const { generatePrintInvoicePdf } = require("../utils/printInvoicePdf");
+  const pdfBuffer = await generatePrintInvoicePdf(payload);
+  const safeOrderNumber = `${order.order_number || order.id}`.replace(
+    /[^\w.-]+/g,
+    "_"
+  );
+
+  return {
+    pdfBuffer,
+    fileName: `invoice-${safeOrderNumber}.pdf`,
+    orderNumber: order.order_number,
+    totalDue: payload.totalDue,
+  };
+}
+
+async function getPrintXrayInvoicePdf(orderId) {
+  const normalizedId = Number(orderId);
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const order = await Order.findById(normalizedId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const xrayRow = await InvoiceXray.findByOrderId(normalizedId);
+
+  if (!xrayRow) {
+    throw new ApiError(404, "X-Ray invoice not found for this order");
+  }
+
+  const payments = await Order.findPaymentsByOrderId(normalizedId);
+  const payload = invoiceService.buildPrintXrayInvoicePdfData(
+    xrayRow,
+    order,
+    payments
+  );
+
+  if (!payload) {
+    throw new ApiError(404, "X-Ray invoice data not available for this order");
+  }
+
+  const { generatePrintXrayInvoicePdf } = require("../utils/printXrayInvoicePdf");
+  const pdfBuffer = await generatePrintXrayInvoicePdf(payload);
+  const safeOrderNumber = `${order.order_number || order.id}`.replace(
+    /[^\w.-]+/g,
+    "_"
+  );
+
+  return {
+    pdfBuffer,
+    fileName: `xray-invoice-${safeOrderNumber}.pdf`,
+    orderNumber: order.order_number,
+    totalDue: payload.totalDue,
+  };
+}
+
 async function recordOrderFax(orderId, { faxNumber, sentDate, notes } = {}) {
   const normalizedId = Number(orderId);
 
@@ -1995,9 +2159,12 @@ module.exports = {
   markOrderWorkflowSent,
   getOrderSubpoenaFile,
   scanMedicalRecords,
+  removeMedicalRecords,
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
   sendCopyServiceLetter,
+  getPrintInvoicePdf,
+  getPrintXrayInvoicePdf,
   recordOrderFax,
   recordOrderPickup,
 };

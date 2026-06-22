@@ -259,13 +259,17 @@ function renderNote(note) {
   const lines = String(note).split("\n");
 
   return lines.map((line, lineIndex) => {
-    const parts = line.split(/(CNR Letter|Copy Service Letter)/g);
+    const parts = line.split(/(CNR Letter|Copy Service Letter|Print Invoice)/g);
 
     return (
       <span key={lineIndex}>
         {lineIndex > 0 && <br />}
         {parts.map((part, index) => {
-          if (part === "CNR Letter" || part === "Copy Service Letter") {
+          if (
+            part === "CNR Letter" ||
+            part === "Copy Service Letter" ||
+            part === "Print Invoice"
+          ) {
             return (
               <span key={index} className="font-semibold text-[#2563EB]">
                 {part}
