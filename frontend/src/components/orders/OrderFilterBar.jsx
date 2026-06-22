@@ -99,6 +99,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           <option value="active">Active</option>
           <option value="ready">Ready to Pickup</option>
           <option value="completed">Completed</option>
+          <option value="writeoffs">Write Offs</option>
           <option value="cancelled">Cancelled</option>
           <option value="deleted">Deleted</option>
         </select>
