@@ -121,6 +121,8 @@ const ORDER_UPDATE_SET = `
 
 const ORDER_DETAIL_SELECT = `
   SELECT o.*, f.facility_name, f.slug AS facility_slug,
+         f.address AS facility_address, f.city AS facility_city,
+         f.state AS facility_state, f.zip_code AS facility_zip,
          p.company_name AS provider_name,
          p.email AS provider_email
   FROM orders o

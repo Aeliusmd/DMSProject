@@ -447,6 +447,22 @@ exports.mailCompletedOrder = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, "Email sent");
 });
 
+exports.sendCopyServiceLetter = asyncHandler(async (req, res) => {
+  const result = await orderService.sendCopyServiceLetter(req.params.id, {
+    email: req.body.email,
+    additionalEmails: req.body.additionalEmails,
+  });
+
+  const order = await orderService.getOrderById(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "copy_service_letter",
+    details: `Copy service letter emailed to ${result.recipients.join(", ")} for order ${order.orderNumber}`,
+  });
+
+  return ApiResponse.success(res, result, "Copy service letter sent successfully");
+});
+
 exports.recordPickup = asyncHandler(async (req, res) => {
   const result = await orderService.recordOrderPickup(req.params.id, {
     pickupDate: req.body.pickupDate,

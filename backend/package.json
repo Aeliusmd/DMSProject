@@ -9,7 +9,11 @@
     "seed": "node database/seed.js",
     "test": "echo \"Tests not configured yet\" && exit 0"
   },
-  "keywords": ["dms", "mvc", "api"],
+  "keywords": [
+    "dms",
+    "mvc",
+    "api"
+  ],
   "license": "ISC",
   "engines": {
     "node": ">=18.0.0"
@@ -24,6 +28,7 @@
     "multer": "^2.1.1",
     "mysql2": "^3.12.0",
     "nodemailer": "^6.9.16",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "pdfkit": "^0.19.1"
   }
 }

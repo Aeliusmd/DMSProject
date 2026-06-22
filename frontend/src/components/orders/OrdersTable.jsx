@@ -7,6 +7,7 @@ import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
 import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
+import SendCopyLetterModal from "@/components/orders/SendCopyLetterModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
 import OrderMailModal from "@/components/orders/OrderMailModal";
@@ -22,6 +23,7 @@ import {
   fetchOrderMedicalRecordsPdf,
   fetchOrderSubpoenaPdf,
   mailCompletedOrder,
+  sendCopyServiceLetter,
   recordOrderPickup,
   recordOrderFax,
 } from "@/lib/orders/orderApi";
@@ -161,6 +163,11 @@ function toRenderOrder(order) {
     invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
+    facilityInfo: order.facilityInfo || {
+      name: order.facilityName || "",
+      address: "",
+      addressLines: [],
+    },
     certificateNoRecords: Boolean(order.certificateNoRecords),
     cnrDelivery: order.cnrDelivery || "",
     mailSentDate: order.readyDate || order.mailSentDate || "",
@@ -187,6 +194,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedXrayCoverSheetOrder, setSelectedXrayCoverSheetOrder] =
     useState(null);
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
+  const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
@@ -765,6 +773,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <FormsList
                         forms={order.forms}
                         onCnrClick={() => setSelectedCnrOrder(order)}
+                        onCopyLetterClick={() => setSelectedCopyLetterOrder(order)}
                       />
                     </td>
 
@@ -882,6 +891,19 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedCnrOrder)}
         order={selectedCnrOrder}
         onClose={() => setSelectedCnrOrder(null)}
+      />
+
+      <SendCopyLetterModal
+        isOpen={Boolean(selectedCopyLetterOrder)}
+        order={selectedCopyLetterOrder}
+        onClose={() => setSelectedCopyLetterOrder(null)}
+        onSent={async (payload) => {
+          const result = await sendCopyServiceLetter(
+            selectedCopyLetterOrder.dbId,
+            payload
+          );
+          return result;
+        }}
       />
 
       <OrderActivityLogModal
@@ -1358,9 +1380,10 @@ function CompanyBlock({ company }) {
   );
 }
 
-function FormsList({ forms, onCnrClick }) {
+function FormsList({ forms, onCnrClick, onCopyLetterClick }) {
   const handlers = {
     CNR: onCnrClick,
+    "Send Copy/Letter": onCopyLetterClick,
   };
 
   return (
@@ -1370,7 +1393,12 @@ function FormsList({ forms, onCnrClick }) {
           key={form}
           type="button"
           onClick={handlers[form]}
-          className="block text-left text-[10px] font-medium text-[#007F96] underline"
+          disabled={!handlers[form]}
+          className={`block text-left text-[10px] font-medium underline ${
+            handlers[form]
+              ? "text-[#007F96] hover:opacity-80"
+              : "cursor-default text-[#94A3B8] no-underline"
+          }`}
         >
           {form}
         </button>
