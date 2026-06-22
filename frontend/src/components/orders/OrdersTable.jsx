@@ -104,6 +104,7 @@ function buildWorkflowStagesForOrder(order) {
         status: isComplete ? "complete" : stage.status,
         label: isComplete ? "Uploaded Records" : "Scan Medical Records",
         openMedicalRecords: isComplete && hasMedicalRecords,
+        actionLink: !isComplete,
       };
     }
 
@@ -1127,6 +1128,17 @@ function getWorkflowStageHref(stage, order) {
 }
 
 function WorkflowStageItem({ stage, onClick, href }) {
+  if (stage.actionLink && href) {
+    return (
+      <Link
+        href={href}
+        className="block text-[10px] font-semibold text-[#007F96] underline"
+      >
+        {stage.label}
+      </Link>
+    );
+  }
+
   const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
   const className = `flex w-full items-center justify-between gap-2 text-left text-[10px] font-semibold ${style.text} ${
     onClick || href ? "cursor-pointer hover:underline" : ""
