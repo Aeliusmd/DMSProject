@@ -461,7 +461,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         {order.orderRef}
                       </p>
 
-                      {order.hasSubpoenaFile ? (
+                      {order.hasSubpoenaFile && (
                         <button
                           type="button"
                           onClick={() => setSelectedSubpoenaOrder(order)}
@@ -469,10 +469,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         >
                           ✓ Subpoena
                         </button>
-                      ) : (
-                        <p className="mt-2 text-[10px] font-semibold text-[#94A3B8]">
-                          No Subpoena
-                        </p>
                       )}
 
                       {order.court && (
@@ -483,18 +479,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      {!order.isSubpoena && (
-                        <p className="mb-2 text-[10px] font-semibold text-[#475569]">
-                          No Subpoena
-                        </p>
-                      )}
-
-                      {!order.isRecords && (
-                        <p className="mb-2 text-[10px] font-semibold text-[#475569]">
-                          No Records
-                        </p>
-                      )}
-
                       {order.isWriteOffs && (
                         <p className="mb-2 text-[10px] font-semibold text-[#DC2626]">
                           Write Offs
