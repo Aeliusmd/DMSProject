@@ -1,4 +1,5 @@
 const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays", "other"];
+const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
 const WORKFLOW_STAGE_NAMES = [
   "Upload Records",
   "Review Records",
@@ -38,7 +39,51 @@ function validateOrderPayload(body = {}) {
     errors.push({ field: "serveCompanyName", message: "Company name is required" });
   }
 
+  errors.push(...validateInjuryFields(body));
+
   return { valid: errors.length === 0, errors };
+}
+
+function validateInjuryFields(body = {}) {
+  const errors = [];
+  const injuryType = `${body.injuryType || ""}`.trim();
+
+  if (!injuryType || !ALLOWED_INJURY_TYPES.includes(injuryType)) {
+    return errors;
+  }
+
+  if (injuryType === "specific") {
+    if (!`${body.injuryDate || ""}`.trim()) {
+      errors.push({ field: "injuryDate", message: "Injury date is required" });
+    }
+    return errors;
+  }
+
+  const begin = `${body.injuryDateBegin || ""}`.trim();
+  const end = `${body.injuryDateEnd || ""}`.trim();
+
+  if (!begin) {
+    errors.push({
+      field: "injuryDateBegin",
+      message: "Start date is required",
+    });
+  }
+
+  if (!end) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "End date is required",
+    });
+  }
+
+  if (begin && end && end < begin) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "End date must be on or after start date",
+    });
+  }
+
+  return errors;
 }
 
 function validateCreateOrder(body = {}) {

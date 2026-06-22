@@ -171,6 +171,8 @@ function toRenderOrder(order) {
     dob: order.dob || "",
     ssn: order.ssn || "",
     dobSsn: order.dobSsn || [],
+    doiDisplay: order.doiDisplay || "",
+    hasDoi: Boolean(order.hasDoi),
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
   };
 }
@@ -534,7 +536,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                 <th className="w-[170px] px-4 py-3">Invoice</th>
                 <th className="w-[170px] px-4 py-3">Records</th>
                 <th className="w-[280px] px-4 py-3">Company</th>
-                <th className="w-[95px] px-4 py-3">DOB/SSN</th>
+                <th className="w-[110px] px-4 py-3">DOB/SSN/DOI</th>
                 <th className="w-[130px] px-4 py-3">Forms</th>
                 <th className="w-[120px] px-4 py-3" />
               </tr>
@@ -743,9 +745,18 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <div className="space-y-1 text-[11px] text-[#334155]">
                         {order.dob ? <p>{order.dob}</p> : null}
                         {order.ssn ? <p>{order.ssn}</p> : null}
-                        {!order.dob && !order.ssn ? (
-                          <p className="text-[#94A3B8]">—</p>
-                        ) : null}
+                        {order.hasDoi ? (
+                          <p>{order.doiDisplay}</p>
+                        ) : (
+                          <Link
+                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                              order.dbId
+                            )}`}
+                            className="font-semibold text-red-500 hover:underline"
+                          >
+                            No DOI
+                          </Link>
+                        )}
                       </div>
                     </td>
 
