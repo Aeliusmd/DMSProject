@@ -479,6 +479,31 @@ function buildCompanyBlock(row) {
   };
 }
 
+function buildFacilityBlock(row) {
+  const addressLines = [];
+
+  if (row.facility_address) {
+    addressLines.push(row.facility_address);
+  }
+
+  const cityStateZip = [
+    row.facility_city,
+    [row.facility_state, row.facility_zip].filter(Boolean).join(" "),
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  if (cityStateZip) {
+    addressLines.push(cityStateZip);
+  }
+
+  return {
+    name: row.facility_name || "",
+    address: addressLines.join(", "),
+    addressLines,
+  };
+}
+
 function buildRecordsBlock(row) {
   const title = RECORD_TITLES[row.order_type] || "Records";
 
@@ -525,6 +550,7 @@ function mapOrderListRow(
     dbId: row.id,
     facility: row.facility_id ? String(row.facility_id) : "",
     facilityName: row.facility_name || "",
+    facilityInfo: buildFacilityBlock(row),
     year: orderYear,
     status: row.status,
     filterStatus: deriveFilterStatus(row.status),
@@ -1712,6 +1738,34 @@ function resolveMedicalRecordsAttachment(order) {
   };
 }
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+function normalizeRecipientEmails(primaryEmail, additionalEmails = []) {
+  const primary = trimOrNull(primaryEmail);
+
+  if (!primary || !EMAIL_PATTERN.test(primary)) {
+    throw new ApiError(400, "A valid company email is required");
+  }
+
+  const recipients = [primary.toLowerCase()];
+
+  for (const rawEmail of additionalEmails) {
+    const email = trimOrNull(rawEmail);
+    if (!email) continue;
+
+    if (!EMAIL_PATTERN.test(email)) {
+      throw new ApiError(400, `Invalid email address: ${email}`);
+    }
+
+    const normalized = email.toLowerCase();
+    if (!recipients.includes(normalized)) {
+      recipients.push(normalized);
+    }
+  }
+
+  return recipients;
+}
+
 async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
   const normalizedId = Number(orderId);
   const recipient = trimOrNull(email);
@@ -1724,7 +1778,7 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
     throw new ApiError(400, "Email is required");
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(recipient)) {
+  if (!EMAIL_PATTERN.test(recipient)) {
     throw new ApiError(400, "Enter a valid email address");
   }
 
@@ -1779,6 +1833,63 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
     devLogged: Boolean(result.devLogged),
     sentDate: mailSentDate,
     readyDate: mailSentDate,
+  };
+}
+
+async function sendCopyServiceLetter(
+  orderId,
+  { email, additionalEmails = [] } = {}
+) {
+  const normalizedId = Number(orderId);
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const recipients = normalizeRecipientEmails(email, additionalEmails);
+  const order = await Order.findById(normalizedId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const facilityInfo = buildFacilityBlock(order);
+  const sendDate = new Date();
+  const {
+    generateCopyServiceLetterPdf,
+    addExpiryDate,
+  } = require("../utils/copyServiceLetterPdf");
+  const { sendCopyServiceLetterEmail } = require("./emailService");
+
+  const pdfBuffer = await generateCopyServiceLetterPdf({
+    facilityName: facilityInfo.name || order.facility_name || "N/A",
+    facilityAddressLines: facilityInfo.addressLines,
+    applicantName: buildApplicantName(order) || "N/A",
+    orderNumber: order.order_number,
+    sendDate,
+  });
+
+  const expiresDate = addExpiryDate(sendDate);
+  const result = await sendCopyServiceLetterEmail({
+    to: recipients.join(", "),
+    orderNumber: order.order_number,
+    applicantName: buildApplicantName(order),
+    facilityName: facilityInfo.name || order.facility_name || "",
+    sendDate,
+    expiresDate,
+    pdfBuffer,
+  });
+
+  if (!result.delivered && !result.devLogged) {
+    throw new ApiError(500, "Failed to send copy service letter email");
+  }
+
+  return {
+    recipients,
+    delivered: result.delivered,
+    devLogged: Boolean(result.devLogged),
+    sentDate: sendDate.toISOString(),
+    expiresDate: expiresDate.toISOString(),
   };
 }
 
@@ -1886,6 +1997,7 @@ module.exports = {
   scanMedicalRecords,
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
+  sendCopyServiceLetter,
   recordOrderFax,
   recordOrderPickup,
 };

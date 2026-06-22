@@ -288,4 +288,101 @@ async function sendOrderCompletedMail({
   }
 }
 
-module.exports = { sendTwoFactorCode, sendInvoiceEmail, sendOrderCompletedMail };
+async function sendCopyServiceLetterEmail({
+  to,
+  orderNumber,
+  applicantName,
+  facilityName,
+  sendDate,
+  expiresDate,
+  pdfBuffer,
+}) {
+  const subject = `Copy Service Letter - Order ${orderNumber}`;
+  const sentLabel = formatCopyLetterDate(sendDate);
+  const expiresLabel = formatCopyLetterDate(expiresDate);
+
+  const text = [
+    "Dear Copy Service,",
+    "",
+    `Attached is the copy service letter for order ${orderNumber}.`,
+    applicantName ? `Applicant: ${applicantName}` : "",
+    facilityName ? `Facility: ${facilityName}` : "",
+    "",
+    `Sent on ${sentLabel}.`,
+    `This letter expires on ${expiresLabel} (7 days from send date).`,
+    "",
+    "DMS Custodian",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
+      <p>Dear Copy Service,</p>
+      <p>Attached is the copy service letter for order <strong>${orderNumber}</strong>.</p>
+      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
+      ${facilityName ? `<p><strong>Facility:</strong> ${facilityName}</p>` : ""}
+      <p>Sent on <strong>${sentLabel}</strong>.<br />
+      This letter expires on <strong>${expiresLabel}</strong> (7 days from send date).</p>
+      <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
+    </div>
+  `;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Copy service letter email", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = buildMailOptions({
+    to,
+    subject,
+    text,
+    html,
+    attachments: [
+      {
+        filename: `copy-service-letter-${orderNumber}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("Copy service letter email sent", { to, orderNumber });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send copy service letter email", {
+      to,
+      error: error.message,
+    });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Copy service letter email fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
+function formatCopyLetterDate(date) {
+  return new Date(date).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+module.exports = {
+  sendTwoFactorCode,
+  sendInvoiceEmail,
+  sendOrderCompletedMail,
+  sendCopyServiceLetterEmail,
+};
