@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import {
   getOrder,
+  removeMedicalRecords,
   uploadMedicalRecordsScan,
 } from "@/lib/orders/orderApi";
 
@@ -13,6 +15,7 @@ export default function ScanMedicalRecordsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
+  const isEditMode = searchParams.get("mode") === "edit";
 
   const fileInputRef = useRef(null);
   const [order, setOrder] = useState(null);
@@ -21,7 +24,9 @@ export default function ScanMedicalRecordsPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [confirmAction, setConfirmAction] = useState(null);
 
   const hasMedicalRecords = Boolean(
     order?.medicalRecordsStoragePath || order?.medicalRecordsUrl
@@ -64,10 +69,10 @@ export default function ScanMedicalRecordsPage() {
   }, [orderId]);
 
   useEffect(() => {
-    if (!loadingOrder && hasMedicalRecords) {
+    if (!loadingOrder && hasMedicalRecords && !isEditMode) {
       router.replace("/orders");
     }
-  }, [hasMedicalRecords, loadingOrder, router]);
+  }, [hasMedicalRecords, isEditMode, loadingOrder, router]);
 
   const handleChooseFile = () => {
     fileInputRef.current?.click();
@@ -111,18 +116,24 @@ export default function ScanMedicalRecordsPage() {
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || uploading || !orderId || hasMedicalRecords) return;
+    if (!selectedFile || uploading || !orderId) return;
+    if (!isEditMode && hasMedicalRecords) return;
 
     setError("");
     setSuccessMessage("");
     setUploading(true);
 
     try {
-      await uploadMedicalRecordsScan(orderId, selectedFile);
+      await uploadMedicalRecordsScan(orderId, selectedFile, {
+        replace: isEditMode && hasMedicalRecords,
+      });
       setSuccessMessage(
-        "Medical records uploaded. Upload Records and Review Records are complete."
+        isEditMode
+          ? "Medical records updated. Review Records is ready for review again."
+          : "Medical records uploaded. Open Review Records from the orders table to review."
       );
       setSelectedFile(null);
+      setConfirmAction(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -137,17 +148,60 @@ export default function ScanMedicalRecordsPage() {
     }
   };
 
+  const handleRemove = async () => {
+    if (!orderId || removing || !hasMedicalRecords) return;
+
+    setError("");
+    setSuccessMessage("");
+    setRemoving(true);
+
+    try {
+      await removeMedicalRecords(orderId);
+      setSuccessMessage("Medical records removed.");
+      setConfirmAction(null);
+      setTimeout(() => {
+        router.push("/orders");
+      }, 900);
+    } catch (err) {
+      setError(err.message || "Failed to remove medical records.");
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  const uploadConfirmMessage = isEditMode && hasMedicalRecords
+    ? "Are you sure you want to replace the existing medical records with this file?"
+    : "Are you sure you want to upload medical records for this order?";
+
   const applicantName = order
     ? [order.firstName, order.middleName, order.lastName]
         .filter(Boolean)
         .join(" ")
     : "";
 
-  if (loadingOrder || hasMedicalRecords) {
+  if (loadingOrder || (!isEditMode && hasMedicalRecords)) {
     return (
       <DashboardShell>
         <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
           <p className="text-[13px] text-[#64748B]">Loading...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  if (isEditMode && !hasMedicalRecords) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-3 px-4">
+          <p className="text-[13px] text-[#64748B]">
+            No medical records are uploaded for this order.
+          </p>
+          <Link
+            href={`/orders/scan-medical-records?orderId=${encodeURIComponent(orderId)}`}
+            className="text-[12px] font-semibold text-[#007F96] hover:underline"
+          >
+            Upload medical records
+          </Link>
         </div>
       </DashboardShell>
     );
@@ -164,18 +218,20 @@ export default function ScanMedicalRecordsPage() {
             Back to Orders
           </Link>
           <h1 className="mt-2 text-[15px] font-semibold text-[#111827]">
-            Scan Medical Records
+            {isEditMode ? "Edit Medical Records" : "Scan Medical Records"}
           </h1>
         </div>
 
         <div className="flex flex-1 items-center justify-center px-4 py-10">
           <div className="w-full max-w-[340px] text-center">
             <h2 className="text-[20px] font-semibold text-[#111827]">
-              Scan Medical Records
+              {isEditMode ? "Edit Medical Records" : "Scan Medical Records"}
             </h2>
 
             <p className="mt-2 text-[11px] text-[#94A3B8]">
-              Upload scanned medical records PDF for this order (one time only)
+              {isEditMode
+                ? "Upload a new PDF to replace the current file. Removal is optional."
+                : "Upload scanned medical records PDF for this order"}
             </p>
 
             {order ? (
@@ -189,6 +245,11 @@ export default function ScanMedicalRecordsPage() {
                 {order.caseNumber && (
                   <p className="mt-1 text-[#64748B]">
                     Case: {order.caseNumber}
+                  </p>
+                )}
+                {isEditMode && hasMedicalRecords && (
+                  <p className="mt-2 text-[#059669]">
+                    Current medical records are uploaded.
                   </p>
                 )}
               </div>
@@ -215,7 +276,7 @@ export default function ScanMedicalRecordsPage() {
               <button
                 type="button"
                 onClick={handleChooseFile}
-                disabled={uploading || !order}
+                disabled={uploading || removing || !order}
                 className="mt-5 inline-flex h-[30px] items-center justify-center rounded-[5px] bg-[#E6F7FA] px-4 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Choose File
@@ -241,11 +302,15 @@ export default function ScanMedicalRecordsPage() {
             {selectedFile && (
               <button
                 type="button"
-                onClick={handleUpload}
-                disabled={uploading || !order}
+                onClick={() => setConfirmAction("upload")}
+                disabled={uploading || removing || !order}
                 className="mt-4 inline-flex h-[34px] w-full items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#007F96] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {uploading ? "Uploading..." : "Upload Medical Records"}
+                {uploading
+                  ? "Uploading..."
+                  : isEditMode
+                    ? "Upload New Records"
+                    : "Upload Medical Records"}
               </button>
             )}
 
@@ -260,9 +325,44 @@ export default function ScanMedicalRecordsPage() {
                 {error}
               </p>
             )}
+
+            {isEditMode && hasMedicalRecords && (
+              <button
+                type="button"
+                onClick={() => setConfirmAction("remove")}
+                disabled={removing || uploading}
+                className="mt-6 text-[11px] font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {removing ? "Removing..." : "Remove existing records"}
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        open={confirmAction === "upload"}
+        title={isEditMode && hasMedicalRecords ? "Replace Medical Records" : "Upload Medical Records"}
+        message={uploadConfirmMessage}
+        variant="warning"
+        confirmLabel={uploading ? "Uploading..." : "Upload"}
+        cancelLabel="Cancel"
+        confirmDisabled={uploading}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={handleUpload}
+      />
+
+      <ConfirmModal
+        open={confirmAction === "remove"}
+        title="Remove Medical Records"
+        message="Are you sure you want to remove the uploaded medical records for this order?"
+        variant="danger"
+        confirmLabel={removing ? "Removing..." : "Remove"}
+        cancelLabel="Cancel"
+        confirmDisabled={removing}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={handleRemove}
+      />
     </DashboardShell>
   );
 }

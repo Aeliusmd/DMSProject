@@ -21,11 +21,14 @@ import {
   deleteOrder,
   getOrders,
   fetchOrderMedicalRecordsPdf,
+  fetchOrderPrintInvoicePdf,
+  fetchOrderPrintXrayInvoicePdf,
   fetchOrderSubpoenaPdf,
   mailCompletedOrder,
   sendCopyServiceLetter,
   recordOrderPickup,
   recordOrderFax,
+  removeMedicalRecords,
 } from "@/lib/orders/orderApi";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import {
@@ -33,7 +36,7 @@ import {
   getDeliveryStatus,
   resolveProviderEmail,
 } from "@/lib/orders/deliveryActions";
-import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
+import { emailInvoiceByOrderId, emailXrayInvoiceByOrderId, resendInvoices } from "@/lib/invoices/invoiceApi";
 import {
   formatMoneyAmount,
   parsePaymentAmount,
@@ -41,6 +44,9 @@ import {
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
 const ORDERS_PER_PAGE = 6;
+
+const NO_PROVIDER_EMAIL_MESSAGE =
+  "No provider email on file. Please edit the order to add the provider email.";
 
 const defaultOrderFilters = {
   facility: "",
@@ -104,9 +110,19 @@ function buildWorkflowStagesForOrder(order) {
       return {
         ...stage,
         status: isComplete ? "complete" : stage.status,
-        label: isComplete ? "Uploaded Records" : "Scan Medical Records",
-        openMedicalRecords: isComplete && hasMedicalRecords,
+        label: isComplete ? "Uploaded Records" : "Scan Records",
         actionLink: !isComplete,
+        showRemoveRecords: isComplete && hasMedicalRecords,
+      };
+    }
+
+    if (stage.key === "Review Records") {
+      const isComplete =
+        isWorkflowStageComplete(stage.status) || hasMedicalRecords;
+
+      return {
+        ...stage,
+        status: isComplete ? "complete" : stage.status,
       };
     }
 
@@ -136,6 +152,14 @@ function buildWorkflowStagesForOrder(order) {
       };
     }
 
+    if (stage.key === "SENT" && stage.status === "sent") {
+      return {
+        ...stage,
+        showResend: Boolean(order.invoice?.invoiceId),
+        invoiceId: order.invoice?.invoiceId || null,
+      };
+    }
+
     return stage;
   });
 }
@@ -159,6 +183,8 @@ function toRenderOrder(order) {
     court: order.court || "",
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
+    providerName: order.providerName || "",
+    providerEmail: order.providerEmail || order.invoice?.providerEmail || "",
     status: buildWorkflowStagesForOrder(order),
     invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
@@ -199,16 +225,26 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
     useState(null);
+  const [selectedPrintInvoiceOrder, setSelectedPrintInvoiceOrder] =
+    useState(null);
+  const [selectedPrintXrayInvoiceOrder, setSelectedPrintXrayInvoiceOrder] =
+    useState(null);
   const [selectedSubpoenaOrder, setSelectedSubpoenaOrder] = useState(null);
   const [selectedMailOrder, setSelectedMailOrder] = useState(null);
   const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
   const [selectedFaxOrder, setSelectedFaxOrder] = useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
+  const [emailingXrayOrderId, setEmailingXrayOrderId] = useState(null);
+  const [resendingOrderId, setResendingOrderId] = useState(null);
   const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
   const [emailError, setEmailError] = useState("");
   const [deliveryError, setDeliveryError] = useState("");
   const [deleteModal, setDeleteModal] = useState({ open: false, order: null });
   const [cancelModal, setCancelModal] = useState({ open: false, order: null });
+  const [removeRecordsModal, setRemoveRecordsModal] = useState({
+    open: false,
+    order: null,
+  });
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
 
@@ -239,10 +275,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   }
 
   const fetchOrders = useCallback(
-    async ({ silent = false } = {}) => {
-      // A silent (focus-triggered) refetch is skipped if we just fetched,
-      // so returning to the tab repeatedly never spams the API.
-      if (silent && Date.now() - lastFetchAtRef.current < 5000) return;
+    async ({ silent = false, force = false } = {}) => {
+      if (silent && !force && Date.now() - lastFetchAtRef.current < 5000) return;
 
       const requestId = (requestIdRef.current += 1);
 
@@ -302,6 +336,33 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     setCancelModal({ open: false, order: null });
   }
 
+  function openRemoveRecordsModal(order) {
+    setActionError("");
+    setRemoveRecordsModal({ open: true, order });
+  }
+
+  function closeRemoveRecordsModal() {
+    if (actionLoading) return;
+    setRemoveRecordsModal({ open: false, order: null });
+  }
+
+  async function handleConfirmRemoveRecords() {
+    if (!removeRecordsModal.order?.dbId || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await removeMedicalRecords(removeRecordsModal.order.dbId);
+      setRemoveRecordsModal({ open: false, order: null });
+      await fetchOrders();
+    } catch (err) {
+      setActionError(err.message || "Failed to remove medical records");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   async function handleConfirmDelete() {
     if (!deleteModal.order?.dbId) return;
 
@@ -350,23 +411,109 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     return () => window.clearInterval(intervalId);
   }, [lastUpdatedAt]);
 
+  const applyInvoiceEmailState = useCallback((orderDbId, updates = {}) => {
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.dbId === orderDbId
+          ? {
+              ...item,
+              invoice: {
+                ...item.invoice,
+                ...updates,
+              },
+            }
+          : item
+      )
+    );
+  }, []);
+
   const handleEmailInvoice = useCallback(
     async (order) => {
       if (!order?.dbId || emailingOrderId) return;
+
+      const providerEmail =
+        order.providerEmail || order.invoice?.providerEmail || "";
+
+      if (!providerEmail.trim()) {
+        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+        window.alert(NO_PROVIDER_EMAIL_MESSAGE);
+        return;
+      }
 
       setEmailError("");
       setEmailingOrderId(order.dbId);
 
       try {
-        await emailInvoiceByOrderId(order.dbId);
-        await fetchOrders({ silent: true });
+        const result = await emailInvoiceByOrderId(order.dbId);
+        applyInvoiceEmailState(order.dbId, {
+          sentDate: result.sentDate,
+          sentDateCompact: result.sentDateCompact,
+          recipientEmail: result.recipientEmail || result.recipient || "",
+        });
+        await fetchOrders({ silent: true, force: true });
       } catch (err) {
-        setEmailError(err.message || "Failed to mark invoice as sent");
+        setEmailError(err.message || "Failed to email invoice");
       } finally {
         setEmailingOrderId(null);
       }
     },
-    [emailingOrderId, fetchOrders]
+    [emailingOrderId, fetchOrders, applyInvoiceEmailState]
+  );
+
+  const handleEmailXrayInvoice = useCallback(
+    async (order) => {
+      if (!order?.dbId || emailingXrayOrderId) return;
+
+      const providerEmail =
+        order.providerEmail || order.invoice?.providerEmail || "";
+
+      if (!providerEmail.trim()) {
+        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+        window.alert(NO_PROVIDER_EMAIL_MESSAGE);
+        return;
+      }
+
+      setEmailError("");
+      setEmailingXrayOrderId(order.dbId);
+
+      try {
+        const result = await emailXrayInvoiceByOrderId(order.dbId);
+        applyInvoiceEmailState(order.dbId, {
+          xraySentDate: result.xraySentDate,
+          xraySentDateCompact: result.xraySentDateCompact,
+          recipientEmail: result.recipientEmail || result.recipient || "",
+        });
+        await fetchOrders({ silent: true, force: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to email X-Ray invoice");
+      } finally {
+        setEmailingXrayOrderId(null);
+      }
+    },
+    [emailingXrayOrderId, fetchOrders, applyInvoiceEmailState]
+  );
+
+  const handleResendInvoice = useCallback(
+    async (order, invoiceId) => {
+      const normalizedInvoiceId = Number(invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(normalizedInvoiceId) || resendingOrderId) {
+        return;
+      }
+
+      setEmailError("");
+      setResendingOrderId(order.dbId);
+
+      try {
+        await resendInvoices([normalizedInvoiceId]);
+        await fetchOrders({ silent: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to resend invoice");
+      } finally {
+        setResendingOrderId(null);
+      }
+    },
+    [resendingOrderId, fetchOrders]
   );
 
   const handleMailDelivery = useCallback(
@@ -652,12 +799,27 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                             stage={stage}
                             href={getWorkflowStageHref(stage, order)}
                             onClick={
-                              stage.openMedicalRecords ||
-                              (stage.key === "Review Records" &&
-                                order.hasMedicalRecords)
+                              stage.key === "Review Records" &&
+                              order.hasMedicalRecords
                                 ? () => setSelectedMedicalRecordsOrder(order)
                                 : undefined
                             }
+                            onResend={
+                              stage.showResend
+                                ? () =>
+                                    handleResendInvoice(order, stage.invoiceId)
+                                : undefined
+                            }
+                            onRemoveRecords={
+                              stage.showRemoveRecords
+                                ? () => openRemoveRecordsModal(order)
+                                : undefined
+                            }
+                            removingRecords={
+                              actionLoading &&
+                              removeRecordsModal.order?.dbId === order.dbId
+                            }
+                            resending={resendingOrderId === order.dbId}
                           />
                         ))}
                       </div>
@@ -716,6 +878,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     <td className="px-4 py-5 align-top">
                       <InvoiceBlock
                         invoice={order.invoice}
+                        orderDbId={order.dbId}
+                        providerEmail={
+                          order.providerEmail ||
+                          order.invoice?.providerEmail ||
+                          ""
+                        }
                         onCreateInvoice={() => {
                           setInvoiceModalMode("create");
                           setSelectedInvoiceOrder(order);
@@ -738,7 +906,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                           setSelectedXrayCoverSheetOrder(order)
                         }
                         onEmailInvoice={() => handleEmailInvoice(order)}
+                        onEmailXrayInvoice={() => handleEmailXrayInvoice(order)}
+                        onPrintInvoice={() => setSelectedPrintInvoiceOrder(order)}
+                        onPrintXrayInvoice={() =>
+                          setSelectedPrintXrayInvoiceOrder(order)
+                        }
                         emailing={emailingOrderId === order.dbId}
+                        emailingXray={emailingXrayOrderId === order.dbId}
                       />
                     </td>
 
@@ -925,6 +1099,26 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       />
 
       <OrderPdfPreviewModal
+        isOpen={Boolean(selectedPrintInvoiceOrder)}
+        order={selectedPrintInvoiceOrder}
+        onClose={() => setSelectedPrintInvoiceOrder(null)}
+        title="Print Invoice"
+        fileName="Invoice.pdf"
+        fetchPdf={fetchOrderPrintInvoicePdf}
+        loadingLabel="Generating invoice PDF..."
+      />
+
+      <OrderPdfPreviewModal
+        isOpen={Boolean(selectedPrintXrayInvoiceOrder)}
+        order={selectedPrintXrayInvoiceOrder}
+        onClose={() => setSelectedPrintXrayInvoiceOrder(null)}
+        title="Print X-Ray Invoice"
+        fileName="XRay-Invoice.pdf"
+        fetchPdf={fetchOrderPrintXrayInvoicePdf}
+        loadingLabel="Generating X-Ray invoice PDF..."
+      />
+
+      <OrderPdfPreviewModal
         isOpen={Boolean(selectedSubpoenaOrder)}
         order={selectedSubpoenaOrder}
         onClose={() => setSelectedSubpoenaOrder(null)}
@@ -1004,6 +1198,18 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         confirmDisabled={actionLoading}
         onCancel={closeDeleteModal}
         onConfirm={handleConfirmDelete}
+      />
+
+      <ConfirmModal
+        open={removeRecordsModal.open}
+        title="Remove Medical Records"
+        message="Are you sure you want to remove the uploaded medical records for this order?"
+        variant="danger"
+        confirmLabel={actionLoading ? "Removing..." : "Remove"}
+        cancelLabel="Cancel"
+        confirmDisabled={actionLoading}
+        onCancel={closeRemoveRecordsModal}
+        onConfirm={handleConfirmRemoveRecords}
       />
 
       <OrderCancelModal
@@ -1119,13 +1325,16 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
 }
 
 function getWorkflowStageHref(stage, order) {
-  if (
-    stage.key === "Upload Records" &&
-    !isWorkflowStageComplete(stage.status)
-  ) {
-    return `/orders/scan-medical-records?orderId=${encodeURIComponent(
-      order.dbId
-    )}`;
+  if (stage.key === "Upload Records") {
+    const hasMedicalRecords = Boolean(order.hasMedicalRecords);
+    const isComplete =
+      isWorkflowStageComplete(stage.status) || hasMedicalRecords;
+
+    if (!isComplete) {
+      return `/orders/scan-medical-records?orderId=${encodeURIComponent(
+        order.dbId
+      )}`;
+    }
   }
 
   if (
@@ -1149,7 +1358,15 @@ function getWorkflowStageHref(stage, order) {
   return null;
 }
 
-function WorkflowStageItem({ stage, onClick, href }) {
+function WorkflowStageItem({
+  stage,
+  onClick,
+  href,
+  onResend,
+  onRemoveRecords,
+  resending = false,
+  removingRecords = false,
+}) {
   if (stage.actionLink && href) {
     return (
       <Link
@@ -1162,6 +1379,27 @@ function WorkflowStageItem({ stage, onClick, href }) {
   }
 
   const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+
+  if (stage.showRemoveRecords) {
+    return (
+      <div
+        className={`flex w-full flex-nowrap items-center gap-1.5 text-[10px] font-semibold ${style.text}`}
+      >
+        <WorkflowStageIcon status={stage.status} />
+        <span className="min-w-0 flex-1 truncate">{stage.label}</span>
+        <button
+          type="button"
+          onClick={onRemoveRecords}
+          disabled={removingRecords || !onRemoveRecords}
+          className="flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded text-red-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Remove medical records"
+        >
+          <CloseIcon />
+        </button>
+      </div>
+    );
+  }
+
   const className = `flex w-full items-center justify-between gap-2 text-left text-[10px] font-semibold ${style.text} ${
     onClick || href ? "cursor-pointer hover:underline" : ""
   }`;
@@ -1180,23 +1418,36 @@ function WorkflowStageItem({ stage, onClick, href }) {
     </>
   );
 
-  if (href) {
-    return (
+  const stageRow =
+    href ? (
       <Link href={href} className={className}>
         {content}
       </Link>
-    );
-  }
-
-  if (onClick) {
-    return (
+    ) : onClick ? (
       <button type="button" onClick={onClick} className={className}>
         {content}
       </button>
+    ) : (
+      <div className={className}>{content}</div>
     );
+
+  if (!stage.showResend) {
+    return stageRow;
   }
 
-  return <div className={className}>{content}</div>;
+  return (
+    <div className="space-y-0.5">
+      {stageRow}
+      <button
+        type="button"
+        onClick={onResend}
+        disabled={resending || !onResend}
+        className="ml-4 block text-[9px] italic text-[#2563EB] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {resending ? "sending..." : "resend"}
+      </button>
+    </div>
+  );
 }
 
 function WorkflowStageIcon({ status }) {
@@ -1232,6 +1483,8 @@ function WorkflowStageIcon({ status }) {
 
 function InvoiceBlock({
   invoice,
+  orderDbId,
+  providerEmail = "",
   onCreateInvoice,
   onReviewInvoice,
   onCreateXrayInvoice,
@@ -1239,25 +1492,107 @@ function InvoiceBlock({
   onCoverSheet,
   onXrayCoverSheet,
   onEmailInvoice,
+  onEmailXrayInvoice,
+  onPrintInvoice,
+  onPrintXrayInvoice,
   emailing = false,
+  emailingXray = false,
 }) {
-  const xrayReviewLine = invoice.hasXray ? (
-    <p className="text-[#334155]">
+  const hasProviderEmail = Boolean(providerEmail?.trim());
+  const invoiceSentDate =
+    invoice.sentDateCompact || invoice.sentDate || null;
+  const xraySentDate =
+    invoice.xraySentDateCompact || invoice.xraySentDate || null;
+
+  const emailInvoiceButton = !invoice.sentDate ? (
+    <div className="space-y-0.5">
+      {hasProviderEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+      ) : (
+        <MissingProviderEmailNotice orderDbId={orderDbId} />
+      )}
       <button
         type="button"
-        onClick={onReviewXrayInvoice}
-        className="text-[#007F96] underline"
+        onClick={onEmailInvoice}
+        disabled={emailing}
+        className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
       >
-        Review Xray Invoice
-      </button>{" "}
-      <span className="text-[#94A3B8]">{invoice.xrayReviewDate}</span>{" "}
-      <span className="text-[#111827]">{invoice.xrayReviewAmount}</span>
-    </p>
+        {emailing ? "Sending..." : "Email Invoice"}
+      </button>
+    </div>
+  ) : null;
+
+  const invoiceEmailedStatus = invoice.sentDate ? (
+    <InvoiceEmailedStatus
+      label="Invoice Emailed"
+      sentDate={invoiceSentDate}
+      recipientEmail={providerEmail || invoice.recipientEmail}
+    />
+  ) : null;
+
+  const xraySection = invoice.hasXray ? (
+    <>
+      <InvoiceReviewRows
+        label={
+          <button
+            type="button"
+            onClick={onReviewXrayInvoice}
+            className="text-[#007F96] underline"
+          >
+            Review Xray Invoice
+          </button>
+        }
+        dateCompact={invoice.xrayReviewDateCompact || invoice.xrayReviewDate}
+        dueAmount={invoice.xrayReviewAmount}
+      />
+
+      <button
+        type="button"
+        onClick={onPrintXrayInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Print Xray Invoice
+      </button>
+
+      <button
+        type="button"
+        onClick={onXrayCoverSheet}
+        className="block text-left text-[#007F96] underline"
+      >
+        X-ray Cover Sheet
+      </button>
+
+      {!invoice.xraySentDate ? (
+        <div className="space-y-0.5">
+          {hasProviderEmail ? (
+            <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+          ) : (
+            <MissingProviderEmailNotice orderDbId={orderDbId} />
+          )}
+          <button
+            type="button"
+            onClick={onEmailXrayInvoice}
+            disabled={emailingXray}
+            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {emailingXray ? "Sending..." : "Email Xray Invoice"}
+          </button>
+        </div>
+      ) : null}
+
+      {invoice.xraySentDate ? (
+        <InvoiceEmailedStatus
+          label="Xray Invoice Emailed"
+          sentDate={xraySentDate}
+          recipientEmail={providerEmail || invoice.recipientEmail}
+        />
+      ) : null}
+    </>
   ) : (
     <button
       type="button"
       onClick={onCreateXrayInvoice}
-      className="block text-[#007F96] underline"
+      className="block text-left text-[#007F96] underline"
     >
       Create Xray Invoice
     </button>
@@ -1269,7 +1604,7 @@ function InvoiceBlock({
         <button
           type="button"
           onClick={onCreateInvoice}
-          className="block text-[#007F96] underline"
+          className="block text-left text-[#007F96] underline"
         >
           Create Invoice
         </button>
@@ -1277,80 +1612,128 @@ function InvoiceBlock({
         <button
           type="button"
           onClick={onCoverSheet}
-          className="block text-[#007F96] underline"
+          className="block text-left text-[#007F96] underline"
         >
           Cover Sheet
         </button>
 
-        <button
-          type="button"
-          onClick={onXrayCoverSheet}
-          className="block text-[#007F96] underline"
-        >
-          X-ray Cover Sheet
-        </button>
-
-        {xrayReviewLine}
+        {emailInvoiceButton}
+        {invoiceEmailedStatus}
+        {xraySection}
       </div>
     );
   }
 
   return (
     <div className="space-y-1 text-[10px]">
-      <p className="text-[#334155]">
-        <button
-          type="button"
-          onClick={onReviewInvoice}
-          className="text-[#007F96] underline"
-        >
-          Review Invoice
-        </button>{" "}
-        <span className="text-[#94A3B8]">{invoice.reviewDate}</span>{" "}
-        <span className="text-[#111827]">{invoice.reviewAmount}</span>
-      </p>
+      <InvoiceReviewRows
+        label={
+          <button
+            type="button"
+            onClick={onReviewInvoice}
+            className="text-[#007F96] underline"
+          >
+            Review Invoice
+          </button>
+        }
+        dateCompact={invoice.invoiceDateCompact || invoice.reviewDate}
+        dueAmount={invoice.due}
+      />
 
-      <p className="text-[#334155]">
-        <button type="button" className="text-[#007F96] underline">
-          Print Invoice
-        </button>{" "}
-        <span>{invoice.printAmount}</span>
-      </p>
-
-      {invoice.custodianAmount && (
-        <p className="text-[#334155]">
-          Custodian{" "}
-          <span className="font-semibold">{invoice.custodianAmount}</span>
-        </p>
-      )}
+      <button
+        type="button"
+        onClick={onPrintInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Print Invoice
+      </button>
 
       <button
         type="button"
         onClick={onCoverSheet}
-        className="block text-[#007F96] underline"
+        className="block text-left text-[#007F96] underline"
       >
         Cover Sheet
       </button>
 
-      <button
-        type="button"
-        onClick={onXrayCoverSheet}
-        className="block text-[#007F96] underline"
+      {emailInvoiceButton}
+      {invoiceEmailedStatus}
+      {xraySection}
+    </div>
+  );
+}
+
+function MissingProviderEmailNotice({ orderDbId }) {
+  if (!orderDbId) {
+    return (
+      <p className="text-[10px] font-semibold text-amber-600">
+        No provider email. Edit order to add email.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-[10px] font-semibold text-amber-600">
+      No provider email.{" "}
+      <Link
+        href={`/orders/new?mode=edit&orderId=${encodeURIComponent(orderDbId)}`}
+        className="text-[#007F96] underline"
       >
-        X-ray Cover Sheet
-      </button>
+        Edit order
+      </Link>{" "}
+      to add email.
+    </p>
+  );
+}
 
-      {xrayReviewLine}
+function InvoiceEmailedStatus({ label, sentDate, recipientEmail }) {
+  return (
+    <div className="space-y-0.5 text-[#334155]">
+      <p className="font-semibold text-[#059669]">✓ {label}</p>
+      {recipientEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {recipientEmail}</p>
+      ) : null}
+      {sentDate ? (
+        <p className="text-[#94A3B8]">Sent: {sentDate}</p>
+      ) : null}
+    </div>
+  );
+}
 
-      {invoice.showEmail && !invoice.sentDate && (
-        <button
-          type="button"
-          onClick={onEmailInvoice}
-          disabled={emailing}
-          className="block text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+function InvoiceReviewRows({ label, dateCompact, dueAmount }) {
+  const dueLabel = dateCompact ? `${dateCompact} - Due:` : null;
+
+  return (
+    <div className="space-y-0.5">
+      <div className="text-[#334155]">{label}</div>
+      {dueLabel && dueAmount ? (
+        <div className="flex w-full items-center justify-between gap-2 text-[#334155]">
+          <span className="min-w-0 text-left">{dueLabel}</span>
+          <span className="shrink-0 text-right">{dueAmount}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InvoiceMoneyRow({ label, date, amount, amountClassName = "" }) {
+  return (
+    <div className="flex w-full items-center justify-between gap-2 text-[#334155]">
+      <span className="min-w-0">{label}</span>
+      {amount ? (
+        <span
+          className={`shrink-0 text-right ${
+            amountClassName || "font-semibold text-[#111827]"
+          }`}
         >
-          {emailing ? "Marking..." : "Mark Sent"}
-        </button>
-      )}
+          {date ? (
+            <>
+              <span className="font-normal text-[#94A3B8]">{date}</span>{" "}
+            </>
+          ) : null}
+          {amount}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1445,6 +1828,19 @@ function SmallCircleIcon() {
   return (
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

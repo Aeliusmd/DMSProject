@@ -74,6 +74,20 @@ class InvoiceXray {
       }
     );
   }
+
+  static async markAsSent(orderId, connection = null) {
+    const db = connection || getPool();
+
+    const [result] = await db.execute(
+      `UPDATE invoice_xray_details
+       SET sent_date = CURDATE(), updated_at = NOW()
+       WHERE order_id = :orderId
+         AND sent_date IS NULL`,
+      { orderId }
+    );
+
+    return result.affectedRows;
+  }
 }
 
 module.exports = InvoiceXray;

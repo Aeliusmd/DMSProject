@@ -6,6 +6,7 @@ const Provider = require("../models/Provider");
 const config = require("../config");
 const { getPool } = require("../config/database");
 const { calculateOrderRushLevel } = require("../utils/rushUtils");
+const { formatDobDisplay } = require("../utils/dateUtils");
 
 const ORDER_TYPE_LABELS = {
   medical: "Medical Records",
@@ -22,20 +23,37 @@ function trimOrNull(value) {
 }
 
 function getInvoiceRecipientEmail(invoice) {
-  return trimOrNull(invoice?.recipient_emails) || trimOrNull(invoice?.provider_email);
+  return trimOrNull(invoice?.provider_email);
 }
 
 async function resolveInvoiceRecipientFromOrder(order, connection = null) {
   const providerId = order?.provider_id || null;
 
-  if (!providerId) {
-    return null;
+  if (providerId) {
+    const provider = await Provider.findById(providerId, connection);
+    const providerEmail = trimOrNull(provider?.email);
+    if (providerEmail) {
+      return providerEmail;
+    }
   }
 
-  const provider = await Provider.findById(providerId, connection);
-
-  return trimOrNull(provider?.email);
+  return trimOrNull(order?.provider_email);
 }
+
+async function resolveInvoiceRecipientEmail(invoice, connection = null) {
+  if (invoice?.order_id) {
+    const order = await Order.findById(invoice.order_id, connection);
+    const fromOrder = await resolveInvoiceRecipientFromOrder(order, connection);
+    if (fromOrder) {
+      return fromOrder;
+    }
+  }
+
+  return getInvoiceRecipientEmail(invoice);
+}
+
+const NO_PROVIDER_EMAIL_MESSAGE =
+  "No provider email on file. Edit the order to add the provider email.";
 
 function getXrayPayment(xrayRow) {
   return xrayRow ? toNumber(xrayRow.payment) : 0;
@@ -168,6 +186,18 @@ function toShortDate(value) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   const year = date.getFullYear();
+
+  return `${month}/${day}/${year}`;
+}
+
+function toCompactDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const year = String(date.getFullYear()).slice(-2);
 
   return `${month}/${day}/${year}`;
 }
@@ -524,6 +554,179 @@ function mapOrderPaymentsSummary(payments = []) {
   };
 }
 
+function pushPrintFeeLine(feeLines, line) {
+  const total = toNumber(line.total);
+
+  if (total > 0) {
+    feeLines.push({ ...line, total });
+  }
+}
+
+function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
+  if (!invoiceRow || !orderRow) {
+    return null;
+  }
+
+  const financials = resolveRowFinancials(invoiceRow, orderPayments);
+  const servedAmount = toNumber(invoiceRow.served_amount);
+  const serviceFee = toNumber(invoiceRow.service_fee);
+  const pageCount = Math.max(0, Math.floor(toNumber(invoiceRow.page_count)));
+  const perPageAmount = toNumber(invoiceRow.per_page_amount);
+  const pagesTotal = pageCount * perPageAmount;
+  const mileage = toNumber(invoiceRow.mileage);
+  const parking = toNumber(invoiceRow.parking);
+  const otherFee = toNumber(invoiceRow.other_fee);
+  const custodianFee = toNumber(invoiceRow.custodian_fee);
+  const xrayFee = toNumber(invoiceRow.xray_fee);
+
+  const feeLines = [];
+
+  if (servedAmount > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Served Amount",
+      quantity: "",
+      total: servedAmount,
+    });
+  }
+
+  if (serviceFee > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Service Fee",
+      quantity: "",
+      total: serviceFee,
+    });
+  }
+
+  if (custodianFee > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Custodian Fee",
+      quantity: "",
+      total: custodianFee,
+    });
+  }
+
+  if (xrayFee > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "X-Ray Fee",
+      quantity: "",
+      total: xrayFee,
+    });
+  }
+
+  if (mileage > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Mileage",
+      quantity: "",
+      total: mileage,
+    });
+  }
+
+  if (parking > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Parking",
+      quantity: "",
+      total: parking,
+    });
+  }
+
+  if (otherFee > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Other",
+      quantity: "",
+      total: otherFee,
+    });
+  }
+
+  if (pagesTotal > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Pages Amount",
+      quantity: String(pageCount),
+      total: pagesTotal,
+    });
+  }
+
+  const prepaymentAmount = getOrderPaymentAmount(orderPayments, "prepayment");
+  if (prepaymentAmount > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Prepayment",
+      quantity: "",
+      total: prepaymentAmount,
+    });
+  }
+
+  return {
+    customer: orderRow.serve_company_name || orderRow.provider_name || "",
+    requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
+    yourFileNumber: orderRow.order_ref || "",
+    ourCaseNumber: orderRow.order_number || "",
+    applicant: buildApplicantName(invoiceRow),
+    feeLines,
+    totalInvoiced: financials.totalAmount,
+    totalDue: financials.amountDue,
+    amountPaid: financials.amountPaid,
+  };
+}
+
+function formatPerViewRate(amount) {
+  const value = toNumber(amount);
+
+  if (Number.isInteger(value) || value === Math.trunc(value)) {
+    return String(Math.trunc(value));
+  }
+
+  return value.toFixed(2);
+}
+
+function buildPrintXrayInvoicePdfData(xrayRow, orderRow, orderPayments = []) {
+  if (!xrayRow || !orderRow) {
+    return null;
+  }
+
+  const viewCount = Math.max(0, Math.floor(toNumber(xrayRow.view_count)));
+  const perViewAmount = toNumber(xrayRow.per_view_amount);
+  const viewsTotal = viewCount * perViewAmount;
+  const xrayPaidEarlier = getOrderPaymentAmount(orderPayments, "xray");
+  const totalInvoiced = viewsTotal - xrayPaidEarlier;
+  const totalDue = Math.max(0, totalInvoiced);
+  const description = trimOrNull(xrayRow.description) || "";
+  const feeLines = [];
+
+  if (viewsTotal > 0) {
+    feeLines.push({
+      description: `Views @ $${formatPerViewRate(perViewAmount)} per`,
+      quantity: String(viewCount),
+      total: viewsTotal,
+      subDescription: description,
+    });
+  }
+
+  if (xrayPaidEarlier > 0) {
+    const checkLabel = trimOrNull(xrayRow.check_number)
+      ? `CK# ${xrayRow.check_number}`
+      : "CK#";
+
+    feeLines.push({
+      description: "Processing Fee",
+      quantity: checkLabel,
+      total: -xrayPaidEarlier,
+    });
+  }
+
+  return {
+    customer: orderRow.provider_name || orderRow.serve_company_name || "",
+    requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
+    specificDoctor: orderRow.specific_doctor || "",
+    yourFileNumber: orderRow.order_ref || "",
+    ourCaseNumber: orderRow.order_number || "",
+    applicant: buildApplicantName(orderRow),
+    dob: formatDobDisplay(orderRow.dob) || "",
+    examDate: toShortDate(xrayRow.exam_date) || "",
+    feeLines,
+    totalInvoiced,
+    totalDue,
+  };
+}
+
 function mapOrderInvoiceFees(invoiceRow, xrayRow = null) {
   if (!invoiceRow) {
     return {
@@ -571,20 +774,37 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
   const hasStandardInvoice = hasStandardInvoiceFields(row);
   const financials = resolveRowFinancials(row, orderPayments);
 
+  const invoiceDueMeta = `${toCompactDate(row.invoice_date)} - Due:${formatMoney(financials.amountDue)}`;
+
   return {
     createOnly: !hasStandardInvoice,
     hasXray,
     hasStandardInvoice,
     invoiceId: row.id,
     reviewDate: toShortDate(row.invoice_date),
+    invoiceDateCompact: toCompactDate(row.invoice_date),
     reviewAmount: formatMoney(financials.totalAmount),
     printAmount: formatMoney(financials.totalAmount),
+    invoiceDueMeta,
     custodianAmount:
       toNumber(row.custodian_fee) > 0 ? formatMoney(row.custodian_fee) : null,
     sentDate: row.sent_date ? toShortDate(row.sent_date) : null,
+    sentDateCompact: row.sent_date ? toCompactDate(row.sent_date) : null,
     xrayReviewDate: hasXray ? toShortDate(xrayRow.xray_invoice_date) : "",
+    xrayReviewDateCompact: hasXray
+      ? toCompactDate(xrayRow.xray_invoice_date)
+      : "",
     xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
-    showEmail: Boolean(getInvoiceRecipientEmail(row)),
+    xraySentDate:
+      hasXray && xrayRow?.sent_date ? toShortDate(xrayRow.sent_date) : null,
+    xraySentDateCompact:
+      hasXray && xrayRow?.sent_date ? toCompactDate(xrayRow.sent_date) : null,
+    xrayDueMeta: hasXray
+      ? `${toCompactDate(xrayRow.xray_invoice_date)} - Due:${mapXrayReviewAmount(xrayRow, orderPayments)}`
+      : "",
+    recipientEmail: trimOrNull(row.provider_email) || "",
+    providerEmail: trimOrNull(row.provider_email) || "",
+    showEmail: Boolean(trimOrNull(row.provider_email)),
     paid:
       financials.amountPaid > 0 ? formatMoney(financials.amountPaid) : null,
     status: row.status || "Unpaid",
@@ -1351,18 +1571,47 @@ async function getByCompany(facilityId, query = {}) {
   };
 }
 
-async function deliverInvoiceEmail(invoice, { isResend = false } = {}) {
+async function deliverInvoiceEmail(invoice, { isResend = false, orderPayments = [] } = {}) {
   if (!invoice) {
     throw new ApiError(404, "Invoice not found");
   }
 
-  const recipient = getInvoiceRecipientEmail(invoice);
+  const recipient = await resolveInvoiceRecipientEmail(invoice);
 
   if (!recipient) {
-    throw new ApiError(400, "No provider email address is available for this invoice");
+    throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
   }
 
   const primaryEmail = recipient.split(",")[0].trim();
+  const payments =
+    orderPayments.length > 0
+      ? orderPayments
+      : await Order.findPaymentsByOrderId(invoice.order_id);
+  const order = await Order.findById(invoice.order_id);
+  const invoiceRow = order
+    ? await Invoice.findByOrderId(invoice.order_id)
+    : null;
+  const attachments = [];
+
+  if (order && invoiceRow) {
+    const payload = buildPrintInvoicePdfData(invoiceRow, order, payments);
+
+    if (payload) {
+      const { generatePrintInvoicePdf } = require("../utils/printInvoicePdf");
+      const pdfBuffer = await generatePrintInvoicePdf(payload);
+      const safeOrderNumber = `${order.order_number || order.id}`.replace(
+        /[^\w.-]+/g,
+        "_"
+      );
+
+      attachments.push({
+        filename: `invoice-${safeOrderNumber}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      });
+    }
+  }
+
   const { sendInvoiceEmail } = require("./emailService");
 
   const result = await sendInvoiceEmail({
@@ -1382,9 +1631,10 @@ async function deliverInvoiceEmail(invoice, { isResend = false } = {}) {
     orderDetailsText: Boolean(invoice.send_order_details)
       ? buildOrderDetailsText(invoice)
       : "",
+    attachments,
   });
 
-  if (!result.delivered) {
+  if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
     const hint =
       config.nodeEnv === "development" && result.devLogged
         ? "SMTP is not configured or delivery failed (check backend logs)."
@@ -1393,7 +1643,84 @@ async function deliverInvoiceEmail(invoice, { isResend = false } = {}) {
     throw new ApiError(500, hint);
   }
 
-  return { recipient: primaryEmail, delivered: true };
+  return {
+    recipient: primaryEmail,
+    delivered: Boolean(result.delivered),
+    devLogged: Boolean(result.devLogged),
+  };
+}
+
+async function deliverXrayInvoiceEmail(xrayRow, order, orderPayments = []) {
+  if (!xrayRow || !order) {
+    throw new ApiError(404, "X-Ray invoice not found");
+  }
+
+  const invoice = await Invoice.findByOrderId(order.id);
+  const recipient = invoice
+    ? await resolveInvoiceRecipientEmail(invoice)
+    : await resolveInvoiceRecipientFromOrder(order);
+
+  if (!recipient) {
+    throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+  }
+
+  const primaryEmail = recipient.split(",")[0].trim();
+  const payments =
+    orderPayments.length > 0
+      ? orderPayments
+      : await Order.findPaymentsByOrderId(order.id);
+  const payload = buildPrintXrayInvoicePdfData(xrayRow, order, payments);
+  const attachments = [];
+
+  if (payload) {
+    const { generatePrintXrayInvoicePdf } = require("../utils/printXrayInvoicePdf");
+    const pdfBuffer = await generatePrintXrayInvoicePdf(payload);
+    const safeOrderNumber = `${order.order_number || order.id}`.replace(
+      /[^\w.-]+/g,
+      "_"
+    );
+
+    attachments.push({
+      filename: `xray-invoice-${safeOrderNumber}.pdf`,
+      content: pdfBuffer,
+      contentType: "application/pdf",
+    });
+  }
+
+  const financials = invoice
+    ? resolveRowFinancials(invoice, payments)
+    : { totalAmount: 0, amountPaid: 0, amountDue: 0 };
+  const xrayDue = mapXrayReviewAmount(xrayRow, payments);
+  const { sendInvoiceEmail } = require("./emailService");
+
+  const result = await sendInvoiceEmail({
+    to: primaryEmail,
+    companyName: order.provider_name || order.serve_company_name || "Company",
+    caseNo: order.order_number || "",
+    applicant: buildApplicantName(order),
+    invoiceDate: toShortDate(xrayRow.xray_invoice_date),
+    sentDate: toShortDate(new Date()),
+    invoiced: xrayDue,
+    paid: formatMoney(financials.amountPaid),
+    due: xrayDue,
+    subjectOverride: `X-Ray Invoice - Case ${order.order_number || ""}`,
+    attachments,
+  });
+
+  if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
+    const hint =
+      config.nodeEnv === "development" && result.devLogged
+        ? "SMTP is not configured or delivery failed (check backend logs)."
+        : "Failed to deliver X-Ray invoice email.";
+
+    throw new ApiError(500, hint);
+  }
+
+  return {
+    recipient: primaryEmail,
+    delivered: Boolean(result.delivered),
+    devLogged: Boolean(result.devLogged),
+  };
 }
 
 async function sendInvoices(invoiceIds = []) {
@@ -1479,21 +1806,36 @@ async function resendInvoices(invoiceIds = []) {
       );
     }
 
-    await deliverInvoiceEmail(invoice, {
-      isResend: invoice.status === "Needs Resend",
+    const recipientEmail = await resolveInvoiceRecipientEmail(invoice);
+
+    if (!recipientEmail) {
+      throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+    }
+
+    const { recipient: deliveredTo } = await deliverInvoiceEmail(invoice, {
+      isResend: true,
     });
 
-    const updated = await Invoice.markAsEmailSent([invoiceId]);
-
-    if (!updated) {
-      throw new ApiError(400, "Unable to update emailed invoice");
-    }
+    await getPool().execute(
+      `UPDATE invoices
+       SET recipient_emails = :recipientEmails,
+           sent_date = CURDATE(),
+           status = CASE
+             WHEN status IN ('Paid', 'Partial', 'Unpaid') THEN status
+             WHEN status = 'Written Off' THEN status
+             ELSE 'Needs Resend'
+           END,
+           updated_at = NOW()
+       WHERE id = :invoiceId
+         AND status <> 'Written Off'`,
+      { recipientEmails: recipientEmail, invoiceId }
+    );
 
     if (invoice.order_id) {
       await Order.upsertWorkflowStage(invoice.order_id, "SENT", "sent", new Date());
     }
 
-    resent.push(invoiceId);
+    resent.push({ invoiceId, recipient: deliveredTo });
   }
 
   return { resentCount: resent.length };
@@ -1516,6 +1858,18 @@ async function emailInvoiceByOrderId(orderId) {
     throw new ApiError(400, "Invoice is already marked as sent");
   }
 
+  const recipientEmail = await resolveInvoiceRecipientEmail(invoice);
+
+  if (!recipientEmail) {
+    throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+  }
+
+  const orderPayments = await Order.findPaymentsByOrderId(normalizedOrderId);
+  const { recipient, delivered, devLogged } = await deliverInvoiceEmail(invoice, {
+    isResend: false,
+    orderPayments,
+  });
+
   const invoiceId = normalizeInvoiceId(invoice.id);
   const sentCount = await Invoice.markAsSent([invoiceId]);
 
@@ -1523,14 +1877,77 @@ async function emailInvoiceByOrderId(orderId) {
     throw new ApiError(400, "Invoice is already marked as sent");
   }
 
+  await getPool().execute(
+    `UPDATE invoices
+     SET recipient_emails = :recipientEmails,
+         updated_at = NOW()
+     WHERE id = :invoiceId`,
+    { recipientEmails: recipientEmail, invoiceId }
+  );
+
   await Order.upsertWorkflowStage(normalizedOrderId, "SENT", "sent", new Date());
+
+  const sentOn = new Date();
 
   return {
     invoiceId,
     orderId: normalizedOrderId,
     isResend: false,
-    recipient: null,
-    emailed: false,
+    recipient,
+    recipientEmail: recipient,
+    emailed: delivered,
+    devLogged: Boolean(devLogged),
+    sentDate: toShortDate(sentOn),
+    sentDateCompact: toCompactDate(sentOn),
+  };
+}
+
+async function emailXrayInvoiceByOrderId(orderId) {
+  const normalizedOrderId = Number(orderId);
+
+  if (!Number.isFinite(normalizedOrderId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const order = await Order.findById(normalizedOrderId);
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const xrayRow = await InvoiceXray.findByOrderId(normalizedOrderId);
+
+  if (!xrayRow) {
+    throw new ApiError(404, "No X-Ray invoice found for this order");
+  }
+
+  if (xrayRow.sent_date) {
+    throw new ApiError(400, "X-Ray invoice is already marked as sent");
+  }
+
+  const orderPayments = await Order.findPaymentsByOrderId(normalizedOrderId);
+  const { recipient, delivered, devLogged } = await deliverXrayInvoiceEmail(
+    xrayRow,
+    order,
+    orderPayments
+  );
+
+  const sentCount = await InvoiceXray.markAsSent(normalizedOrderId);
+
+  if (!sentCount) {
+    throw new ApiError(400, "X-Ray invoice is already marked as sent");
+  }
+
+  const sentOn = new Date();
+
+  return {
+    orderId: normalizedOrderId,
+    recipient,
+    recipientEmail: recipient,
+    emailed: delivered,
+    devLogged: Boolean(devLogged),
+    xraySentDate: toShortDate(sentOn),
+    xraySentDateCompact: toCompactDate(sentOn),
   };
 }
 
@@ -1646,6 +2063,7 @@ module.exports = {
   sendInvoices,
   resendInvoices,
   emailInvoiceByOrderId,
+  emailXrayInvoiceByOrderId,
   writeOffInvoices,
   getStandardInvoicesByOrderIds,
   getXrayDetailsByOrderIds,
@@ -1654,5 +2072,7 @@ module.exports = {
   mapOrderInvoiceSummary,
   mapOrderPaymentsSummary,
   mapOrderInvoiceFees,
+  buildPrintInvoicePdfData,
+  buildPrintXrayInvoicePdfData,
   syncInvoiceAmountPaidFromOrder,
 };

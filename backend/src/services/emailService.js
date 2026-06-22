@@ -146,10 +146,14 @@ async function sendInvoiceEmail({
   isRushOrder = false,
   rushLevel = null,
   orderDetailsText = "",
+  attachments = [],
+  subjectOverride = null,
 }) {
-  const baseSubject = isResend
-    ? `Resent Invoice - Case ${caseNo}`
-    : `Invoice - Case ${caseNo}`;
+  const baseSubject = subjectOverride
+    ? subjectOverride
+    : isResend
+      ? `Resent Invoice - Case ${caseNo}`
+      : `Invoice - Case ${caseNo}`;
   const subject = isRushOrder ? `RUSH - ${baseSubject}` : baseSubject;
 
   const templateData = {
@@ -169,29 +173,59 @@ async function sendInvoiceEmail({
   };
 
   const { text, html } = renderInvoiceEmail(templateData);
+  const attachmentNote =
+    attachments.length > 0
+      ? "\n\nThe invoice PDF is attached to this email."
+      : "";
+  const emailText = `${text}${attachmentNote}`;
+  const emailHtml =
+    attachments.length > 0
+      ? `${html}<p style="margin-top:16px;">The invoice PDF is attached to this email.</p>`
+      : html;
 
   const mailTransporter = getTransporter();
 
   if (!mailTransporter) {
     if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Invoice email", { to, subject, text });
+      logger.warn("[DEV] Invoice email", {
+        to,
+        subject,
+        text: emailText,
+        attachments: attachments.map((file) => file.filename),
+      });
       return { delivered: false, devLogged: true };
     }
 
     throw new Error("SMTP is not configured");
   }
 
-  const mailOptions = buildMailOptions({ to, subject, text, html });
+  const mailOptions = buildMailOptions({
+    to,
+    subject,
+    text: emailText,
+    html: emailHtml,
+    attachments,
+  });
 
   try {
     await mailTransporter.sendMail(mailOptions);
-    logger.info("Invoice email sent", { to, caseNo, isResend });
+    logger.info("Invoice email sent", {
+      to,
+      caseNo,
+      isResend,
+      attachments: attachments.length,
+    });
     return { delivered: true, devLogged: false };
   } catch (error) {
     logger.error("Failed to send invoice email", { to, error: error.message });
 
     if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Invoice email fallback", { to, subject, text });
+      logger.warn("[DEV] Invoice email fallback", {
+        to,
+        subject,
+        text: emailText,
+        attachments: attachments.map((file) => file.filename),
+      });
       return { delivered: false, devLogged: true };
     }
 
