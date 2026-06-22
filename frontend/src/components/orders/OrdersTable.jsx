@@ -12,10 +12,30 @@ import OrderNotesModal from "@/components/orders/OrderNotesModal";
 import OrderMailModal from "@/components/orders/OrderMailModal";
 import OrderPickupModal from "@/components/orders/OrderPickupModal";
 import OrderFaxModal from "@/components/orders/OrderFaxModal";
+import OrderCancelModal from "@/components/orders/OrderCancelModal";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import CompletedDeliveryLink from "@/components/orders/CompletedDeliveryLink";
-import { getOrders, fetchOrderMedicalRecordsPdf, fetchOrderSubpoenaPdf, mailCompletedOrder, recordOrderPickup, recordOrderFax } from "@/lib/orders/orderApi";
-import { getCompletedDeliveryActions, getDeliveryStatus, resolveProviderEmail } from "@/lib/orders/deliveryActions";
+import {
+  cancelOrder,
+  deleteOrder,
+  getOrders,
+  fetchOrderMedicalRecordsPdf,
+  fetchOrderSubpoenaPdf,
+  mailCompletedOrder,
+  recordOrderPickup,
+  recordOrderFax,
+} from "@/lib/orders/orderApi";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import {
+  getCompletedDeliveryActions,
+  getDeliveryStatus,
+  resolveProviderEmail,
+} from "@/lib/orders/deliveryActions";
 import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
+import {
+  formatMoneyAmount,
+  parsePaymentAmount,
+} from "@/lib/orders/paymentUtils";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
 const ORDERS_PER_PAGE = 6;
@@ -49,6 +69,10 @@ const WORKFLOW_STATUS_STYLES = {
   sent: { text: "text-[#2563EB]", dot: "bg-[#3B82F6]" },
 };
 
+function isWorkflowStageComplete(status) {
+  return status === "complete" || status === "sent";
+}
+
 function mapWorkflowStages(stages = []) {
   const byName = new Map(
     stages.map((stage) => [stage.stageName, stage.stageStatus])
@@ -58,10 +82,63 @@ function mapWorkflowStages(stages = []) {
     const status = byName.get(stageName) || "pending";
 
     return {
+      key: stageName,
       label: stageName,
       status,
     };
   });
+}
+
+function buildWorkflowStagesForOrder(order) {
+  const prepaymentPaid = parsePaymentAmount(order.invoice?.prepaymentPaid);
+  const custodianPaid = parsePaymentAmount(order.invoice?.custodianPaid);
+  const hasMedicalRecords = Boolean(order.records?.hasMedicalRecords);
+
+  return mapWorkflowStages(order.workflowStages).map((stage) => {
+    if (stage.key === "Upload Records") {
+      const isComplete =
+        isWorkflowStageComplete(stage.status) || hasMedicalRecords;
+
+      return {
+        ...stage,
+        status: isComplete ? "complete" : stage.status,
+        label: isComplete ? "Uploaded Records" : "Scan Medical Records",
+        openMedicalRecords: isComplete && hasMedicalRecords,
+      };
+    }
+
+    if (stage.key === "Serve") {
+      const isComplete = isWorkflowStageComplete(stage.status);
+
+      return {
+        ...stage,
+        label: isComplete ? "Serve" : "Serve Payment",
+        paidAmount:
+          isComplete && prepaymentPaid > 0
+            ? formatMoneyAmount(prepaymentPaid)
+            : null,
+      };
+    }
+
+    if (stage.key === "Custodian") {
+      const isComplete = isWorkflowStageComplete(stage.status);
+
+      return {
+        ...stage,
+        label: isComplete ? "Custodian" : "Custodian Payment",
+        paidAmount:
+          isComplete && custodianPaid > 0
+            ? formatMoneyAmount(custodianPaid)
+            : null,
+      };
+    }
+
+    return stage;
+  });
+}
+
+function isInactiveOrderStatus(status) {
+  return status === "Cancelled" || status === "Deleted";
 }
 
 function toRenderOrder(order) {
@@ -79,13 +156,14 @@ function toRenderOrder(order) {
     court: order.court || "",
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
-    status: mapWorkflowStages(order.workflowStages),
+    status: buildWorkflowStagesForOrder(order),
     invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
     certificateNoRecords: Boolean(order.certificateNoRecords),
     cnrDelivery: order.cnrDelivery || "",
-    mailSentDate: order.mailSentDate || "",
+    mailSentDate: order.readyDate || order.mailSentDate || "",
+    readyDate: order.readyDate || "",
     deliveryDate: order.deliveryDate || "",
     pickupPersonName: order.pickupPersonName || "",
     cnrDateSent: order.cnrDateSent || "",
@@ -118,6 +196,10 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
   const [emailError, setEmailError] = useState("");
   const [deliveryError, setDeliveryError] = useState("");
+  const [deleteModal, setDeleteModal] = useState({ open: false, order: null });
+  const [cancelModal, setCancelModal] = useState({ open: false, order: null });
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -189,6 +271,60 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     ]
   );
 
+  function openDeleteModal(order) {
+    setActionError("");
+    setDeleteModal({ open: true, order });
+  }
+
+  function closeDeleteModal() {
+    if (actionLoading) return;
+    setDeleteModal({ open: false, order: null });
+  }
+
+  function openCancelModal(order) {
+    setActionError("");
+    setCancelModal({ open: true, order });
+  }
+
+  function closeCancelModal() {
+    if (actionLoading) return;
+    setCancelModal({ open: false, order: null });
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteModal.order?.dbId) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await deleteOrder(deleteModal.order.dbId);
+      setDeleteModal({ open: false, order: null });
+      await fetchOrders();
+    } catch (err) {
+      setActionError(err.message || "Failed to delete order");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleConfirmCancel(reason) {
+    if (!cancelModal.order?.dbId || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await cancelOrder(cancelModal.order.dbId, { reason });
+      setCancelModal({ open: false, order: null });
+      await fetchOrders();
+    } catch (err) {
+      setActionError(err.message || "Failed to cancel order");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
@@ -232,9 +368,9 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       }
 
       const email = resolveProviderEmail(order);
-      const hasDeliveryDate = Boolean(order.deliveryDate);
+      const mailSentDate = getTodayInputDate();
 
-      if (!email || !hasDeliveryDate) {
+      if (!email) {
         setSelectedMailOrder(order);
         return;
       }
@@ -244,12 +380,21 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       setDeliveryError("");
 
       try {
-        const result = await mailCompletedOrder(order.dbId, { email });
-        const sentDate = result.sentDate || order.deliveryDate;
+        const result = await mailCompletedOrder(order.dbId, {
+          email,
+          deliveryDate: mailSentDate,
+        });
+        const sentDate = result.readyDate || result.sentDate || mailSentDate;
         setOrders((prev) =>
           prev.map((item) =>
             item.dbId === order.dbId
-              ? { ...item, mailSentDate: sentDate }
+              ? {
+                  ...item,
+                  orderStatus: "Completed",
+                  readyDate: sentDate,
+                  mailSentDate: sentDate,
+                  deliveryDate: sentDate,
+                }
               : item
           )
         );
@@ -264,13 +409,16 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   );
 
   const applyMailSentState = useCallback((order, sentDate, deliveryDate) => {
+    const resolvedDate = sentDate || deliveryDate;
     setOrders((prev) =>
       prev.map((item) =>
         item.dbId === order.dbId
           ? {
               ...item,
-              mailSentDate: sentDate,
-              deliveryDate: deliveryDate || item.deliveryDate,
+              orderStatus: "Completed",
+              readyDate: resolvedDate,
+              mailSentDate: resolvedDate,
+              deliveryDate: resolvedDate,
             }
           : item
       )
@@ -370,6 +518,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
           </p>
         )}
 
+        {actionError && (
+          <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
+            {actionError}
+          </p>
+        )}
+
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full min-w-[1280px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
@@ -382,6 +536,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                 <th className="w-[280px] px-4 py-3">Company</th>
                 <th className="w-[95px] px-4 py-3">DOB/SSN</th>
                 <th className="w-[130px] px-4 py-3">Forms</th>
+                <th className="w-[120px] px-4 py-3" />
               </tr>
             </thead>
 
@@ -389,7 +544,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     Loading orders...
@@ -398,7 +553,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : error ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-10 text-center text-[12px] font-semibold text-red-500"
                   >
                     {error}
@@ -407,7 +562,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : currentOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     No orders match the selected filters.
@@ -479,27 +634,16 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      {order.isWriteOffs && (
-                        <p className="mb-2 text-[10px] font-semibold text-[#DC2626]">
-                          Write Offs
-                        </p>
-                      )}
-
-                      {order.orderStatus === "Completed" && (
-                        <p className="mb-2 text-[10px] font-semibold text-[#059669]">
-                          Completed
-                        </p>
-                      )}
-
                       <div className="space-y-1">
                         {order.status.map((stage) => (
                           <WorkflowStageItem
-                            key={stage.label}
+                            key={stage.key || stage.label}
                             stage={stage}
                             href={getWorkflowStageHref(stage, order)}
                             onClick={
-                              stage.label === "Review Records" &&
-                              order.hasMedicalRecords
+                              stage.openMedicalRecords ||
+                              (stage.key === "Review Records" &&
+                                order.hasMedicalRecords)
                                 ? () => setSelectedMedicalRecordsOrder(order)
                                 : undefined
                             }
@@ -507,7 +651,9 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         ))}
                       </div>
 
-                      {order.orderStatus === "Completed" && (() => {
+                      {(order.orderStatus === "Ready to Pickup" ||
+                        order.orderStatus === "Completed") &&
+                        (() => {
                         const deliveryActions = getCompletedDeliveryActions(order);
                         const mailStatus = getDeliveryStatus(order, "mail");
                         const faxStatus = getDeliveryStatus(order, "fax");
@@ -554,16 +700,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         );
                       })()}
 
-                      {!order.hasMedicalRecords && (
-                        <Link
-                          href={`/orders/scan-medical-records?orderId=${encodeURIComponent(
-                            order.dbId
-                          )}`}
-                          className="mt-2 block text-[10px] font-semibold text-[#007F96] underline"
-                        >
-                          Scan Medical Record
-                        </Link>
-                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -618,6 +754,37 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         forms={order.forms}
                         onCnrClick={() => setSelectedCnrOrder(order)}
                       />
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <div className="flex flex-col items-start gap-2">
+                        {!isInactiveOrderStatus(order.orderStatus) ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(order)}
+                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                            >
+                              <TrashIcon />
+                              Delete
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => openCancelModal(order)}
+                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                              style={{
+                                border: "1px solid #FCD34D",
+                                backgroundColor: "#FFFBEB",
+                                color: "#B45309",
+                              }}
+                            >
+                              <SmallCircleIcon />
+                              Cancel
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -745,8 +912,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
           });
           applyMailSentState(
             selectedMailOrder,
-            result.sentDate,
-            deliveryDate || selectedMailOrder.deliveryDate
+            result.readyDate || result.sentDate,
+            result.readyDate || result.sentDate
           );
           await fetchOrders();
         }}
@@ -767,7 +934,9 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               item.dbId === selectedPickupOrder.dbId
                 ? {
                     ...item,
+                    orderStatus: "Completed",
                     deliveryDate: pickupDate,
+                    readyDate: pickupDate,
                     pickupPersonName,
                   }
                 : item
@@ -789,6 +958,26 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
           });
           await fetchOrders({ silent: true });
         }}
+      />
+
+      <ConfirmModal
+        open={deleteModal.open}
+        title="Delete Order"
+        message="Are you sure you want to delete this order?"
+        variant="danger"
+        confirmLabel={actionLoading ? "Deleting..." : "Confirm"}
+        cancelLabel="Cancel"
+        confirmDisabled={actionLoading}
+        onCancel={closeDeleteModal}
+        onConfirm={handleConfirmDelete}
+      />
+
+      <OrderCancelModal
+        open={cancelModal.open}
+        order={cancelModal.order}
+        loading={actionLoading}
+        onClose={closeCancelModal}
+        onConfirm={handleConfirmCancel}
       />
     </>
   );
@@ -895,12 +1084,29 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
   );
 }
 
-function isWorkflowStageComplete(status) {
-  return status === "complete" || status === "sent";
-}
-
 function getWorkflowStageHref(stage, order) {
-  if (stage.label === "Custodian" && !isWorkflowStageComplete(stage.status)) {
+  if (
+    stage.key === "Upload Records" &&
+    !isWorkflowStageComplete(stage.status)
+  ) {
+    return `/orders/scan-medical-records?orderId=${encodeURIComponent(
+      order.dbId
+    )}`;
+  }
+
+  if (
+    stage.key === "Serve" &&
+    !isWorkflowStageComplete(stage.status)
+  ) {
+    return `/orders/new?mode=edit&orderId=${encodeURIComponent(
+      order.dbId
+    )}&panel=payment`;
+  }
+
+  if (
+    stage.key === "Custodian" &&
+    !isWorkflowStageComplete(stage.status)
+  ) {
     return `/orders/new?mode=edit&orderId=${encodeURIComponent(
       order.dbId
     )}&panel=payment`;
@@ -911,14 +1117,21 @@ function getWorkflowStageHref(stage, order) {
 
 function WorkflowStageItem({ stage, onClick, href }) {
   const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
-  const className = `flex items-center gap-1.5 text-left text-[10px] font-semibold ${style.text} ${
+  const className = `flex w-full items-center justify-between gap-2 text-left text-[10px] font-semibold ${style.text} ${
     onClick || href ? "cursor-pointer hover:underline" : ""
   }`;
 
   const content = (
     <>
-      <WorkflowStageIcon status={stage.status} />
-      {stage.label}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <WorkflowStageIcon status={stage.status} />
+        <span>{stage.label}</span>
+      </span>
+      {stage.paidAmount ? (
+        <span className="shrink-0 font-semibold text-[#059669]">
+          {stage.paidAmount}
+        </span>
+      ) : null}
     </>
   );
 
@@ -1161,4 +1374,26 @@ function formatLastUpdatedLabel(date) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function TrashIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SmallCircleIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
 }

@@ -2,6 +2,11 @@
 -- DMS orders — DROP existing table and CREATE fresh (DESTRUCTIVE)
 -- =============================================================================
 -- WARNING: Deletes ALL orders. Backup first. Dev / rebuild only.
+--
+-- Aligned with current app:
+--   • Soft delete: status = 'Deleted' + deleted_at/deleted_by (no is_deleted)
+--   • Mail/pickup date: ready_date (no mail_sent_date)
+--   • subpoena_ref, ssn_encrypted kept for future use
 USE dms_db;
 
 SET FOREIGN_KEY_CHECKS = 0;
@@ -16,8 +21,11 @@ CREATE TABLE orders (
   order_type      ENUM('medical', 'billing', 'employment', 'xrays') NOT NULL,
   status          ENUM(
     'Active', 'Ready', 'Ready to Pickup', 'Completed', 'Cancelled',
-    'Write Offs'
+    'Deleted', 'Write Offs'
   ) NOT NULL DEFAULT 'Active',
+  cancel_reason   TEXT            NULL COMMENT 'Reason provided when order was cancelled',
+  cancelled_at    DATETIME        NULL COMMENT 'When the order was cancelled',
+  cancelled_by    BIGINT UNSIGNED NULL COMMENT 'matrix_employees.id who cancelled the order',
   court           VARCHAR(50)     NULL DEFAULT 'WCAB',
   case_number     VARCHAR(50)     NULL,
   subpoena_ref    VARCHAR(50)     NULL COMMENT 'Subpoena reference number',
@@ -31,7 +39,7 @@ CREATE TABLE orders (
   applicant_aka         VARCHAR(150) NULL,
   defendant       VARCHAR(200)    NULL,
   injury_type     ENUM('specific', 'cumulative') NULL,
-  subpoena_storage_path     VARCHAR(500) NULL COMMENT 'Primary subpoena file path',
+  subpoena_storage_path      VARCHAR(500) NULL COMMENT 'Primary subpoena file path',
   medical_records_storage_path VARCHAR(500) NULL COMMENT 'Scanned medical records PDF path',
   serve_company_name VARCHAR(255) NULL,
   serve_address   VARCHAR(255)    NULL,
@@ -54,8 +62,9 @@ CREATE TABLE orders (
   date_served     DATE            NULL,
   depo_due_date   DATE            NULL,
   delivery_date   DATE            NULL,
+  pickup_person_name VARCHAR(150) NULL COMMENT 'Person who picked up records',
   subpoena_date   DATE            NULL,
-  ready_date      DATE            NULL,
+  ready_date      DATE            NULL COMMENT 'Mail sent or pickup date',
   invoice_date    DATE            NULL,
   xray_invoice_date DATE          NULL,
   flag_medical_records    TINYINT(1) NOT NULL DEFAULT 0,
@@ -76,6 +85,8 @@ CREATE TABLE orders (
   created_by      BIGINT UNSIGNED NULL,
   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at      DATETIME        NULL COMMENT 'When order was deleted (status = Deleted)',
+  deleted_by      BIGINT UNSIGNED NULL COMMENT 'matrix_employees.id who deleted the order',
   PRIMARY KEY (id),
   UNIQUE KEY uq_orders_order_number (order_number),
   KEY idx_orders_facility (facility_id),
@@ -92,5 +103,11 @@ CREATE TABLE orders (
     ON DELETE SET NULL ON UPDATE CASCADE,
   CONSTRAINT fk_orders_created_by
     FOREIGN KEY (created_by) REFERENCES matrix_employees (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_orders_cancelled_by
+    FOREIGN KEY (cancelled_by) REFERENCES matrix_employees (id)
+    ON DELETE SET NULL ON UPDATE CASCADE,
+  CONSTRAINT fk_orders_deleted_by
+    FOREIGN KEY (deleted_by) REFERENCES matrix_employees (id)
     ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

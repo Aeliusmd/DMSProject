@@ -97,9 +97,10 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         >
           <option value="">All Status</option>
           <option value="active">Active</option>
-          <option value="ready">Ready</option>
+          <option value="ready">Ready to Pickup</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
+          <option value="deleted">Deleted</option>
         </select>
 
         <div className="flex h-[34px] min-w-0 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">

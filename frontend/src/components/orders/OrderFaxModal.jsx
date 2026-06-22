@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
 
 export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
   const mounted = useIsClient();
@@ -16,7 +17,7 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
     if (!isOpen || !order) return;
 
     setFaxNumber(order.company?.faxNumber || "");
-    setSentDate(new Date().toISOString().slice(0, 10));
+    setSentDate(getTodayInputDate());
     setNotes("");
     setError("");
   }, [isOpen, order]);

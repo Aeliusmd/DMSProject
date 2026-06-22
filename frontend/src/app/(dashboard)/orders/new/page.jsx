@@ -1256,9 +1256,30 @@ function ServeInfoForm({
             type="date"
           />
 
-          <NewOrderField label="Ready Date" disabled placeholder="-" />
-          <NewOrderField label="Invoice Date" disabled placeholder="-" />
-          <NewOrderField label="Xray Invoice Date" disabled placeholder="-" />
+          <NewOrderField
+            label="Ready Date"
+            name="readyDate"
+            value={formData.readyDate}
+            type="date"
+            disabled
+            placeholder="-"
+          />
+          <NewOrderField
+            label="Invoice Date"
+            name="invoiceDate"
+            value={formData.invoiceDate}
+            type="date"
+            disabled
+            placeholder="-"
+          />
+          <NewOrderField
+            label="Xray Invoice Date"
+            name="xrayInvoiceDate"
+            value={formData.xrayInvoiceDate}
+            type="date"
+            disabled
+            placeholder="-"
+          />
         </div>
 
         <div>

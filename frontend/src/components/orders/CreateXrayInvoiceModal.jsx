@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import {
   getXrayInvoiceByOrderId,
   saveXrayInvoice,
 } from "@/lib/invoices/invoiceApi";
 
 const initialFormData = {
-  xrayInvoiceDate: new Date().toISOString().slice(0, 10),
+  xrayInvoiceDate: "",
   examDate: "",
   views: "0",
   perViewAmount: "0.00",
@@ -39,7 +40,7 @@ export default function CreateXrayInvoiceModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
-      setFormData(initialFormData);
+      setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
       setErrors({});
       setSubmitError("");
     }
@@ -62,8 +63,7 @@ export default function CreateXrayInvoiceModal({
           xray?.xrayPaidEarlier ?? xray?.prepayment ?? "0.00";
 
         setFormData({
-          xrayInvoiceDate:
-            xray?.xrayInvoiceDate || initialFormData.xrayInvoiceDate,
+          xrayInvoiceDate: xray?.xrayInvoiceDate || getTodayInputDate(),
           examDate: xray?.examDate || "",
           views: xray?.views ?? initialFormData.views,
           perViewAmount: xray?.perViewAmount ?? initialFormData.perViewAmount,
@@ -73,7 +73,7 @@ export default function CreateXrayInvoiceModal({
         });
       } catch {
         if (!cancelled) {
-          setFormData(initialFormData);
+          setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
         }
       } finally {
         if (!cancelled) {

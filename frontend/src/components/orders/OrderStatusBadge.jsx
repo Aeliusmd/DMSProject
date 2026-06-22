@@ -5,6 +5,7 @@ const styles = {
   Ready: "bg-[#DBEAFE] text-[#1D4ED8]",
   Completed: "bg-[#DCFCE7] text-[#15803D]",
   Cancelled: "bg-[#FEE2E2] text-[#DC2626]",
+  Deleted: "bg-[#FEE2E2] text-[#991B1B]",
   "No Records": "bg-[#F1F5F9] text-[#334155]",
   "Write Offs": "bg-[#FEE2E2] text-[#DC2626]",
 };

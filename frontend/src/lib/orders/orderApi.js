@@ -95,6 +95,16 @@ export async function deleteOrder(id) {
   });
 }
 
+export async function cancelOrder(id, { reason }) {
+  const data = await request(`/orders/${id}/cancel`, {
+    method: "POST",
+    auth: true,
+    body: { reason },
+  });
+
+  return data?.data?.order;
+}
+
 export async function getOrderReminders(scope = "my") {
   const data = await request(`/orders/reminders?scope=${scope}`, {
     auth: true,

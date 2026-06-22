@@ -241,7 +241,10 @@ async function getActivityReport({
   search = "",
 } = {}) {
   const pool = getPool();
-  const conditions = ["f.is_active = 1"];
+  const conditions = [
+    "f.is_active = 1",
+    "o.status NOT IN ('Cancelled', 'Deleted')",
+  ];
   const params = {};
 
   if (dateFrom) {
