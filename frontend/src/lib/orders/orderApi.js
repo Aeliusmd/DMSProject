@@ -305,6 +305,16 @@ export async function mailCompletedOrder(orderId, payload = {}) {
   return data?.data || {};
 }
 
+export async function sendCopyServiceLetter(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/send-copy-letter`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
+}
+
 export async function recordOrderPickup(orderId, payload = {}) {
   const data = await request(`/orders/${orderId}/pickup`, {
     method: "POST",
