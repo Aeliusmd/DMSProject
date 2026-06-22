@@ -18,7 +18,9 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
     if (!isOpen || !order) return;
 
     setPickupPersonName("");
-    setPickupDate(new Date().toISOString().slice(0, 10));
+    setPickupDate(
+      order.deliveryDate || new Date().toISOString().slice(0, 10)
+    );
     setNotes("");
     setError("");
   }, [isOpen, order]);

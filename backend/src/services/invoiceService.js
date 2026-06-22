@@ -1314,7 +1314,7 @@ async function sendInvoices(invoiceIds = []) {
 function canDeliverInvoiceEmail(invoice) {
   if (!invoice) return false;
 
-  if (["Paid", "Written Off"].includes(invoice.status)) {
+  if (invoice.status === "Written Off") {
     return false;
   }
 

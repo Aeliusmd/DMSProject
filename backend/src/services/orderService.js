@@ -1576,7 +1576,7 @@ function resolveMedicalRecordsAttachment(order) {
   };
 }
 
-async function mailCompletedOrder(orderId, { email } = {}) {
+async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
   const normalizedId = Number(orderId);
   const recipient = trimOrNull(email);
 
@@ -1603,8 +1603,23 @@ async function mailCompletedOrder(orderId, { email } = {}) {
     );
   }
 
-  const resolvedDate =
-    toInputDate(order.delivery_date) || new Date().toISOString().slice(0, 10);
+  const pool = getPool();
+  const incomingDeliveryDate = dateOrNull(deliveryDate);
+  let resolvedDate = toInputDate(order.delivery_date);
+
+  if (incomingDeliveryDate) {
+    resolvedDate = incomingDeliveryDate;
+    await pool.execute(
+      `UPDATE orders
+       SET delivery_date = :deliveryDate, updated_at = NOW()
+       WHERE id = :orderId`,
+      { deliveryDate: incomingDeliveryDate, orderId: normalizedId }
+    );
+  }
+
+  if (!resolvedDate) {
+    throw new ApiError(400, "Delivery date is required before sending mail");
+  }
 
   const { sendOrderCompletedMail } = require("./emailService");
   const result = await sendOrderCompletedMail({
@@ -1619,7 +1634,6 @@ async function mailCompletedOrder(orderId, { email } = {}) {
     throw new ApiError(500, "Failed to send email");
   }
 
-  const pool = getPool();
   const setCnrDate =
     Number(order.certificate_no_records) && order.cnr_delivery === "email";
 

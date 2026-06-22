@@ -227,14 +227,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       if (!order?.dbId || getDeliveryStatus(order, "mail").completed) return;
 
       if (!order.hasMedicalRecords) {
-        setDeliveryError(
-          "Scan medical records before sending mail"
-        );
+        setDeliveryError("Scan medical records before sending mail");
         return;
       }
 
       const email = resolveProviderEmail(order);
-      if (!email) {
+      const hasDeliveryDate = Boolean(order.deliveryDate);
+
+      if (!email || !hasDeliveryDate) {
         setSelectedMailOrder(order);
         return;
       }
@@ -244,12 +244,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       setDeliveryError("");
 
       try {
-        await mailCompletedOrder(order.dbId, { email });
-        const sentDate =
-          order.deliveryDate || new Date().toISOString().slice(0, 10);
+        const result = await mailCompletedOrder(order.dbId, { email });
+        const sentDate = result.sentDate || order.deliveryDate;
         setOrders((prev) =>
           prev.map((item) =>
-            item.dbId === order.dbId ? { ...item, mailSentDate: sentDate } : item
+            item.dbId === order.dbId
+              ? { ...item, mailSentDate: sentDate }
+              : item
           )
         );
         await fetchOrders();
@@ -261,6 +262,20 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     },
     [fetchOrders]
   );
+
+  const applyMailSentState = useCallback((order, sentDate, deliveryDate) => {
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.dbId === order.dbId
+          ? {
+              ...item,
+              mailSentDate: sentDate,
+              deliveryDate: deliveryDate || item.deliveryDate,
+            }
+          : item
+      )
+    );
+  }, []);
 
   // Refresh workflow/status changes made elsewhere when the user comes back
   // to the tab or window. No polling, so there is no idle network cost.
@@ -738,18 +753,16 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedMailOrder)}
         order={selectedMailOrder}
         onClose={() => setSelectedMailOrder(null)}
-        onSent={async ({ email }) => {
+        onSent={async ({ email, deliveryDate }) => {
           setDeliveryError("");
-          await mailCompletedOrder(selectedMailOrder.dbId, { email });
-          const sentDate =
-            selectedMailOrder.deliveryDate ||
-            new Date().toISOString().slice(0, 10);
-          setOrders((prev) =>
-            prev.map((item) =>
-              item.dbId === selectedMailOrder.dbId
-                ? { ...item, mailSentDate: sentDate }
-                : item
-            )
+          const result = await mailCompletedOrder(selectedMailOrder.dbId, {
+            email,
+            deliveryDate,
+          });
+          applyMailSentState(
+            selectedMailOrder,
+            result.sentDate,
+            deliveryDate || selectedMailOrder.deliveryDate
           );
           await fetchOrders();
         }}
@@ -765,7 +778,18 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
             pickupDate,
             notes,
           });
-          await fetchOrders({ silent: true });
+          setOrders((prev) =>
+            prev.map((item) =>
+              item.dbId === selectedPickupOrder.dbId
+                ? {
+                    ...item,
+                    deliveryDate: pickupDate,
+                    pickupPersonName,
+                  }
+                : item
+            )
+          );
+          await fetchOrders();
         }}
       />
 

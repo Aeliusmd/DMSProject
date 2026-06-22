@@ -8,13 +8,20 @@ import { resolveProviderEmail } from "@/lib/orders/deliveryActions";
 export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   const mounted = useIsClient();
   const [email, setEmail] = useState("");
+  const [deliveryDate, setDeliveryDate] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const needsEmail = order ? !resolveProviderEmail(order) : true;
+  const needsDeliveryDate = order ? !order.deliveryDate : true;
 
   useEffect(() => {
     if (!isOpen || !order) return;
 
     setEmail(resolveProviderEmail(order) || "");
+    setDeliveryDate(
+      order.deliveryDate || new Date().toISOString().slice(0, 10)
+    );
     setError("");
   }, [isOpen, order]);
 
@@ -32,14 +39,23 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   if (!mounted || !isOpen || !order) return null;
 
   const handleSubmit = async () => {
-    const trimmed = email.trim();
+    if (needsDeliveryDate && !deliveryDate) {
+      setError("Delivery date is required");
+      return;
+    }
 
-    if (!trimmed) {
+    const trimmed = needsEmail ? email.trim() : resolveProviderEmail(order);
+
+    if (needsEmail && !trimmed) {
       setError("Email is required");
       return;
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
+    if (
+      needsEmail &&
+      trimmed &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)
+    ) {
       setError("Enter a valid email address");
       return;
     }
@@ -48,7 +64,10 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
     setError("");
 
     try {
-      await onSent?.({ email: trimmed });
+      await onSent?.({
+        email: trimmed,
+        deliveryDate: needsDeliveryDate ? deliveryDate : undefined,
+      });
       onClose();
     } catch (err) {
       setError(err.message || "Failed to send email");
@@ -67,31 +86,61 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
           </p>
         </div>
 
-        <div className="px-5 py-4">
-          <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
-            Provider email
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => {
-              setEmail(e.target.value);
-              setError("");
-            }}
-            placeholder="Enter email address"
-            className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
-              error
-                ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-                : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-            }`}
-          />
-          {error ? (
-            <p className="mt-2 text-[11px] text-red-500">{error}</p>
-          ) : (
-            <p className="mt-2 text-[10px] text-[#94A3B8]">
-              Sends a records-ready notification to the provider.
-            </p>
+        <div className="space-y-3 px-5 py-4">
+          {needsDeliveryDate && (
+            <div>
+              <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
+                Delivery date
+              </label>
+              <input
+                type="date"
+                value={deliveryDate}
+                onChange={(e) => {
+                  setDeliveryDate(e.target.value);
+                  setError("");
+                }}
+                className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              />
+              <p className="mt-2 text-[10px] text-[#94A3B8]">
+                Saved as the order delivery date and used as the mail sent date.
+              </p>
+            </div>
           )}
+
+          {needsEmail && (
+            <div>
+              <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
+                Provider email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError("");
+                }}
+                placeholder="Enter email address"
+                className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                  error
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+            </div>
+          )}
+
+          {!needsEmail && !needsDeliveryDate ? null : !needsEmail ? (
+            <p className="text-[10px] text-[#94A3B8]">
+              Medical records PDF will be attached to the email.
+            </p>
+          ) : needsEmail && !needsDeliveryDate ? (
+            <p className="text-[10px] text-[#94A3B8]">
+              Sends a records-ready notification with the medical records PDF
+              attached.
+            </p>
+          ) : null}
+
+          {error ? <p className="text-[11px] text-red-500">{error}</p> : null}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-[#E2E8F0] px-5 py-4">
