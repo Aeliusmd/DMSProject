@@ -28,13 +28,9 @@ import { getTodayInputDate } from "@/lib/utils/dateUtils";
 const initialFormData = {
   invoiceDate: "",
   serviceDate: "",
-  servedAmount: "10.00",
-  serviceFee: "0.00",
   custodianFee: "0.00",
   xrayFee: "0.00",
-  mileage: "0.00",
-  parking: "0.00",
-  other: "0.00",
+  storageFee: "0.00",
   pages: "0",
   perPageAmount: "0.00",
   clericalTimeHours: "0",
@@ -191,16 +187,12 @@ export default function CreateInvoiceModal({
 
   const totalAmount = useMemo(() => {
     return (
-      toNumber(formData.servedAmount) +
-      fullFees.serviceFee +
       fullFees.custodianFee +
       fullFees.xrayFee +
-      toNumber(formData.mileage) +
-      toNumber(formData.parking) +
-      toNumber(formData.other) +
       pagesAmount +
       clericalAmount +
-      toNumber(formData.shippingHandling)
+      toNumber(formData.shippingHandling) +
+      fullFees.storageFee
     );
   }, [formData, fullFees, pagesAmount, clericalAmount]);
 
@@ -360,8 +352,10 @@ export default function CreateInvoiceModal({
 
     try {
       const invoiceId = order.invoiceId || order.invoice?.invoiceId;
+      const completingXrayOnlyStub =
+        !isEditMode && invoiceId && order.invoice?.createOnly;
 
-      if (isEditMode && invoiceId) {
+      if ((isEditMode || completingXrayOnlyStub) && invoiceId) {
         await updateInvoice(invoiceId, payload);
       } else {
         await createInvoice(payload);
@@ -377,9 +371,9 @@ export default function CreateInvoiceModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
-      <section className="flex max-h-[calc(100vh-42px)] w-full max-w-[700px] flex-col overflow-hidden rounded-[10px] bg-white shadow-2xl">
-        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-5 py-4 text-white">
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+      <section className="flex max-h-[100dvh] w-full max-w-[880px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
+        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
             type="button"
             onClick={onClose}
@@ -403,8 +397,9 @@ export default function CreateInvoiceModal({
           </p>
         </div>
 
-        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5 py-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-3 sm:px-5">
+          <div className="-mx-1 overflow-x-auto px-1">
+            <div className="flex min-w-max flex-wrap items-center gap-x-5 gap-y-2 text-[11px] sm:min-w-0">
             <MetaItem label="# ID" value={order.id || order.orderNo} />
             <MetaItem
               label=""
@@ -426,11 +421,12 @@ export default function CreateInvoiceModal({
             )}
             <MetaItem label="Status" value={invoiceStatus} />
             {rushLevel && <MetaItem label="Rush Level" value={rushLevel} />}
+            </div>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_170px]">
-          <div className="min-h-0 overflow-y-auto px-5 py-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_200px]">
+          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DateField
                 label="Invoice Date"
@@ -462,64 +458,26 @@ export default function CreateInvoiceModal({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <MoneyField
-                label="Served Amount"
-                name="servedAmount"
-                value={formData.servedAmount}
-                onChange={handleMoneyChange}
-                error={errors.servedAmount}
-              />
-
-              <MoneyField
-                label="Service Fee"
-                name="serviceFee"
-                value={formData.serviceFee}
-                onChange={handleMoneyChange}
-                error={errors.serviceFee}
-              />
-
-              <MoneyField
                 label="Custodian Fee"
                 name="custodianFee"
                 value={formData.custodianFee}
                 onChange={handleMoneyChange}
                 error={errors.custodianFee}
                 paymentHint={paymentHints.custodian}
-               
               />
-            </div>
 
-            <SectionTitle title="Additional Charges" />
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <ReadOnlyMoneyField
                 label="X-Ray Fee"
                 value={toNumber(formData.xrayFee)}
                 paymentHint={paymentHints.xray}
-              
               />
 
               <MoneyField
-                label="Mileage"
-                name="mileage"
-                value={formData.mileage}
+                label="Storage Fee"
+                name="storageFee"
+                value={formData.storageFee}
                 onChange={handleMoneyChange}
-                error={errors.mileage}
-              />
-
-              <MoneyField
-                label="Parking"
-                name="parking"
-                value={formData.parking}
-                onChange={handleMoneyChange}
-                error={errors.parking}
-              />
-
-              <MoneyField
-                label="Other"
-                name="other"
-                value={formData.other}
-                onChange={handleMoneyChange}
-                error={errors.other}
+                error={errors.storageFee}
               />
             </div>
 
@@ -616,20 +574,12 @@ export default function CreateInvoiceModal({
             </div>
           </div>
 
-          <aside className="flex min-h-[210px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 lg:border-l lg:border-t-0">
+          <aside className="flex min-h-[210px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 md:border-l md:border-t-0 md:px-4">
             <h3 className="mb-4 text-[12px] font-semibold text-[#334155]">
               Summary
             </h3>
 
             <div className="space-y-3">
-              <SummaryRow
-                label="Served Amount"
-                value={formatMoney(toNumber(formData.servedAmount))}
-              />
-              <SummaryRow
-                label="Service Fee"
-                value={formatMoney(fullFees.serviceFee)}
-              />
               <SummaryRow
                 label="Custodian Fee"
                 value={formatMoney(fullFees.custodianFee)}
@@ -637,6 +587,10 @@ export default function CreateInvoiceModal({
               <SummaryRow
                 label="X-Ray Fee"
                 value={formatMoney(fullFees.xrayFee)}
+              />
+              <SummaryRow
+                label="Storage Fee"
+                value={formatMoney(fullFees.storageFee)}
               />
               <SummaryRow label="Pages" value={formatMoney(pagesAmount)} />
               <SummaryRow
@@ -742,13 +696,9 @@ function getInitialInvoiceFormData(order, isEditMode) {
     ...initialFormData,
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
     serviceDate: toDateInput(invoice.sentDateRaw || invoice.sentDate) || "",
-    servedAmount: invoice.servedAmount || "0.00",
-    serviceFee: invoice.serviceFee || "0.00",
     custodianFee: invoice.custodianFee || "0.00",
     xrayFee: "0.00",
-    mileage: invoice.mileage || "0.00",
-    parking: invoice.parking || "0.00",
-    other: invoice.other || "0.00",
+    storageFee: invoice.storageFee || invoice.other || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
     clericalTimeHours: invoice.clericalTimeHours || "0",
@@ -768,13 +718,9 @@ function mapInvoiceToFormData(invoice, order) {
   return {
     invoiceDate: invoice.invoiceDate || initialFormData.invoiceDate,
     serviceDate: invoice.serviceDate || "",
-    servedAmount: invoice.servedAmount || "0.00",
-    serviceFee: invoice.serviceFee || "0.00",
     custodianFee: invoice.custodianFee || "0.00",
     xrayFee: "0.00",
-    mileage: invoice.mileage || "0.00",
-    parking: invoice.parking || "0.00",
-    other: invoice.other || "0.00",
+    storageFee: invoice.storageFee || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
     clericalTimeHours: invoice.clericalTimeHours || "0",
@@ -1009,12 +955,8 @@ function validateInvoiceForm(data) {
   }
 
   const moneyFields = [
-    "servedAmount",
-    "serviceFee",
     "custodianFee",
-    "mileage",
-    "parking",
-    "other",
+    "storageFee",
     "perPageAmount",
     "clericalHourlyRate",
     "shippingHandling",

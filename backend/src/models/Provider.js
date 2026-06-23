@@ -80,6 +80,26 @@ class Provider {
 
     return result.insertId;
   }
+
+  static async update(connection, id, data) {
+    const db = connection || getPool();
+
+    await db.execute(
+      `UPDATE providers
+       SET company_name = :companyName,
+           address = :address,
+           zip_code = :zipCode,
+           city = :city,
+           state = :state,
+           phone = :phone,
+           fax = :fax,
+           email = :email,
+           updated_at = NOW()
+       WHERE id = :id
+         AND is_active = 1`,
+      { ...data, id }
+    );
+  }
 }
 
 module.exports = Provider;

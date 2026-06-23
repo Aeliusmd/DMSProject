@@ -26,6 +26,7 @@ export default function InvoiceReportTable({
   invoiceGroups = [],
   loading = false,
   onRefresh,
+  onSent,
 }) {
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
@@ -101,6 +102,7 @@ export default function InvoiceReportTable({
         [group.company]: [],
       }));
       onRefresh?.();
+      onSent?.();
     } catch (error) {
       setSendError(error?.message || "Failed to send invoices");
       console.error("Failed to send invoices:", error);

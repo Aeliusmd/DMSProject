@@ -37,7 +37,7 @@ import {
 
 import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
-import { getProviders } from "@/lib/providers/providerApi";
+import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { API_BASE_URL } from "@/config/api";
 
@@ -52,6 +52,16 @@ function subpoenaFileName(path) {
   if (!path) return "Subpoena";
   return path.split("/").pop() || "Subpoena";
 }
+
+const PROVIDER_SYNC_FIELDS = new Set([
+  "address",
+  "zip",
+  "city",
+  "state",
+  "phone",
+  "fax",
+  "email",
+]);
 
 const initialFormData = {
   facility: "",
@@ -127,7 +137,6 @@ const initialFormData = {
   prepaymentDate: "",
   prepaymentPaid: "",
   prepaymentMemo: "",
-  subpoenaPrepaymentAmount: "",
 
   custodianCheck: "",
   custodianDate: "",
@@ -276,6 +285,43 @@ function NewOrderPageContent() {
       }));
     }
   }, [panel, isEditMode]);
+
+  useEffect(() => {
+    if (!isEditMode || !orderId) return undefined;
+
+    let active = true;
+
+    async function refreshInvoiceFees() {
+      try {
+        const order = await getOrder(orderId);
+        if (!active || !order) return;
+
+        setFormData((prev) => ({
+          ...prev,
+          invoiceFees: order.invoiceFees || prev.invoiceFees,
+        }));
+      } catch {
+        // Payment charges can still use the last loaded invoice snapshot.
+      }
+    }
+
+    if (panel === "payment") {
+      refreshInvoiceFees();
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && panel === "payment") {
+        refreshInvoiceFees();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [isEditMode, orderId, panel]);
 
   useEffect(() => {
     if (!isEditMode || !orderId) {
@@ -441,6 +487,42 @@ function NewOrderPageContent() {
       ...prev,
       [name]: true,
     }));
+
+    if (PROVIDER_SYNC_FIELDS.has(name)) {
+      setFormData((prev) => {
+        syncProviderFromForm(prev);
+        return prev;
+      });
+    }
+  };
+
+  const syncProviderFromForm = async (data) => {
+    const providerId = Number(data.providerId);
+
+    if (!Number.isFinite(providerId) || providerId <= 0) return;
+    if (!(`${data.serveCompanyName || ""}`.trim())) return;
+
+    try {
+      await updateProvider(providerId, {
+        companyName: data.serveCompanyName,
+        address: data.address,
+        zip: data.zip,
+        city: data.city,
+        state: data.state,
+        phone: data.phone,
+        fax: data.fax,
+        email: data.email,
+      });
+    } catch {
+      // Provider is still synced when the order is saved.
+    }
+  };
+
+  const handleProviderBlur = () => {
+    setFormData((prev) => {
+      syncProviderFromForm(prev);
+      return prev;
+    });
   };
 
   const getError = (name) => {
@@ -754,6 +836,7 @@ function NewOrderPageContent() {
               saveError={saveError}
               onProviderInput={handleProviderInput}
               onProviderSelect={handleProviderSelect}
+              onProviderBlur={handleProviderBlur}
               extractionMeta={extractionMeta}
             />
           </CollapsibleOrderPanel>
@@ -1127,6 +1210,7 @@ function ServeInfoForm({
   saveError = "",
   onProviderInput,
   onProviderSelect,
+  onProviderBlur,
   extractionMeta = {},
 }) {
   return (
@@ -1172,6 +1256,7 @@ function ServeInfoForm({
         providerId={formData.providerId}
         onInputChange={onProviderInput}
         onSelect={onProviderSelect}
+        onBlur={onProviderBlur}
         required
         error={getError("serveCompanyName")}
         hint="Search existing providers or type a new company name"
@@ -1484,19 +1569,7 @@ import {
 
 function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false }) {
   const invoiceFees = formData.invoiceFees;
-  const hasSubpoenaUploaded = Boolean(
-    formData.subpoenaFile ||
-      formData.subpoenaExtractId ||
-      formData.subpoenaStoragePath ||
-      formData.subpoenaUrl
-  );
-  const subpoenaAmount = parsePaymentAmount(
-    formData.subpoenaPrepaymentAmount || formData.prepaymentPaid
-  );
-  const prepaymentCharge =
-    subpoenaAmount > 0
-      ? subpoenaAmount
-      : getPaymentChargeForType("prepayment", invoiceFees);
+  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
   const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
   const xrayCharge = getPaymentChargeForType("xray", invoiceFees);
 
@@ -1511,8 +1584,6 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         chargeAmount={prepaymentCharge}
         paidAmount={formData.prepaymentPaid}
         showPaidField
-        chargeAmountFieldName="subpoenaPrepaymentAmount"
-        chargeAmountLabel="Prepayment Amount"
         theme="green"
         prefix="prepayment"
         formData={formData}
@@ -1525,9 +1596,7 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         title="Custodian Charge"
         chargeAmount={custodianCharge}
         paidAmount={formData.custodianPaid}
-        showPaidField={isEditMode || !hasSubpoenaUploaded}
-        dueReadOnly={false}
-        paidReadOnly={false}
+        showPaidField
         theme="purple"
         prefix="custodian"
         formData={formData}
@@ -1540,9 +1609,7 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         title="Xray Charge"
         chargeAmount={xrayCharge}
         paidAmount={formData.xrayPaid}
-        showPaidField={isEditMode || !hasSubpoenaUploaded}
-        dueReadOnly={false}
-        paidReadOnly={false}
+        showPaidField
         theme="blue"
         prefix="xray"
         formData={formData}

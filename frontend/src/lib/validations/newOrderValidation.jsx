@@ -24,7 +24,6 @@ export const numericOnlyFields = [
 ];
 
 export const moneyFields = [
-  "subpoenaPrepaymentAmount",
   "prepaymentPaid",
   "custodianPaid",
   "xrayPaid",

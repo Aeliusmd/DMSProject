@@ -16,3 +16,8 @@ exports.getById = asyncHandler(async (req, res) => {
   const provider = await providerService.getProviderById(req.params.id);
   return ApiResponse.success(res, { provider });
 });
+
+exports.update = asyncHandler(async (req, res) => {
+  const provider = await providerService.updateProvider(req.params.id, req.body);
+  return ApiResponse.success(res, { provider });
+});

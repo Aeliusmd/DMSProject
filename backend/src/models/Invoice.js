@@ -196,7 +196,7 @@ class Invoice {
          served_amount, service_fee, custodian_fee, xray_fee,
          mileage, parking, other_fee,
          page_count, per_page_amount,
-         clerical_time_hours, clerical_hourly_rate, shipping_handling,
+         clerical_time_hours, clerical_hourly_rate, shipping_handling, storage_fee,
          total_amount, amount_paid, amount_due,
          notes, send_order_details, is_rush_order, recipient_emails, created_by,
          created_at, updated_at
@@ -206,7 +206,7 @@ class Invoice {
          :servedAmount, :serviceFee, :custodianFee, :xrayFee,
          :mileage, :parking, :otherFee,
          :pageCount, :perPageAmount,
-         :clericalTimeHours, :clericalHourlyRate, :shippingHandling,
+         :clericalTimeHours, :clericalHourlyRate, :shippingHandling, :storageFee,
          :totalAmount, :amountPaid, :amountDue,
          :notes, :sendOrderDetails, :isRushOrder, :recipientEmails, :createdBy,
          NOW(), NOW()
@@ -238,6 +238,7 @@ class Invoice {
          clerical_time_hours = :clericalTimeHours,
          clerical_hourly_rate = :clericalHourlyRate,
          shipping_handling = :shippingHandling,
+         storage_fee = :storageFee,
          total_amount = :totalAmount,
          amount_paid = :amountPaid,
          amount_due = :amountDue,

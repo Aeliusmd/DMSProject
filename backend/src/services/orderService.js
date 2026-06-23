@@ -8,6 +8,7 @@ const path = require("path");
 const Order = require("../models/Order");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
+const { buildProviderPayload } = require("./providerService");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -188,6 +189,51 @@ function hasDoi(row) {
   return Boolean(formatDoiDisplay(row));
 }
 
+function hasInjuryPayload(data = {}) {
+  const injuryType = trimOrNull(data.injuryType);
+  if (!injuryType) return false;
+
+  if (injuryType === "specific") {
+    return Boolean(trimOrNull(data.injuryDate));
+  }
+
+  return Boolean(trimOrNull(data.injuryDateBegin) || trimOrNull(data.injuryDateEnd));
+}
+
+function applyInjuryFromExtract(data = {}, extract = null) {
+  if (!extract || hasInjuryPayload(data)) {
+    return data;
+  }
+
+  const {
+    resolveExtractionSchema,
+    mapSchemaToExtractRow,
+  } = require("../utils/extractionMapper");
+
+  let injuryDate = extract.date_of_injury ? toInputDate(extract.date_of_injury) : "";
+
+  if (!injuryDate && extract.raw_extraction) {
+    const raw =
+      typeof extract.raw_extraction === "string"
+        ? JSON.parse(extract.raw_extraction || "{}")
+        : extract.raw_extraction;
+    const mapped = mapSchemaToExtractRow(resolveExtractionSchema(raw));
+    injuryDate = mapped.date_of_injury ? toInputDate(mapped.date_of_injury) : "";
+  }
+
+  if (!injuryDate) {
+    return data;
+  }
+
+  return {
+    ...data,
+    injuryType: "specific",
+    injuryDate,
+    injuryDateBegin: "",
+    injuryDateEnd: "",
+  };
+}
+
 function buildInjuryDatePayload(data) {
   const injuryType = enumOrNull(data.injuryType, ALLOWED_INJURY_TYPES);
 
@@ -328,7 +374,6 @@ async function syncOrderWorkflowFromState(
   orderId,
   {
     payments = [],
-    subpoenaPrepaymentAmount = 0,
     invoiceServiceFee = 0,
     invoiceCustodianFee = 0,
   } = {}
@@ -336,10 +381,7 @@ async function syncOrderWorkflowFromState(
   const prepayment = getPrepaymentPayment(payments);
   const paidAmount = parsePaymentAmount(prepayment?.amount);
 
-  let chargeAmount = parsePaymentAmount(subpoenaPrepaymentAmount);
-  if (chargeAmount <= 0) {
-    chargeAmount = parsePaymentAmount(invoiceServiceFee);
-  }
+  let chargeAmount = parsePaymentAmount(invoiceServiceFee);
   if (chargeAmount <= 0) {
     chargeAmount = DEFAULT_PREPAYMENT_CHARGE;
   }
@@ -350,6 +392,14 @@ async function syncOrderWorkflowFromState(
       "Serve",
       "complete",
       new Date(),
+      connection
+    );
+  } else {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Serve",
+      "pending",
+      null,
       connection
     );
   }
@@ -367,6 +417,14 @@ async function syncOrderWorkflowFromState(
       "Custodian",
       "complete",
       new Date(),
+      connection
+    );
+  } else {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Custodian",
+      "pending",
+      null,
       connection
     );
   }
@@ -750,8 +808,7 @@ function mapOrderDetail(
   workflowStages = [],
   notes = [],
   invoiceRow = null,
-  xrayRow = null,
-  subpoenaPrepaymentDue = 0
+  xrayRow = null
 ) {
   return {
     id: row.id,
@@ -846,8 +903,6 @@ function mapOrderDetail(
     ...mapPaymentsToForm(payments),
     ...invoiceService.mapOrderPaymentsSummary(payments),
     invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow),
-    subpoenaPrepaymentAmount:
-      subpoenaPrepaymentDue > 0 ? String(subpoenaPrepaymentDue) : "",
   };
 }
 
@@ -934,28 +989,6 @@ async function getOrderStats() {
   };
 }
 
-async function resolveSubpoenaPrepaymentDue(orderId, invoiceRow) {
-  if (invoiceRow) {
-    const fee = Number(invoiceRow.service_fee);
-    if (Number.isFinite(fee) && fee > 0) {
-      return fee;
-    }
-  }
-
-  const pool = getPool();
-  const [rows] = await pool.execute(
-    `SELECT amount
-     FROM batch_scan_extracts
-     WHERE order_id = :orderId AND is_deleted = 0
-     ORDER BY id DESC
-     LIMIT 1`,
-    { orderId }
-  );
-
-  const amount = Number(rows[0]?.amount);
-  return Number.isFinite(amount) && amount > 0 ? amount : 0;
-}
-
 async function getOrderById(id) {
   const order = await Order.findById(id);
 
@@ -969,9 +1002,6 @@ async function getOrderById(id) {
   const notes = await Order.findNotesByOrderId(order.id);
   const invoiceRow = await Invoice.findByOrderId(order.id);
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
-  const subpoenaPrepaymentDue = order.subpoena_storage_path
-    ? await resolveSubpoenaPrepaymentDue(order.id, invoiceRow)
-    : 0;
 
   return mapOrderDetail(
     order,
@@ -980,8 +1010,7 @@ async function getOrderById(id) {
     workflowStages,
     notes,
     invoiceRow,
-    xrayRow,
-    subpoenaPrepaymentDue
+    xrayRow
   );
 }
 
@@ -1312,31 +1341,28 @@ async function resolveProviderId(connection, data) {
     return data.providerId ? Number(data.providerId) : null;
   }
 
+  let providerPayload;
+  try {
+    providerPayload = buildProviderPayload(data);
+  } catch {
+    return data.providerId ? Number(data.providerId) : null;
+  }
+
   if (data.providerId) {
     const selected = await Provider.findById(Number(data.providerId), connection);
-    if (
-      selected &&
-      selected.company_name.toLowerCase().trim() === companyName.toLowerCase()
-    ) {
+    if (selected) {
+      await Provider.update(connection, selected.id, providerPayload);
       return selected.id;
     }
   }
 
   const existing = await Provider.findByCompanyName(companyName, connection);
   if (existing) {
+    await Provider.update(connection, existing.id, providerPayload);
     return existing.id;
   }
 
-  return Provider.create(connection, {
-    companyName,
-    address: trimOrNull(data.address),
-    zipCode: trimOrNull(data.zip),
-    city: trimOrNull(data.city),
-    state: trimOrNull(data.state),
-    phone: trimOrNull(data.phone),
-    fax: trimOrNull(data.fax),
-    email: trimOrNull(data.email),
-  });
+  return Provider.create(connection, providerPayload);
 }
 
 async function createOrder(data, actorId, files) {
@@ -1353,18 +1379,19 @@ async function createOrder(data, actorId, files) {
   const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
   const subpoenaExtractId = Number(data.subpoenaExtractId) || null;
 
+  let linkedExtract = null;
   let subpoenaStoragePath = null;
   if (subpoenaExtractId) {
-    const extract = await batchScanRepository.getExtractById(subpoenaExtractId);
-    if (!extract) {
+    linkedExtract = await batchScanRepository.getExtractById(subpoenaExtractId);
+    if (!linkedExtract) {
       throw new ApiError(400, "Subpoena extract not found");
     }
-    if (extract.is_processed) {
+    if (linkedExtract.is_processed) {
       throw new ApiError(409, "This subpoena extract was already processed into an order");
     }
     try {
       subpoenaStoragePath = fileStorage.archiveBatchScanSubpoenaToProcessed(
-        extract.storage_path,
+        linkedExtract.storage_path,
         orderNumber
       );
     } catch (error) {
@@ -1381,10 +1408,11 @@ async function createOrder(data, actorId, files) {
     await connection.beginTransaction();
 
     const providerId = await resolveProviderId(connection, data);
-    const payload = buildOrderDbPayload({ ...data, providerId });
+    const payload = buildOrderDbPayload(
+      applyInjuryFromExtract({ ...data, providerId }, linkedExtract)
+    );
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
-    const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     const orderId = await Order.create(connection, {
       ...payload,
@@ -1418,7 +1446,6 @@ async function createOrder(data, actorId, files) {
 
     await syncOrderWorkflowFromState(connection, orderId, {
       payments,
-      subpoenaPrepaymentAmount,
       invoiceServiceFee: 0,
       invoiceCustodianFee: 0,
     });
@@ -1469,7 +1496,6 @@ async function updateOrder(id, data, actorId, files) {
     const payload = buildOrderDbPayload({ ...data, providerId });
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
-    const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     await Order.update(connection, existing.id, {
       ...payload,
@@ -1495,13 +1521,11 @@ async function updateOrder(id, data, actorId, files) {
     });
 
     const invoiceRow = await Invoice.findByOrderId(existing.id);
-    const invoiceServiceFee = invoiceRow ? Number(invoiceRow.service_fee) : 0;
     const invoiceCustodianFee = invoiceRow ? Number(invoiceRow.custodian_fee) : 0;
 
     await syncOrderWorkflowFromState(connection, existing.id, {
       payments,
-      subpoenaPrepaymentAmount,
-      invoiceServiceFee,
+      invoiceServiceFee: 0,
       invoiceCustodianFee,
     });
 
