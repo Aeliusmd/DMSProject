@@ -118,6 +118,15 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     errors.injuryDate = "Injury date is required";
   }
 
+  if (
+    data.certificateNoRecords &&
+    data.cnrDelivery &&
+    ["email", "fax", "pickup"].includes(data.cnrDelivery) &&
+    !data.cnrDateSent
+  ) {
+    errors.cnrDateSent = "Date is required for the selected delivery method";
+  }
+
   return errors;
 }
 

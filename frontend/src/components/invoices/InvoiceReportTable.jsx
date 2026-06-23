@@ -4,7 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
-import { sendInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
+import {
+  sendInvoices,
+  sendXrayInvoices,
+  writeOffInvoices as submitWriteOffInvoices,
+} from "@/lib/invoices/invoiceApi";
+import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import { canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
 
 function buildWriteOffInvoice(group, row) {
@@ -27,6 +32,8 @@ export default function InvoiceReportTable({
   loading = false,
   onRefresh,
   onSent,
+  invoiceType = "invoice",
+  enableWriteOff = true,
 }) {
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
@@ -90,13 +97,21 @@ export default function InvoiceReportTable({
       .map((row) => Number(row.invoiceId))
       .filter((id) => Number.isFinite(id) && id > 0);
 
-    if (!invoiceIds.length) return;
+    const orderIds = selectedInvoiceRows
+      .map((row) => Number(row.orderId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (invoiceType === "xray" ? !orderIds.length : !invoiceIds.length) return;
 
     setSending(true);
     setSendError("");
 
     try {
-      await sendInvoices(invoiceIds);
+      if (invoiceType === "xray") {
+        await sendXrayInvoices(orderIds);
+      } else {
+        await sendInvoices(invoiceIds);
+      }
       setSelectedRows((prev) => ({
         ...prev,
         [group.company]: [],
@@ -241,6 +256,7 @@ export default function InvoiceReportTable({
                     onWriteoffInvoice={handleWriteoffInvoice}
                     onOpenInvoiceModal={handleOpenInvoiceModal}
                     onOpenSingleWriteOffModal={handleOpenSingleWriteOffModal}
+                    enableWriteOff={enableWriteOff}
                   />
                 );
               })}
@@ -260,20 +276,31 @@ export default function InvoiceReportTable({
         </div>
       </section>
 
-      <CreateInvoiceModal
-        isOpen={Boolean(selectedInvoiceOrder)}
-        mode="edit"
-        order={selectedInvoiceOrder}
-        onClose={() => setSelectedInvoiceOrder(null)}
-        onSaved={onRefresh}
-      />
+      {invoiceType === "xray" ? (
+        <CreateXrayInvoiceModal
+          isOpen={Boolean(selectedInvoiceOrder)}
+          order={selectedInvoiceOrder}
+          onClose={() => setSelectedInvoiceOrder(null)}
+          onSaved={onRefresh}
+        />
+      ) : (
+        <CreateInvoiceModal
+          isOpen={Boolean(selectedInvoiceOrder)}
+          mode="edit"
+          order={selectedInvoiceOrder}
+          onClose={() => setSelectedInvoiceOrder(null)}
+          onSaved={onRefresh}
+        />
+      )}
 
-      <WriteOffInvoiceModal
-        isOpen={writeOffInvoices.length > 0}
-        invoices={writeOffInvoices}
-        onClose={() => setWriteOffInvoices([])}
-        onSubmit={handleSubmitWriteOff}
-      />
+      {enableWriteOff && (
+        <WriteOffInvoiceModal
+          isOpen={writeOffInvoices.length > 0}
+          invoices={writeOffInvoices}
+          onClose={() => setWriteOffInvoices([])}
+          onSubmit={handleSubmitWriteOff}
+        />
+      )}
     </>
   );
 }
@@ -289,6 +316,7 @@ function InvoiceGroup({
   onWriteoffInvoice,
   onOpenInvoiceModal,
   onOpenSingleWriteOffModal,
+  enableWriteOff = true,
 }) {
   const hasSelected = selectedIds.length > 0;
   const hasWritableSelected = group.rows.some(
@@ -324,6 +352,7 @@ function InvoiceGroup({
           onToggleRow={onToggleRow}
           onOpenInvoiceModal={onOpenInvoiceModal}
           onOpenSingleWriteOffModal={onOpenSingleWriteOffModal}
+          enableWriteOff={enableWriteOff}
         />
       ))}
 
@@ -352,18 +381,20 @@ function InvoiceGroup({
               {sending ? "Sending..." : "Send Invoice"}
             </button>
 
-            <button
-              type="button"
-              disabled={!hasWritableSelected}
-              onClick={() => onWriteoffInvoice(group)}
-              className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
-                hasWritableSelected
-                  ? "bg-red-500 text-white hover:bg-red-600"
-                  : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
-              }`}
-            >
-              Writeoff Invoice
-            </button>
+            {enableWriteOff && (
+              <button
+                type="button"
+                disabled={!hasWritableSelected}
+                onClick={() => onWriteoffInvoice(group)}
+                className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
+                  hasWritableSelected
+                    ? "bg-red-500 text-white hover:bg-red-600"
+                    : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
+                }`}
+              >
+                Writeoff Invoice
+              </button>
+            )}
           </div>
         </td>
 
@@ -392,6 +423,7 @@ function InvoiceRow({
   onToggleRow,
   onOpenInvoiceModal,
   onOpenSingleWriteOffModal,
+  enableWriteOff = true,
 }) {
   const rowClassName = row.isWrittenOff
     ? "border-b border-[#F1F5F9] bg-white text-[#94A3B8] line-through hover:bg-[#F8FAFC]"
@@ -465,14 +497,16 @@ function InvoiceRow({
       </td>
 
       <td className="px-4 py-4 align-top text-right">
-        <button
-          type="button"
-          onClick={() => onOpenSingleWriteOffModal(group, row)}
-          disabled={!canWriteOffInvoice(row)}
-          className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Writeoff
-        </button>
+        {enableWriteOff && (
+          <button
+            type="button"
+            onClick={() => onOpenSingleWriteOffModal(group, row)}
+            disabled={!canWriteOffInvoice(row)}
+            className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Writeoff
+          </button>
+        )}
       </td>
     </tr>
   );

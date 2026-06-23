@@ -546,6 +546,10 @@ function NewOrderPageContent() {
         cnrDelivery: checked ? prev.cnrDelivery : "",
         cnrDateSent: checked ? prev.cnrDateSent : "",
         cnrMemo: checked ? prev.cnrMemo : false,
+        custodianCheck: checked ? "" : prev.custodianCheck,
+        custodianDate: checked ? "" : prev.custodianDate,
+        custodianPaid: checked ? "" : prev.custodianPaid,
+        custodianMemo: checked ? "" : prev.custodianMemo,
       }));
 
       return;
@@ -1592,18 +1596,20 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         getError={getError}
       />
 
-      <PaymentChargeCard
-        title="Custodian Charge"
-        chargeAmount={custodianCharge}
-        paidAmount={formData.custodianPaid}
-        showPaidField
-        theme="purple"
-        prefix="custodian"
-        formData={formData}
-        onChange={onChange}
-        onBlur={onBlur}
-        getError={getError}
-      />
+      {!formData.certificateNoRecords && (
+        <PaymentChargeCard
+          title="Custodian Charge"
+          chargeAmount={custodianCharge}
+          paidAmount={formData.custodianPaid}
+          showPaidField
+          theme="purple"
+          prefix="custodian"
+          formData={formData}
+          onChange={onChange}
+          onBlur={onBlur}
+          getError={getError}
+        />
+      )}
 
       <PaymentChargeCard
         title="Xray Charge"

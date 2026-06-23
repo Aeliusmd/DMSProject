@@ -10,6 +10,98 @@ const RUSH_LEVEL_3_MIN_DAYS = 21;
 /** Outstanding invoices older than this are counted as overdue */
 const OVERDUE_INVOICE_DAYS = 30;
 
+async function getStandardInvoiceFinancials(pool) {
+  const invoiceTotalSql = `
+    COALESCE(i.custodian_fee, 0)
+    + COALESCE(i.page_count, 0) * COALESCE(i.per_page_amount, 0)
+    + COALESCE(i.clerical_time_hours, 0) * COALESCE(i.clerical_hourly_rate, 0)
+    + COALESCE(i.shipping_handling, 0)
+    + COALESCE(i.storage_fee, COALESCE(i.other_fee, 0))
+  `;
+
+  const [rows] = await pool.execute(
+    `SELECT
+      COALESCE(SUM(${invoiceTotalSql}), 0) AS total_invoiced,
+      COALESCE(SUM(COALESCE(payments.paid_total, 0)), 0) AS total_paid,
+      COALESCE(SUM(
+        CASE
+          WHEN i.status NOT IN ('Paid', 'Needs Resend', 'Written Off')
+            AND GREATEST(
+              0,
+              (${invoiceTotalSql}) - COALESCE(payments.paid_total, 0) - COALESCE(i.writeoff_amount, 0)
+            ) > 0
+          THEN GREATEST(
+            0,
+            (${invoiceTotalSql}) - COALESCE(payments.paid_total, 0) - COALESCE(i.writeoff_amount, 0)
+          )
+          ELSE 0
+        END
+      ), 0) AS outstanding_total,
+      SUM(
+        CASE
+          WHEN i.status NOT IN ('Paid', 'Written Off', 'Needs Resend')
+            AND GREATEST(
+              0,
+              (${invoiceTotalSql}) - COALESCE(payments.paid_total, 0) - COALESCE(i.writeoff_amount, 0)
+            ) > 0
+            AND DATEDIFF(
+              CURDATE(),
+              DATE(COALESCE(i.sent_date, i.invoice_date))
+            ) >= :overdueDays
+          THEN 1
+          ELSE 0
+        END
+      ) AS overdue_count,
+      SUM(CASE WHEN i.status = 'Needs Resend' THEN 1 ELSE 0 END) AS needs_resend_count
+    FROM invoices i
+    LEFT JOIN (
+      SELECT order_id, SUM(amount) AS paid_total
+      FROM order_payments
+      WHERE payment_type IN ('prepayment', 'custodian')
+      GROUP BY order_id
+    ) payments ON payments.order_id = i.order_id`,
+    { overdueDays: OVERDUE_INVOICE_DAYS }
+  );
+
+  return rows[0] || {};
+}
+
+async function getXrayInvoiceFinancials(pool) {
+  const [rows] = await pool.execute(
+    `SELECT
+      COALESCE(SUM(x.payment), 0) AS total_invoiced,
+      COALESCE(SUM(COALESCE(op.amount, 0)), 0) AS total_paid,
+      COALESCE(SUM(
+        CASE
+          WHEN GREATEST(0, x.payment - COALESCE(op.amount, 0)) > 0
+          THEN GREATEST(0, x.payment - COALESCE(op.amount, 0))
+          ELSE 0
+        END
+      ), 0) AS outstanding_total,
+      SUM(
+        CASE
+          WHEN GREATEST(0, x.payment - COALESCE(op.amount, 0)) > 0
+            AND DATEDIFF(
+              CURDATE(),
+              DATE(COALESCE(x.sent_date, x.xray_invoice_date))
+            ) >= :overdueDays
+          THEN 1
+          ELSE 0
+        END
+      ) AS overdue_count,
+      SUM(CASE WHEN x.sent_date IS NOT NULL THEN 1 ELSE 0 END) AS needs_resend_count
+    FROM invoice_xray_details x
+    INNER JOIN orders o ON o.id = x.order_id
+    LEFT JOIN order_payments op
+      ON op.order_id = x.order_id
+     AND op.payment_type = 'xray'
+    WHERE o.status NOT IN ('Cancelled', 'Deleted')`,
+    { overdueDays: OVERDUE_INVOICE_DAYS }
+  );
+
+  return rows[0] || {};
+}
+
 function formatMoney(value) {
   const amount = Number(value) || 0;
   return `$${amount.toLocaleString("en-US", {
@@ -24,7 +116,7 @@ async function getDashboardStats() {
   const [
     [orderCountRows],
     [rushCountRows],
-    [financialRows],
+    financialSummary,
     [unprocessedRows],
     [facilityRows],
     [reminderRows],
@@ -44,34 +136,7 @@ async function getDashboardStats() {
          AND DATEDIFF(CURDATE(), DATE(created_at)) >= :minDays`,
       { minDays: RUSH_LEVEL_3_MIN_DAYS }
     ),
-    pool.execute(
-      `SELECT
-        COALESCE(SUM(total_amount), 0) AS total_invoiced,
-        COALESCE(SUM(amount_paid), 0) AS total_paid,
-        COALESCE(SUM(
-          CASE
-            WHEN status NOT IN ('Paid', 'Needs Resend', 'Written Off')
-              AND amount_due > 0
-            THEN amount_due
-            ELSE 0
-          END
-        ), 0) AS outstanding_total,
-        SUM(
-          CASE
-            WHEN status NOT IN ('Paid', 'Written Off', 'Needs Resend')
-              AND amount_due > 0
-              AND DATEDIFF(
-                CURDATE(),
-                DATE(COALESCE(sent_date, invoice_date))
-              ) >= :overdueDays
-            THEN 1
-            ELSE 0
-          END
-        ) AS overdue_count,
-        SUM(CASE WHEN status = 'Needs Resend' THEN 1 ELSE 0 END) AS needs_resend_count
-      FROM invoices`,
-      { overdueDays: OVERDUE_INVOICE_DAYS }
-    ),
+    Promise.all([getStandardInvoiceFinancials(pool), getXrayInvoiceFinancials(pool)]),
     pool.execute(`
       SELECT COUNT(*) AS unprocessed_count
       FROM batch_scan_extracts e
@@ -93,7 +158,24 @@ async function getDashboardStats() {
   ]);
 
   const counts = orderCountRows[0] || {};
-  const financial = financialRows[0] || {};
+  const [standardFinancial, xrayFinancial] = financialSummary;
+  const financial = {
+    total_invoiced:
+      (Number(standardFinancial?.total_invoiced) || 0) +
+      (Number(xrayFinancial?.total_invoiced) || 0),
+    total_paid:
+      (Number(standardFinancial?.total_paid) || 0) +
+      (Number(xrayFinancial?.total_paid) || 0),
+    outstanding_total:
+      (Number(standardFinancial?.outstanding_total) || 0) +
+      (Number(xrayFinancial?.outstanding_total) || 0),
+    overdue_count:
+      (Number(standardFinancial?.overdue_count) || 0) +
+      (Number(xrayFinancial?.overdue_count) || 0),
+    needs_resend_count:
+      (Number(standardFinancial?.needs_resend_count) || 0) +
+      (Number(xrayFinancial?.needs_resend_count) || 0),
+  };
   const outstanding = Number(financial.outstanding_total) || 0;
   const totalInvoiced = Number(financial.total_invoiced) || 0;
   const totalPaid = Number(financial.total_paid) || 0;

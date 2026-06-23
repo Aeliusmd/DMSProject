@@ -6,7 +6,12 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
-import { getInvoices, resendInvoices } from "@/lib/invoices/invoiceApi";
+import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
+import {
+  getInvoices,
+  resendInvoices,
+  resendXrayInvoices,
+} from "@/lib/invoices/invoiceApi";
 
 const EMPTY_SUMMARY = {
   companies: 0,
@@ -17,6 +22,7 @@ const EMPTY_SUMMARY = {
 };
 
 export default function InvoicesPage() {
+  const [invoiceCategory, setInvoiceCategory] = useState("invoice");
   const [activeTab, setActiveTab] = useState("outstanding");
   const [filters, setFilters] = useState({
     from: "",
@@ -34,29 +40,47 @@ export default function InvoicesPage() {
     summary: EMPTY_SUMMARY,
     count: 0,
   });
+  const [xrayOutstanding, setXrayOutstanding] = useState({
+    groups: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+  const [xrayResend, setXrayResend] = useState({
+    invoices: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
 
   const loadInvoices = useCallback(async () => {
     setLoading(true);
 
+    const dateFilters = {
+      dateFrom: filters.from || undefined,
+      dateTo: filters.through || undefined,
+    };
+
     try {
-      const [outstandingData, resendData] = await Promise.all([
-        getInvoices({
-          tab: "outstanding",
-          dateFrom: filters.from || undefined,
-          dateTo: filters.through || undefined,
-        }),
-        getInvoices({
-          tab: "resend",
-          dateFrom: filters.from || undefined,
-          dateTo: filters.through || undefined,
-        }),
+      const [
+        outstandingData,
+        resendData,
+        xrayOutstandingData,
+        xrayResendData,
+      ] = await Promise.all([
+        getInvoices({ ...dateFilters, tab: "outstanding", type: "invoice" }),
+        getInvoices({ ...dateFilters, tab: "resend", type: "invoice" }),
+        getInvoices({ ...dateFilters, tab: "outstanding", type: "xray" }),
+        getInvoices({ ...dateFilters, tab: "resend", type: "xray" }),
       ]);
 
       setOutstanding(outstandingData);
       setResend(resendData);
+      setXrayOutstanding(xrayOutstandingData);
+      setXrayResend(xrayResendData);
     } catch {
       setOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
       setResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
+      setXrayOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+      setXrayResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
     } finally {
       setLoading(false);
     }
@@ -87,8 +111,11 @@ export default function InvoicesPage() {
     setRefreshKey((value) => value + 1);
   };
 
+  const isXray = invoiceCategory === "xray";
+  const currentOutstanding = isXray ? xrayOutstanding : outstanding;
+  const currentResend = isXray ? xrayResend : resend;
   const activeSummary =
-    activeTab === "resend" ? resend.summary : outstanding.summary;
+    activeTab === "resend" ? currentResend.summary : currentOutstanding.summary;
 
   return (
     <DashboardShell>
@@ -105,21 +132,36 @@ export default function InvoicesPage() {
           />
         </div>
 
-        <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <InvoiceCategoryTabs
+              activeCategory={invoiceCategory}
+              onChange={(category) => {
+                setInvoiceCategory(category);
+                setActiveTab("outstanding");
+              }}
+              invoiceOutstandingCount={outstanding.count}
+              invoiceResendCount={resend.count}
+              xrayOutstandingCount={xrayOutstanding.count}
+              xrayResendCount={xrayResend.count}
+            />
+
+            <Link
+              href="/invoices/company-wise"
+              className="mb-3 inline-flex h-[34px] w-fit items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-4 text-[12px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+            >
+              <CompanyIcon />
+              View Company Wise
+            </Link>
+          </div>
+
           <InvoiceTabs
             activeTab={activeTab}
             onChange={setActiveTab}
-            outstandingCount={outstanding.count}
-            resendCount={resend.count}
+            outstandingCount={currentOutstanding.count}
+            resendCount={currentResend.count}
+            labelPrefix={isXray ? "X-Ray " : ""}
           />
-
-          <Link
-            href="/invoices/company-wise"
-            className="mb-3 inline-flex h-[34px] w-fit items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-4 text-[12px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
-          >
-            <CompanyIcon />
-            View Company Wise
-          </Link>
         </div>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(520px,650px)]">
@@ -135,16 +177,19 @@ export default function InvoicesPage() {
 
         {activeTab === "outstanding" ? (
           <InvoiceReportTable
-            invoiceGroups={outstanding.groups}
+            invoiceGroups={currentOutstanding.groups}
             loading={loading}
             onRefresh={loadInvoices}
             onSent={() => setActiveTab("resend")}
+            invoiceType={isXray ? "xray" : "invoice"}
+            enableWriteOff={!isXray}
           />
         ) : (
           <ResendInvoicesPanel
-            invoices={resend.invoices}
+            invoices={currentResend.invoices}
             loading={loading}
             onRefresh={loadInvoices}
+            invoiceType={isXray ? "xray" : "invoice"}
           />
         )}
       </div>
@@ -152,7 +197,53 @@ export default function InvoicesPage() {
   );
 }
 
-function InvoiceTabs({ activeTab, onChange, outstandingCount, resendCount }) {
+function InvoiceCategoryTabs({
+  activeCategory,
+  onChange,
+  invoiceOutstandingCount,
+  invoiceResendCount,
+  xrayOutstandingCount,
+  xrayResendCount,
+}) {
+  const invoiceTotal = invoiceOutstandingCount + invoiceResendCount;
+  const xrayTotal = xrayOutstandingCount + xrayResendCount;
+
+  return (
+    <div className="flex items-center gap-3 overflow-x-auto">
+      <button
+        type="button"
+        onClick={() => onChange("invoice")}
+        className={`whitespace-nowrap rounded-t-[8px] border-b-2 px-5 py-3 text-[13px] font-semibold transition ${
+          activeCategory === "invoice"
+            ? "border-[#0097B2] bg-[#E6F7FA] text-[#007F96]"
+            : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
+        }`}
+      >
+        Invoices ({invoiceTotal})
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onChange("xray")}
+        className={`whitespace-nowrap rounded-t-[8px] border-b-2 px-5 py-3 text-[13px] font-semibold transition ${
+          activeCategory === "xray"
+            ? "border-[#0097B2] bg-[#E6F7FA] text-[#007F96]"
+            : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
+        }`}
+      >
+        X-Ray Invoices ({xrayTotal})
+      </button>
+    </div>
+  );
+}
+
+function InvoiceTabs({
+  activeTab,
+  onChange,
+  outstandingCount,
+  resendCount,
+  labelPrefix = "",
+}) {
   return (
     <div className="flex items-center gap-3 overflow-x-auto">
       <button
@@ -164,7 +255,7 @@ function InvoiceTabs({ activeTab, onChange, outstandingCount, resendCount }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Outstanding Invoices ({outstandingCount})
+        Outstanding {labelPrefix}Invoices ({outstandingCount})
       </button>
 
       <button
@@ -176,7 +267,7 @@ function InvoiceTabs({ activeTab, onChange, outstandingCount, resendCount }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Resend Invoices ({resendCount})
+        Resend {labelPrefix}Invoices ({resendCount})
       </button>
     </div>
   );
@@ -297,7 +388,12 @@ function SummaryItem({ label, value, green = false, red = false }) {
   );
 }
 
-function ResendInvoicesPanel({ invoices, loading, onRefresh }) {
+function ResendInvoicesPanel({
+  invoices,
+  loading,
+  onRefresh,
+  invoiceType = "invoice",
+}) {
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
   const [resendingId, setResendingId] = useState(null);
@@ -326,15 +422,23 @@ function ResendInvoicesPanel({ invoices, loading, onRefresh }) {
   };
 
   const handleResendInvoice = async (invoice) => {
-    const invoiceId = Number(invoice.invoiceId || invoice.id);
+    const targetId = Number(
+      invoiceType === "xray"
+        ? invoice.orderId || invoice.invoiceId || invoice.id
+        : invoice.invoiceId || invoice.id
+    );
 
-    if (!Number.isFinite(invoiceId) || resendingId) return;
+    if (!Number.isFinite(targetId) || resendingId) return;
 
     setResendingId(invoice.id);
     setResendError("");
 
     try {
-      await resendInvoices([invoiceId]);
+      if (invoiceType === "xray") {
+        await resendXrayInvoices([targetId]);
+      } else {
+        await resendInvoices([targetId]);
+      }
       onRefresh?.();
     } catch (error) {
       setResendError(error?.message || "Failed to resend invoice");
@@ -522,13 +626,22 @@ function ResendInvoicesPanel({ invoices, loading, onRefresh }) {
         </div>
       </section>
 
-      <CreateInvoiceModal
-        isOpen={Boolean(selectedInvoiceOrder)}
-        mode="edit"
-        order={selectedInvoiceOrder}
-        onClose={() => setSelectedInvoiceOrder(null)}
-        onSaved={onRefresh}
-      />
+      {invoiceType === "xray" ? (
+        <CreateXrayInvoiceModal
+          isOpen={Boolean(selectedInvoiceOrder)}
+          order={selectedInvoiceOrder}
+          onClose={() => setSelectedInvoiceOrder(null)}
+          onSaved={onRefresh}
+        />
+      ) : (
+        <CreateInvoiceModal
+          isOpen={Boolean(selectedInvoiceOrder)}
+          mode="edit"
+          order={selectedInvoiceOrder}
+          onClose={() => setSelectedInvoiceOrder(null)}
+          onSaved={onRefresh}
+        />
+      )}
     </>
   );
 }

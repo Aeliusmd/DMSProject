@@ -6,7 +6,6 @@ import useIsClient from "@/hooks/useIsClient";
 import {
   createInvoice,
   getInvoice,
-  getXrayInvoiceByOrderId,
   updateInvoice,
 } from "@/lib/invoices/invoiceApi";
 import {
@@ -29,7 +28,6 @@ const initialFormData = {
   invoiceDate: "",
   serviceDate: "",
   custodianFee: "0.00",
-  xrayFee: "0.00",
   storageFee: "0.00",
   pages: "0",
   perPageAmount: "0.00",
@@ -84,10 +82,7 @@ export default function CreateInvoiceModal({
       setSubmitError("");
 
       try {
-        const [orderData, xrayData] = await Promise.all([
-          getOrder(order.dbId),
-          getXrayInvoiceByOrderId(order.dbId),
-        ]);
+        const orderData = await getOrder(order.dbId);
 
         if (cancelled) return;
 
@@ -98,7 +93,6 @@ export default function CreateInvoiceModal({
         const loadedPrepayment = getPaymentLineAmount(loadedPaymentLines, "prepayment");
         setPrepaymentAmount(loadedPrepayment > 0 ? loadedPrepayment.toFixed(2) : "0.00");
 
-        const xrayFee = moneyToInput(xrayData?.xray?.payment, "0.00");
         const invoiceId = order.invoiceId || order.invoice?.invoiceId;
 
         if (isEditMode && invoiceId) {
@@ -106,13 +100,7 @@ export default function CreateInvoiceModal({
           if (cancelled) return;
 
           setFormData(
-            mapInvoiceFeesToDueForm(
-              {
-                ...mapInvoiceToFormData(invoice, order),
-                xrayFee,
-              },
-              loadedPaymentLines
-            )
+            mapInvoiceFeesToDueForm(mapInvoiceToFormData(invoice, order), loadedPaymentLines)
           );
           setPersistedInvoiceMeta({
             status: invoice.status,
@@ -125,7 +113,6 @@ export default function CreateInvoiceModal({
         setPersistedInvoiceMeta(null);
         setFormData({
           ...getInitialInvoiceFormData(order, isEditMode),
-          xrayFee,
           rushOrder: Boolean(derivedRushLevel),
         });
       } catch (error) {
@@ -133,10 +120,7 @@ export default function CreateInvoiceModal({
           setSubmitError(error.message || "Failed to load invoice");
           const fallbackLines = buildPaymentLinesFromOrder(order);
           setPaymentLines(fallbackLines);
-          setFormData({
-            ...getInitialInvoiceFormData(order, isEditMode),
-            xrayFee: "0.00",
-          });
+          setFormData(getInitialInvoiceFormData(order, isEditMode));
         }
       } finally {
         if (!cancelled) {
@@ -188,7 +172,6 @@ export default function CreateInvoiceModal({
   const totalAmount = useMemo(() => {
     return (
       fullFees.custodianFee +
-      fullFees.xrayFee +
       pagesAmount +
       clericalAmount +
       toNumber(formData.shippingHandling) +
@@ -201,7 +184,6 @@ export default function CreateInvoiceModal({
       custodian: formatPaidBracket(
         getPaymentLineAmount(paymentLines, "custodian")
       ),
-      xray: formatPaidBracket(getPaymentLineAmount(paymentLines, "xray")),
     }),
     [paymentLines]
   );
@@ -211,10 +193,7 @@ export default function CreateInvoiceModal({
   }, [prepaymentAmount]);
 
   const otherAmountPaid = useMemo(() => {
-    return (
-      getPaymentLineAmount(paymentLines, "custodian") +
-      getPaymentLineAmount(paymentLines, "xray")
-    );
+    return getPaymentLineAmount(paymentLines, "custodian");
   }, [paymentLines]);
 
   const amountPaid = useMemo(() => {
@@ -456,7 +435,7 @@ export default function CreateInvoiceModal({
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MoneyField
                 label="Custodian Fee"
                 name="custodianFee"
@@ -464,12 +443,6 @@ export default function CreateInvoiceModal({
                 onChange={handleMoneyChange}
                 error={errors.custodianFee}
                 paymentHint={paymentHints.custodian}
-              />
-
-              <ReadOnlyMoneyField
-                label="X-Ray Fee"
-                value={toNumber(formData.xrayFee)}
-                paymentHint={paymentHints.xray}
               />
 
               <MoneyField
@@ -585,10 +558,6 @@ export default function CreateInvoiceModal({
                 value={formatMoney(fullFees.custodianFee)}
               />
               <SummaryRow
-                label="X-Ray Fee"
-                value={formatMoney(fullFees.xrayFee)}
-              />
-              <SummaryRow
                 label="Storage Fee"
                 value={formatMoney(fullFees.storageFee)}
               />
@@ -697,7 +666,6 @@ function getInitialInvoiceFormData(order, isEditMode) {
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
     serviceDate: toDateInput(invoice.sentDateRaw || invoice.sentDate) || "",
     custodianFee: invoice.custodianFee || "0.00",
-    xrayFee: "0.00",
     storageFee: invoice.storageFee || invoice.other || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
@@ -719,7 +687,6 @@ function mapInvoiceToFormData(invoice, order) {
     invoiceDate: invoice.invoiceDate || initialFormData.invoiceDate,
     serviceDate: invoice.serviceDate || "",
     custodianFee: invoice.custodianFee || "0.00",
-    xrayFee: "0.00",
     storageFee: invoice.storageFee || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",

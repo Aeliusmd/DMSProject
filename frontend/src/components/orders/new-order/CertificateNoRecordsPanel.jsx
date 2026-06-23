@@ -92,11 +92,19 @@ export default function CertificateNoRecordsPanel({
             />
           </div>
 
+          {getError("cnrDelivery") && (
+            <p className="mt-2 text-[11px] font-medium text-red-500">
+              {getError("cnrDelivery")}
+            </p>
+          )}
+
           <div className="mt-5">
             <NewOrderField
               label={
-                formData.cnrDelivery === "pickup"
-                  ? "Pickup date"
+                formData.cnrDelivery
+                  ? formData.cnrDelivery === "pickup"
+                    ? "Pickup date *"
+                    : "Date Sent *"
                   : "Date Sent"
               }
               name="cnrDateSent"

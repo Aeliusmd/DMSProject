@@ -33,34 +33,28 @@ export function dueMoneyInputFromFee(feeAmount, paidAmount) {
 
 export function mapInvoiceFeesToDueForm(feeFormData, paymentLines = []) {
   const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
-  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
     ...feeFormData,
     custodianFee: dueMoneyInputFromFee(feeFormData.custodianFee, custodianPaid),
-    xrayFee: dueMoneyInputFromFee(feeFormData.xrayFee, xrayPaid),
   };
 }
 
 export function mapDueFormToInvoiceFees(formData, paymentLines = []) {
   const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
-  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
     ...formData,
     custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid).toFixed(2),
-    xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid).toFixed(2),
     storageFee: parsePaymentAmount(formData.storageFee).toFixed(2),
   };
 }
 
 export function resolveFullFeeAmounts(formData, paymentLines = []) {
   const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
-  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
     custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid),
-    xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid),
     storageFee: parsePaymentAmount(formData.storageFee),
   };
 }
@@ -81,13 +75,8 @@ export function formatPaymentDue(chargeAmount, paidValue, options = {}) {
 }
 
 export function getPaymentChargeForType(type, invoiceFees = {}) {
-  if (invoiceFees?.hasInvoice) {
-    if (type === "custodian") {
-      return parsePaymentAmount(invoiceFees.custodianFee);
-    }
-    if (type === "xray") {
-      return parsePaymentAmount(invoiceFees.xrayFee);
-    }
+  if (type === "custodian" && invoiceFees?.hasInvoice) {
+    return parsePaymentAmount(invoiceFees.custodianFee);
   }
 
   if (type === "xray" && invoiceFees?.hasXrayInvoice) {

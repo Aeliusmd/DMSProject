@@ -41,9 +41,12 @@ const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const DEFAULT_PREPAYMENT_CHARGE = 15;
 const DEFAULT_CUSTODIAN_CHARGE = 15;
 
+/** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
+const RUSH_READY_MIN_DAYS = 14;
+
 const STATUS_FILTER_MAP = {
   active: "Active",
-  ready: "Ready to Pickup",
+  ready_pickup: "Ready to Pickup",
   completed: "Completed",
   cancelled: "Cancelled",
   deleted: "Deleted",
@@ -52,6 +55,23 @@ const STATUS_FILTER_MAP = {
 
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
 const ALLOWED_CNR_DELIVERY = ["email", "fax", "pickup"];
+
+function isCnrOrder(data = {}) {
+  return Boolean(data.certificateNoRecords || data.certificate_no_records);
+}
+
+function assertValidCnrDeliveryDate(data = {}) {
+  if (!isCnrOrder(data)) {
+    return;
+  }
+
+  if (
+    ALLOWED_CNR_DELIVERY.includes(data.cnrDelivery) &&
+    !dateOrNull(data.cnrDateSent)
+  ) {
+    throw new ApiError(400, "CNR date is required for the selected delivery method");
+  }
+}
 
 const PAYMENT_PREFIXES = ["prepayment", "custodian", "xray"];
 
@@ -376,6 +396,7 @@ async function syncOrderWorkflowFromState(
     payments = [],
     invoiceServiceFee = 0,
     invoiceCustodianFee = 0,
+    skipCustodian = false,
   } = {}
 ) {
   const prepayment = getPrepaymentPayment(payments);
@@ -411,22 +432,24 @@ async function syncOrderWorkflowFromState(
     custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
   }
 
-  if (custodianCharge > 0 && custodianPaid >= custodianCharge) {
-    await Order.upsertWorkflowStage(
-      orderId,
-      "Custodian",
-      "complete",
-      new Date(),
-      connection
-    );
-  } else {
-    await Order.upsertWorkflowStage(
-      orderId,
-      "Custodian",
-      "pending",
-      null,
-      connection
-    );
+  if (!skipCustodian) {
+    if (custodianCharge > 0 && custodianPaid >= custodianCharge) {
+      await Order.upsertWorkflowStage(
+        orderId,
+        "Custodian",
+        "complete",
+        new Date(),
+        connection
+      );
+    } else {
+      await Order.upsertWorkflowStage(
+        orderId,
+        "Custodian",
+        "pending",
+        null,
+        connection
+      );
+    }
   }
 }
 
@@ -441,7 +464,11 @@ async function markOrderWorkflowSent(orderId, connection = null) {
 }
 
 function collectPayments(data) {
-  return PAYMENT_PREFIXES.map((prefix) => {
+  const prefixes = isCnrOrder(data)
+    ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
+    : PAYMENT_PREFIXES;
+
+  return prefixes.map((prefix) => {
     const checkNumber = trimOrNull(data[`${prefix}Check`]);
     const paymentDate = dateOrNull(data[`${prefix}Date`]);
     const rawAmount = trimOrNull(data[`${prefix}Paid`]);
@@ -494,6 +521,19 @@ function mapPaymentsToForm(payments = []) {
   });
 
   return formFields;
+}
+
+function deriveDisplayOrderStatus(status, createdAt) {
+  if (status === "Ready" || status === "Ready to Pickup") {
+    return status;
+  }
+
+  const rush = calculateOrderRushLevel(createdAt);
+  if (status === "Active" && rush.level >= 2) {
+    return "Ready";
+  }
+
+  return status || "Active";
 }
 
 function deriveFilterStatus(status) {
@@ -572,6 +612,8 @@ function buildRecordsBlock(row) {
   if (row.specific_doctor) lines.push(row.specific_doctor);
 
   const medicalRecordsUrl = buildSubpoenaUrl(row.medical_records_storage_path);
+  const hasCnr = Boolean(Number(row.certificate_no_records));
+  const cnrReason = trimOrNull(row.cnr_reason) || "";
 
   return {
     title,
@@ -579,6 +621,13 @@ function buildRecordsBlock(row) {
     links: medicalRecordsUrl ? ["View Medical Records"] : [],
     hasMedicalRecords: Boolean(row.medical_records_storage_path),
     medicalRecordsUrl,
+    cnrNote: hasCnr
+      ? {
+          label: Boolean(Number(row.cnr_memo)) ? "Memo" : "CNR Note",
+          text: cnrReason,
+          hasNote: true,
+        }
+      : null,
   };
 }
 
@@ -613,6 +662,7 @@ function mapOrderListRow(
     facilityInfo: buildFacilityBlock(row),
     year: orderYear,
     status: row.status,
+    displayStatus: deriveDisplayOrderStatus(row.status, row.created_at),
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
@@ -653,6 +703,8 @@ function mapOrderListRow(
       orderPayments
     ),
     certificateNoRecords: Boolean(Number(row.certificate_no_records)),
+    cnrReason: row.cnr_reason || "",
+    cnrMemo: Boolean(Number(row.cnr_memo)),
     cnrDelivery: row.cnr_delivery || "",
     mailSentDate: toInputDate(row.ready_date),
     readyDate: toInputDate(row.ready_date),
@@ -913,7 +965,9 @@ async function getAllOrders(query = {}) {
     filters.facilityId = Number(query.facility);
   }
 
-  if (query.status && STATUS_FILTER_MAP[query.status]) {
+  if (query.status === "ready") {
+    filters.readyFilter = true;
+  } else if (query.status && STATUS_FILTER_MAP[query.status]) {
     filters.status = STATUS_FILTER_MAP[query.status];
   }
 
@@ -1366,6 +1420,8 @@ async function resolveProviderId(connection, data) {
 }
 
 async function createOrder(data, actorId, files) {
+  assertValidCnrDeliveryDate(data);
+
   const facility = await Facility.findById(Number(data.facility));
 
   if (!facility) {
@@ -1448,6 +1504,7 @@ async function createOrder(data, actorId, files) {
       payments,
       invoiceServiceFee: 0,
       invoiceCustodianFee: 0,
+      skipCustodian: isCnrOrder(data),
     });
 
     await connection.commit();
@@ -1462,6 +1519,8 @@ async function createOrder(data, actorId, files) {
 }
 
 async function updateOrder(id, data, actorId, files) {
+  assertValidCnrDeliveryDate(data);
+
   const existing = await Order.findById(id);
 
   if (!existing) {
@@ -1511,6 +1570,15 @@ async function updateOrder(id, data, actorId, files) {
       });
     }
 
+    if (isCnrOrder(data)) {
+      await connection.execute(
+        `DELETE FROM order_payments
+         WHERE order_id = :orderId
+           AND payment_type = 'custodian'`,
+        { orderId: existing.id }
+      );
+    }
+
     await invoiceService.syncInvoiceAmountPaidFromOrder(connection, existing.id);
 
     await saveOrderDocuments(connection, {
@@ -1524,9 +1592,12 @@ async function updateOrder(id, data, actorId, files) {
     const invoiceCustodianFee = invoiceRow ? Number(invoiceRow.custodian_fee) : 0;
 
     await syncOrderWorkflowFromState(connection, existing.id, {
-      payments,
+      payments: isCnrOrder(data)
+        ? payments.filter((payment) => payment.paymentType !== "custodian")
+        : payments,
       invoiceServiceFee: 0,
       invoiceCustodianFee,
+      skipCustodian: isCnrOrder(data),
     });
 
     await connection.commit();
