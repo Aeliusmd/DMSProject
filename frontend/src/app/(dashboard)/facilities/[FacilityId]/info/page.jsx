@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
@@ -36,6 +36,7 @@ const createEmptyDoctorInput = (id) => ({
 
 export default function FacilityDetailsPage() {
   const params = useParams();
+  const router = useRouter();
 
   const facilityId = String(
     params?.facilityId || params?.FacilityId || params?.id || ""
@@ -467,6 +468,7 @@ export default function FacilityDetailsPage() {
 
     try {
       await persistFacilityUpdate(formData);
+      router.push("/facilities");
     } catch (err) {
       if (err instanceof ApiRequestError && err.errors) {
         setErrors(mapApiErrors(err.errors));

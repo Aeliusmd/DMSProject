@@ -376,7 +376,7 @@ class Order {
     const db = connection || getPool();
 
     const [rows] = await db.execute(
-      `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo
        FROM order_payments
        WHERE order_id = :orderId`,
       { orderId }
@@ -397,7 +397,7 @@ class Order {
     }, {});
 
     const [rows] = await pool.execute(
-      `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo
        FROM order_payments
        WHERE order_id IN (${placeholders})`,
       params
@@ -426,17 +426,36 @@ class Order {
   static async upsertPayment(connection, payment) {
     await connection.execute(
       `INSERT INTO order_payments
-        (order_id, payment_type, check_number, payment_date, amount, is_paid, memo, created_at, updated_at)
+        (order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo, created_at, updated_at)
        VALUES
-        (:orderId, :paymentType, :checkNumber, :paymentDate, :amount, :isPaid, :memo, NOW(), NOW())
+        (:orderId, :paymentType, :checkNumber, :paymentDate, :amount, :dueAmount, :isPaid, :memo, NOW(), NOW())
        ON DUPLICATE KEY UPDATE
         check_number = VALUES(check_number),
         payment_date = VALUES(payment_date),
         amount = VALUES(amount),
+        due_amount = VALUES(due_amount),
         is_paid = VALUES(is_paid),
         memo = VALUES(memo),
         updated_at = NOW()`,
-      payment
+      {
+        orderId: payment.orderId,
+        paymentType: payment.paymentType,
+        checkNumber: payment.checkNumber ?? null,
+        paymentDate: payment.paymentDate ?? null,
+        amount: payment.amount ?? null,
+        dueAmount: payment.dueAmount ?? null,
+        isPaid: payment.isPaid ?? 0,
+        memo: payment.memo ?? null,
+      }
+    );
+  }
+
+  static async deletePaymentByType(connection, orderId, paymentType) {
+    await connection.execute(
+      `DELETE FROM order_payments
+       WHERE order_id = :orderId
+         AND payment_type = :paymentType`,
+      { orderId, paymentType }
     );
   }
 

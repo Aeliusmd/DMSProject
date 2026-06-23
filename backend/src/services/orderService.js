@@ -8,7 +8,7 @@ const path = require("path");
 const Order = require("../models/Order");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
-const { buildProviderPayload } = require("./providerService");
+const { buildProviderPayload, findOrCreateProvider } = require("./providerService");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -39,7 +39,7 @@ const WORKFLOW_STAGE_NAMES = [
 ];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const DEFAULT_PREPAYMENT_CHARGE = 15;
-const DEFAULT_CUSTODIAN_CHARGE = 15;
+const DEFAULT_CUSTODIAN_CHARGE = 0;
 
 /** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
 const RUSH_READY_MIN_DAYS = 14;
@@ -56,8 +56,27 @@ const STATUS_FILTER_MAP = {
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
 const ALLOWED_CNR_DELIVERY = ["email", "fax", "pickup"];
 
+function parseBoolean(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return (
+      normalized === "true" ||
+      normalized === "1" ||
+      normalized === "yes" ||
+      normalized === "on"
+    );
+  }
+  return Boolean(value);
+}
+
 function isCnrOrder(data = {}) {
-  return Boolean(data.certificateNoRecords || data.certificate_no_records);
+  return (
+    parseBoolean(data.certificateNoRecords) ||
+    parseBoolean(data.certificate_no_records)
+  );
 }
 
 function assertValidCnrDeliveryDate(data = {}) {
@@ -136,17 +155,7 @@ function dateOrNull(value) {
 }
 
 function boolToInt(value) {
-  // FormData/multipart sends booleans as strings ("true"/"false").
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    return normalized === "true" ||
-      normalized === "1" ||
-      normalized === "yes" ||
-      normalized === "on"
-      ? 1
-      : 0;
-  }
-  return value ? 1 : 0;
+  return parseBoolean(value) ? 1 : 0;
 }
 
 function hasAnyRecordsRequested(row) {
@@ -427,7 +436,11 @@ async function syncOrderWorkflowFromState(
 
   const custodian = getPaymentByType(payments, "custodian");
   const custodianPaid = parsePaymentAmount(custodian?.amount);
+  const custodianDue = parsePaymentAmount(custodian?.dueAmount);
   let custodianCharge = parsePaymentAmount(invoiceCustodianFee);
+  if (custodianCharge <= 0) {
+    custodianCharge = custodianPaid + custodianDue;
+  }
   if (custodianCharge <= 0) {
     custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
   }
@@ -463,32 +476,90 @@ async function markOrderWorkflowSent(orderId, connection = null) {
   );
 }
 
+function buildPaymentPayload(data, prefix) {
+  const checkNumber = trimOrNull(data[`${prefix}Check`]);
+  const paymentDate = dateOrNull(data[`${prefix}Date`]);
+  const rawAmount = trimOrNull(data[`${prefix}Paid`]);
+  const rawDue = trimOrNull(data[`${prefix}Due`]);
+  const memo = trimOrNull(data[`${prefix}Memo`]);
+
+  if (!checkNumber && !paymentDate && !rawAmount && !rawDue && !memo) {
+    return null;
+  }
+
+  const amount = rawAmount !== null ? Number(rawAmount) : null;
+  const dueAmount = rawDue !== null ? Number(rawDue) : null;
+
+  return {
+    paymentType: prefix,
+    checkNumber,
+    paymentDate,
+    amount: Number.isNaN(amount) ? null : amount,
+    dueAmount: Number.isNaN(dueAmount) ? null : dueAmount,
+    isPaid: amount && amount > 0 ? 1 : 0,
+    memo,
+  };
+}
+
 function collectPayments(data) {
   const prefixes = isCnrOrder(data)
     ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
     : PAYMENT_PREFIXES;
 
-  return prefixes.map((prefix) => {
-    const checkNumber = trimOrNull(data[`${prefix}Check`]);
-    const paymentDate = dateOrNull(data[`${prefix}Date`]);
-    const rawAmount = trimOrNull(data[`${prefix}Paid`]);
-    const memo = trimOrNull(data[`${prefix}Memo`]);
+  return prefixes
+    .map((prefix) => buildPaymentPayload(data, prefix))
+    .filter(Boolean);
+}
 
-    if (!checkNumber && !paymentDate && !rawAmount && !memo) {
-      return null;
+function resolvePaymentDueForSave(prefix, paidAmount, data, invoiceFees) {
+  const paid = paidAmount ?? 0;
+
+  if (prefix === "custodian" && invoiceFees.hasInvoice) {
+    return Math.max(0, Number(invoiceFees.custodianFee) - paid);
+  }
+
+  if (prefix === "xray" && invoiceFees.hasXrayInvoice) {
+    return Math.max(0, Number(invoiceFees.xrayFee) - paid);
+  }
+
+  const rawDue = trimOrNull(data[`${prefix}Due`]);
+  if (rawDue === null) return null;
+
+  const due = Number(rawDue);
+  return Number.isNaN(due) ? null : due;
+}
+
+async function syncOrderPayments(connection, orderId, data) {
+  const prefixes = isCnrOrder(data)
+    ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
+    : PAYMENT_PREFIXES;
+
+  const invoiceRow = await Invoice.findByOrderId(orderId);
+  const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
+  const invoiceFees = invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow);
+
+  for (const prefix of prefixes) {
+    const payment = buildPaymentPayload(data, prefix);
+
+    if (payment) {
+      if (prefix === "custodian" || prefix === "xray") {
+        payment.dueAmount = resolvePaymentDueForSave(
+          prefix,
+          payment.amount,
+          data,
+          invoiceFees
+        );
+      }
+
+      await Order.upsertPayment(connection, { ...payment, orderId });
+    } else {
+      await Order.deletePaymentByType(connection, orderId, prefix);
     }
+  }
 
-    const amount = rawAmount !== null ? Number(rawAmount) : null;
-
-    return {
-      paymentType: prefix,
-      checkNumber,
-      paymentDate,
-      amount: Number.isNaN(amount) ? null : amount,
-      isPaid: amount && amount > 0 ? 1 : 0,
-      memo,
-    };
-  }).filter(Boolean);
+  if (isCnrOrder(data)) {
+    await Order.deletePaymentByType(connection, orderId, "custodian");
+  }
 }
 
 function mapPaymentsToForm(payments = []) {
@@ -500,10 +571,12 @@ function mapPaymentsToForm(payments = []) {
     custodianCheck: "",
     custodianDate: "",
     custodianPaid: "",
+    custodianDue: "",
     custodianMemo: "",
     xrayCheck: "",
     xrayDate: "",
     xrayPaid: "",
+    xrayDue: "",
     xrayMemo: "",
   };
 
@@ -517,10 +590,37 @@ function mapPaymentsToForm(payments = []) {
       payment.amount !== null && payment.amount !== undefined
         ? String(payment.amount)
         : "";
+    formFields[`${prefix}Due`] =
+      payment.due_amount !== null && payment.due_amount !== undefined
+        ? String(payment.due_amount)
+        : "";
     formFields[`${prefix}Memo`] = payment.memo || "";
   });
 
   return formFields;
+}
+
+function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow) {
+  const invoiceFees = invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow);
+  const targets = [
+    ["custodian", invoiceFees.hasInvoice, Number(invoiceFees.custodianFee) || 0],
+    ["xray", invoiceFees.hasXrayInvoice, Number(invoiceFees.xrayFee) || 0],
+  ];
+
+  targets.forEach(([prefix, hasFee, fee]) => {
+    const paid = parsePaymentAmount(paymentForm[`${prefix}Paid`]);
+
+    if (hasFee && fee > 0) {
+      paymentForm[`${prefix}Due`] = Math.max(0, fee - paid).toFixed(2);
+      return;
+    }
+
+    if (paymentForm[`${prefix}Due`] === "") {
+      paymentForm[`${prefix}Due`] = "0";
+    }
+  });
+
+  return paymentForm;
 }
 
 function deriveDisplayOrderStatus(status, createdAt) {
@@ -862,6 +962,13 @@ function mapOrderDetail(
   invoiceRow = null,
   xrayRow = null
 ) {
+  const paymentSummary = invoiceService.mapOrderPaymentsSummary(payments);
+  const paymentForm = enrichPaymentDueFields(
+    mapPaymentsToForm(payments),
+    invoiceRow,
+    xrayRow
+  );
+
   return {
     id: row.id,
     orderNumber: row.order_number || "",
@@ -952,8 +1059,9 @@ function mapOrderDetail(
     cnrDateSent: toInputDate(row.cnr_date_sent),
     cnrMemo: Boolean(row.cnr_memo),
 
-    ...mapPaymentsToForm(payments),
-    ...invoiceService.mapOrderPaymentsSummary(payments),
+    ...paymentForm,
+    paymentLines: paymentSummary.paymentLines,
+    orderAmountPaid: paymentSummary.orderAmountPaid,
     invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow),
   };
 }
@@ -1410,13 +1518,11 @@ async function resolveProviderId(connection, data) {
     }
   }
 
-  const existing = await Provider.findByCompanyName(companyName, connection);
-  if (existing) {
-    await Provider.update(connection, existing.id, providerPayload);
-    return existing.id;
-  }
-
-  return Provider.create(connection, providerPayload);
+  const { provider } = await findOrCreateProvider(
+    { ...data, ...providerPayload },
+    connection
+  );
+  return provider.id;
 }
 
 async function createOrder(data, actorId, files) {
@@ -1480,9 +1586,7 @@ async function createOrder(data, actorId, files) {
       createdBy: actorId || null,
     });
 
-    for (const payment of payments) {
-      await Order.upsertPayment(connection, { ...payment, orderId });
-    }
+    await syncOrderPayments(connection, orderId, data);
 
     await saveOrderDocuments(connection, {
       orderId,
@@ -1563,21 +1667,7 @@ async function updateOrder(id, data, actorId, files) {
       orderNumber,
     });
 
-    for (const payment of payments) {
-      await Order.upsertPayment(connection, {
-        ...payment,
-        orderId: existing.id,
-      });
-    }
-
-    if (isCnrOrder(data)) {
-      await connection.execute(
-        `DELETE FROM order_payments
-         WHERE order_id = :orderId
-           AND payment_type = 'custodian'`,
-        { orderId: existing.id }
-      );
-    }
+    await syncOrderPayments(connection, existing.id, data);
 
     await invoiceService.syncInvoiceAmountPaidFromOrder(connection, existing.id);
 

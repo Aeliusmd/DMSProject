@@ -1,6 +1,6 @@
 export const PAYMENT_CHARGE_AMOUNTS = {
   prepayment: 15,
-  custodian: 15,
+  custodian: 0,
   xray: 0,
 };
 
@@ -84,6 +84,61 @@ export function getPaymentChargeForType(type, invoiceFees = {}) {
   }
 
   return PAYMENT_CHARGE_AMOUNTS[type] ?? 0;
+}
+
+export function resolvePaymentCharge(type, invoiceFees = {}, paidValue = 0, dueValue = 0) {
+  const invoiceCharge = getPaymentChargeForType(type, invoiceFees);
+
+  if (type === "custodian" && invoiceFees?.hasInvoice) {
+    return invoiceCharge;
+  }
+
+  if (type === "xray" && invoiceFees?.hasXrayInvoice) {
+    return invoiceCharge;
+  }
+
+  const paid = parsePaymentAmount(paidValue);
+  const due = parsePaymentAmount(dueValue);
+  return paid + due;
+}
+
+export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0, dueValue = "") {
+  const storedDue = String(dueValue ?? "").trim();
+
+  if (storedDue !== "") {
+    return parsePaymentAmount(storedDue);
+  }
+
+  const charge = getPaymentChargeForType(type, invoiceFees);
+  return dueAmountFromFee(charge, paidValue);
+}
+
+export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFees || {}) {
+  const next = { ...formData };
+  const targets = [
+    { prefix: "custodian", hasFee: Boolean(invoiceFees?.hasInvoice) },
+    { prefix: "xray", hasFee: Boolean(invoiceFees?.hasXrayInvoice) },
+  ];
+
+  for (const { prefix, hasFee } of targets) {
+    if (prefix === "custodian" && formData.certificateNoRecords) {
+      continue;
+    }
+
+    const paid = formData[`${prefix}Paid`];
+    const storedDue = formData[`${prefix}Due`];
+
+    if (hasFee) {
+      const charge = getPaymentChargeForType(prefix, invoiceFees);
+      next[`${prefix}Due`] = dueAmountFromFee(charge, paid).toFixed(2);
+      continue;
+    }
+
+    const charge = resolvePaymentCharge(prefix, invoiceFees, paid, storedDue);
+    next[`${prefix}Due`] = dueAmountFromFee(charge, paid).toFixed(2);
+  }
+
+  return next;
 }
 
 export function deriveInvoiceStatusLabel(totalAmount, amountPaid, writeoffAmount = 0) {
