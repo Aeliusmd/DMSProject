@@ -147,19 +147,44 @@ exports.emailByOrder = asyncHandler(async (req, res) => {
 
   await logBillingActivity(req, {
     action: "email_invoice",
-    details: `Marked invoice for order ${context.orderNumber} as sent`,
+    details: `Invoice emailed to ${result.recipient || "recipient"} for order ${context.orderNumber}`,
     facilityId: context.facilityId,
     companyName: context.companyName,
     orderId: result.orderId,
   });
 
   await notificationService.notifyInvoiceEvent({
-    title: `Invoice Marked Sent — ${context.orderNumber}`,
-    description: "Invoice marked as sent. Email it from the Resend tab.",
+    title: `Invoice Emailed — ${context.orderNumber}`,
+    description: result.recipient
+      ? `Invoice emailed to ${result.recipient}`
+      : "Invoice emailed.",
     orderId: result.orderId,
   });
 
-  return ApiResponse.success(res, result, "Invoice marked as sent successfully");
+  return ApiResponse.success(res, result, "Invoice emailed successfully");
+});
+
+exports.emailXrayByOrder = asyncHandler(async (req, res) => {
+  const result = await invoiceService.emailXrayInvoiceByOrderId(req.params.orderId);
+  const context = await resolveOrderBillingContext(result.orderId);
+
+  await logBillingActivity(req, {
+    action: "email_xray_invoice",
+    details: `X-Ray invoice emailed to ${result.recipient || "recipient"} for order ${context.orderNumber}`,
+    facilityId: context.facilityId,
+    companyName: context.companyName,
+    orderId: result.orderId,
+  });
+
+  await notificationService.notifyInvoiceEvent({
+    title: `X-Ray Invoice Emailed — ${context.orderNumber}`,
+    description: result.recipient
+      ? `X-Ray invoice emailed to ${result.recipient}`
+      : "X-Ray invoice emailed.",
+    orderId: result.orderId,
+  });
+
+  return ApiResponse.success(res, result, "X-Ray invoice emailed successfully");
 });
 
 exports.createXray = asyncHandler(async (req, res) => {

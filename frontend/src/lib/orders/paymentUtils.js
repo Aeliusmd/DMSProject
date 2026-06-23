@@ -32,38 +32,34 @@ export function dueMoneyInputFromFee(feeAmount, paidAmount) {
 }
 
 export function mapInvoiceFeesToDueForm(feeFormData, paymentLines = []) {
-  const prepaymentPaid = getPaymentLineAmount(paymentLines, "prepayment");
   const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
   const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
     ...feeFormData,
-    serviceFee: dueMoneyInputFromFee(feeFormData.serviceFee, prepaymentPaid),
     custodianFee: dueMoneyInputFromFee(feeFormData.custodianFee, custodianPaid),
     xrayFee: dueMoneyInputFromFee(feeFormData.xrayFee, xrayPaid),
   };
 }
 
 export function mapDueFormToInvoiceFees(formData, paymentLines = []) {
-  const prepaymentPaid = getPaymentLineAmount(paymentLines, "prepayment");
   const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
   const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
     ...formData,
-    serviceFee: feeAmountFromDue(formData.serviceFee, prepaymentPaid).toFixed(2),
+    serviceFee: parsePaymentAmount(formData.serviceFee).toFixed(2),
     custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid).toFixed(2),
     xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid).toFixed(2),
   };
 }
 
 export function resolveFullFeeAmounts(formData, paymentLines = []) {
-  const prepaymentPaid = getPaymentLineAmount(paymentLines, "prepayment");
   const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
   const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
-    serviceFee: feeAmountFromDue(formData.serviceFee, prepaymentPaid),
+    serviceFee: parsePaymentAmount(formData.serviceFee),
     custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid),
     xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid),
   };

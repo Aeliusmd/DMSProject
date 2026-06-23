@@ -17,6 +17,7 @@ const INVOICE_SELECT = `
          o.serve_city,
          o.serve_state,
          o.serve_zip,
+         o.serve_email,
          o.specific_record,
          o.specific_doctor,
          o.applicant_first_name,
@@ -322,10 +323,14 @@ class Invoice {
     const [result] = await pool.execute(
       `UPDATE invoices
        SET sent_date = CURDATE(),
-           status = 'Needs Resend',
+           status = CASE
+             WHEN status IN ('Paid', 'Partial', 'Unpaid') THEN status
+             WHEN status = 'Written Off' THEN status
+             ELSE 'Needs Resend'
+           END,
            updated_at = NOW()
        WHERE id IN (${placeholders})
-         AND status NOT IN ('Paid', 'Written Off')`,
+         AND status <> 'Written Off'`,
       params
     );
 

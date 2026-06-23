@@ -206,17 +206,31 @@ exports.scanMedicalRecords = asyncHandler(async (req, res) => {
     throw new ApiError(400, "PDF file is required");
   }
 
+  const replace = req.query.replace === "true";
+
   const order = await orderService.scanMedicalRecords(
     req.params.id,
     req.file,
-    req.user.id
+    req.user.id,
+    { replace }
   );
 
   return ApiResponse.success(
     res,
     { order },
-    "Medical records uploaded successfully"
+    replace
+      ? "Medical records replaced successfully"
+      : "Medical records uploaded successfully"
   );
+});
+
+exports.removeMedicalRecords = asyncHandler(async (req, res) => {
+  const order = await orderService.removeMedicalRecords(
+    req.params.id,
+    req.user.id
+  );
+
+  return ApiResponse.success(res, { order }, "Medical records removed");
 });
 
 exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
@@ -228,6 +242,40 @@ exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
     `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
   );
   return res.sendFile(fileInfo.absolutePath);
+});
+
+exports.getPrintInvoiceFile = asyncHandler(async (req, res) => {
+  const result = await orderService.getPrintInvoicePdf(req.params.id);
+  const order = await orderService.getOrderById(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "print_invoice",
+    details: `Print invoice generated for order ${order.orderNumber}`,
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${result.fileName.replace(/"/g, "")}"`
+  );
+  return res.send(result.pdfBuffer);
+});
+
+exports.getPrintXrayInvoiceFile = asyncHandler(async (req, res) => {
+  const result = await orderService.getPrintXrayInvoicePdf(req.params.id);
+  const order = await orderService.getOrderById(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "print_xray_invoice",
+    details: `Print X-Ray invoice generated for order ${order.orderNumber}`,
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${result.fileName.replace(/"/g, "")}"`
+  );
+  return res.send(result.pdfBuffer);
 });
 
 exports.getReminders = asyncHandler(async (req, res) => {

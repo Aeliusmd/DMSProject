@@ -5,6 +5,7 @@ import Link from "next/link";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 import { sendInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
+import { canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
 
 function buildWriteOffInvoice(group, row) {
   return {
@@ -112,6 +113,7 @@ export default function InvoiceReportTable({
     const selectedIds = selectedRows[group.company] || [];
     const selectedInvoices = group.rows
       .filter((row) => selectedIds.includes(row.id))
+      .filter((row) => canWriteOffInvoice(row))
       .map((row) => buildWriteOffInvoice(group, row));
 
     if (selectedInvoices.length === 0) return;
@@ -120,6 +122,8 @@ export default function InvoiceReportTable({
   };
 
   const handleOpenSingleWriteOffModal = (group, row) => {
+    if (!canWriteOffInvoice(row)) return;
+
     setWriteOffInvoices([buildWriteOffInvoice(group, row)]);
   };
 
@@ -285,6 +289,9 @@ function InvoiceGroup({
   onOpenSingleWriteOffModal,
 }) {
   const hasSelected = selectedIds.length > 0;
+  const hasWritableSelected = group.rows.some(
+    (row) => selectedIds.includes(row.id) && canWriteOffInvoice(row)
+  );
 
   return (
     <>
@@ -345,10 +352,10 @@ function InvoiceGroup({
 
             <button
               type="button"
-              disabled={!hasSelected}
+              disabled={!hasWritableSelected}
               onClick={() => onWriteoffInvoice(group)}
               className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
-                hasSelected
+                hasWritableSelected
                   ? "bg-red-500 text-white hover:bg-red-600"
                   : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
               }`}
@@ -459,7 +466,7 @@ function InvoiceRow({
         <button
           type="button"
           onClick={() => onOpenSingleWriteOffModal(group, row)}
-          disabled={row.isWrittenOff}
+          disabled={!canWriteOffInvoice(row)}
           className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Writeoff

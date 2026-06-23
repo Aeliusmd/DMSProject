@@ -86,11 +86,6 @@ export default function WriteOffInvoiceModal({
       return;
     }
 
-    if (!orderAction) {
-      setError("Please choose whether to close the order or keep it as write off.");
-      return;
-    }
-
     const amountToWriteOff =
       isBulkWriteOff || writeOffType === "full"
         ? totalDue
@@ -106,10 +101,18 @@ export default function WriteOffInvoiceModal({
       return;
     }
 
+    const isFullWriteOff = amountToWriteOff >= totalDue;
+
+    if (isFullWriteOff && !orderAction) {
+      setError("Please choose whether to close the order or keep it as write off.");
+      return;
+    }
+
     onSubmit?.({
       mode: isBulkWriteOff ? "bulk" : "single",
       writeOffType: isBulkWriteOff ? "full" : writeOffType,
-      orderAction,
+      orderAction: isFullWriteOff ? orderAction : null,
+      isFullWriteOff,
       amount: amountToWriteOff,
       totalDue,
       invoices: invoices.map((invoice) => {
@@ -238,31 +241,40 @@ export default function WriteOffInvoiceModal({
               After Write Off
             </p>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="flex cursor-pointer items-center gap-3 rounded-[8px] border border-[#E2E8F0] px-4 py-3 text-[12px] text-[#334155] hover:bg-[#F8FAFC]">
-                <input
-                  type="radio"
-                  name="orderAction"
-                  value="close_order"
-                  checked={orderAction === "close_order"}
-                  onChange={() => setOrderAction("close_order")}
-                  className="h-[14px] w-[14px] accent-red-500"
-                />
-                Close the order
-              </label>
+            {writeOffType === "specified" &&
+            specifiedAmount &&
+            Number(specifiedAmount) < totalDue ? (
+              <p className="rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[12px] text-[#475569]">
+                Partial write off — order status stays unchanged. Choose full
+                due amount to close or mark as write off.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="flex cursor-pointer items-center gap-3 rounded-[8px] border border-[#E2E8F0] px-4 py-3 text-[12px] text-[#334155] hover:bg-[#F8FAFC]">
+                  <input
+                    type="radio"
+                    name="orderAction"
+                    value="close_order"
+                    checked={orderAction === "close_order"}
+                    onChange={() => setOrderAction("close_order")}
+                    className="h-[14px] w-[14px] accent-red-500"
+                  />
+                  Close the order
+                </label>
 
-              <label className="flex cursor-pointer items-center gap-3 rounded-[8px] border border-[#E2E8F0] px-4 py-3 text-[12px] text-[#334155] hover:bg-[#F8FAFC]">
-                <input
-                  type="radio"
-                  name="orderAction"
-                  value="keep_write_off"
-                  checked={orderAction === "keep_write_off"}
-                  onChange={() => setOrderAction("keep_write_off")}
-                  className="h-[14px] w-[14px] accent-red-500"
-                />
-                Keep this as write off
-              </label>
-            </div>
+                <label className="flex cursor-pointer items-center gap-3 rounded-[8px] border border-[#E2E8F0] px-4 py-3 text-[12px] text-[#334155] hover:bg-[#F8FAFC]">
+                  <input
+                    type="radio"
+                    name="orderAction"
+                    value="keep_write_off"
+                    checked={orderAction === "keep_write_off"}
+                    onChange={() => setOrderAction("keep_write_off")}
+                    className="h-[14px] w-[14px] accent-red-500"
+                  />
+                  Keep this as write off
+                </label>
+              </div>
+            )}
           </div>
 
           {error && (

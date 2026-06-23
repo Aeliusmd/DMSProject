@@ -33,11 +33,14 @@ router.post(
 );
 router.get("/:id/subpoena/file", orderController.getSubpoenaFile);
 router.get("/:id/medical-records/file", orderController.getMedicalRecordsFile);
+router.get("/:id/invoice/print", orderController.getPrintInvoiceFile);
+router.get("/:id/invoice/xray/print", orderController.getPrintXrayInvoiceFile);
 router.post(
   "/:id/scan-medical-records",
   uploadMedicalRecordsScan,
   orderController.scanMedicalRecords
 );
+router.delete("/:id/medical-records", orderController.removeMedicalRecords);
 router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);

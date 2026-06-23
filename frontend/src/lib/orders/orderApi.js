@@ -217,14 +217,24 @@ export async function uploadBatchScan(file) {
   return data?.data || null;
 }
 
-export async function uploadMedicalRecordsScan(orderId, file) {
+export async function uploadMedicalRecordsScan(orderId, file, { replace = false } = {}) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const data = await request(`/orders/${orderId}/scan-medical-records`, {
+  const query = replace ? "?replace=true" : "";
+  const data = await request(`/orders/${orderId}/scan-medical-records${query}`, {
     method: "POST",
     auth: true,
     body: formData,
+  });
+
+  return data?.data?.order || null;
+}
+
+export async function removeMedicalRecords(orderId) {
+  const data = await request(`/orders/${orderId}/medical-records`, {
+    method: "DELETE",
+    auth: true,
   });
 
   return data?.data?.order || null;
@@ -307,6 +317,49 @@ export async function fetchOrderMedicalRecordsPdf(orderId) {
 
   if (!response.ok) {
     let message = "Failed to load medical records PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function fetchOrderPrintInvoicePdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/orders/${orderId}/invoice/print`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    let message = "Failed to load print invoice PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function fetchOrderPrintXrayInvoicePdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/orders/${orderId}/invoice/xray/print`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+
+  if (!response.ok) {
+    let message = "Failed to load print X-Ray invoice PDF";
     try {
       const body = await response.json();
       message = body?.message || message;
