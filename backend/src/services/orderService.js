@@ -406,6 +406,8 @@ async function syncOrderWorkflowFromState(
     invoiceServiceFee = 0,
     invoiceCustodianFee = 0,
     skipCustodian = false,
+    resolvedCustodianDue = null,
+    invoiceRow = null,
   } = {}
 ) {
   const prepayment = getPrepaymentPayment(payments);
@@ -437,16 +439,29 @@ async function syncOrderWorkflowFromState(
   const custodian = getPaymentByType(payments, "custodian");
   const custodianPaid = parsePaymentAmount(custodian?.amount);
   const custodianDue = parsePaymentAmount(custodian?.dueAmount);
+  const custodianDueAmount =
+    resolvedCustodianDue !== null && resolvedCustodianDue !== undefined
+      ? parsePaymentAmount(resolvedCustodianDue)
+      : custodianDue;
   let custodianCharge = parsePaymentAmount(invoiceCustodianFee);
   if (custodianCharge <= 0) {
-    custodianCharge = custodianPaid + custodianDue;
+    custodianCharge = custodianPaid + custodianDueAmount;
   }
   if (custodianCharge <= 0) {
     custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
   }
 
   if (!skipCustodian) {
-    if (custodianCharge > 0 && custodianPaid >= custodianCharge) {
+    const custodianIsComplete =
+      (custodianCharge > 0 && custodianPaid >= custodianCharge) ||
+      invoiceService.shouldMarkCustodianStageComplete(
+        custodianDueAmount,
+        custodianPaid,
+        invoiceRow ||
+          (invoiceCustodianFee > 0 ? { custodian_fee: invoiceCustodianFee } : null)
+      );
+
+    if (custodianIsComplete) {
       await Order.upsertWorkflowStage(
         orderId,
         "Custodian",
@@ -511,22 +526,44 @@ function collectPayments(data) {
     .filter(Boolean);
 }
 
-function resolvePaymentDueForSave(prefix, paidAmount, data, invoiceFees) {
-  const paid = paidAmount ?? 0;
+function resolvePrepaymentDueAmount(data) {
+  const paid = parsePaymentAmount(trimOrNull(data.prepaymentPaid));
+  const rawDue = trimOrNull(data.prepaymentDue);
 
-  if (prefix === "custodian" && invoiceFees.hasInvoice) {
-    return Math.max(0, Number(invoiceFees.custodianFee) - paid);
+  if (rawDue !== null) {
+    const due = Number(rawDue);
+    if (!Number.isNaN(due)) {
+      return Math.max(0, due);
+    }
   }
 
-  if (prefix === "xray" && invoiceFees.hasXrayInvoice) {
-    return Math.max(0, Number(invoiceFees.xrayFee) - paid);
+  return Math.max(0, DEFAULT_PREPAYMENT_CHARGE - paid);
+}
+
+async function ensurePrepaymentPayment(connection, orderId, data) {
+  const payment = buildPaymentPayload(data, "prepayment");
+  const dueAmount = resolvePrepaymentDueAmount(data);
+  const paid = parsePaymentAmount(trimOrNull(data.prepaymentPaid));
+
+  if (payment) {
+    await Order.upsertPayment(connection, {
+      ...payment,
+      orderId,
+      dueAmount: payment.dueAmount ?? dueAmount,
+    });
+    return;
   }
 
-  const rawDue = trimOrNull(data[`${prefix}Due`]);
-  if (rawDue === null) return null;
-
-  const due = Number(rawDue);
-  return Number.isNaN(due) ? null : due;
+  await Order.upsertPayment(connection, {
+    orderId,
+    paymentType: "prepayment",
+    checkNumber: null,
+    paymentDate: null,
+    amount: paid > 0 ? paid : null,
+    dueAmount,
+    isPaid: paid > 0 ? 1 : 0,
+    memo: null,
+  });
 }
 
 async function syncOrderPayments(connection, orderId, data) {
@@ -534,23 +571,10 @@ async function syncOrderPayments(connection, orderId, data) {
     ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
     : PAYMENT_PREFIXES;
 
-  const invoiceRow = await Invoice.findByOrderId(orderId);
-  const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
-  const invoiceFees = invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow);
-
   for (const prefix of prefixes) {
     const payment = buildPaymentPayload(data, prefix);
 
     if (payment) {
-      if (prefix === "custodian" || prefix === "xray") {
-        payment.dueAmount = resolvePaymentDueForSave(
-          prefix,
-          payment.amount,
-          data,
-          invoiceFees
-        );
-      }
-
       await Order.upsertPayment(connection, { ...payment, orderId });
     } else {
       await Order.deletePaymentByType(connection, orderId, prefix);
@@ -560,6 +584,12 @@ async function syncOrderPayments(connection, orderId, data) {
   if (isCnrOrder(data)) {
     await Order.deletePaymentByType(connection, orderId, "custodian");
   }
+
+  await ensurePrepaymentPayment(connection, orderId, data);
+
+  await invoiceService.syncOrderPaymentDuesFromInvoice(connection, orderId, {
+    skipCustodian: isCnrOrder(data),
+  });
 }
 
 function mapPaymentsToForm(payments = []) {
@@ -567,6 +597,7 @@ function mapPaymentsToForm(payments = []) {
     prepaymentCheck: "",
     prepaymentDate: "",
     prepaymentPaid: "",
+    prepaymentDue: "",
     prepaymentMemo: "",
     custodianCheck: "",
     custodianDate: "",
@@ -600,15 +631,32 @@ function mapPaymentsToForm(payments = []) {
   return formFields;
 }
 
-function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow) {
-  const invoiceFees = invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow);
+function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = []) {
+  const invoiceFees = invoiceService.mapOrderInvoiceFees(
+    invoiceRow,
+    xrayRow,
+    payments
+  );
+  const prepaymentPaid = parsePaymentAmount(paymentForm.prepaymentPaid);
+  paymentForm.prepaymentDue = Math.max(
+    0,
+    DEFAULT_PREPAYMENT_CHARGE - prepaymentPaid
+  ).toFixed(2);
+
   const targets = [
-    ["custodian", invoiceFees.hasInvoice, Number(invoiceFees.custodianFee) || 0],
+    ["custodian", invoiceFees.hasInvoice, invoiceFees.invoiceTotal],
     ["xray", invoiceFees.hasXrayInvoice, Number(invoiceFees.xrayFee) || 0],
   ];
 
   targets.forEach(([prefix, hasFee, fee]) => {
     const paid = parsePaymentAmount(paymentForm[`${prefix}Paid`]);
+
+    if (prefix === "custodian" && hasFee) {
+      paymentForm[`${prefix}Due`] = invoiceService
+        .resolveCustodianDueAmount(invoiceFees, paid)
+        .toFixed(2);
+      return;
+    }
 
     if (hasFee && fee > 0) {
       paymentForm[`${prefix}Due`] = Math.max(0, fee - paid).toFixed(2);
@@ -771,7 +819,7 @@ function mapOrderListRow(
     hasSubpoenaFile: Boolean(row.subpoena_storage_path),
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
     isRecords: hasAnyRecordsRequested(row),
-    isWriteOffs: row.status === "Write Offs",
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -966,7 +1014,8 @@ function mapOrderDetail(
   const paymentForm = enrichPaymentDueFields(
     mapPaymentsToForm(payments),
     invoiceRow,
-    xrayRow
+    xrayRow,
+    payments
   );
 
   return {
@@ -975,7 +1024,7 @@ function mapOrderDetail(
     status: row.status || "",
     isSubpoena: Boolean(Number(row.is_subpoena)),
     isRecords: hasAnyRecordsRequested(row),
-    isWriteOffs: row.status === "Write Offs",
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",
@@ -1062,7 +1111,7 @@ function mapOrderDetail(
     ...paymentForm,
     paymentLines: paymentSummary.paymentLines,
     orderAmountPaid: paymentSummary.orderAmountPaid,
-    invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow),
+    invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow, payments),
   };
 }
 
@@ -1669,8 +1718,6 @@ async function updateOrder(id, data, actorId, files) {
 
     await syncOrderPayments(connection, existing.id, data);
 
-    await invoiceService.syncInvoiceAmountPaidFromOrder(connection, existing.id);
-
     await saveOrderDocuments(connection, {
       orderId: existing.id,
       additionalDocFile,
@@ -1678,8 +1725,12 @@ async function updateOrder(id, data, actorId, files) {
       actorId,
     });
 
-    const invoiceRow = await Invoice.findByOrderId(existing.id);
+    const invoiceRow = await Invoice.findByOrderId(existing.id, connection);
     const invoiceCustodianFee = invoiceRow ? Number(invoiceRow.custodian_fee) : 0;
+    const savedPayments = await Order.findPaymentsByOrderId(existing.id, connection);
+    const resolvedCustodianDue = invoiceRow
+      ? invoiceService.resolveCustodianPaymentDue(invoiceRow, savedPayments)
+      : null;
 
     await syncOrderWorkflowFromState(connection, existing.id, {
       payments: isCnrOrder(data)
@@ -1688,6 +1739,8 @@ async function updateOrder(id, data, actorId, files) {
       invoiceServiceFee: 0,
       invoiceCustodianFee,
       skipCustodian: isCnrOrder(data),
+      resolvedCustodianDue,
+      invoiceRow,
     });
 
     await connection.commit();

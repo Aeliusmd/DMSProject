@@ -86,6 +86,121 @@ export function getPaymentChargeForType(type, invoiceFees = {}) {
   return PAYMENT_CHARGE_AMOUNTS[type] ?? 0;
 }
 
+export function resolveCustodianDue(invoiceFees = {}, custodianPaid = 0) {
+  if (!invoiceFees?.hasInvoice) {
+    return dueAmountFromFee(
+      parsePaymentAmount(invoiceFees?.custodianFee),
+      custodianPaid
+    );
+  }
+
+  const paid = parsePaymentAmount(custodianPaid);
+  const custodianFee = parsePaymentAmount(invoiceFees.custodianFee);
+
+  if (custodianFee <= 0) {
+    return 0;
+  }
+
+  if (paid >= custodianFee) {
+    return 0;
+  }
+
+  const prepayment = parsePaymentAmount(invoiceFees.prepaymentPaid);
+  const writeoff = parsePaymentAmount(invoiceFees.writeoffAmount);
+  const nonCustodianBalance = Math.max(
+    0,
+    parsePaymentAmount(invoiceFees.nonCustodianTotal) ||
+      parsePaymentAmount(invoiceFees.invoiceTotal) - custodianFee
+  );
+  const creditsApplied = prepayment + writeoff;
+  const excessOverNonCustodian = Math.max(0, creditsApplied - nonCustodianBalance);
+
+  return Math.max(0, custodianFee - paid - excessOverNonCustodian);
+}
+
+export function resolveXrayDue(invoiceFees = {}, xrayPaid = 0) {
+  const charge = invoiceFees?.hasXrayInvoice
+    ? parsePaymentAmount(invoiceFees.xrayFee)
+    : parsePaymentAmount(invoiceFees?.xrayFee);
+
+  return dueAmountFromFee(charge, xrayPaid);
+}
+
+export function getPaymentTotalOwed(type, invoiceFees = {}, storedDue = "") {
+  if (type === "custodian" || type === "xray") {
+    return resolvePaymentDue(type, invoiceFees, 0);
+  }
+
+  const charge = resolvePaymentCharge(
+    type,
+    invoiceFees,
+    0,
+    storedDue
+  );
+
+  return dueAmountFromFee(charge, 0);
+}
+
+export function capPaymentPaidEntry(
+  type,
+  invoiceFees = {},
+  currentPaid = 0,
+  storedDue = "",
+  rawValue = ""
+) {
+  if (type !== "custodian" && type !== "xray") {
+    return { paidValue: rawValue, capped: false };
+  }
+
+  if (rawValue === "") {
+    return { paidValue: "", capped: false };
+  }
+
+  const totalOwed = getPaymentTotalOwed(type, invoiceFees, storedDue);
+  const entered = parsePaymentAmount(rawValue);
+
+  if (entered <= totalOwed) {
+    return { paidValue: rawValue, capped: false };
+  }
+
+  return {
+    paidValue: totalOwed > 0 ? totalOwed.toFixed(2) : "0.00",
+    capped: true,
+  };
+}
+
+export function validateOrderPaymentAmounts(data = {}, invoiceFees = {}) {
+  const errors = {};
+
+  if (!data.certificateNoRecords) {
+    validatePaymentPaidCap(errors, "custodian", data, invoiceFees);
+  }
+
+  validatePaymentPaidCap(errors, "xray", data, invoiceFees);
+
+  return errors;
+}
+
+function validatePaymentPaidCap(errors, prefix, data, invoiceFees) {
+  const paidField = `${prefix}Paid`;
+  const rawPaid = data[paidField];
+
+  if (!rawPaid) {
+    return;
+  }
+
+  const paid = parsePaymentAmount(rawPaid);
+  const totalOwed = getPaymentTotalOwed(
+    prefix,
+    invoiceFees,
+    data[`${prefix}Due`]
+  );
+
+  if (paid > totalOwed) {
+    errors[paidField] = "Paid cannot exceed due";
+  }
+}
+
 export function resolvePaymentCharge(type, invoiceFees = {}, paidValue = 0, dueValue = 0) {
   const invoiceCharge = getPaymentChargeForType(type, invoiceFees);
 
@@ -102,11 +217,13 @@ export function resolvePaymentCharge(type, invoiceFees = {}, paidValue = 0, dueV
   return paid + due;
 }
 
-export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0, dueValue = "") {
-  const storedDue = String(dueValue ?? "").trim();
+export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0) {
+  if (type === "custodian" && invoiceFees?.hasInvoice) {
+    return resolveCustodianDue(invoiceFees, paidValue);
+  }
 
-  if (storedDue !== "") {
-    return parsePaymentAmount(storedDue);
+  if (type === "xray" && invoiceFees?.hasXrayInvoice) {
+    return resolveXrayDue(invoiceFees, paidValue);
   }
 
   const charge = getPaymentChargeForType(type, invoiceFees);
@@ -115,6 +232,12 @@ export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0, dueValu
 
 export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFees || {}) {
   const next = { ...formData };
+  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+  next.prepaymentDue = dueAmountFromFee(
+    prepaymentCharge,
+    formData.prepaymentPaid
+  ).toFixed(2);
+
   const targets = [
     { prefix: "custodian", hasFee: Boolean(invoiceFees?.hasInvoice) },
     { prefix: "xray", hasFee: Boolean(invoiceFees?.hasXrayInvoice) },
@@ -129,6 +252,16 @@ export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFe
     const storedDue = formData[`${prefix}Due`];
 
     if (hasFee) {
+      if (prefix === "custodian") {
+        next[`${prefix}Due`] = resolveCustodianDue(invoiceFees, paid).toFixed(2);
+        continue;
+      }
+
+      if (prefix === "xray") {
+        next[`${prefix}Due`] = resolveXrayDue(invoiceFees, paid).toFixed(2);
+        continue;
+      }
+
       const charge = getPaymentChargeForType(prefix, invoiceFees);
       next[`${prefix}Due`] = dueAmountFromFee(charge, paid).toFixed(2);
       continue;

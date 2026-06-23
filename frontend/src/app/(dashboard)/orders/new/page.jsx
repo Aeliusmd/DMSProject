@@ -39,7 +39,7 @@ import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUn
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
-import { syncPaymentDueFields } from "@/lib/orders/paymentUtils";
+import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
 import { API_BASE_URL } from "@/config/api";
 
 function toFileUrl(path) {
@@ -137,6 +137,7 @@ const initialFormData = {
   prepaymentCheck: "",
   prepaymentDate: "",
   prepaymentPaid: "",
+  prepaymentDue: "15.00",
   prepaymentMemo: "",
 
   custodianCheck: "",
@@ -308,8 +309,6 @@ function NewOrderPageContent() {
             {
               ...prev,
               invoiceFees: order.invoiceFees || prev.invoiceFees,
-              custodianPaid: order.custodianPaid ?? prev.custodianPaid,
-              xrayPaid: order.xrayPaid ?? prev.xrayPaid,
             },
             order.invoiceFees || prev.invoiceFees
           )
@@ -336,6 +335,39 @@ function NewOrderPageContent() {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [isEditMode, orderId, panel]);
+
+  useEffect(() => {
+    if (!isEditMode || !orderId || !expandedPanels.payment) {
+      return undefined;
+    }
+
+    let active = true;
+
+    async function refreshPaymentDues() {
+      try {
+        const order = await getOrder(orderId);
+        if (!active || !order) return;
+
+        setFormData((prev) =>
+          syncPaymentDueFields(
+            {
+              ...prev,
+              invoiceFees: order.invoiceFees || prev.invoiceFees,
+            },
+            order.invoiceFees || prev.invoiceFees
+          )
+        );
+      } catch {
+        // Keep the last loaded payment snapshot.
+      }
+    }
+
+    refreshPaymentDues();
+
+    return () => {
+      active = false;
+    };
+  }, [isEditMode, orderId, expandedPanels.payment]);
 
   useEffect(() => {
     if (!isEditMode || !orderId) {
@@ -457,7 +489,10 @@ function NewOrderPageContent() {
   );
 
   const errors = useMemo(
-    () => validateNewOrderForm(formData, fileErrors),
+    () => ({
+      ...validateNewOrderForm(formData, fileErrors),
+      ...validateOrderPaymentAmounts(formData, formData.invoiceFees),
+    }),
     [formData, fileErrors]
   );
 
@@ -550,10 +585,15 @@ function NewOrderPageContent() {
   };
 
   const handlePaymentValuesChange = (updates) => {
-    setFormData((prev) => ({
-      ...prev,
-      ...updates,
-    }));
+    setFormData((prev) =>
+      syncPaymentDueFields(
+        {
+          ...prev,
+          ...updates,
+        },
+        prev.invoiceFees
+      )
+    );
   };
 
   const handleChange = (e) => {
@@ -1626,12 +1666,14 @@ function PaymentForm({
         chargeAmount={prepaymentCharge}
         paidAmount={formData.prepaymentPaid}
         showPaidField
+        autoDueOnPaidChange
         theme="green"
         prefix="prepayment"
         formData={formData}
         onChange={onChange}
         onBlur={onBlur}
         getError={getError}
+        onValuesChange={onValuesChange}
       />
 
       {!formData.certificateNoRecords && (
@@ -1641,8 +1683,8 @@ function PaymentForm({
           showPaidField
           paidReadOnly={false}
           fieldsReadOnly={false}
-          editableDue
           autoDueOnPaidChange
+          capPaidToDue
           paymentType="custodian"
           invoiceFees={invoiceFees}
           theme="purple"
@@ -1661,8 +1703,8 @@ function PaymentForm({
         showPaidField
         paidReadOnly={false}
         fieldsReadOnly={false}
-        editableDue
         autoDueOnPaidChange
+        capPaidToDue
         paymentType="xray"
         invoiceFees={invoiceFees}
         theme="blue"

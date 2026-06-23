@@ -566,12 +566,12 @@ function CompanyInvoiceTable({
             {!loading &&
               invoices.map((invoice) => {
               const selected = selectedIds.includes(invoice.id);
+              const rowClassName = invoice.isWrittenOff
+                ? "border-b border-[#F1F5F9] last:border-b-0 bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
+                : "border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]";
 
               return (
-                <tr
-                  key={invoice.id}
-                  className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-                >
+                <tr key={invoice.id} className={rowClassName}>
                   <td className="px-4 py-4 align-middle">
                     <input
                       type="checkbox"
@@ -629,14 +629,16 @@ function CompanyInvoiceTable({
                   </td>
 
                   <td className="px-4 py-4 text-center align-middle">
-                    <button
-                      type="button"
-                      onClick={() => onWriteOffSingle(invoice)}
-                      disabled={!canWriteOffInvoice(invoice)}
-                      className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Write Off
-                    </button>
+                    {!invoice.isWrittenOff && (
+                      <button
+                        type="button"
+                        onClick={() => onWriteOffSingle(invoice)}
+                        disabled={!canWriteOffInvoice(invoice)}
+                        className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Write Off
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

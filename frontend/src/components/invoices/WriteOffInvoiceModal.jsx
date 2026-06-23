@@ -36,6 +36,14 @@ export default function WriteOffInvoiceModal({
 
   const isBulkWriteOff = invoices.length > 1;
   const selectedInvoice = invoices[0];
+  const hasDue = totalDue > 0;
+  const showOrderAction =
+    !hasDue ||
+    isBulkWriteOff ||
+    writeOffType === "full" ||
+    (writeOffType === "specified" &&
+      specifiedAmount &&
+      Number(specifiedAmount) >= totalDue);
 
   const openSession = isOpen
     ? invoices.map((invoice) => invoice.id || invoice.invoiceNo || "").join(",")
@@ -81,8 +89,28 @@ export default function WriteOffInvoiceModal({
   const handleSubmit = () => {
     setError("");
 
-    if (totalDue <= 0) {
-      setError("There is no due amount available to write off.");
+    if (!hasDue) {
+      if (!orderAction) {
+        setError("Please choose whether to close the order or keep it as write off.");
+        return;
+      }
+
+      onSubmit?.({
+        mode: isBulkWriteOff ? "bulk" : "single",
+        writeOffType: "full",
+        orderAction,
+        isFullWriteOff: true,
+        isZeroDue: true,
+        amount: 0,
+        totalDue: 0,
+        invoices: invoices.map((invoice) => ({
+          ...invoice,
+          dueAmount: parseCurrency(invoice.due),
+          writeOffAmount: 0,
+        })),
+      });
+
+      onClose?.();
       return;
     }
 
@@ -166,7 +194,12 @@ export default function WriteOffInvoiceModal({
             </p>
           </div>
 
-          {isBulkWriteOff ? (
+          {!hasDue ? (
+            <div className="rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[12px] text-[#475569]">
+              This invoice has no remaining due amount. Choose whether to close the
+              order as completed or keep it marked as a write off.
+            </div>
+          ) : isBulkWriteOff ? (
             <div className="rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[12px] text-[#475569]">
               Bulk write off is enabled. Amount input is disabled because all
               selected invoice due amounts will be written off fully.
@@ -241,12 +274,10 @@ export default function WriteOffInvoiceModal({
               After Write Off
             </p>
 
-            {writeOffType === "specified" &&
-            specifiedAmount &&
-            Number(specifiedAmount) < totalDue ? (
+            {!showOrderAction ? (
               <p className="rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[12px] text-[#475569]">
-                Partial write off — order status stays unchanged. Choose full
-                due amount to close or mark as write off.
+                Partial write off — order status stays unchanged. Choose full due
+                amount to close or mark as write off.
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -298,7 +329,7 @@ export default function WriteOffInvoiceModal({
             onClick={handleSubmit}
             className="h-[36px] rounded-[6px] bg-red-500 px-5 text-[12px] font-semibold text-white hover:bg-red-600"
           >
-            Confirm Write Off
+            Confirm {hasDue ? "Write Off" : "Update Order"}
           </button>
         </div>
       </div>

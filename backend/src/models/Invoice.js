@@ -46,10 +46,10 @@ class Invoice {
     return rows[0] || null;
   }
 
-  static async findByOrderId(orderId) {
-    const pool = getPool();
+  static async findByOrderId(orderId, connection = null) {
+    const db = connection || getPool();
 
-    const [rows] = await pool.execute(
+    const [rows] = await db.execute(
       `${INVOICE_SELECT}
        WHERE i.order_id = :orderId AND ${ORDER_VISIBLE}
        ORDER BY i.id DESC
@@ -91,7 +91,7 @@ class Invoice {
     const pool = getPool();
     const conditions = [
       ORDER_VISIBLE,
-      "i.status NOT IN ('Written Off', 'Needs Resend')",
+      "i.status <> 'Needs Resend'",
       "i.sent_date IS NULL",
     ];
     const params = {};
@@ -159,7 +159,7 @@ class Invoice {
     const conditions = [
       ORDER_VISIBLE,
       "i.facility_id = :facilityId",
-      "i.status NOT IN ('Written Off', 'Needs Resend')",
+      "i.status <> 'Needs Resend'",
       "i.sent_date IS NULL",
     ];
     const params = { facilityId };
@@ -362,13 +362,11 @@ class Invoice {
       `UPDATE invoices
        SET sent_date = CURDATE(),
            status = CASE
-             WHEN status IN ('Paid', 'Partial', 'Unpaid') THEN status
-             WHEN status = 'Written Off' THEN status
+             WHEN status IN ('Paid', 'Partial', 'Unpaid', 'Written Off') THEN status
              ELSE 'Needs Resend'
            END,
            updated_at = NOW()
-       WHERE id IN (${placeholders})
-         AND status <> 'Written Off'`,
+       WHERE id IN (${placeholders})`,
       params
     );
 

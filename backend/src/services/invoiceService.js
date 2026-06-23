@@ -654,6 +654,35 @@ function pushPrintFeeLine(feeLines, line) {
   }
 }
 
+function appendPrintInvoiceDeductions(feeLines, invoiceRow, orderPayments = []) {
+  const prepaymentPaid = getOrderPaymentAmount(orderPayments, "prepayment");
+
+  if (prepaymentPaid > 0) {
+    const prepayment = orderPayments.find((row) => row.payment_type === "prepayment");
+    const checkLabel = trimOrNull(prepayment?.check_number)
+      ? `CK# ${prepayment.check_number}`
+      : "";
+
+    feeLines.push({
+      description: "Prepayment",
+      quantity: checkLabel,
+      total: -prepaymentPaid,
+      italic: true,
+    });
+  }
+
+  const writeoffAmount = toNumber(invoiceRow.writeoff_amount);
+
+  if (writeoffAmount > 0) {
+    feeLines.push({
+      description: "Written Off",
+      quantity: "",
+      total: -writeoffAmount,
+      italic: true,
+    });
+  }
+}
+
 function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   if (!invoiceRow || !orderRow) {
     return null;
@@ -710,6 +739,8 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
       total: storageFee,
     });
   }
+
+  appendPrintInvoiceDeductions(feeLines, invoiceRow, orderPayments);
 
   const financials = resolveRowFinancials(invoiceRow, orderPayments);
 
@@ -786,7 +817,7 @@ function buildPrintXrayInvoicePdfData(xrayRow, orderRow, orderPayments = []) {
   };
 }
 
-function mapOrderInvoiceFees(invoiceRow, xrayRow = null) {
+function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
   const xrayPayment = xrayRow ? toNumber(xrayRow.payment) : 0;
 
   if (!invoiceRow) {
@@ -794,17 +825,210 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null) {
       hasInvoice: false,
       hasXrayInvoice: Boolean(xrayRow),
       custodianFee: 0,
+      invoiceTotal: 0,
+      nonCustodianTotal: 0,
+      prepaymentPaid: 0,
+      writeoffAmount: 0,
       xrayFee: xrayPayment,
     };
   }
 
+  const totals = calculateTotalsWithPayments(
+    {
+      custodianFee: invoiceRow.custodian_fee,
+      pages: invoiceRow.page_count,
+      perPageAmount: invoiceRow.per_page_amount,
+      clericalTimeHours: invoiceRow.clerical_time_hours,
+      clericalHourlyRate: invoiceRow.clerical_hourly_rate,
+      shippingHandling: invoiceRow.shipping_handling,
+      storageFee: getStorageFee(invoiceRow),
+    },
+    orderPayments
+  );
+  const financials = resolveRowFinancials(invoiceRow, orderPayments);
+
   return {
     hasInvoice: true,
     hasXrayInvoice: Boolean(xrayRow),
-    custodianFee: toNumber(invoiceRow.custodian_fee),
+    custodianFee: totals.custodianFee,
+    invoiceTotal: totals.totalAmount,
+    invoiceAmountPaid: financials.amountPaid,
+    invoiceAmountDue: financials.amountDue,
+    nonCustodianTotal: Math.max(0, totals.totalAmount - totals.custodianFee),
+    prepaymentPaid: getOrderPaymentAmount(orderPayments, "prepayment"),
+    writeoffAmount: toNumber(invoiceRow.writeoff_amount),
     xrayFee: xrayPayment,
     storageFee: getStorageFee(invoiceRow),
   };
+}
+
+function resolveCustodianDueAmount(invoiceFees = {}, custodianPaid = 0) {
+  const paid = toNumber(custodianPaid);
+  const custodianFee = toNumber(invoiceFees.custodianFee);
+
+  if (custodianFee <= 0) {
+    return 0;
+  }
+
+  if (paid >= custodianFee) {
+    return 0;
+  }
+
+  const prepayment = toNumber(invoiceFees.prepaymentPaid);
+  const writeoff = toNumber(invoiceFees.writeoffAmount);
+  const nonCustodianBalance = Math.max(
+    0,
+    toNumber(invoiceFees.nonCustodianTotal) ||
+      toNumber(invoiceFees.invoiceTotal) - custodianFee
+  );
+  const creditsApplied = prepayment + writeoff;
+  const excessOverNonCustodian = Math.max(0, creditsApplied - nonCustodianBalance);
+
+  return Math.max(0, custodianFee - paid - excessOverNonCustodian);
+}
+
+function resolveCustodianPaymentDue(invoiceRow, orderPayments = []) {
+  if (!invoiceRow) {
+    return 0;
+  }
+
+  const invoiceFees = mapOrderInvoiceFees(invoiceRow, null, orderPayments);
+  const custodianPaid = getOrderPaymentAmount(orderPayments, "custodian");
+
+  return resolveCustodianDueAmount(invoiceFees, custodianPaid);
+}
+
+function shouldMarkCustodianStageComplete(dueAmount, custodianPaid, invoiceRow = null) {
+  if (toNumber(dueAmount) > 0) {
+    return false;
+  }
+
+  if (toNumber(custodianPaid) > 0) {
+    return true;
+  }
+
+  if (!invoiceRow) {
+    return false;
+  }
+
+  if (toNumber(invoiceRow.custodian_fee) > 0) {
+    return true;
+  }
+
+  if (toNumber(invoiceRow.writeoff_amount) > 0) {
+    return true;
+  }
+
+  return false;
+}
+
+function resolveXrayPaymentDue(xrayRow, orderPayments = []) {
+  if (!xrayRow) {
+    return 0;
+  }
+
+  const xrayFee = toNumber(xrayRow.payment);
+  const xrayPaid = getOrderPaymentAmount(orderPayments, "xray");
+
+  return Math.max(0, xrayFee - xrayPaid);
+}
+
+async function upsertOrderPaymentDue(
+  connection,
+  orderId,
+  paymentType,
+  dueAmount,
+  payments
+) {
+  const payment = payments.find((row) => row.payment_type === paymentType);
+
+  if (payment) {
+    await connection.execute(
+      `UPDATE order_payments
+       SET due_amount = :dueAmount, updated_at = NOW()
+       WHERE id = :id`,
+      { dueAmount, id: payment.id }
+    );
+    return;
+  }
+
+  await Order.upsertPayment(connection, {
+    orderId,
+    paymentType,
+    checkNumber: null,
+    paymentDate: null,
+    amount: null,
+    dueAmount,
+    isPaid: 0,
+    memo: null,
+  });
+}
+
+async function syncOrderCustodianDueFromInvoice(connection, orderId) {
+  const order = await Order.findById(orderId, connection);
+
+  if (!order || order.certificate_no_records) {
+    return;
+  }
+
+  const invoice = await Invoice.findByOrderId(orderId, connection);
+
+  if (!invoice) {
+    return;
+  }
+
+  const payments = await Order.findPaymentsByOrderId(orderId, connection);
+  const dueAmount = resolveCustodianPaymentDue(invoice, payments);
+
+  await upsertOrderPaymentDue(connection, orderId, "custodian", dueAmount, payments);
+
+  const custodianPaid = getOrderPaymentAmount(payments, "custodian");
+
+  if (shouldMarkCustodianStageComplete(dueAmount, custodianPaid, invoice)) {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Custodian",
+      "complete",
+      new Date(),
+      connection
+    );
+  } else {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Custodian",
+      "pending",
+      null,
+      connection
+    );
+  }
+}
+
+async function syncOrderPaymentDuesFromInvoice(connection, orderId, options = {}) {
+  const skipCustodian = options.skipCustodian === true;
+  const order = await Order.findById(orderId, connection);
+
+  if (!order) {
+    return null;
+  }
+
+  const invoice = await Invoice.findByOrderId(orderId, connection);
+  const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
+  const payments = await Order.findPaymentsByOrderId(orderId, connection);
+
+  if (!skipCustodian && !order.certificate_no_records && invoice) {
+    await syncOrderCustodianDueFromInvoice(connection, orderId);
+  }
+
+  if (xrayRow) {
+    const xrayDue = resolveXrayPaymentDue(xrayRow, payments);
+    await upsertOrderPaymentDue(connection, orderId, "xray", xrayDue, payments);
+  }
+
+  if (invoice) {
+    return syncInvoiceAmountPaidFromOrder(connection, orderId);
+  }
+
+  return null;
 }
 
 function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
@@ -2155,10 +2379,6 @@ async function sendInvoices(invoiceIds = []) {
 function canDeliverInvoiceEmail(invoice) {
   if (!invoice) return false;
 
-  if (invoice.status === "Written Off") {
-    return false;
-  }
-
   if (invoice.status === "Needs Resend") {
     return true;
   }
@@ -2210,13 +2430,11 @@ async function resendInvoices(invoiceIds = []) {
        SET recipient_emails = :recipientEmails,
            sent_date = CURDATE(),
            status = CASE
-             WHEN status IN ('Paid', 'Partial', 'Unpaid') THEN status
-             WHEN status = 'Written Off' THEN status
+             WHEN status IN ('Paid', 'Partial', 'Unpaid', 'Written Off') THEN status
              ELSE 'Needs Resend'
            END,
            updated_at = NOW()
-       WHERE id = :invoiceId
-         AND status <> 'Written Off'`,
+       WHERE id = :invoiceId`,
       { recipientEmails: recipientEmail, invoiceId }
     );
 
@@ -2450,9 +2668,8 @@ async function writeOffInvoices(body = {}, userId) {
       const invoiceId = normalizeInvoiceId(
         item.invoiceId || item.invoiceDbId || item.id
       );
-      const writeOffAmount = toNumber(item.writeOffAmount ?? item.dueAmount ?? body.amount);
 
-      if (!invoiceId || writeOffAmount <= 0) {
+      if (!invoiceId) {
         continue;
       }
 
@@ -2472,6 +2689,59 @@ async function writeOffInvoices(body = {}, userId) {
       );
       const financials = resolveRowFinancials(invoice, orderPayments);
       const currentDue = financials.amountDue;
+      const requestedWriteOff = toNumber(
+        item.writeOffAmount ?? item.dueAmount ?? body.amount
+      );
+
+      if (currentDue <= 0 || body.isZeroDue) {
+        const newOrderStatus =
+          orderAction === "close_order" ? "Completed" : "Write Offs";
+        const isWriteOffs = orderAction === "keep_write_off" ? 1 : 0;
+
+        await connection.execute(
+          `UPDATE orders
+           SET status = :status, is_write_offs = :isWriteOffs, updated_at = NOW()
+           WHERE id = :orderId`,
+          {
+            status: newOrderStatus,
+            isWriteOffs,
+            orderId: invoice.order_id,
+          }
+        );
+
+        if (invoice.status !== "Paid") {
+          await Invoice.writeOff(connection, invoiceId, {
+            status: currentDue <= 0 ? "Paid" : "Written Off",
+            amountDue: 0,
+            writeoffAmount: toNumber(invoice.writeoff_amount),
+            writeoffBy: userId || null,
+            writeoffReason:
+              orderAction === "close_order"
+                ? "Order closed with no remaining due"
+                : "Order marked as write off with no remaining due",
+          });
+        }
+
+        writtenOff.push({
+          invoiceId,
+          orderId: invoice.order_id,
+          writeOffAmount: 0,
+          amountDue: 0,
+          status:
+            orderAction === "close_order" ? "Completed" : "Write Offs",
+          orderStatus: newOrderStatus,
+        });
+
+        await syncOrderPaymentDuesFromInvoice(connection, invoice.order_id);
+        continue;
+      }
+
+      const writeOffAmount = requestedWriteOff;
+
+      if (writeOffAmount <= 0) {
+        continue;
+      }
+
       const appliedAmount = Math.min(writeOffAmount, currentDue);
 
       if (appliedAmount <= 0) {
@@ -2497,12 +2767,17 @@ async function writeOffInvoices(body = {}, userId) {
       if (newDue <= 0) {
         const newOrderStatus =
           orderAction === "close_order" ? "Completed" : "Write Offs";
+        const isWriteOffs = orderAction === "keep_write_off" ? 1 : 0;
 
         await connection.execute(
           `UPDATE orders
-           SET status = :status, updated_at = NOW()
+           SET status = :status, is_write_offs = :isWriteOffs, updated_at = NOW()
            WHERE id = :orderId`,
-          { status: newOrderStatus, orderId: invoice.order_id }
+          {
+            status: newOrderStatus,
+            isWriteOffs,
+            orderId: invoice.order_id,
+          }
         );
       }
 
@@ -2512,7 +2787,10 @@ async function writeOffInvoices(body = {}, userId) {
         writeOffAmount: appliedAmount,
         amountDue: newDue,
         status: newStatus,
+        orderStatus: newDue <= 0 ? orderAction === "close_order" ? "Completed" : "Write Offs" : null,
       });
+
+      await syncOrderPaymentDuesFromInvoice(connection, invoice.order_id);
     }
 
     if (!writtenOff.length) {
@@ -2555,6 +2833,11 @@ module.exports = {
   mapOrderInvoiceSummary,
   mapOrderPaymentsSummary,
   mapOrderInvoiceFees,
+  resolveCustodianDueAmount,
+  resolveCustodianPaymentDue,
+  shouldMarkCustodianStageComplete,
+  syncOrderCustodianDueFromInvoice,
+  syncOrderPaymentDuesFromInvoice,
   buildPrintInvoicePdfData,
   buildPrintXrayInvoicePdfData,
   syncInvoiceAmountPaidFromOrder,
