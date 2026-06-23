@@ -1,7 +1,16 @@
+const DATE_OF_INJURY_FIELD_ALIASES = [
+  "DateOfInjury",
+  "Date of Injury",
+  "date_of_injury",
+  "DOI",
+  "InjuryDate",
+];
+
 const AI_FIELDS = [
   "ApplicantName",
   "CaseName",
   "OrderNumber",
+  "RecNumber",
   "SSN",
   "DateOfBirth",
   "DateOfInjury",
@@ -20,6 +29,46 @@ const AI_FIELDS = [
   "ChequeNumber",
 ];
 
+function resolveExtractionSchema(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+
+  if (raw.schema_extraction && typeof raw.schema_extraction === "object") {
+    return raw.schema_extraction;
+  }
+
+  return raw;
+}
+
+function normalizeFieldValue(entry) {
+  if (entry == null) {
+    return null;
+  }
+
+  if (typeof entry === "string" || typeof entry === "number") {
+    const text = String(entry).trim();
+    return text || null;
+  }
+
+  if (entry.value != null) {
+    const text = String(entry.value).trim();
+    if (text) return text;
+  }
+
+  if (entry.normalized != null) {
+    const text = String(entry.normalized).trim();
+    if (text) return text;
+  }
+
+  if (entry.mention_text != null) {
+    const text = String(entry.mention_text).trim();
+    if (text) return text;
+  }
+
+  return null;
+}
+
 function getFieldEntry(schema, fieldName) {
   const entry = schema?.[fieldName];
   if (!entry) return null;
@@ -36,7 +85,40 @@ function getFieldEntry(schema, fieldName) {
 
 function getFieldText(schema, fieldName) {
   const entry = getFieldEntry(schema, fieldName);
-  return entry?.value?.trim() || null;
+  return normalizeFieldValue(entry);
+}
+
+function getFirstFieldText(schema, fieldNames = []) {
+  if (!schema || typeof schema !== "object") {
+    return null;
+  }
+
+  for (const fieldName of fieldNames) {
+    const text = getFieldText(schema, fieldName);
+    if (text) return text;
+  }
+
+  const aliasSet = new Set(
+    fieldNames.map((name) => name.toLowerCase().replace(/[\s_]/g, ""))
+  );
+
+  for (const [key, entry] of Object.entries(schema)) {
+    const normalizedKey = key.toLowerCase().replace(/[\s_]/g, "");
+    if (!aliasSet.has(normalizedKey)) {
+      continue;
+    }
+
+    const text = normalizeFieldValue(entry);
+    if (text) {
+      return text;
+    }
+  }
+
+  return null;
+}
+
+function getDateOfInjuryText(schema) {
+  return getFirstFieldText(schema, DATE_OF_INJURY_FIELD_ALIASES);
 }
 
 function getFieldConfidence(schema, fieldName) {
@@ -85,9 +167,10 @@ function mapSchemaToExtractRow(schema) {
     applicant_name: getFieldText(schema, "ApplicantName"),
     case_name: getFieldText(schema, "CaseName"),
     order_number: getFieldText(schema, "OrderNumber"),
+    rec_number: getFieldText(schema, "RecNumber"),
     ssn: getFieldText(schema, "SSN"),
     date_of_birth: parseDateForDb(getFieldText(schema, "DateOfBirth")),
-    date_of_injury: parseDateForDb(getFieldText(schema, "DateOfInjury")),
+    date_of_injury: parseDateForDb(getDateOfInjuryText(schema)),
     customer: getFieldText(schema, "Customer"),
     company_name: getFieldText(schema, "CompanyName"),
     company_address: getFieldText(schema, "CompanyAddress"),
@@ -114,9 +197,11 @@ function mapSchemaToOrderHints(schema) {
     applicantName: row.applicant_name,
     caseName: row.case_name,
     orderNumber: row.order_number,
+    recNumber: row.rec_number,
     ssn: row.ssn,
     dateOfBirth: row.date_of_birth,
     dateOfInjury: row.date_of_injury,
+    dateOfInjuryText: getDateOfInjuryText(schema),
     customer: row.customer,
     companyName: row.company_name,
     companyAddress: row.company_address,
@@ -132,9 +217,29 @@ function mapSchemaToOrderHints(schema) {
   };
 }
 
+function enrichOrderHintsFromRow(orderHints, row = {}) {
+  const hints = { ...orderHints };
+  const persistedDoi = row.date_of_injury
+    ? String(row.date_of_injury).trim().match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ||
+      String(row.date_of_injury).trim()
+    : "";
+
+  if (persistedDoi && !hints.dateOfInjury) {
+    hints.dateOfInjury = persistedDoi;
+  }
+
+  if (persistedDoi && !hints.dateOfInjuryText) {
+    hints.dateOfInjuryText = persistedDoi;
+  }
+
+  return hints;
+}
+
 module.exports = {
   AI_FIELDS,
   mapSchemaToExtractRow,
   mapSchemaToOrderHints,
+  resolveExtractionSchema,
+  enrichOrderHintsFromRow,
   getFieldText,
 };

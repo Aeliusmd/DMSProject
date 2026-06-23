@@ -27,6 +27,7 @@ const {
   extractYear,
   formatSsnLastFourDisplay,
 } = require("../utils/dateUtils");
+const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
 
 const WORKFLOW_STAGE_NAMES = [
   "Upload Records",
@@ -249,6 +250,7 @@ function buildOrderDbPayload(data) {
     orderType,
     court: trimOrNull(data.court) || "WCAB",
     caseNumber: trimOrNull(data.caseNumber),
+    recNumber: trimOrNull(data.recNumber),
     orderRef: trimOrNull(data.orderRef),
     ssnLastFour: ssnLastFour(data.ssn),
     dob: dateOrNull(data.dob),
@@ -569,6 +571,7 @@ function mapOrderListRow(
       row.applicant_last_name
     ),
     caseNumber: row.case_number || "",
+    recNumber: row.rec_number || "",
     orderRef: row.order_ref || "",
     providerName: row.serve_company_name || row.provider_name || "",
     providerEmail: trimOrNull(row.provider_email) || "",
@@ -766,6 +769,7 @@ function mapOrderDetail(
     type: resolveOrderTypeForForm(row),
     court: row.court || "",
     caseNumber: row.case_number || "",
+    recNumber: row.rec_number || "",
     orderRef: row.order_ref || "",
     ssn: "",
     dob: toInputDate(row.dob),
@@ -863,6 +867,14 @@ async function getAllOrders(query = {}) {
 
     if (Number.isFinite(year)) {
       filters.year = year;
+    }
+  }
+
+  if (query.period) {
+    const periodFrom = resolveOrderPeriodStartDate(`${query.period}`.trim());
+
+    if (periodFrom) {
+      filters.periodFrom = periodFrom;
     }
   }
 
@@ -2140,6 +2152,14 @@ async function recordOrderPickup(orderId, { pickupDate, pickupPersonName, notes 
   };
 }
 
+async function searchOrderDoctors(query) {
+  return Order.searchDoctors(query);
+}
+
+async function searchOrderDoctorAddresses(query) {
+  return Order.searchDoctorAddresses(query);
+}
+
 module.exports = {
   getAllOrders,
   getOrderStats,
@@ -2167,4 +2187,6 @@ module.exports = {
   getPrintXrayInvoicePdf,
   recordOrderFax,
   recordOrderPickup,
+  searchOrderDoctors,
+  searchOrderDoctorAddresses,
 };

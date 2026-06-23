@@ -37,6 +37,8 @@ import {
   getDeliveryStatus,
   resolveProviderEmail,
 } from "@/lib/orders/deliveryActions";
+import { getOrderPeriodStartDate } from "@/lib/orders/orderFilterConstants";
+import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
 import { emailInvoiceByOrderId, emailXrayInvoiceByOrderId, resendInvoices } from "@/lib/invoices/invoiceApi";
 import {
   formatMoneyAmount,
@@ -52,6 +54,7 @@ const NO_PROVIDER_EMAIL_MESSAGE =
 const defaultOrderFilters = {
   facility: "",
   year: "",
+  period: "",
   status: "",
   search: "",
 };
@@ -169,6 +172,43 @@ function isInactiveOrderStatus(status) {
   return status === "Cancelled" || status === "Deleted";
 }
 
+function getOrderFilterDate(order) {
+  const raw = order.createdAt || order.created_at || order.subpoenaDate || "";
+  if (!raw) return "";
+
+  if (raw instanceof Date) {
+    const year = raw.getFullYear();
+    const month = String(raw.getMonth() + 1).padStart(2, "0");
+    const day = String(raw.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const value = String(raw);
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function filterOrdersByPeriod(orders, period) {
+  if (!period) return orders;
+
+  const periodStart = getOrderPeriodStartDate(period);
+  if (!periodStart) return orders;
+
+  return orders.filter((order) => {
+    const orderDate = getOrderFilterDate(order);
+    return orderDate && orderDate >= periodStart;
+  });
+}
+
 function toRenderOrder(order) {
   return {
     id: order.id,
@@ -182,6 +222,7 @@ function toRenderOrder(order) {
     subpoena: order.subpoena,
     hasSubpoenaFile: Boolean(order.hasSubpoenaFile),
     court: order.court || "",
+    recNumber: order.recNumber || "",
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
     providerName: order.providerName || "",
@@ -195,6 +236,8 @@ function toRenderOrder(order) {
       address: "",
       addressLines: [],
     },
+    facilityName:
+      order.facilityName || order.facilityInfo?.name || "",
     certificateNoRecords: Boolean(order.certificateNoRecords),
     cnrDelivery: order.cnrDelivery || "",
     mailSentDate: order.readyDate || order.mailSentDate || "",
@@ -208,6 +251,8 @@ function toRenderOrder(order) {
     dobSsn: order.dobSsn || [],
     doiDisplay: order.doiDisplay || "",
     hasDoi: Boolean(order.hasDoi),
+    createdAt: order.createdAt || order.created_at || "",
+    subpoenaDate: order.subpoenaDate || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
   };
 }
@@ -264,11 +309,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const normalizedFilters = {
     facility: filters.facility || "",
     year: filters.year || "",
+    period: filters.period || "",
     status: filters.status || "",
     search: filters.search || "",
   };
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.year}|${normalizedFilters.status}|${normalizedFilters.search}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
 
   if (filterKey !== prevFilterKey) {
@@ -291,6 +337,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         const data = await getOrders({
           facility: normalizedFilters.facility,
           year: normalizedFilters.year,
+          period: normalizedFilters.period,
           status: normalizedFilters.status,
           search: normalizedFilters.search,
         });
@@ -313,6 +360,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     [
       normalizedFilters.facility,
       normalizedFilters.year,
+      normalizedFilters.period,
       normalizedFilters.status,
       normalizedFilters.search,
     ]
@@ -603,7 +651,10 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     };
   }, [fetchOrders]);
 
-  const filteredOrders = orders;
+  const filteredOrders = useMemo(
+    () => filterOrdersByPeriod(orders, normalizedFilters.period),
+    [orders, normalizedFilters.period]
+  );
 
   const totalPages = Math.max(
     1,
@@ -685,11 +736,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         )}
 
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[1280px] border-collapse">
+          <table className="w-full min-w-[1420px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th className="w-[90px] px-4 py-3">ID</th>
                 <th className="w-[150px] px-4 py-3">Case</th>
+                <th className="w-[160px] px-4 py-3">Facility</th>
                 <th className="w-[125px] px-4 py-3">Status</th>
                 <th className="w-[170px] px-4 py-3">Invoice</th>
                 <th className="w-[170px] px-4 py-3">Records</th>
@@ -704,7 +756,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     Loading orders...
@@ -713,7 +765,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : error ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-[12px] font-semibold text-red-500"
                   >
                     {error}
@@ -722,7 +774,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : currentOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     No orders match the selected filters.
@@ -791,6 +843,24 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                           {order.court}
                         </p>
                       )}
+
+                      {order.recNumber && (
+                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                          REC {order.recNumber}
+                        </p>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <p className="font-semibold text-[#111827]">
+                        {order.facilityName || "—"}
+                      </p>
+
+                      {order.facilityInfo?.address ? (
+                        <p className="mt-1 text-[10px] leading-[15px] text-[#64748B]">
+                          {order.facilityInfo.address}
+                        </p>
+                      ) : null}
                     </td>
 
                     <td className="px-4 py-5 align-top">

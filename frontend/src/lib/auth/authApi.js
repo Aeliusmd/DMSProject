@@ -39,7 +39,7 @@ function refreshOnce() {
 
 export async function request(
   path,
-  { method = "GET", body, auth = false, _isRetry = false } = {}
+  { method = "GET", body, auth = false, cache, _isRetry = false } = {}
 ) {
   const isFormData =
     typeof FormData !== "undefined" && body instanceof FormData;
@@ -68,6 +68,7 @@ export async function request(
     method,
     headers,
     body: requestBody,
+    ...(cache ? { cache } : {}),
   });
 
   // Access token likely expired — try to refresh once, then retry.

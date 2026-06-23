@@ -11,6 +11,7 @@ import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal
 const defaultFilters = {
   facility: "",
   year: "",
+  period: "",
   status: "",
   search: "",
 };

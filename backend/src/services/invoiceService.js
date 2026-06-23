@@ -302,6 +302,10 @@ function calculateTotals(payload = {}) {
   const pageCount = Math.max(0, Math.floor(toNumber(payload.pages)));
   const perPageAmount = toNumber(payload.perPageAmount);
   const pagesAmount = pageCount * perPageAmount;
+  const clericalTimeHours = Math.max(0, toNumber(payload.clericalTimeHours));
+  const clericalHourlyRate = toNumber(payload.clericalHourlyRate);
+  const clericalAmount = clericalTimeHours * clericalHourlyRate;
+  const shippingHandling = toNumber(payload.shippingHandling);
 
   const totalAmount =
     servedAmount +
@@ -311,7 +315,9 @@ function calculateTotals(payload = {}) {
     mileage +
     parking +
     otherFee +
-    pagesAmount;
+    pagesAmount +
+    clericalAmount +
+    shippingHandling;
 
   return {
     servedAmount,
@@ -323,6 +329,10 @@ function calculateTotals(payload = {}) {
     otherFee,
     pageCount,
     perPageAmount,
+    clericalTimeHours,
+    clericalHourlyRate,
+    clericalAmount,
+    shippingHandling,
     totalAmount,
   };
 }
@@ -416,6 +426,12 @@ function mapInvoiceDetail(row) {
     other: toNumber(row.other_fee).toFixed(2),
     pages: String(row.page_count ?? 0),
     perPageAmount: toNumber(row.per_page_amount).toFixed(2),
+    clericalTimeHours: toNumber(row.clerical_time_hours).toFixed(2),
+    clericalHourlyRate: toNumber(row.clerical_hourly_rate).toFixed(2),
+    clericalAmount: (
+      toNumber(row.clerical_time_hours) * toNumber(row.clerical_hourly_rate)
+    ).toFixed(2),
+    shippingHandling: toNumber(row.shipping_handling).toFixed(2),
     totalAmount: toNumber(row.total_amount),
     amountPaid: toNumber(row.amount_paid),
     amountDue: toNumber(row.amount_due),
@@ -511,7 +527,10 @@ function hasStandardInvoiceFields(row) {
     toNumber(row.mileage) > 0 ||
     toNumber(row.parking) > 0 ||
     toNumber(row.other_fee) > 0 ||
-    toNumber(row.page_count) > 0
+    toNumber(row.page_count) > 0 ||
+    toNumber(row.clerical_time_hours) > 0 ||
+    toNumber(row.clerical_hourly_rate) > 0 ||
+    toNumber(row.shipping_handling) > 0
   );
 }
 
@@ -828,6 +847,12 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     other: toNumber(row.other_fee).toFixed(2),
     pages: String(row.page_count ?? 0),
     perPageAmount: toNumber(row.per_page_amount).toFixed(2),
+    clericalTimeHours: toNumber(row.clerical_time_hours).toFixed(2),
+    clericalHourlyRate: toNumber(row.clerical_hourly_rate).toFixed(2),
+    clericalAmount: (
+      toNumber(row.clerical_time_hours) * toNumber(row.clerical_hourly_rate)
+    ).toFixed(2),
+    shippingHandling: toNumber(row.shipping_handling).toFixed(2),
     notes: row.notes || "",
     sendOrderDetails: Boolean(row.send_order_details),
     rushOrder: Boolean(row.is_rush_order),
@@ -978,6 +1003,9 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     otherFee: totals.otherFee,
     pageCount: totals.pageCount,
     perPageAmount: totals.perPageAmount,
+    clericalTimeHours: totals.clericalTimeHours,
+    clericalHourlyRate: totals.clericalHourlyRate,
+    shippingHandling: totals.shippingHandling,
     totalAmount: totals.totalAmount,
     amountPaid,
     amountDue,
@@ -1128,6 +1156,9 @@ async function createOrUpdateXrayInvoice(body, userId) {
         otherFee: 0,
         pageCount: 0,
         perPageAmount: 0,
+        clericalTimeHours: 0,
+        clericalHourlyRate: 0,
+        shippingHandling: 0,
         totalAmount,
         amountPaid,
         amountDue,
@@ -1149,6 +1180,10 @@ async function createOrUpdateXrayInvoice(body, userId) {
       const pageCount = Math.max(0, Math.floor(toNumber(invoice.page_count)));
       const perPageAmount = toNumber(invoice.per_page_amount);
       const pagesAmount = pageCount * perPageAmount;
+      const clericalTimeHours = toNumber(invoice.clerical_time_hours);
+      const clericalHourlyRate = toNumber(invoice.clerical_hourly_rate);
+      const clericalAmount = clericalTimeHours * clericalHourlyRate;
+      const shippingHandling = toNumber(invoice.shipping_handling);
       const totalAmount =
         servedAmount +
         serviceFee +
@@ -1157,7 +1192,9 @@ async function createOrUpdateXrayInvoice(body, userId) {
         mileage +
         parking +
         otherFee +
-        pagesAmount;
+        pagesAmount +
+        clericalAmount +
+        shippingHandling;
       const amountPaid = sumOrderPayments(orderPayments);
       const writeoffAmount = toNumber(invoice.writeoff_amount);
       const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
@@ -1187,6 +1224,9 @@ async function createOrUpdateXrayInvoice(body, userId) {
         otherFee,
         pageCount,
         perPageAmount,
+        clericalTimeHours,
+        clericalHourlyRate,
+        shippingHandling,
         totalAmount,
         amountPaid,
         amountDue,
@@ -1308,6 +1348,9 @@ async function createInvoice(body, userId) {
       otherFee: invoicePayload.otherFee,
       pageCount: invoicePayload.pageCount,
       perPageAmount: invoicePayload.perPageAmount,
+      clericalTimeHours: invoicePayload.clericalTimeHours,
+      clericalHourlyRate: invoicePayload.clericalHourlyRate,
+      shippingHandling: invoicePayload.shippingHandling,
       totalAmount: invoicePayload.totalAmount,
       amountPaid: invoicePayload.amountPaid,
       amountDue: invoicePayload.amountDue,
@@ -1381,6 +1424,9 @@ async function updateInvoice(id, body) {
       otherFee: invoicePayload.otherFee,
       pageCount: invoicePayload.pageCount,
       perPageAmount: invoicePayload.perPageAmount,
+      clericalTimeHours: invoicePayload.clericalTimeHours,
+      clericalHourlyRate: invoicePayload.clericalHourlyRate,
+      shippingHandling: invoicePayload.shippingHandling,
       totalAmount: invoicePayload.totalAmount,
       amountPaid: invoicePayload.amountPaid,
       amountDue: invoicePayload.amountDue,

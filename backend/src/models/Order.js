@@ -25,7 +25,7 @@ const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
 
 const ORDER_COLUMNS = `
-  order_number, facility_id, provider_id, order_type, status, court,
+  order_number, rec_number, facility_id, provider_id, order_type, status, court,
   case_number, order_ref, ssn_last_four, dob,
   applicant_first_name, applicant_middle_name, applicant_last_name,
   applicant_aka, defendant, injury_type, injury_date, injury_date_begin, injury_date_end,
@@ -42,7 +42,7 @@ const ORDER_COLUMNS = `
   subpoena_storage_path, has_note, is_subpoena, created_by`;
 
 const ORDER_VALUES = `
-  :orderNumber, :facilityId, :providerId, :orderType, :status, :court,
+  :orderNumber, :recNumber, :facilityId, :providerId, :orderType, :status, :court,
   :caseNumber, :orderRef, :ssnLastFour, :dob,
   :applicantFirstName, :applicantMiddleName, :applicantLastName,
   :applicantAka, :defendant, :injuryType, :injuryDate, :injuryDateBegin, :injuryDateEnd,
@@ -60,6 +60,7 @@ const ORDER_VALUES = `
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
+  rec_number = :recNumber,
   facility_id = :facilityId,
   provider_id = :providerId,
   order_type = :orderType,
@@ -148,16 +149,16 @@ class Order {
       params.facilityId = filters.facilityId;
     }
 
-    if (filters.status) {
-      conditions.push("o.status = :status");
-      params.status = filters.status;
-    }
-
     if (filters.year) {
       conditions.push(
         "YEAR(COALESCE(o.subpoena_date, o.created_at)) = :year"
       );
       params.year = Number(filters.year);
+    }
+
+    if (filters.periodFrom) {
+      conditions.push("DATE(o.created_at) >= :periodFrom");
+      params.periodFrom = filters.periodFrom;
     }
 
     if (filters.search) {
@@ -189,6 +190,50 @@ class Order {
     );
 
     return rows;
+  }
+
+  static async searchDoctors(query, limit = 10) {
+    const pool = getPool();
+    const trimmed = `${query || ""}`.trim();
+
+    if (!trimmed) return [];
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
+
+    const [rows] = await pool.execute(
+      `SELECT DISTINCT TRIM(specific_doctor) AS name
+       FROM orders
+       WHERE specific_doctor IS NOT NULL
+         AND TRIM(specific_doctor) <> ''
+         AND specific_doctor LIKE :query
+       ORDER BY name ASC
+       LIMIT ${safeLimit}`,
+      { query: `%${trimmed}%` }
+    );
+
+    return rows.map((row) => row.name).filter(Boolean);
+  }
+
+  static async searchDoctorAddresses(query, limit = 10) {
+    const pool = getPool();
+    const trimmed = `${query || ""}`.trim();
+
+    if (!trimmed) return [];
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
+
+    const [rows] = await pool.execute(
+      `SELECT DISTINCT TRIM(full_address) AS address
+       FROM orders
+       WHERE full_address IS NOT NULL
+         AND TRIM(full_address) <> ''
+         AND full_address LIKE :query
+       ORDER BY address ASC
+       LIMIT ${safeLimit}`,
+      { query: `%${trimmed}%` }
+    );
+
+    return rows.map((row) => row.address).filter(Boolean);
   }
 
   static async findForReport(filters = {}) {

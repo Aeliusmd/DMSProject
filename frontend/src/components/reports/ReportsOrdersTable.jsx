@@ -310,6 +310,12 @@ export default function ReportsOrdersTable({
                           {order.subNo}
                         </p>
 
+                        {order.recNumber ? (
+                          <p className="mt-[2px] text-[9px] leading-[12px] font-semibold text-[#334155]">
+                            REC {order.recNumber}
+                          </p>
+                        ) : null}
+
                         {order.subpoenaUrl ? (
                           <a
                             href={toFileUrl(order.subpoenaUrl)}

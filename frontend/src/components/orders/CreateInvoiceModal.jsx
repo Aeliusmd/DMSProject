@@ -37,6 +37,9 @@ const initialFormData = {
   other: "0.00",
   pages: "0",
   perPageAmount: "0.00",
+  clericalTimeHours: "0",
+  clericalHourlyRate: "0.00",
+  shippingHandling: "0.00",
   notes: "",
   sendOrderDetails: false,
   rushOrder: false,
@@ -176,6 +179,12 @@ export default function CreateInvoiceModal({
     return toNumber(formData.pages) * toNumber(formData.perPageAmount);
   }, [formData.pages, formData.perPageAmount]);
 
+  const clericalAmount = useMemo(() => {
+    return (
+      toNumber(formData.clericalTimeHours) * toNumber(formData.clericalHourlyRate)
+    );
+  }, [formData.clericalTimeHours, formData.clericalHourlyRate]);
+
   const fullFees = useMemo(() => {
     return resolveFullFeeAmounts(formData, paymentLines);
   }, [formData, paymentLines]);
@@ -189,9 +198,11 @@ export default function CreateInvoiceModal({
       toNumber(formData.mileage) +
       toNumber(formData.parking) +
       toNumber(formData.other) +
-      pagesAmount
+      pagesAmount +
+      clericalAmount +
+      toNumber(formData.shippingHandling)
     );
-  }, [formData, fullFees, pagesAmount]);
+  }, [formData, fullFees, pagesAmount, clericalAmount]);
 
   const paymentHints = useMemo(
     () => ({
@@ -283,6 +294,24 @@ export default function CreateInvoiceModal({
     }));
   };
 
+  const handleClericalHoursChange = (e) => {
+    const { value } = e.target;
+    const cleanValue = value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+
+    setFormData((prev) => ({
+      ...prev,
+      clericalTimeHours: cleanValue,
+    }));
+
+    setErrors((prev) => ({
+      ...prev,
+      clericalTimeHours: "",
+    }));
+  };
+
   const handlePrepaymentChange = (e) => {
     const cleanValue = e.target.value
       .replace(/[^\d.]/g, "")
@@ -321,6 +350,7 @@ export default function CreateInvoiceModal({
       activeType: isEditMode ? "Edit Invoice" : "Create Invoice",
       ...feePayload,
       pagesAmount,
+      clericalAmount,
       totalAmount,
       prepaymentAmount: toNumber(prepaymentAmount),
     };
@@ -513,6 +543,43 @@ export default function CreateInvoiceModal({
               <ReadOnlyMoneyField label="Pages Amount" value={pagesAmount} />
             </div>
 
+            <SectionTitle title="Clerical Time" />
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <NumberField
+                label="Clerical Time (Hours)"
+                name="clericalTimeHours"
+                value={formData.clericalTimeHours}
+                onChange={handleClericalHoursChange}
+                error={errors.clericalTimeHours}
+              />
+
+              <MoneyField
+                label="Per Hour Charge"
+                name="clericalHourlyRate"
+                value={formData.clericalHourlyRate}
+                onChange={handleMoneyChange}
+                error={errors.clericalHourlyRate}
+              />
+
+              <ReadOnlyMoneyField
+                label="Clerical Time Charge"
+                value={clericalAmount}
+              />
+            </div>
+
+            <SectionTitle title="Shipping & Handling" />
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MoneyField
+                label="Shipping & Handling Fee"
+                name="shippingHandling"
+                value={formData.shippingHandling}
+                onChange={handleMoneyChange}
+                error={errors.shippingHandling}
+              />
+            </div>
+
             <div className="mt-3">
               <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
                 Notes
@@ -572,6 +639,14 @@ export default function CreateInvoiceModal({
                 value={formatMoney(fullFees.xrayFee)}
               />
               <SummaryRow label="Pages" value={formatMoney(pagesAmount)} />
+              <SummaryRow
+                label="Clerical Time"
+                value={formatMoney(clericalAmount)}
+              />
+              <SummaryRow
+                label="Shipping & Handling"
+                value={formatMoney(toNumber(formData.shippingHandling))}
+              />
             </div>
 
             <div className="mt-4 space-y-3 border-t border-[#E2E8F0] pt-4">
@@ -676,6 +751,9 @@ function getInitialInvoiceFormData(order, isEditMode) {
     other: invoice.other || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
+    clericalTimeHours: invoice.clericalTimeHours || "0",
+    clericalHourlyRate: invoice.clericalHourlyRate || "0.00",
+    shippingHandling: invoice.shippingHandling || "0.00",
     notes: invoice.notes || `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
     sendOrderDetails: Boolean(invoice.sendOrderDetails),
     rushOrder: Boolean(invoice.rushOrder),
@@ -699,6 +777,9 @@ function mapInvoiceToFormData(invoice, order) {
     other: invoice.other || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
+    clericalTimeHours: invoice.clericalTimeHours || "0",
+    clericalHourlyRate: invoice.clericalHourlyRate || "0.00",
+    shippingHandling: invoice.shippingHandling || "0.00",
     notes: invoice.notes || "",
     sendOrderDetails: Boolean(invoice.sendOrderDetails),
     rushOrder: Boolean(invoice.rushOrder),
@@ -935,6 +1016,8 @@ function validateInvoiceForm(data) {
     "parking",
     "other",
     "perPageAmount",
+    "clericalHourlyRate",
+    "shippingHandling",
   ];
 
   moneyFields.forEach((field) => {
@@ -949,6 +1032,12 @@ function validateInvoiceForm(data) {
     errors.pages = "Required";
   } else if (Number(data.pages) < 0) {
     errors.pages = "Invalid";
+  }
+
+  if (data.clericalTimeHours === "") {
+    errors.clericalTimeHours = "Required";
+  } else if (Number(data.clericalTimeHours) < 0) {
+    errors.clericalTimeHours = "Invalid";
   }
 
   return errors;
