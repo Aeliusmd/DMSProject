@@ -40,10 +40,9 @@ function getPresetRange(preset) {
 }
 
 function getDefaultFilters() {
-  const range = getPresetRange("Last Month");
   return {
-    reportDate: range.from,
-    throughDate: range.to,
+    reportDate: "",
+    throughDate: "",
     facility: "all",
     activity: "All",
   };
@@ -214,7 +213,7 @@ export default function ActivityReportPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `activity-report-${filters.reportDate}-${filters.throughDate}.csv`;
+    link.download = `activity-report-${filters.reportDate || "all"}-${filters.throughDate || "all"}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
