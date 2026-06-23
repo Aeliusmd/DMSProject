@@ -10,7 +10,7 @@ import {
   writeOffInvoices as submitWriteOffInvoices,
 } from "@/lib/invoices/invoiceApi";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
-import { canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
+import { canSendInvoice, canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
 
 function buildWriteOffInvoice(group, row) {
   return {
@@ -72,8 +72,7 @@ export default function InvoiceReportTable({
   const handleSendInvoice = async (group) => {
     const selectedIds = selectedRows[group.company] || [];
     const selectedInvoiceRows = group.rows.filter(
-      (row) =>
-        selectedIds.includes(row.id) && !row.isSent && !row.isWrittenOff
+      (row) => selectedIds.includes(row.id) && canSendInvoice(row)
     );
 
     if (!selectedInvoiceRows.length || sending) {
@@ -84,8 +83,6 @@ export default function InvoiceReportTable({
 
         if (selectedRows.every((row) => row.isSent)) {
           setSendError("Selected invoices are already sent.");
-        } else if (selectedRows.every((row) => row.isWrittenOff)) {
-          setSendError("Written off invoices cannot be sent.");
         } else {
           setSendError("Selected invoices cannot be sent.");
         }
@@ -318,7 +315,9 @@ function InvoiceGroup({
   onOpenSingleWriteOffModal,
   enableWriteOff = true,
 }) {
-  const hasSelected = selectedIds.length > 0;
+  const hasSendableSelected = group.rows.some(
+    (row) => selectedIds.includes(row.id) && canSendInvoice(row)
+  );
   const hasWritableSelected = group.rows.some(
     (row) => selectedIds.includes(row.id) && canWriteOffInvoice(row)
   );
@@ -370,10 +369,10 @@ function InvoiceGroup({
 
             <button
               type="button"
-              disabled={!hasSelected || sending}
+              disabled={!hasSendableSelected || sending}
               onClick={() => onSendInvoice(group)}
               className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
-                hasSelected && !sending
+                hasSendableSelected && !sending
                   ? "bg-[#0097B2] text-white hover:bg-[#0086A0]"
                   : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
               }`}
@@ -426,7 +425,7 @@ function InvoiceRow({
   enableWriteOff = true,
 }) {
   const rowClassName = row.isWrittenOff
-    ? "border-b border-[#F1F5F9] bg-white text-[#94A3B8] line-through hover:bg-[#F8FAFC]"
+    ? "border-b border-[#F1F5F9] bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
     : "border-b border-[#F1F5F9] bg-white hover:bg-[#F8FAFC]";
 
   return (
@@ -497,7 +496,7 @@ function InvoiceRow({
       </td>
 
       <td className="px-4 py-4 align-top text-right">
-        {enableWriteOff && (
+        {enableWriteOff && !row.isWrittenOff && (
           <button
             type="button"
             onClick={() => onOpenSingleWriteOffModal(group, row)}

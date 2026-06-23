@@ -332,10 +332,10 @@ class Order {
     return rows[0] || {};
   }
 
-  static async findById(id) {
-    const pool = getPool();
+  static async findById(id, connection = null) {
+    const db = connection || getPool();
 
-    const [rows] = await pool.execute(
+    const [rows] = await db.execute(
       `${ORDER_DETAIL_SELECT}
        WHERE o.id = :id AND ${ACTIVE_ORDER_ALIAS}
        LIMIT 1`,

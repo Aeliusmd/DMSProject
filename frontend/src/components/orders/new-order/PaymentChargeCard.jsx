@@ -1,11 +1,13 @@
+import { useState } from "react";
 import NewOrderField from "@/components/orders/new-order/NewOrderField";
 import {
+  capPaymentPaidEntry,
   dueAmountFromFee,
   formatMoneyAmount,
   formatPaidBracket,
   parsePaymentAmount,
-  resolvePaymentCharge,
   resolvePaymentDue,
+  resolvePaymentCharge,
 } from "@/lib/orders/paymentUtils";
 
 const paymentThemes = {
@@ -61,6 +63,13 @@ function AmountField({ label, value, onChange, onBlur, readOnly, colors, error }
   );
 }
 
+function usesInvoiceDueRules(type, invoiceFees) {
+  return (
+    (type === "custodian" && invoiceFees?.hasInvoice) ||
+    (type === "xray" && invoiceFees?.hasXrayInvoice)
+  );
+}
+
 export default function PaymentChargeCard({
   title,
   chargeAmount,
@@ -78,17 +87,20 @@ export default function PaymentChargeCard({
   fieldsReadOnly = false,
   chargeAmountFieldName = "",
   chargeAmountLabel = "Amount",
-  editableDue = false,
   autoDueOnPaidChange = false,
   invoiceFees = null,
   paymentType = "",
+  capPaidToDue = false,
   onValuesChange,
 }) {
   const colors = paymentThemes[theme];
+  const [paidCapError, setPaidCapError] = useState("");
   const lockPaid = paidReadOnly ?? amountsReadOnly;
   const lockFields = fieldsReadOnly || lockPaid;
   const dueFieldName = `${prefix}Due`;
   const type = paymentType || prefix;
+  const invoiceLinkedDue = usesInvoiceDueRules(type, invoiceFees);
+  const autoComputeDue = autoDueOnPaidChange || invoiceLinkedDue;
 
   const resolvedPaid = showPaidField
     ? parsePaymentAmount(formData[`${prefix}Paid`])
@@ -96,16 +108,11 @@ export default function PaymentChargeCard({
   const storedDue = formData[dueFieldName];
   const charge = chargeAmountFieldName
     ? parsePaymentAmount(formData[chargeAmountFieldName] || chargeAmount)
-    : resolvePaymentCharge(
-        type,
-        invoiceFees,
-        resolvedPaid,
-        storedDue
-      );
+    : resolvePaymentCharge(type, invoiceFees, resolvedPaid, storedDue);
   const paid = resolvedPaid;
   const paidBracket = formatPaidBracket(paid);
-  const dueAmount = editableDue
-    ? resolvePaymentDue(type, invoiceFees, resolvedPaid, storedDue)
+  const computedDue = invoiceLinkedDue
+    ? resolvePaymentDue(type, invoiceFees, resolvedPaid)
     : mirrorPaidDue
       ? charge
       : dueAmountFromFee(charge, resolvedPaid);
@@ -126,40 +133,40 @@ export default function PaymentChargeCard({
     if (lockPaid) return;
 
     const rawPaid = sanitizeMoneyInput(event.target.value);
-    const updates = { [`${prefix}Paid`]: rawPaid };
+    let nextPaid = rawPaid;
 
-    if (autoDueOnPaidChange) {
-      const lockedCharge = resolvePaymentCharge(
+    if (capPaidToDue) {
+      const { paidValue, capped } = capPaymentPaidEntry(
         type,
         invoiceFees,
         resolvedPaid,
-        storedDue
+        storedDue,
+        rawPaid
       );
-      updates[dueFieldName] = dueAmountFromFee(lockedCharge, rawPaid).toFixed(2);
+      nextPaid = paidValue;
+      setPaidCapError(capped ? "Paid cannot exceed due" : "");
+    } else {
+      setPaidCapError("");
+    }
+
+    const updates = { [`${prefix}Paid`]: nextPaid };
+
+    if (autoComputeDue) {
+      updates[dueFieldName] = resolvePaymentDue(
+        type,
+        invoiceFees,
+        nextPaid
+      ).toFixed(2);
     }
 
     emitValues(updates);
   };
 
-  const handleDueChange = (event) => {
-    if (!editableDue) return;
-
-    emitValues({
-      [dueFieldName]: sanitizeMoneyInput(event.target.value),
-    });
-  };
-
-  const handleChargeAmountChange = (event) => {
-    if (!chargeAmountFieldName) return;
-
-    emitValues({
-      [chargeAmountFieldName]: sanitizeMoneyInput(event.target.value),
-    });
-  };
-
-  const dueDisplayValue = editableDue
-    ? storedDue ?? ""
-    : dueAmount.toFixed(2);
+  const dueDisplayValue = autoComputeDue
+    ? computedDue.toFixed(2)
+    : mirrorPaidDue
+      ? charge.toFixed(2)
+      : dueAmountFromFee(charge, paid).toFixed(2);
 
   return (
     <div className={`rounded-[10px] border ${colors.border} ${colors.bg} p-4`}>
@@ -187,7 +194,11 @@ export default function PaymentChargeCard({
           <AmountField
             label={chargeAmountLabel}
             value={formData[chargeAmountFieldName] ?? ""}
-            onChange={handleChargeAmountChange}
+            onChange={(event) => {
+              emitValues({
+                [chargeAmountFieldName]: sanitizeMoneyInput(event.target.value),
+              });
+            }}
             onBlur={onBlur}
             readOnly={false}
             colors={colors}
@@ -231,16 +242,14 @@ export default function PaymentChargeCard({
             onBlur={onBlur}
             readOnly={lockPaid}
             colors={colors}
-            error={getError(`${prefix}Paid`)}
+            error={getError(`${prefix}Paid`) || paidCapError}
           />
         )}
 
         <AmountField
           label="Due"
           value={dueDisplayValue}
-          onChange={handleDueChange}
-          onBlur={onBlur}
-          readOnly={!editableDue}
+          readOnly
           colors={colors}
           error={getError(dueFieldName)}
         />
