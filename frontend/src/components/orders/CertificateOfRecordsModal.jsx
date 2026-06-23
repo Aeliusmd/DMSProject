@@ -6,12 +6,12 @@ import useIsClient from "@/hooks/useIsClient";
 import SheetLetterhead from "@/components/orders/SheetLetterhead";
 import { buildCertificateFormData } from "@/lib/orders/certificateFormData";
 import {
-  CNR_SIGNER,
+  CERTIFICATE_SIGNER,
   SHEET_COLORS,
   SHEET_COMPANY_INFO,
 } from "@/lib/sheetTemplateConstants";
 
-export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
+export default function CertificateOfRecordsModal({ isOpen, order, onClose }) {
   const mounted = useIsClient();
 
   useEffect(() => {
@@ -42,9 +42,8 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
               className="h-[8px] w-[8px] rounded-full"
               style={{ backgroundColor: SHEET_COLORS.purple }}
             />
-
             <h2 className="text-[13px] font-semibold text-[#111827]">
-              Certificate of No Records — {certificateData.orderId}
+              Certificate of Records — {certificateData.orderId}
             </h2>
           </div>
 
@@ -62,7 +61,7 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
               type="button"
               onClick={onClose}
               className="flex h-[28px] w-[28px] items-center justify-center rounded-[5px] text-[16px] leading-none text-[#94A3B8] hover:bg-[#F1F5F9] hover:text-[#334155]"
-              aria-label="Close CNR modal"
+              aria-label="Close certification modal"
             >
               ×
             </button>
@@ -79,7 +78,7 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
             <SheetLetterhead />
 
             <h1 className="mt-6 text-center text-[16px] font-bold">
-              Certificate of No Records
+              Certificate of Records
             </h1>
 
             <div className="mt-7 space-y-4 text-[13px] leading-[21px]">
@@ -99,7 +98,6 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
                   <span className="ml-8 font-bold">Regarding:</span>{" "}
                   <span className="text-[#B45309]">{certificateData.applicant}</span>
                 </p>
-
                 <p>
                   <span className="ml-8 font-bold">Reference #</span>{" "}
                   <span className="text-[#B45309]">{certificateData.reference}</span>
@@ -107,23 +105,34 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
               </div>
 
               <p>
-                I understand, being the{" "}
-                <span className="text-[#B45309]">authorized Release of Information</span>{" "}
-                for:{" "}
+                I, the undersigned, being the authorized Release of Information service
+                for,{" "}
                 <span className="font-bold text-[#B45309]">
                   {certificateData.facilityName}
                 </span>
+                {certificateData.facilityAddressLines.length > 0 ? (
+                  <>
+                    {", "}
+                    <span className="text-[#B45309]">
+                      {certificateData.facilityAddressLines.join(", ")}
+                    </span>
+                  </>
+                ) : null}
+                .
               </p>
 
               <p>Declare the following:</p>
 
               <p>
-                We certify that a thorough search of our files, carried out under{" "}
-                <span className="text-[#B45309]">our direction and control</span> revealed
-                no records on the patient named in the{" "}
-                <span className="text-[#B45309]">Subpoena / Authorization</span> for the
-                above named{" "}
-                <span className="text-[#B45309]">medical facility / doctor.</span>
+                Including this declaration, all records requested have been reproduced in
+                my presence, under my direction and control. The copy submitted with the
+                declaration is a true copy thereof.
+              </p>
+
+              <p>
+                To the best of my knowledge all records referred to above, were prepared
+                or complied by our personnel, in the ordinary course of business at or
+                near the time of the acts, conditions, or events recorded.
               </p>
 
               <p className="text-[#B45309]">
@@ -132,8 +141,8 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
               </p>
 
               <div className="pt-7">
-                <p className="font-bold">{CNR_SIGNER.name}</p>
-                <p className="underline">{CNR_SIGNER.title}</p>
+                <p className="font-bold">{CERTIFICATE_SIGNER.name}</p>
+                <p className="underline">{CERTIFICATE_SIGNER.title}</p>
                 <p>{SHEET_COMPANY_INFO.companyName}</p>
               </div>
             </div>
