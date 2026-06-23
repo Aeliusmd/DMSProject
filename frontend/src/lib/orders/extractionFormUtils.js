@@ -168,6 +168,18 @@ function extractDateTokens(text) {
 }
 
 export function applyDateOfInjuryFromHints(updates, hints = {}) {
+  const parsedFromHint =
+    parseSingleDateToInput(hints.dateOfInjury) ||
+    parseSingleDateToInput(hints.date_of_injury);
+
+  if (!hints.dateOfInjuryText && parsedFromHint) {
+    updates.injuryType = "specific";
+    updates.injuryDate = parsedFromHint;
+    updates.injuryDateBegin = "";
+    updates.injuryDateEnd = "";
+    return;
+  }
+
   const rawText =
     hints.dateOfInjuryText ||
     hints.dateOfInjury ||
@@ -321,7 +333,10 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
     const formattedSsn = normalizeAutofillSSN(hints.ssn);
     if (formattedSsn) updates.ssn = formattedSsn;
   }
-  if (hints.dateOfBirth) updates.dob = hints.dateOfBirth;
+  if (hints.dateOfBirth) {
+    updates.dob =
+      parseSingleDateToInput(hints.dateOfBirth) || hints.dateOfBirth;
+  }
   applyDateOfInjuryFromHints(updates, hints);
   if (hints.companyAddress) applyParsedServeAddress(updates, hints.companyAddress);
   if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
@@ -332,7 +347,6 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   if (hints.amount) {
     const amount = normalizeAutofillAmount(hints.amount);
     if (amount) {
-      updates.subpoenaPrepaymentAmount = amount;
       updates.prepaymentPaid = amount;
     }
   }

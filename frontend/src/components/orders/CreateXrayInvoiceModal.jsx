@@ -192,9 +192,9 @@ export default function CreateXrayInvoiceModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
-      <section className="flex max-h-[calc(100vh-42px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[10px] bg-white shadow-2xl">
-        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-5 py-4 text-white">
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+      <section className="flex max-h-[100dvh] w-full max-w-[720px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
+        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
             type="button"
             onClick={onClose}
@@ -218,8 +218,9 @@ export default function CreateXrayInvoiceModal({
           </p>
         </div>
 
-        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5 py-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-3 sm:px-5">
+          <div className="-mx-1 overflow-x-auto px-1">
+            <div className="flex min-w-max flex-wrap items-center gap-x-5 gap-y-2 text-[11px] sm:min-w-0">
             <MetaItem label="Ref #" value={order.orderRef || "—"} />
 
             <MetaItem
@@ -229,11 +230,12 @@ export default function CreateXrayInvoiceModal({
             />
 
             <MetaItem label="WCAB:" value={order.court || "N/A"} />
+            </div>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_170px]">
-          <div className="min-h-0 overflow-y-auto px-5 py-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_200px]">
+          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DateField
                 label="X-Ray Invoice Date"
@@ -318,7 +320,7 @@ export default function CreateXrayInvoiceModal({
             </div>
           </div>
 
-          <aside className="flex min-h-[220px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 lg:border-l lg:border-t-0">
+          <aside className="flex min-h-[220px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 md:border-l md:border-t-0">
             <h3 className="mb-4 text-[12px] font-semibold text-[#334155]">
               Summary
             </h3>

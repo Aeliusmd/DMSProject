@@ -40,8 +40,48 @@ async function getProviderById(id) {
   return mapProviderRow(provider);
 }
 
+function buildProviderPayload(data = {}) {
+  const companyName = `${data.companyName ?? data.serveCompanyName ?? ""}`.trim();
+
+  if (!companyName) {
+    throw new ApiError(400, "Provider company name is required");
+  }
+
+  return {
+    companyName,
+    address: `${data.address ?? ""}`.trim(),
+    zipCode: `${data.zipCode ?? data.zip ?? ""}`.trim(),
+    city: `${data.city ?? ""}`.trim(),
+    state: `${data.state ?? ""}`.trim(),
+    phone: `${data.phone ?? ""}`.trim(),
+    fax: `${data.fax ?? ""}`.trim(),
+    email: `${data.email ?? ""}`.trim(),
+  };
+}
+
+async function updateProvider(id, data) {
+  const providerId = Number(id);
+
+  if (!Number.isFinite(providerId)) {
+    throw new ApiError(400, "Invalid provider id");
+  }
+
+  const existing = await Provider.findById(providerId);
+
+  if (!existing) {
+    throw new ApiError(404, "Provider not found");
+  }
+
+  const payload = buildProviderPayload(data);
+  await Provider.update(null, providerId, payload);
+
+  return getProviderById(providerId);
+}
+
 module.exports = {
   getAllProviders,
   searchProviders,
   getProviderById,
+  updateProvider,
+  buildProviderPayload,
 };

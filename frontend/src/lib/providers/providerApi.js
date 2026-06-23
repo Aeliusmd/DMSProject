@@ -20,3 +20,13 @@ export async function getProvider(id) {
   const data = await request(`/providers/${id}`, { auth: true });
   return data?.data?.provider || null;
 }
+
+export async function updateProvider(id, payload) {
+  const data = await request(`/providers/${id}`, {
+    method: "PUT",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data?.provider || null;
+}

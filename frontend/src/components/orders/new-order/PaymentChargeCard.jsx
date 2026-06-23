@@ -65,14 +65,12 @@ export default function PaymentChargeCard({
   showPaidField = false,
   mirrorPaidDue = false,
   amountsReadOnly = false,
-  dueReadOnly,
   paidReadOnly,
   fieldsReadOnly = false,
   chargeAmountFieldName = "",
   chargeAmountLabel = "Amount",
 }) {
   const colors = paymentThemes[theme];
-  const lockDue = dueReadOnly ?? amountsReadOnly;
   const lockPaid = paidReadOnly ?? amountsReadOnly;
   const lockFields = fieldsReadOnly || lockPaid;
   const charge = chargeAmountFieldName
@@ -85,24 +83,6 @@ export default function PaymentChargeCard({
     : dueAmountFromFee(charge, paid);
   const paidDisplay = mirrorPaidDue ? charge : paid;
   const displayValue = (amount) => amount.toFixed(2);
-
-  const handleDueChange = (event) => {
-    if (lockDue) return;
-
-    const rawDue = event.target.value
-      .replace(/[^\d.]/g, "")
-      .replace(/(\..*)\./g, "$1")
-      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
-    const nextDue = parsePaymentAmount(rawDue);
-    const nextPaid = Math.max(0, charge - nextDue);
-
-    onChange({
-      target: {
-        name: `${prefix}Paid`,
-        value: nextPaid > 0 ? nextPaid.toFixed(2) : "",
-      },
-    });
-  };
 
   const handlePaidChange = (event) => {
     if (lockPaid) return;
@@ -213,11 +193,8 @@ export default function PaymentChargeCard({
         <AmountField
           label="Due"
           value={displayValue(dueAmount)}
-          onChange={handleDueChange}
-          onBlur={onBlur}
-          readOnly={lockDue}
+          readOnly
           colors={colors}
-          error={!showPaidField ? getError(`${prefix}Paid`) : ""}
         />
 
         <NewOrderField

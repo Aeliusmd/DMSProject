@@ -114,9 +114,9 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   const db = connection || getPool();
 
   const [invoiceRows] = await db.execute(
-    `SELECT id, served_amount, service_fee, custodian_fee, xray_fee,
-            mileage, parking, other_fee, page_count, per_page_amount,
-            total_amount, status, writeoff_amount
+    `SELECT id, custodian_fee, xray_fee, page_count, per_page_amount,
+            clerical_time_hours, clerical_hourly_rate, shipping_handling, storage_fee,
+            other_fee, total_amount, status, writeoff_amount
      FROM invoices
      WHERE order_id = :orderId
      LIMIT 1`,
@@ -169,6 +169,23 @@ function toNumber(value) {
   const number = Number(value);
   return Number.isNaN(number) ? 0 : number;
 }
+
+function getStorageFee(rowOrPayload = {}) {
+  const storageFee = toNumber(rowOrPayload.storage_fee ?? rowOrPayload.storageFee);
+  if (storageFee > 0) {
+    return storageFee;
+  }
+
+  return toNumber(rowOrPayload.other_fee ?? rowOrPayload.other);
+}
+
+const LEGACY_INVOICE_AMOUNTS = {
+  servedAmount: 0,
+  serviceFee: 0,
+  mileage: 0,
+  parking: 0,
+  otherFee: 0,
+};
 
 function boolToInt(value) {
   if (typeof value === "string") {
@@ -229,7 +246,20 @@ function buildApplicantName(row) {
     .trim();
 }
 
-function buildOrderDetailsText(row) {
+function resolveYourFileNumber(orderRow) {
+  if (!orderRow) return "";
+
+  const typeLabel = trimOrNull(ORDER_TYPE_LABELS[orderRow.order_type]);
+  if (typeLabel) return typeLabel;
+
+  return (
+    trimOrNull(orderRow.specific_record) ||
+    trimOrNull(orderRow.order_type) ||
+    ""
+  );
+}
+
+function buildOrderDetailsText(row, orderPayments = []) {
   if (!row) return "";
 
   const lines = [];
@@ -276,7 +306,60 @@ function buildOrderDetailsText(row) {
     row.date_served ? toShortDate(row.date_served) : null
   );
 
+  const feeLines = buildInvoiceFeeSummaryLines(row, orderPayments);
+  if (feeLines.length) {
+    lines.push("");
+    lines.push("Invoice Fees:");
+    lines.push(...feeLines);
+  }
+
   return lines.join("\n");
+}
+
+function buildInvoiceFeeSummaryLines(row, orderPayments = []) {
+  if (!row) return [];
+
+  const totals = calculateTotalsWithPayments(
+    {
+      custodianFee: row.custodian_fee,
+      xrayFee: row.xray_fee,
+      pages: row.page_count,
+      perPageAmount: row.per_page_amount,
+      clericalTimeHours: row.clerical_time_hours,
+      clericalHourlyRate: row.clerical_hourly_rate,
+      shippingHandling: row.shipping_handling,
+      storageFee: getStorageFee(row),
+    },
+    orderPayments
+  );
+  const financials = resolveRowFinancials(row, orderPayments);
+  const lines = [];
+  const pushFee = (label, amount) => {
+    if (toNumber(amount) > 0) {
+      lines.push(`${label}: ${formatMoney(amount)}`);
+    }
+  };
+
+  pushFee("Custodian Fee", totals.custodianFee);
+  pushFee("X-Ray Fee", totals.xrayFee);
+
+  if (totals.pageCount > 0 && totals.perPageAmount > 0) {
+    lines.push(
+      `Per Page Charge (${totals.pageCount} x ${formatMoney(totals.perPageAmount)}): ${formatMoney(totals.pageCount * totals.perPageAmount)}`
+    );
+  }
+
+  if (totals.clericalAmount > 0) {
+    lines.push(`Clerical Time: ${formatMoney(totals.clericalAmount)}`);
+  }
+
+  pushFee("Shipping & Handling", totals.shippingHandling);
+  pushFee("Storage Fee", totals.storageFee);
+  lines.push(`Total Invoiced: ${formatMoney(financials.totalAmount)}`);
+  lines.push(`Total Paid: ${formatMoney(financials.amountPaid)}`);
+  lines.push(`Amount Due: ${formatMoney(financials.amountDue)}`);
+
+  return lines;
 }
 
 function daysSince(dateValue) {
@@ -292,13 +375,8 @@ function daysSince(dateValue) {
 }
 
 function calculateTotals(payload = {}) {
-  const servedAmount = toNumber(payload.servedAmount);
-  const serviceFee = toNumber(payload.serviceFee);
   const custodianFee = toNumber(payload.custodianFee);
   const xrayFee = toNumber(payload.xrayFee);
-  const mileage = toNumber(payload.mileage);
-  const parking = toNumber(payload.parking);
-  const otherFee = toNumber(payload.other);
   const pageCount = Math.max(0, Math.floor(toNumber(payload.pages)));
   const perPageAmount = toNumber(payload.perPageAmount);
   const pagesAmount = pageCount * perPageAmount;
@@ -306,33 +384,27 @@ function calculateTotals(payload = {}) {
   const clericalHourlyRate = toNumber(payload.clericalHourlyRate);
   const clericalAmount = clericalTimeHours * clericalHourlyRate;
   const shippingHandling = toNumber(payload.shippingHandling);
+  const storageFee = getStorageFee(payload);
 
   const totalAmount =
-    servedAmount +
-    serviceFee +
     custodianFee +
     xrayFee +
-    mileage +
-    parking +
-    otherFee +
     pagesAmount +
     clericalAmount +
-    shippingHandling;
+    shippingHandling +
+    storageFee;
 
   return {
-    servedAmount,
-    serviceFee,
     custodianFee,
     xrayFee,
-    mileage,
-    parking,
-    otherFee,
     pageCount,
     perPageAmount,
+    pagesAmount,
     clericalTimeHours,
     clericalHourlyRate,
     clericalAmount,
     shippingHandling,
+    storageFee,
     totalAmount,
   };
 }
@@ -364,7 +436,6 @@ function calculateTotalsWithPayments(payload = {}, orderPayments = []) {
 
   return calculateTotals({
     ...payload,
-    serviceFee: toNumber(payload.serviceFee),
     custodianFee: normalizeGrossFee(payload.custodianFee, custodianPaid),
     xrayFee: normalizeGrossFee(payload.xrayFee, xrayPaid),
   });
@@ -373,15 +444,14 @@ function calculateTotalsWithPayments(payload = {}, orderPayments = []) {
 function resolveRowFinancials(row, orderPayments = []) {
   const totals = calculateTotalsWithPayments(
     {
-      servedAmount: row.served_amount,
-      serviceFee: row.service_fee,
       custodianFee: row.custodian_fee,
       xrayFee: row.xray_fee,
-      mileage: row.mileage,
-      parking: row.parking,
-      other: row.other_fee,
       pages: row.page_count,
       perPageAmount: row.per_page_amount,
+      clericalTimeHours: row.clerical_time_hours,
+      clericalHourlyRate: row.clerical_hourly_rate,
+      shippingHandling: row.shipping_handling,
+      storageFee: getStorageFee(row),
     },
     orderPayments
   );
@@ -417,13 +487,9 @@ function mapInvoiceDetail(row) {
     invoiceDate: toInputDate(row.invoice_date),
     serviceDate: toInputDate(row.service_date),
     sentDate: toInputDate(row.sent_date),
-    servedAmount: toNumber(row.served_amount).toFixed(2),
-    serviceFee: toNumber(row.service_fee).toFixed(2),
     custodianFee: toNumber(row.custodian_fee).toFixed(2),
     xrayFee: toNumber(row.xray_fee).toFixed(2),
-    mileage: toNumber(row.mileage).toFixed(2),
-    parking: toNumber(row.parking).toFixed(2),
-    other: toNumber(row.other_fee).toFixed(2),
+    storageFee: getStorageFee(row).toFixed(2),
     pages: String(row.page_count ?? 0),
     perPageAmount: toNumber(row.per_page_amount).toFixed(2),
     clericalTimeHours: toNumber(row.clerical_time_hours).toFixed(2),
@@ -521,16 +587,12 @@ function mapXrayDetail(row, orderPayments = []) {
 function hasStandardInvoiceFields(row) {
   return (
     Boolean(row.invoice_date) ||
-    toNumber(row.service_fee) > 0 ||
     toNumber(row.custodian_fee) > 0 ||
-    toNumber(row.served_amount) > 0 ||
-    toNumber(row.mileage) > 0 ||
-    toNumber(row.parking) > 0 ||
-    toNumber(row.other_fee) > 0 ||
     toNumber(row.page_count) > 0 ||
     toNumber(row.clerical_time_hours) > 0 ||
     toNumber(row.clerical_hourly_rate) > 0 ||
-    toNumber(row.shipping_handling) > 0
+    toNumber(row.shipping_handling) > 0 ||
+    getStorageFee(row) > 0
   );
 }
 
@@ -586,35 +648,18 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
     return null;
   }
 
-  const financials = resolveRowFinancials(invoiceRow, orderPayments);
-  const servedAmount = toNumber(invoiceRow.served_amount);
-  const serviceFee = toNumber(invoiceRow.service_fee);
   const pageCount = Math.max(0, Math.floor(toNumber(invoiceRow.page_count)));
   const perPageAmount = toNumber(invoiceRow.per_page_amount);
   const pagesTotal = pageCount * perPageAmount;
-  const mileage = toNumber(invoiceRow.mileage);
-  const parking = toNumber(invoiceRow.parking);
-  const otherFee = toNumber(invoiceRow.other_fee);
   const custodianFee = toNumber(invoiceRow.custodian_fee);
   const xrayFee = toNumber(invoiceRow.xray_fee);
+  const clericalTimeHours = Math.max(0, toNumber(invoiceRow.clerical_time_hours));
+  const clericalHourlyRate = toNumber(invoiceRow.clerical_hourly_rate);
+  const clericalAmount = clericalTimeHours * clericalHourlyRate;
+  const shippingHandling = toNumber(invoiceRow.shipping_handling);
+  const storageFee = getStorageFee(invoiceRow);
 
   const feeLines = [];
-
-  if (servedAmount > 0) {
-    pushPrintFeeLine(feeLines, {
-      description: "Served Amount",
-      quantity: "",
-      total: servedAmount,
-    });
-  }
-
-  if (serviceFee > 0) {
-    pushPrintFeeLine(feeLines, {
-      description: "Service Fee",
-      quantity: "",
-      total: serviceFee,
-    });
-  }
 
   if (custodianFee > 0) {
     pushPrintFeeLine(feeLines, {
@@ -632,53 +677,46 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
     });
   }
 
-  if (mileage > 0) {
+  if (clericalAmount > 0) {
     pushPrintFeeLine(feeLines, {
-      description: "Mileage",
-      quantity: "",
-      total: mileage,
-    });
-  }
-
-  if (parking > 0) {
-    pushPrintFeeLine(feeLines, {
-      description: "Parking",
-      quantity: "",
-      total: parking,
-    });
-  }
-
-  if (otherFee > 0) {
-    pushPrintFeeLine(feeLines, {
-      description: "Other",
-      quantity: "",
-      total: otherFee,
+      description: `Clerical time $${formatPerViewRate(clericalHourlyRate)} per hour`,
+      quantity: clericalTimeHours.toFixed(2),
+      total: clericalAmount,
     });
   }
 
   if (pagesTotal > 0) {
     pushPrintFeeLine(feeLines, {
-      description: "Pages Amount",
+      description: "Per Page Charge",
       quantity: String(pageCount),
       total: pagesTotal,
     });
   }
 
-  const prepaymentAmount = getOrderPaymentAmount(orderPayments, "prepayment");
-  if (prepaymentAmount > 0) {
+  if (shippingHandling > 0) {
     pushPrintFeeLine(feeLines, {
-      description: "Prepayment",
-      quantity: "",
-      total: prepaymentAmount,
+      description: "Shipping & Handling",
+      quantity: "1",
+      total: shippingHandling,
     });
   }
+
+  if (storageFee > 0) {
+    pushPrintFeeLine(feeLines, {
+      description: "Storage Fee",
+      quantity: "1",
+      total: storageFee,
+    });
+  }
+
+  const financials = resolveRowFinancials(invoiceRow, orderPayments);
 
   return {
     customer: orderRow.serve_company_name || orderRow.provider_name || "",
     requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
-    yourFileNumber: orderRow.order_ref || "",
+    yourFileNumber: resolveYourFileNumber(orderRow),
     ourCaseNumber: orderRow.order_number || "",
-    applicant: buildApplicantName(invoiceRow),
+    applicant: buildApplicantName(orderRow),
     feeLines,
     totalInvoiced: financials.totalAmount,
     totalDue: financials.amountDue,
@@ -735,7 +773,7 @@ function buildPrintXrayInvoicePdfData(xrayRow, orderRow, orderPayments = []) {
     customer: orderRow.provider_name || orderRow.serve_company_name || "",
     requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
     specificDoctor: orderRow.specific_doctor || "",
-    yourFileNumber: orderRow.order_ref || "",
+    yourFileNumber: resolveYourFileNumber(orderRow),
     ourCaseNumber: orderRow.order_number || "",
     applicant: buildApplicantName(orderRow),
     dob: formatDobDisplay(orderRow.dob) || "",
@@ -747,12 +785,14 @@ function buildPrintXrayInvoicePdfData(xrayRow, orderRow, orderPayments = []) {
 }
 
 function mapOrderInvoiceFees(invoiceRow, xrayRow = null) {
+  const xrayPayment = xrayRow ? toNumber(xrayRow.payment) : 0;
+
   if (!invoiceRow) {
     return {
       hasInvoice: false,
-      serviceFee: 0,
+      hasXrayInvoice: Boolean(xrayRow),
       custodianFee: 0,
-      xrayFee: 0,
+      xrayFee: xrayPayment,
     };
   }
 
@@ -760,15 +800,14 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null) {
   const xrayFee =
     xrayFeeFromInvoice > 0
       ? xrayFeeFromInvoice
-      : xrayRow
-        ? toNumber(xrayRow.payment)
-        : 0;
+      : xrayPayment;
 
   return {
     hasInvoice: true,
-    serviceFee: toNumber(invoiceRow.service_fee),
+    hasXrayInvoice: Boolean(xrayRow),
     custodianFee: toNumber(invoiceRow.custodian_fee),
     xrayFee,
+    storageFee: getStorageFee(invoiceRow),
   };
 }
 
@@ -776,9 +815,24 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
   const paymentsSummary = mapOrderPaymentsSummary(orderPayments);
 
   if (!row) {
+    const hasXray = Boolean(xrayRow);
+
     return {
       createOnly: true,
-      hasXray: false,
+      hasXray,
+      hasStandardInvoice: false,
+      ...(hasXray
+        ? {
+            xrayReviewDate: toShortDate(xrayRow.xray_invoice_date),
+            xrayReviewDateCompact: toCompactDate(xrayRow.xray_invoice_date),
+            xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
+            xraySentDate: xrayRow.sent_date ? toShortDate(xrayRow.sent_date) : null,
+            xraySentDateCompact: xrayRow.sent_date
+              ? toCompactDate(xrayRow.sent_date)
+              : null,
+            xrayDueMeta: `${toCompactDate(xrayRow.xray_invoice_date)} - Due:${mapXrayReviewAmount(xrayRow, orderPayments)}`,
+          }
+        : {}),
       ...paymentsSummary,
       status: null,
       due: formatMoney(0),
@@ -838,13 +892,9 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     due: formatMoney(financials.amountDue),
     paidAmount: formatMoney(financials.amountPaid),
     ...paymentsSummary,
-    servedAmount: toNumber(row.served_amount).toFixed(2),
-    serviceFee: toNumber(row.service_fee).toFixed(2),
     custodianFee: toNumber(row.custodian_fee).toFixed(2),
     xrayFee: toNumber(row.xray_fee).toFixed(2),
-    mileage: toNumber(row.mileage).toFixed(2),
-    parking: toNumber(row.parking).toFixed(2),
-    other: toNumber(row.other_fee).toFixed(2),
+    storageFee: getStorageFee(row).toFixed(2),
     pages: String(row.page_count ?? 0),
     perPageAmount: toNumber(row.per_page_amount).toFixed(2),
     clericalTimeHours: toNumber(row.clerical_time_hours).toFixed(2),
@@ -994,18 +1044,15 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     invoiceDate: trimOrNull(body.invoiceDate),
     serviceDate: trimOrNull(body.serviceDate),
     sentDate: existing?.sent_date || null,
-    servedAmount: totals.servedAmount,
-    serviceFee: totals.serviceFee,
+    ...LEGACY_INVOICE_AMOUNTS,
     custodianFee: totals.custodianFee,
     xrayFee: totals.xrayFee,
-    mileage: totals.mileage,
-    parking: totals.parking,
-    otherFee: totals.otherFee,
     pageCount: totals.pageCount,
     perPageAmount: totals.perPageAmount,
     clericalTimeHours: totals.clericalTimeHours,
     clericalHourlyRate: totals.clericalHourlyRate,
     shippingHandling: totals.shippingHandling,
+    storageFee: totals.storageFee,
     totalAmount: totals.totalAmount,
     amountPaid,
     amountDue,
@@ -1128,83 +1175,34 @@ async function createOrUpdateXrayInvoice(body, userId) {
   try {
     await connection.beginTransaction();
 
-    let invoice = await Invoice.findByOrderId(orderId);
-    const existingXray = await InvoiceXray.findByOrderId(orderId, connection);
+    const invoice = await Invoice.findByOrderId(orderId, connection);
     const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
     const xrayFee = viewsAmount;
 
-    if (!invoice) {
-      const totalAmount = xrayFee;
-      const amountPaid = sumOrderPayments(orderPayments);
-      const { amountDue, status } = resolveInvoiceAmounts(totalAmount, amountPaid);
-      const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
-
-      const invoiceId = await Invoice.create(connection, {
-        invoiceNumber: `INV-${order.order_number}`,
-        orderId,
-        facilityId: order.facility_id,
-        status,
-        invoiceDate: null,
-        serviceDate: null,
-        sentDate: null,
-        servedAmount: 0,
-        serviceFee: 0,
-        custodianFee: 0,
-        xrayFee,
-        mileage: 0,
-        parking: 0,
-        otherFee: 0,
-        pageCount: 0,
-        perPageAmount: 0,
-        clericalTimeHours: 0,
-        clericalHourlyRate: 0,
-        shippingHandling: 0,
-        totalAmount,
-        amountPaid,
-        amountDue,
-        notes: description,
-        sendOrderDetails: 0,
-        isRushOrder: 0,
-        recipientEmails,
-        createdBy: userId || null,
-      });
-
-      invoice = { id: invoiceId };
-    } else {
-      const servedAmount = toNumber(invoice.served_amount);
-      const serviceFee = toNumber(invoice.service_fee);
-      const custodianFee = toNumber(invoice.custodian_fee);
-      const mileage = toNumber(invoice.mileage);
-      const parking = toNumber(invoice.parking);
-      const otherFee = toNumber(invoice.other_fee);
-      const pageCount = Math.max(0, Math.floor(toNumber(invoice.page_count)));
-      const perPageAmount = toNumber(invoice.per_page_amount);
-      const pagesAmount = pageCount * perPageAmount;
-      const clericalTimeHours = toNumber(invoice.clerical_time_hours);
-      const clericalHourlyRate = toNumber(invoice.clerical_hourly_rate);
-      const clericalAmount = clericalTimeHours * clericalHourlyRate;
-      const shippingHandling = toNumber(invoice.shipping_handling);
-      const totalAmount =
-        servedAmount +
-        serviceFee +
-        custodianFee +
-        xrayFee +
-        mileage +
-        parking +
-        otherFee +
-        pagesAmount +
-        clericalAmount +
-        shippingHandling;
+    if (invoice) {
+      const totals = calculateTotalsWithPayments(
+        {
+          custodianFee: invoice.custodian_fee,
+          xrayFee,
+          pages: invoice.page_count,
+          perPageAmount: invoice.per_page_amount,
+          clericalTimeHours: invoice.clerical_time_hours,
+          clericalHourlyRate: invoice.clerical_hourly_rate,
+          shippingHandling: invoice.shipping_handling,
+          storageFee: getStorageFee(invoice),
+        },
+        orderPayments
+      );
       const amountPaid = sumOrderPayments(orderPayments);
       const writeoffAmount = toNumber(invoice.writeoff_amount);
       const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
-        totalAmount,
+        totals.totalAmount,
         amountPaid,
         writeoffAmount
       );
       const status = resolveInvoiceStatusForSave(
         invoice,
-        totalAmount,
+        totals.totalAmount,
         amountPaid,
         derivedStatus
       );
@@ -1215,19 +1213,16 @@ async function createOrUpdateXrayInvoice(body, userId) {
         invoiceDate: invoice.invoice_date,
         serviceDate: invoice.service_date,
         sentDate: invoice.sent_date,
-        servedAmount,
-        serviceFee,
-        custodianFee,
-        xrayFee,
-        mileage,
-        parking,
-        otherFee,
-        pageCount,
-        perPageAmount,
-        clericalTimeHours,
-        clericalHourlyRate,
-        shippingHandling,
-        totalAmount,
+        ...LEGACY_INVOICE_AMOUNTS,
+        custodianFee: totals.custodianFee,
+        xrayFee: totals.xrayFee,
+        pageCount: totals.pageCount,
+        perPageAmount: totals.perPageAmount,
+        clericalTimeHours: totals.clericalTimeHours,
+        clericalHourlyRate: totals.clericalHourlyRate,
+        shippingHandling: totals.shippingHandling,
+        storageFee: totals.storageFee,
+        totalAmount: totals.totalAmount,
         amountPaid,
         amountDue,
         notes: invoice.notes,
@@ -1308,8 +1303,12 @@ async function createInvoice(body, userId) {
 
   const existing = await Invoice.findByOrderId(orderId);
 
-  if (existing) {
+  if (existing && hasStandardInvoiceFields(existing)) {
     throw new ApiError(409, "An invoice already exists for this order");
+  }
+
+  if (existing && !hasStandardInvoiceFields(existing)) {
+    return updateInvoice(existing.id, body);
   }
 
   const pool = getPool();
@@ -1339,18 +1338,15 @@ async function createInvoice(body, userId) {
       invoiceDate: invoicePayload.invoiceDate,
       serviceDate: invoicePayload.serviceDate,
       sentDate: invoicePayload.sentDate,
-      servedAmount: invoicePayload.servedAmount,
-      serviceFee: invoicePayload.serviceFee,
+      ...LEGACY_INVOICE_AMOUNTS,
       custodianFee: invoicePayload.custodianFee,
       xrayFee: invoicePayload.xrayFee,
-      mileage: invoicePayload.mileage,
-      parking: invoicePayload.parking,
-      otherFee: invoicePayload.otherFee,
       pageCount: invoicePayload.pageCount,
       perPageAmount: invoicePayload.perPageAmount,
       clericalTimeHours: invoicePayload.clericalTimeHours,
       clericalHourlyRate: invoicePayload.clericalHourlyRate,
       shippingHandling: invoicePayload.shippingHandling,
+      storageFee: invoicePayload.storageFee,
       totalAmount: invoicePayload.totalAmount,
       amountPaid: invoicePayload.amountPaid,
       amountDue: invoicePayload.amountDue,
@@ -1415,18 +1411,15 @@ async function updateInvoice(id, body) {
       invoiceDate: invoicePayload.invoiceDate,
       serviceDate: invoicePayload.serviceDate,
       sentDate: invoicePayload.sentDate,
-      servedAmount: invoicePayload.servedAmount,
-      serviceFee: invoicePayload.serviceFee,
+      ...LEGACY_INVOICE_AMOUNTS,
       custodianFee: invoicePayload.custodianFee,
       xrayFee: invoicePayload.xrayFee,
-      mileage: invoicePayload.mileage,
-      parking: invoicePayload.parking,
-      otherFee: invoicePayload.otherFee,
       pageCount: invoicePayload.pageCount,
       perPageAmount: invoicePayload.perPageAmount,
       clericalTimeHours: invoicePayload.clericalTimeHours,
       clericalHourlyRate: invoicePayload.clericalHourlyRate,
       shippingHandling: invoicePayload.shippingHandling,
+      storageFee: invoicePayload.storageFee,
       totalAmount: invoicePayload.totalAmount,
       amountPaid: invoicePayload.amountPaid,
       amountDue: invoicePayload.amountDue,
@@ -1633,6 +1626,7 @@ async function deliverInvoiceEmail(invoice, { isResend = false, orderPayments = 
     orderPayments.length > 0
       ? orderPayments
       : await Order.findPaymentsByOrderId(invoice.order_id);
+  const financials = resolveRowFinancials(invoice, payments);
   const order = await Order.findById(invoice.order_id);
   const invoiceRow = order
     ? await Invoice.findByOrderId(invoice.order_id)
@@ -1667,15 +1661,15 @@ async function deliverInvoiceEmail(invoice, { isResend = false, orderPayments = 
     applicant: buildApplicantName(invoice),
     invoiceDate: toShortDate(invoice.invoice_date),
     sentDate: toShortDate(isResend ? invoice.sent_date || new Date() : new Date()),
-    invoiced: formatMoney(invoice.total_amount),
-    paid: formatMoney(invoice.amount_paid),
-    due: formatMoney(invoice.amount_due),
+    invoiced: formatMoney(financials.totalAmount),
+    paid: formatMoney(financials.amountPaid),
+    due: formatMoney(financials.amountDue),
     isResend,
     sendOrderDetails: Boolean(invoice.send_order_details),
     isRushOrder: Boolean(invoice.is_rush_order),
     rushLevel: calculateOrderRushLevel(invoice.order_created_at).label,
     orderDetailsText: Boolean(invoice.send_order_details)
-      ? buildOrderDetailsText(invoice)
+      ? buildOrderDetailsText(invoice, payments)
       : "",
     attachments,
   });

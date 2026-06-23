@@ -138,6 +138,7 @@ export default function InvoicesPage() {
             invoiceGroups={outstanding.groups}
             loading={loading}
             onRefresh={loadInvoices}
+            onSent={() => setActiveTab("resend")}
           />
         ) : (
           <ResendInvoicesPanel

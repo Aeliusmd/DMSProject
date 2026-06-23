@@ -38,8 +38,11 @@ import {
   resolveProviderEmail,
 } from "@/lib/orders/deliveryActions";
 import { getOrderPeriodStartDate } from "@/lib/orders/orderFilterConstants";
-import { emailInvoiceByOrderId } from "@/lib/invoices/invoiceApi";
-import { emailInvoiceByOrderId, emailXrayInvoiceByOrderId, resendInvoices } from "@/lib/invoices/invoiceApi";
+import {
+  emailXrayInvoiceByOrderId,
+  resendInvoices,
+  sendInvoices,
+} from "@/lib/invoices/invoiceApi";
 import {
   formatMoneyAmount,
   parsePaymentAmount,
@@ -281,6 +284,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
   const [selectedFaxOrder, setSelectedFaxOrder] = useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
+  const [sendingInvoiceOrderId, setSendingInvoiceOrderId] = useState(null);
   const [emailingXrayOrderId, setEmailingXrayOrderId] = useState(null);
   const [resendingOrderId, setResendingOrderId] = useState(null);
   const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
@@ -477,9 +481,36 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     );
   }, []);
 
-  const handleEmailInvoice = useCallback(
+  const handleSendInvoice = useCallback(
     async (order) => {
-      if (!order?.dbId || emailingOrderId) return;
+      const invoiceId = Number(order.invoice?.invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(invoiceId) || sendingInvoiceOrderId) {
+        return;
+      }
+
+      setEmailError("");
+      setSendingInvoiceOrderId(order.dbId);
+
+      try {
+        await sendInvoices([invoiceId]);
+        await fetchOrders({ silent: true, force: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to send invoice");
+      } finally {
+        setSendingInvoiceOrderId(null);
+      }
+    },
+    [fetchOrders, sendingInvoiceOrderId]
+  );
+
+  const handleResendInvoiceEmail = useCallback(
+    async (order) => {
+      const invoiceId = Number(order.invoice?.invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(invoiceId) || emailingOrderId) {
+        return;
+      }
 
       const providerEmail =
         order.providerEmail || order.invoice?.providerEmail || "";
@@ -494,12 +525,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       setEmailingOrderId(order.dbId);
 
       try {
-        const result = await emailInvoiceByOrderId(order.dbId);
-        applyInvoiceEmailState(order.dbId, {
-          sentDate: result.sentDate,
-          sentDateCompact: result.sentDateCompact,
-          recipientEmail: result.recipientEmail || result.recipient || "",
-        });
+        await resendInvoices([invoiceId]);
         await fetchOrders({ silent: true, force: true });
       } catch (err) {
         setEmailError(err.message || "Failed to email invoice");
@@ -507,7 +533,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         setEmailingOrderId(null);
       }
     },
-    [emailingOrderId, fetchOrders, applyInvoiceEmailState]
+    [emailingOrderId, fetchOrders]
   );
 
   const handleEmailXrayInvoice = useCallback(
@@ -977,12 +1003,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         onXrayCoverSheet={() =>
                           setSelectedXrayCoverSheetOrder(order)
                         }
-                        onEmailInvoice={() => handleEmailInvoice(order)}
+                        onSendInvoice={() => handleSendInvoice(order)}
+                        onResendInvoice={() => handleResendInvoiceEmail(order)}
                         onEmailXrayInvoice={() => handleEmailXrayInvoice(order)}
                         onPrintInvoice={() => setSelectedPrintInvoiceOrder(order)}
                         onPrintXrayInvoice={() =>
                           setSelectedPrintXrayInvoiceOrder(order)
                         }
+                        sending={sendingInvoiceOrderId === order.dbId}
                         emailing={emailingOrderId === order.dbId}
                         emailingXray={emailingXrayOrderId === order.dbId}
                       />
@@ -1570,10 +1598,12 @@ function InvoiceBlock({
   onReviewXrayInvoice,
   onCoverSheet,
   onXrayCoverSheet,
-  onEmailInvoice,
+  onSendInvoice,
+  onResendInvoice,
   onEmailXrayInvoice,
   onPrintInvoice,
   onPrintXrayInvoice,
+  sending = false,
   emailing = false,
   emailingXray = false,
 }) {
@@ -1583,7 +1613,7 @@ function InvoiceBlock({
   const xraySentDate =
     invoice.xraySentDateCompact || invoice.xraySentDate || null;
 
-  const emailInvoiceButton = !invoice.sentDate ? (
+  const sendInvoiceButton = !invoice.sentDate ? (
     <div className="space-y-0.5">
       {hasProviderEmail ? (
         <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
@@ -1592,21 +1622,35 @@ function InvoiceBlock({
       )}
       <button
         type="button"
-        onClick={onEmailInvoice}
-        disabled={emailing}
+        onClick={onSendInvoice}
+        disabled={sending}
         className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {emailing ? "Sending..." : "Email Invoice"}
+        {sending ? "Sending..." : "Send Invoice"}
       </button>
     </div>
   ) : null;
 
-  const invoiceEmailedStatus = invoice.sentDate ? (
-    <InvoiceEmailedStatus
-      label="Invoice Emailed"
-      sentDate={invoiceSentDate}
-      recipientEmail={providerEmail || invoice.recipientEmail}
-    />
+  const resendInvoiceButton = invoice.sentDate ? (
+    <div className="space-y-0.5">
+      <p className="font-semibold text-[#2563EB]">Invoice Sent</p>
+      {invoiceSentDate ? (
+        <p className="text-[#94A3B8]">Sent: {invoiceSentDate}</p>
+      ) : null}
+      {hasProviderEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+      ) : (
+        <MissingProviderEmailNotice orderDbId={orderDbId} />
+      )}
+      <button
+        type="button"
+        onClick={onResendInvoice}
+        disabled={emailing}
+        className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {emailing ? "Emailing..." : "Email Invoice"}
+      </button>
+    </div>
   ) : null;
 
   const xraySection = invoice.hasXray ? (
@@ -1696,8 +1740,8 @@ function InvoiceBlock({
           Cover Sheet
         </button>
 
-        {emailInvoiceButton}
-        {invoiceEmailedStatus}
+        {sendInvoiceButton}
+        {resendInvoiceButton}
         {xraySection}
       </div>
     );
@@ -1735,8 +1779,8 @@ function InvoiceBlock({
         Cover Sheet
       </button>
 
-      {emailInvoiceButton}
-      {invoiceEmailedStatus}
+      {sendInvoiceButton}
+      {resendInvoiceButton}
       {xraySection}
     </div>
   );

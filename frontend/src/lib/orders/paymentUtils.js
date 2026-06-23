@@ -48,9 +48,9 @@ export function mapDueFormToInvoiceFees(formData, paymentLines = []) {
 
   return {
     ...formData,
-    serviceFee: parsePaymentAmount(formData.serviceFee).toFixed(2),
     custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid).toFixed(2),
     xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid).toFixed(2),
+    storageFee: parsePaymentAmount(formData.storageFee).toFixed(2),
   };
 }
 
@@ -59,9 +59,9 @@ export function resolveFullFeeAmounts(formData, paymentLines = []) {
   const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
 
   return {
-    serviceFee: parsePaymentAmount(formData.serviceFee),
     custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid),
     xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid),
+    storageFee: parsePaymentAmount(formData.storageFee),
   };
 }
 
@@ -80,13 +80,18 @@ export function formatPaymentDue(chargeAmount, paidValue, options = {}) {
   return formatMoneyAmount(Math.max(0, charge - paid));
 }
 
-export function getPaymentChargeForType(type, invoiceFees) {
+export function getPaymentChargeForType(type, invoiceFees = {}) {
   if (invoiceFees?.hasInvoice) {
-    if (type === "prepayment") {
-      return parsePaymentAmount(invoiceFees.serviceFee);
+    if (type === "custodian") {
+      return parsePaymentAmount(invoiceFees.custodianFee);
     }
-    if (type === "custodian") return parsePaymentAmount(invoiceFees.custodianFee);
-    if (type === "xray") return parsePaymentAmount(invoiceFees.xrayFee);
+    if (type === "xray") {
+      return parsePaymentAmount(invoiceFees.xrayFee);
+    }
+  }
+
+  if (type === "xray" && invoiceFees?.hasXrayInvoice) {
+    return parsePaymentAmount(invoiceFees.xrayFee);
   }
 
   return PAYMENT_CHARGE_AMOUNTS[type] ?? 0;
