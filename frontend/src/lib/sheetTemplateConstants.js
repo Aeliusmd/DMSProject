@@ -19,6 +19,8 @@ export const CNR_SIGNER = {
   title: "Release of Information Coordinator",
 };
 
+export const CERTIFICATE_SIGNER = CNR_SIGNER;
+
 export const SHEET_COLORS = {
   purple: "#A855F7",
   lightPurple: "#C084FC",

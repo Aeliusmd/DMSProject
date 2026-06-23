@@ -7,6 +7,7 @@ import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
 import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
+import CertificateOfRecordsModal from "@/components/orders/CertificateOfRecordsModal";
 import SendCopyLetterModal from "@/components/orders/SendCopyLetterModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
@@ -52,7 +53,7 @@ const defaultOrderFilters = {
 const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
   "Copy Center",
-  "Certification",
+  "Certification of Records",
   "CNR",
 ];
 
@@ -194,6 +195,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedXrayCoverSheetOrder, setSelectedXrayCoverSheetOrder] =
     useState(null);
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
+  const [selectedCertificationOrder, setSelectedCertificationOrder] = useState(null);
   const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
@@ -773,6 +775,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <FormsList
                         forms={order.forms}
                         onCnrClick={() => setSelectedCnrOrder(order)}
+                        onCertificationClick={() => setSelectedCertificationOrder(order)}
                         onCopyLetterClick={() => setSelectedCopyLetterOrder(order)}
                       />
                     </td>
@@ -891,6 +894,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedCnrOrder)}
         order={selectedCnrOrder}
         onClose={() => setSelectedCnrOrder(null)}
+      />
+
+      <CertificateOfRecordsModal
+        isOpen={Boolean(selectedCertificationOrder)}
+        order={selectedCertificationOrder}
+        onClose={() => setSelectedCertificationOrder(null)}
       />
 
       <SendCopyLetterModal
@@ -1380,9 +1389,10 @@ function CompanyBlock({ company }) {
   );
 }
 
-function FormsList({ forms, onCnrClick, onCopyLetterClick }) {
+function FormsList({ forms, onCnrClick, onCertificationClick, onCopyLetterClick }) {
   const handlers = {
     CNR: onCnrClick,
+    "Certification of Records": onCertificationClick,
     "Send Copy/Letter": onCopyLetterClick,
   };
 

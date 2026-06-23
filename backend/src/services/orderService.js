@@ -97,7 +97,7 @@ function resolveOrderTypeForDb(data) {
 const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
   "Copy Center",
-  "Certification",
+  "Certification of Records",
   "CNR",
 ];
 
