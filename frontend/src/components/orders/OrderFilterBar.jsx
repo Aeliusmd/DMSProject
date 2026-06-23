@@ -111,7 +111,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         >
           <option value="">All Status</option>
           <option value="active">Active</option>
-          <option value="ready">Ready to Pickup</option>
+          <option value="ready">Ready</option>
+          <option value="ready_pickup">Ready to Pickup</option>
           <option value="completed">Completed</option>
           <option value="writeoffs">Write Offs</option>
           <option value="cancelled">Cancelled</option>

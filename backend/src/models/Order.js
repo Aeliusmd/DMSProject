@@ -23,6 +23,8 @@ const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
 const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
+/** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
+const RUSH_READY_MIN_DAYS = 14;
 
 const ORDER_COLUMNS = `
   order_number, rec_number, facility_id, provider_id, order_type, status, court,
@@ -137,7 +139,16 @@ class Order {
     const conditions = [];
     const params = {};
 
-    if (filters.status) {
+    if (filters.readyFilter) {
+      conditions.push(`(
+        o.status IN ('Ready', 'Ready to Pickup')
+        OR (
+          o.status = 'Active'
+          AND DATEDIFF(CURDATE(), DATE(o.created_at)) >= :rushReadyMinDays
+        )
+      )`);
+      params.rushReadyMinDays = RUSH_READY_MIN_DAYS;
+    } else if (filters.status) {
       conditions.push("o.status = :status");
       params.status = filters.status;
     } else {

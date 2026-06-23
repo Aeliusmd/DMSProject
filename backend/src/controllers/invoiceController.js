@@ -141,6 +141,28 @@ exports.resend = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, "Invoices resent successfully");
 });
 
+exports.sendXray = asyncHandler(async (req, res) => {
+  const result = await invoiceService.sendXrayInvoices(req.body.orderIds);
+
+  await logBillingActivity(req, {
+    action: "send_xray_invoices",
+    details: `Emailed ${result.sentCount} X-Ray invoice(s)`,
+  });
+
+  return ApiResponse.success(res, result, "X-Ray invoices sent successfully");
+});
+
+exports.resendXray = asyncHandler(async (req, res) => {
+  const result = await invoiceService.resendXrayInvoices(req.body.orderIds);
+
+  await logBillingActivity(req, {
+    action: "resend_xray_invoices",
+    details: `Resent ${result.resentCount} X-Ray invoice(s) by email`,
+  });
+
+  return ApiResponse.success(res, result, "X-Ray invoices resent successfully");
+});
+
 exports.emailByOrder = asyncHandler(async (req, res) => {
   const result = await invoiceService.emailInvoiceByOrderId(req.params.orderId);
   const context = await resolveOrderBillingContext(result.orderId);
