@@ -90,6 +90,68 @@ class InvoiceXray {
     return rows;
   }
 
+  static async findByFacilityId(facilityId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "o.facility_id = :facilityId",
+      "x.sent_date IS NULL",
+    ];
+    const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findResendByFacilityId(facilityId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "o.facility_id = :facilityId",
+      "x.sent_date IS NOT NULL",
+    ];
+    const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
   static async findResend(filters = {}) {
     const pool = getPool();
     const conditions = [ORDER_VISIBLE, "x.sent_date IS NOT NULL"];

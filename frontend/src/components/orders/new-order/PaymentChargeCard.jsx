@@ -4,6 +4,8 @@ import {
   formatMoneyAmount,
   formatPaidBracket,
   parsePaymentAmount,
+  resolvePaymentCharge,
+  resolvePaymentDue,
 } from "@/lib/orders/paymentUtils";
 
 const paymentThemes = {
@@ -26,6 +28,13 @@ const paymentThemes = {
     due: "text-[#2563EB]",
   },
 };
+
+function sanitizeMoneyInput(value) {
+  return String(value ?? "")
+    .replace(/[^\d.]/g, "")
+    .replace(/(\..*)\./g, "$1")
+    .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+}
 
 function AmountField({ label, value, onChange, onBlur, readOnly, colors, error }) {
   return (
@@ -69,52 +78,88 @@ export default function PaymentChargeCard({
   fieldsReadOnly = false,
   chargeAmountFieldName = "",
   chargeAmountLabel = "Amount",
+  editableDue = false,
+  autoDueOnPaidChange = false,
+  invoiceFees = null,
+  paymentType = "",
+  onValuesChange,
 }) {
   const colors = paymentThemes[theme];
   const lockPaid = paidReadOnly ?? amountsReadOnly;
   const lockFields = fieldsReadOnly || lockPaid;
+  const dueFieldName = `${prefix}Due`;
+  const type = paymentType || prefix;
+
+  const resolvedPaid = showPaidField
+    ? parsePaymentAmount(formData[`${prefix}Paid`])
+    : parsePaymentAmount(paidAmount);
+  const storedDue = formData[dueFieldName];
   const charge = chargeAmountFieldName
     ? parsePaymentAmount(formData[chargeAmountFieldName] || chargeAmount)
-    : parsePaymentAmount(chargeAmount);
-  const paid = parsePaymentAmount(paidAmount);
+    : resolvePaymentCharge(
+        type,
+        invoiceFees,
+        resolvedPaid,
+        storedDue
+      );
+  const paid = resolvedPaid;
   const paidBracket = formatPaidBracket(paid);
-  const dueAmount = mirrorPaidDue
-    ? charge
-    : dueAmountFromFee(charge, paid);
+  const dueAmount = editableDue
+    ? resolvePaymentDue(type, invoiceFees, resolvedPaid, storedDue)
+    : mirrorPaidDue
+      ? charge
+      : dueAmountFromFee(charge, resolvedPaid);
   const paidDisplay = mirrorPaidDue ? charge : paid;
-  const displayValue = (amount) => amount.toFixed(2);
+
+  const emitValues = (updates) => {
+    if (onValuesChange) {
+      onValuesChange(updates);
+      return;
+    }
+
+    Object.entries(updates).forEach(([name, value]) => {
+      onChange({ target: { name, value } });
+    });
+  };
 
   const handlePaidChange = (event) => {
     if (lockPaid) return;
 
-    const rawPaid = event.target.value
-      .replace(/[^\d.]/g, "")
-      .replace(/(\..*)\./g, "$1")
-      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+    const rawPaid = sanitizeMoneyInput(event.target.value);
+    const updates = { [`${prefix}Paid`]: rawPaid };
 
-    onChange({
-      target: {
-        name: `${prefix}Paid`,
-        value: rawPaid,
-      },
+    if (autoDueOnPaidChange) {
+      const lockedCharge = resolvePaymentCharge(
+        type,
+        invoiceFees,
+        resolvedPaid,
+        storedDue
+      );
+      updates[dueFieldName] = dueAmountFromFee(lockedCharge, rawPaid).toFixed(2);
+    }
+
+    emitValues(updates);
+  };
+
+  const handleDueChange = (event) => {
+    if (!editableDue) return;
+
+    emitValues({
+      [dueFieldName]: sanitizeMoneyInput(event.target.value),
     });
   };
 
   const handleChargeAmountChange = (event) => {
     if (!chargeAmountFieldName) return;
 
-    const rawAmount = event.target.value
-      .replace(/[^\d.]/g, "")
-      .replace(/(\..*)\./g, "$1")
-      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
-
-    onChange({
-      target: {
-        name: chargeAmountFieldName,
-        value: rawAmount,
-      },
+    emitValues({
+      [chargeAmountFieldName]: sanitizeMoneyInput(event.target.value),
     });
   };
+
+  const dueDisplayValue = editableDue
+    ? storedDue ?? ""
+    : dueAmount.toFixed(2);
 
   return (
     <div className={`rounded-[10px] border ${colors.border} ${colors.bg} p-4`}>
@@ -179,7 +224,7 @@ export default function PaymentChargeCard({
             label="Paid"
             value={
               lockPaid
-                ? displayValue(paidDisplay)
+                ? paidDisplay.toFixed(2)
                 : formData[`${prefix}Paid`] ?? ""
             }
             onChange={handlePaidChange}
@@ -192,9 +237,12 @@ export default function PaymentChargeCard({
 
         <AmountField
           label="Due"
-          value={displayValue(dueAmount)}
-          readOnly
+          value={dueDisplayValue}
+          onChange={handleDueChange}
+          onBlur={onBlur}
+          readOnly={!editableDue}
           colors={colors}
+          error={getError(dueFieldName)}
         />
 
         <NewOrderField

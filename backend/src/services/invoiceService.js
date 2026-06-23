@@ -1387,6 +1387,7 @@ async function syncInvoicePrepayment(connection, orderId, prepaymentAmount) {
     checkNumber: existingPrepayment?.check_number || null,
     paymentDate: existingPrepayment?.payment_date || null,
     amount,
+    dueAmount: existingPrepayment?.due_amount ?? null,
     isPaid: amount > 0 ? 1 : 0,
     memo: existingPrepayment?.memo || null,
   });
@@ -1564,52 +1565,88 @@ async function updateInvoice(id, body) {
   }
 }
 
-async function getCompanyWise() {
-  const rows = await Invoice.findOutstanding({});
-  const orderIds = [...new Set(rows.map((row) => row.order_id))];
-  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
-  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
-  const companiesMap = new Map();
+function ensureCompanyEntry(companiesMap, row) {
+  const facilityId = row.facility_id;
 
+  if (!companiesMap.has(facilityId)) {
+    companiesMap.set(facilityId, {
+      id: facilityId,
+      company: row.facility_name || "Unknown Company",
+      email: row.facility_email || "",
+      cases: 0,
+      needsResend: 0,
+      invoiced: 0,
+      paid: 0,
+      due: 0,
+    });
+  }
+
+  return companiesMap.get(facilityId);
+}
+
+function accumulateCompanyFinancials(
+  companiesMap,
+  row,
+  financials,
+  { needsResend = false } = {}
+) {
+  const company = ensureCompanyEntry(companiesMap, row);
+  company.cases += 1;
+
+  if (needsResend) {
+    company.needsResend += 1;
+  }
+
+  company.invoiced += financials.totalAmount;
+  company.paid += financials.amountPaid;
+  company.due += financials.amountDue;
+}
+
+function isStandardNeedsResend(row) {
+  return row.status === "Needs Resend" || Boolean(row.sent_date);
+}
+
+function isXrayNeedsResend(row) {
+  return Boolean(row.sent_date);
+}
+
+function processCompanyStandardRows(
+  companiesMap,
+  rows,
+  paymentsByOrderId,
+  { needsResend = false } = {}
+) {
   rows.forEach((row) => {
-    const facilityId = row.facility_id;
     const financials = resolveRowFinancials(
       row,
       paymentsByOrderId[row.order_id] || []
     );
 
-    if (!companiesMap.has(facilityId)) {
-      companiesMap.set(facilityId, {
-        id: facilityId,
-        company: row.facility_name || "Unknown Company",
-        email: row.facility_email || "",
-        cases: 0,
-        needsResend: 0,
-        invoiced: 0,
-        paid: 0,
-        due: 0,
-      });
-    }
-
-    const company = companiesMap.get(facilityId);
-    company.cases += 1;
-    if (row.status === "Needs Resend") {
-      company.needsResend += 1;
-    }
-    company.invoiced += financials.totalAmount;
-    company.paid += financials.amountPaid;
-    company.due += financials.amountDue;
+    accumulateCompanyFinancials(companiesMap, row, financials, {
+      needsResend: needsResend || isStandardNeedsResend(row),
+    });
   });
+}
 
-  const companies = Array.from(companiesMap.values())
-    .map((company) => ({
-      ...company,
-      invoiced: formatMoney(company.invoiced),
-      paid: formatMoney(company.paid),
-      due: formatMoney(company.due),
-    }))
-    .sort((a, b) => a.company.localeCompare(b.company));
+function processCompanyXrayRows(
+  companiesMap,
+  rows,
+  paymentsByOrderId,
+  { needsResend = false } = {}
+) {
+  rows.forEach((row) => {
+    const financials = resolveXrayRowFinancials(
+      row,
+      paymentsByOrderId[row.order_id] || []
+    );
 
+    accumulateCompanyFinancials(companiesMap, row, financials, {
+      needsResend: needsResend || isXrayNeedsResend(row),
+    });
+  });
+}
+
+function sumStandardFinancials(rows, paymentsByOrderId) {
   let invoiced = 0;
   let paid = 0;
   let due = 0;
@@ -1624,13 +1661,84 @@ async function getCompanyWise() {
     due += financials.amountDue;
   });
 
+  return { invoiced, paid, due };
+}
+
+function sumXrayFinancials(rows, paymentsByOrderId) {
+  let invoiced = 0;
+  let paid = 0;
+  let due = 0;
+
+  rows.forEach((row) => {
+    const financials = resolveXrayRowFinancials(
+      row,
+      paymentsByOrderId[row.order_id] || []
+    );
+    invoiced += financials.totalAmount;
+    paid += financials.amountPaid;
+    due += financials.amountDue;
+  });
+
+  return { invoiced, paid, due };
+}
+
+async function getCompanyWise() {
+  const [
+    standardOutstanding,
+    standardResend,
+    xrayOutstanding,
+    xrayResend,
+  ] = await Promise.all([
+    Invoice.findOutstanding({}),
+    Invoice.findResend({}),
+    InvoiceXray.findOutstanding({}),
+    InvoiceXray.findResend({}),
+  ]);
+
+  const standardRows = [...standardOutstanding, ...standardResend];
+  const xrayRows = [...xrayOutstanding, ...xrayResend];
+  const orderIds = [
+    ...new Set([
+      ...standardRows.map((row) => row.order_id),
+      ...xrayRows.map((row) => row.order_id),
+    ]),
+  ];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const companiesMap = new Map();
+
+  processCompanyStandardRows(
+    companiesMap,
+    standardOutstanding,
+    paymentsByOrderId
+  );
+  processCompanyStandardRows(companiesMap, standardResend, paymentsByOrderId, {
+    needsResend: true,
+  });
+  processCompanyXrayRows(companiesMap, xrayOutstanding, paymentsByOrderId);
+  processCompanyXrayRows(companiesMap, xrayResend, paymentsByOrderId, {
+    needsResend: true,
+  });
+
+  const companies = Array.from(companiesMap.values())
+    .map((company) => ({
+      ...company,
+      invoiced: formatMoney(company.invoiced),
+      paid: formatMoney(company.paid),
+      due: formatMoney(company.due),
+    }))
+    .sort((a, b) => a.company.localeCompare(b.company));
+
+  const standardTotals = sumStandardFinancials(standardRows, paymentsByOrderId);
+  const xrayTotals = sumXrayFinancials(xrayRows, paymentsByOrderId);
+
   const summary = {
     companies: companies.length,
-    totalCases: rows.length,
+    totalCases: standardRows.length + xrayRows.length,
     needsResend: companies.reduce((sum, company) => sum + company.needsResend, 0),
-    invoiced: formatMoney(invoiced),
-    paid: formatMoney(paid),
-    due: formatMoney(due),
+    invoiced: formatMoney(standardTotals.invoiced + xrayTotals.invoiced),
+    paid: formatMoney(standardTotals.paid + xrayTotals.paid),
+    due: formatMoney(standardTotals.due + xrayTotals.due),
   };
 
   return { companies, summary };
@@ -1647,15 +1755,73 @@ function mapCompanyInvoiceRow(row, orderPayments = []) {
     invoiceId: row.order_number,
     orderId: row.order_id,
     invoiceDbId: row.id,
+    invoiceType: "invoice",
     invoiceDate: toShortDate(row.invoice_date),
     days: daysSince(displayDate),
     status: row.status || "Unpaid",
+    needsResend: isStandardNeedsResend(row),
     isWrittenOff,
     isSent,
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
     due: formatMoney(financials.amountDue),
   };
+}
+
+function mapCompanyXrayInvoiceRow(row, orderPayments = []) {
+  const isSent = Boolean(row.sent_date);
+  const displayDate = isSent ? row.sent_date : row.xray_invoice_date;
+  const financials = resolveXrayRowFinancials(row, orderPayments);
+  const orderId = row.order_id;
+  const status = isSent
+    ? financials.amountDue <= 0
+      ? "Paid"
+      : "Needs Resend"
+    : financials.amountDue <= 0
+      ? "Paid"
+      : financials.amountPaid > 0
+        ? "Partial"
+        : "Unpaid";
+
+  return {
+    id: `xray-${orderId}`,
+    invoiceId: row.order_number,
+    orderId,
+    invoiceDbId: orderId,
+    invoiceType: "xray",
+    invoiceDate: toShortDate(row.xray_invoice_date),
+    days: daysSince(displayDate),
+    status,
+    needsResend: isXrayNeedsResend(row),
+    isWrittenOff: false,
+    isSent,
+    invoiced: formatMoney(financials.totalAmount),
+    paid: formatMoney(financials.amountPaid),
+    due: formatMoney(financials.amountDue),
+  };
+}
+
+function buildCompanyInvoiceList(standardRows = [], xrayRows = [], paymentsByOrderId = {}) {
+  const mergedRows = [
+    ...standardRows.map((row) => ({
+      sortDate: row.invoice_date,
+      invoice: mapCompanyInvoiceRow(
+        row,
+        paymentsByOrderId[row.order_id] || []
+      ),
+    })),
+    ...xrayRows.map((row) => ({
+      sortDate: row.xray_invoice_date,
+      invoice: mapCompanyXrayInvoiceRow(
+        row,
+        paymentsByOrderId[row.order_id] || []
+      ),
+    })),
+  ];
+
+  return mergedRows
+    .sort((left, right) => String(right.sortDate).localeCompare(String(left.sortDate)))
+    .map((entry) => entry.invoice);
 }
 
 async function getByCompany(facilityId, query = {}) {
@@ -1665,12 +1831,27 @@ async function getByCompany(facilityId, query = {}) {
     throw new ApiError(400, "Invalid company id");
   }
 
-  const rows = await Invoice.findByFacilityId(companyId, {
+  const dateFilters = {
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
-  });
+  };
 
-  if (!rows.length) {
+  const [
+    standardOutstanding,
+    standardResend,
+    xrayOutstanding,
+    xrayResend,
+  ] = await Promise.all([
+    Invoice.findByFacilityId(companyId, dateFilters),
+    Invoice.findResendByFacilityId(companyId, dateFilters),
+    InvoiceXray.findByFacilityId(companyId, dateFilters),
+    InvoiceXray.findResendByFacilityId(companyId, dateFilters),
+  ]);
+
+  const standardRows = [...standardOutstanding, ...standardResend];
+  const xrayRows = [...xrayOutstanding, ...xrayResend];
+
+  if (!standardRows.length && !xrayRows.length) {
     return {
       company: {
         id: companyId,
@@ -1688,38 +1869,41 @@ async function getByCompany(facilityId, query = {}) {
     };
   }
 
-  const firstRow = rows[0];
-  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const referenceRow = standardRows[0] || xrayRows[0];
+  const orderIds = [
+    ...new Set([
+      ...standardRows.map((row) => row.order_id),
+      ...xrayRows.map((row) => row.order_id),
+    ]),
+  ];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
-  const invoices = rows.map((row) =>
-    mapCompanyInvoiceRow(row, paymentsByOrderId[row.order_id] || [])
+  const invoices = buildCompanyInvoiceList(
+    standardRows,
+    xrayRows,
+    paymentsByOrderId
   );
 
   let totalInvoiced = 0;
   let totalPaid = 0;
   let totalDue = 0;
 
-  rows.forEach((row) => {
-    const financials = resolveRowFinancials(
-      row,
-      paymentsByOrderId[row.order_id] || []
-    );
-    totalInvoiced += financials.totalAmount;
-    totalPaid += financials.amountPaid;
-    totalDue += financials.amountDue;
-  });
+  const standardTotals = sumStandardFinancials(standardRows, paymentsByOrderId);
+  const xrayTotals = sumXrayFinancials(xrayRows, paymentsByOrderId);
+  totalInvoiced = standardTotals.invoiced + xrayTotals.invoiced;
+  totalPaid = standardTotals.paid + xrayTotals.paid;
+  totalDue = standardTotals.due + xrayTotals.due;
 
   return {
     company: {
       id: companyId,
-      name: firstRow.facility_name || "Company",
-      email: firstRow.facility_email || "",
+      name: referenceRow.facility_name || "Company",
+      email: referenceRow.facility_email || "",
     },
     invoices,
     summary: {
       totalCases: invoices.length,
-      needsResend: invoices.filter((invoice) => invoice.status === "Needs Resend").length,
+      needsResend: invoices.filter((invoice) => invoice.needsResend).length,
       totalInvoiced: formatMoney(totalInvoiced),
       totalPaid: formatMoney(totalPaid),
       totalDue: formatMoney(totalDue),

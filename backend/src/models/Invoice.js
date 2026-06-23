@@ -186,6 +186,43 @@ class Invoice {
     return rows;
   }
 
+  static async findResendByFacilityId(facilityId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "i.facility_id = :facilityId",
+      `(
+        i.status = 'Needs Resend'
+        OR (
+          i.sent_date IS NOT NULL
+          AND i.status <> 'Written Off'
+        )
+      )`,
+    ];
+    const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("i.invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("i.invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY i.invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
   static async create(connection, data) {
     const db = connection || getPool();
 

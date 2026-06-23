@@ -24,10 +24,10 @@ class Provider {
       `SELECT id, company_name, address, zip_code, city, state, phone, fax, email, is_active
        FROM providers
        WHERE is_active = 1
-         AND company_name LIKE :query
+         AND LOWER(company_name) LIKE :query
        ORDER BY company_name ASC
        LIMIT ${Number(limit)}`,
-      { query: `%${trimmed}%` }
+      { query: `%${trimmed.toLowerCase()}%` }
     );
 
     return rows;

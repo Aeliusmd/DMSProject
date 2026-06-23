@@ -39,6 +39,7 @@ import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUn
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
+import { syncPaymentDueFields } from "@/lib/orders/paymentUtils";
 import { API_BASE_URL } from "@/config/api";
 
 function toFileUrl(path) {
@@ -141,11 +142,13 @@ const initialFormData = {
   custodianCheck: "",
   custodianDate: "",
   custodianPaid: "",
+  custodianDue: "0",
   custodianMemo: "",
 
   xrayCheck: "",
   xrayDate: "",
   xrayPaid: "",
+  xrayDue: "0",
   xrayMemo: "",
 };
 
@@ -169,12 +172,11 @@ function NewOrderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const mode = searchParams.get("mode");
   const orderId = searchParams.get("orderId");
   const subpoenaId = searchParams.get("subpoenaId");
   const panel = searchParams.get("panel");
 
-  const isEditMode = mode === "edit" && Boolean(orderId);
+  const isEditMode = Boolean(orderId);
 
   const [expandedPanels, setExpandedPanels] = useState({
     subpoena: false,
@@ -250,7 +252,12 @@ function NewOrderPageContent() {
           return;
         }
 
-        setFormData({ ...initialFormData, ...order });
+        setFormData(
+          syncPaymentDueFields(
+            { ...initialFormData, ...order },
+            order.invoiceFees
+          )
+        );
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -296,10 +303,17 @@ function NewOrderPageContent() {
         const order = await getOrder(orderId);
         if (!active || !order) return;
 
-        setFormData((prev) => ({
-          ...prev,
-          invoiceFees: order.invoiceFees || prev.invoiceFees,
-        }));
+        setFormData((prev) =>
+          syncPaymentDueFields(
+            {
+              ...prev,
+              invoiceFees: order.invoiceFees || prev.invoiceFees,
+              custodianPaid: order.custodianPaid ?? prev.custodianPaid,
+              xrayPaid: order.xrayPaid ?? prev.xrayPaid,
+            },
+            order.invoiceFees || prev.invoiceFees
+          )
+        );
       } catch {
         // Payment charges can still use the last loaded invoice snapshot.
       }
@@ -535,6 +549,13 @@ function NewOrderPageContent() {
     return "";
   };
 
+  const handlePaymentValuesChange = (updates) => {
+    setFormData((prev) => ({
+      ...prev,
+      ...updates,
+    }));
+  };
+
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
 
@@ -549,6 +570,7 @@ function NewOrderPageContent() {
         custodianCheck: checked ? "" : prev.custodianCheck,
         custodianDate: checked ? "" : prev.custodianDate,
         custodianPaid: checked ? "" : prev.custodianPaid,
+        custodianDue: checked ? "0" : prev.custodianDue,
         custodianMemo: checked ? "" : prev.custodianMemo,
       }));
 
@@ -691,14 +713,23 @@ function NewOrderPageContent() {
 
     setSaving(true);
 
+    const activeOrderId = orderId || String(formData.id || "");
+
     try {
-      if (isEditMode) {
-        await updateOrder(orderId, formData);
-      } else {
-        await createOrder(formData);
+      if (isEditMode || activeOrderId) {
+        await updateOrder(activeOrderId, formData);
+        router.push("/orders");
+        return;
       }
 
-      router.push("/orders");
+      const order = await createOrder(formData);
+      if (order?.id) {
+        router.push("/orders");
+        return;
+      }
+
+      setSaveError("Order was saved but could not return to the orders list. Please refresh and try again.");
+      setSaving(false);
     } catch (err) {
       setSaveError(err.message || "Failed to save order");
       setSaving(false);
@@ -857,7 +888,7 @@ function NewOrderPageContent() {
               onChange={handleChange}
               onBlur={handleBlur}
               getError={getError}
-              isEditMode={isEditMode}
+              onValuesChange={handlePaymentValuesChange}
             />
           </CollapsibleOrderPanel>
         </div>
@@ -1267,7 +1298,9 @@ function ServeInfoForm({
       />
       {extractionMeta.providerName && formData.providerId && (
         <p className="-mt-3 text-[10px] font-medium text-[#059669]">
-          Matched existing provider: {extractionMeta.providerName}
+          {extractionMeta.providerCreated
+            ? `New provider added: ${extractionMeta.providerName}`
+            : `Matched existing provider: ${extractionMeta.providerName}`}
         </p>
       )}
 
@@ -1568,14 +1601,19 @@ function ServeInfoForm({
 
 import {
   getPaymentChargeForType,
+  dueAmountFromFee,
   parsePaymentAmount,
 } from "@/lib/orders/paymentUtils";
 
-function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false }) {
+function PaymentForm({
+  formData,
+  onChange,
+  onBlur,
+  getError,
+  onValuesChange,
+}) {
   const invoiceFees = formData.invoiceFees;
   const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
-  const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
-  const xrayCharge = getPaymentChargeForType("xray", invoiceFees);
 
   return (
     <div className="space-y-5">
@@ -1599,29 +1637,41 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
       {!formData.certificateNoRecords && (
         <PaymentChargeCard
           title="Custodian Charge"
-          chargeAmount={custodianCharge}
           paidAmount={formData.custodianPaid}
           showPaidField
+          paidReadOnly={false}
+          fieldsReadOnly={false}
+          editableDue
+          autoDueOnPaidChange
+          paymentType="custodian"
+          invoiceFees={invoiceFees}
           theme="purple"
           prefix="custodian"
           formData={formData}
           onChange={onChange}
           onBlur={onBlur}
           getError={getError}
+          onValuesChange={onValuesChange}
         />
       )}
 
       <PaymentChargeCard
         title="Xray Charge"
-        chargeAmount={xrayCharge}
         paidAmount={formData.xrayPaid}
         showPaidField
+        paidReadOnly={false}
+        fieldsReadOnly={false}
+        editableDue
+        autoDueOnPaidChange
+        paymentType="xray"
+        invoiceFees={invoiceFees}
         theme="blue"
         prefix="xray"
         formData={formData}
         onChange={onChange}
         onBlur={onBlur}
         getError={getError}
+        onValuesChange={onValuesChange}
       />
     </div>
   );

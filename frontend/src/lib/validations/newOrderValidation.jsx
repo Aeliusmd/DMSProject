@@ -26,7 +26,9 @@ export const numericOnlyFields = [
 export const moneyFields = [
   "prepaymentPaid",
   "custodianPaid",
+  "custodianDue",
   "xrayPaid",
+  "xrayDue",
 ];
 
 export const paymentPrefixes = ["prepayment", "custodian", "xray"];

@@ -83,8 +83,8 @@ export default function CompanyWiseInvoicesPage() {
               </h1>
 
               <p className="mt-[4px] text-[12px] text-[#64748B]">
-                View invoices grouped by company — click a company to manage its
-                invoices
+                View outstanding and resend standard and X-Ray invoices grouped by
+                company
               </p>
             </div>
           </div>
@@ -237,7 +237,7 @@ function CompanyWiseTable({ companies, loading }) {
                       {company.needsResend}
                     </span>
                   ) : (
-                    <span className="text-[12px] text-[#94A3B8]">–</span>
+                    <span className="text-[12px] text-[#94A3B8]">-</span>
                   )}
                 </td>
 
