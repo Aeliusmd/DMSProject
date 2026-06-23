@@ -10,6 +10,8 @@ import NewOrderField, {
 } from "@/components/orders/new-order/NewOrderField";
 import PaymentChargeCard from "@/components/orders/new-order/PaymentChargeCard";
 import ProviderSearchField from "@/components/orders/new-order/ProviderSearchField";
+import DoctorSearchField from "@/components/orders/new-order/DoctorSearchField";
+import DoctorAddressSearchField from "@/components/orders/new-order/DoctorAddressSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 import CertificateNoRecordsPanel from "@/components/orders/new-order/CertificateNoRecordsPanel";
 
@@ -75,6 +77,7 @@ const initialFormData = {
   additionalDocumentFile: null,
 
   orderNumber: "",
+  recNumber: "",
   serveCompanyName: "",
   address: "",
   zip: "",
@@ -1141,6 +1144,15 @@ function ServeInfoForm({
         placeholder="Order number"
       />
 
+      <NewOrderField
+        label="REC Number"
+        name="recNumber"
+        value={formData.recNumber}
+        onChange={onChange}
+        onBlur={onBlur}
+        placeholder="Enter REC number"
+      />
+
       <Divider />
 
       <div className="flex items-center justify-between">
@@ -1404,23 +1416,24 @@ function ServeInfoForm({
         placeholder="Specific record details"
       />
 
-      <NewOrderField
+      <DoctorSearchField
         label="Specific Doctor"
         name="specificDoctor"
         value={formData.specificDoctor}
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Doctor name"
+        error={getError("specificDoctor")}
       />
 
-      <NewOrderField
+      <DoctorAddressSearchField
         label="Full Address"
         name="fullAddress"
         value={formData.fullAddress}
         onChange={onChange}
         onBlur={onBlur}
-        textarea
         placeholder="Full address"
+        error={getError("fullAddress")}
       />
 
       <Divider />
@@ -1477,11 +1490,13 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
       formData.subpoenaStoragePath ||
       formData.subpoenaUrl
   );
-  const subpoenaAmount = parsePaymentAmount(formData.subpoenaPrepaymentAmount);
-  const lockPrepaymentFromSubpoena = !isEditMode && hasSubpoenaUploaded;
-  const prepaymentCharge = lockPrepaymentFromSubpoena && subpoenaAmount > 0
-    ? subpoenaAmount
-    : getPaymentChargeForType("prepayment", invoiceFees);
+  const subpoenaAmount = parsePaymentAmount(
+    formData.subpoenaPrepaymentAmount || formData.prepaymentPaid
+  );
+  const prepaymentCharge =
+    subpoenaAmount > 0
+      ? subpoenaAmount
+      : getPaymentChargeForType("prepayment", invoiceFees);
   const custodianCharge = getPaymentChargeForType("custodian", invoiceFees);
   const xrayCharge = getPaymentChargeForType("xray", invoiceFees);
 
@@ -1496,10 +1511,8 @@ function PaymentForm({ formData, onChange, onBlur, getError, isEditMode = false 
         chargeAmount={prepaymentCharge}
         paidAmount={formData.prepaymentPaid}
         showPaidField
-        mirrorPaidDue={lockPrepaymentFromSubpoena && subpoenaAmount > 0}
-        dueReadOnly={lockPrepaymentFromSubpoena}
-        paidReadOnly={lockPrepaymentFromSubpoena}
-        fieldsReadOnly={lockPrepaymentFromSubpoena}
+        chargeAmountFieldName="subpoenaPrepaymentAmount"
+        chargeAmountLabel="Prepayment Amount"
         theme="green"
         prefix="prepayment"
         formData={formData}

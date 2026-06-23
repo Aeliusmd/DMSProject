@@ -68,12 +68,16 @@ export default function PaymentChargeCard({
   dueReadOnly,
   paidReadOnly,
   fieldsReadOnly = false,
+  chargeAmountFieldName = "",
+  chargeAmountLabel = "Amount",
 }) {
   const colors = paymentThemes[theme];
   const lockDue = dueReadOnly ?? amountsReadOnly;
   const lockPaid = paidReadOnly ?? amountsReadOnly;
   const lockFields = fieldsReadOnly || lockPaid;
-  const charge = parsePaymentAmount(chargeAmount);
+  const charge = chargeAmountFieldName
+    ? parsePaymentAmount(formData[chargeAmountFieldName] || chargeAmount)
+    : parsePaymentAmount(chargeAmount);
   const paid = parsePaymentAmount(paidAmount);
   const paidBracket = formatPaidBracket(paid);
   const dueAmount = mirrorPaidDue
@@ -116,6 +120,22 @@ export default function PaymentChargeCard({
     });
   };
 
+  const handleChargeAmountChange = (event) => {
+    if (!chargeAmountFieldName) return;
+
+    const rawAmount = event.target.value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+
+    onChange({
+      target: {
+        name: chargeAmountFieldName,
+        value: rawAmount,
+      },
+    });
+  };
+
   return (
     <div className={`rounded-[10px] border ${colors.border} ${colors.bg} p-4`}>
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -138,6 +158,18 @@ export default function PaymentChargeCard({
       </div>
 
       <div className="space-y-3">
+        {chargeAmountFieldName && (
+          <AmountField
+            label={chargeAmountLabel}
+            value={formData[chargeAmountFieldName] ?? ""}
+            onChange={handleChargeAmountChange}
+            onBlur={onBlur}
+            readOnly={false}
+            colors={colors}
+            error={getError(chargeAmountFieldName)}
+          />
+        )}
+
         <NewOrderField
           label="Check #"
           name={`${prefix}Check`}
@@ -145,7 +177,6 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="Check number"
-          required={!lockFields}
           disabled={lockFields}
           inputMode="numeric"
           maxLength={12}
@@ -159,7 +190,6 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           type="date"
-          required={!lockFields}
           disabled={lockFields}
           error={getError(`${prefix}Date`)}
         />

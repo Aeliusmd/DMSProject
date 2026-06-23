@@ -4,7 +4,12 @@ const { randomUUID } = require("crypto");
 const ApiError = require("../utils/ApiError");
 const fileStorage = require("../utils/fileStorage");
 const { getPdfPageCount, extractPageRange } = require("../utils/pdfSplit");
-const { mapSchemaToExtractRow, mapSchemaToOrderHints } = require("../utils/extractionMapper");
+const {
+  mapSchemaToExtractRow,
+  mapSchemaToOrderHints,
+  resolveExtractionSchema,
+  enrichOrderHintsFromRow,
+} = require("../utils/extractionMapper");
 const subpoenaExtractionService = require("./subpoenaExtractionService");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const { withTransaction } = require("../config/database");
@@ -53,6 +58,8 @@ function mapExtractRowToApi(row) {
     typeof row.raw_extraction === "string"
       ? JSON.parse(row.raw_extraction || "{}")
       : row.raw_extraction || {};
+  const schema = resolveExtractionSchema(rawExtraction);
+  const orderHints = enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), row);
 
   return {
     id: row.id,
@@ -66,7 +73,8 @@ function mapExtractRowToApi(row) {
     fileSizeBytes: row.file_size_bytes,
     uploadedAt: formatUploadDate(row.uploaded_at || row.created_at),
     isProcessed: Boolean(row.is_processed),
-    orderHints: mapSchemaToOrderHints(rawExtraction),
+    orderHints,
+    dateOfInjury: orderHints.dateOfInjury || null,
     extractionConfidence: confidence,
     batchReferenceCode: row.batch_reference_code,
     batchFileName: row.batch_file_name,
@@ -160,7 +168,7 @@ async function processBatchScan(file, uploadedBy, options = {}) {
       page_range_start: start,
       page_range_end: end,
       ...mapped,
-      order_hints: mapSchemaToOrderHints(schema),
+      order_hints: enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), mapped),
     });
   }
 

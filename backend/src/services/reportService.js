@@ -72,6 +72,7 @@ function mapReportOrderRow(row) {
     id: row.id,
     dbId: row.id,
     orderNo: row.order_number || "",
+    recNumber: row.rec_number || "",
     subNo: row.order_ref || "",
     status: row.status || "",
     invoiced,

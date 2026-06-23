@@ -7,6 +7,7 @@ function buildOrdersQuery(filters = {}) {
 
   if (filters.facility) params.set("facility", filters.facility);
   if (filters.year) params.set("year", filters.year);
+  if (filters.period) params.set("period", filters.period);
   if (filters.status) params.set("status", filters.status);
   if (filters.search?.trim()) params.set("search", filters.search.trim());
   if (filters.limit) params.set("limit", String(filters.limit));
@@ -53,9 +54,32 @@ function buildOrderFormData(payload = {}) {
 export async function getOrders(filters = {}) {
   const data = await request(`/orders${buildOrdersQuery(filters)}`, {
     auth: true,
+    cache: "no-store",
   });
 
   return data?.data?.orders || [];
+}
+
+export async function searchOrderDoctors(query) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+
+  const data = await request(`/orders/doctors/search?${params.toString()}`, {
+    auth: true,
+  });
+
+  return data?.data?.doctors || [];
+}
+
+export async function searchOrderDoctorAddresses(query) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+
+  const data = await request(`/orders/doctor-addresses/search?${params.toString()}`, {
+    auth: true,
+  });
+
+  return data?.data?.addresses || [];
 }
 
 export async function getOrderStats() {

@@ -39,6 +39,7 @@ EXPECTED_FIELDS = [
     "DePoDueDate",
     "DoctorAddress",
     "OrderNumber",
+    "RecNumber",
     "RecordType",
     "RequestedRecord",
     "SpecificDoctor",

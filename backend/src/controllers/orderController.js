@@ -122,8 +122,19 @@ async function logOrderActivity(
 }
 
 exports.getAll = asyncHandler(async (req, res) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate");
   const orders = await orderService.getAllOrders(req.query);
   return ApiResponse.success(res, { orders });
+});
+
+exports.searchDoctors = asyncHandler(async (req, res) => {
+  const doctors = await orderService.searchOrderDoctors(req.query.q);
+  return ApiResponse.success(res, { doctors });
+});
+
+exports.searchDoctorAddresses = asyncHandler(async (req, res) => {
+  const addresses = await orderService.searchOrderDoctorAddresses(req.query.q);
+  return ApiResponse.success(res, { addresses });
 });
 
 exports.getStats = asyncHandler(async (_req, res) => {

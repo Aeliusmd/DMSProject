@@ -16,6 +16,8 @@ router.get("/", orderController.getAll);
 router.get("/stats", orderController.getStats);
 router.get("/reminders/due-today", orderController.getDueRemindersToday);
 router.get("/reminders", orderController.getReminders);
+router.get("/doctors/search", orderController.searchDoctors);
+router.get("/doctor-addresses/search", orderController.searchDoctorAddresses);
 router.get("/unprocessed", orderController.getUnprocessed);
 router.get("/unprocessed/:extractId/file", orderController.getUnprocessedFile);
 router.get("/unprocessed/:extractId", orderController.getUnprocessedById);

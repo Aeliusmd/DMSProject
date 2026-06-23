@@ -118,6 +118,194 @@ export function normalizeAutofillSSN(value) {
   return formatMaskedSSN(String(value).trim());
 }
 
+const DATE_TOKEN_PATTERN =
+  /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})/g;
+
+const DATE_RANGE_SEPARATOR =
+  /\s*(?:-|–|—|\bto\b|\bthrough\b|\bthru\b)\s*/i;
+
+export function parseSingleDateToInput(value) {
+  if (!value) return "";
+
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+  const slash = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (slash) {
+    let year = Number(slash[3]);
+    if (year < 100) year += 2000;
+    const month = String(slash[1]).padStart(2, "0");
+    const day = String(slash[2]).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const embeddedIso = trimmed.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (embeddedIso) {
+    return `${embeddedIso[1]}-${embeddedIso[2]}-${embeddedIso[3]}`;
+  }
+
+  const embeddedSlash = trimmed.match(
+    /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/
+  );
+  if (embeddedSlash) {
+    let year = Number(embeddedSlash[3]);
+    if (year < 100) year += 2000;
+    const month = String(embeddedSlash[1]).padStart(2, "0");
+    const day = String(embeddedSlash[2]).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  return "";
+}
+
+function extractDateTokens(text) {
+  return [...String(text || "").matchAll(DATE_TOKEN_PATTERN)]
+    .map((match) => parseSingleDateToInput(match[1]))
+    .filter(Boolean);
+}
+
+export function applyDateOfInjuryFromHints(updates, hints = {}) {
+  const rawText =
+    hints.dateOfInjuryText ||
+    hints.dateOfInjury ||
+    hints.date_of_injury;
+  if (!rawText) return;
+
+  const text = String(rawText).trim();
+  if (!text) return;
+
+  const rangeParts = text.split(DATE_RANGE_SEPARATOR).filter(Boolean);
+  if (rangeParts.length >= 2) {
+    const begin = parseSingleDateToInput(rangeParts[0]);
+    const end = parseSingleDateToInput(rangeParts[rangeParts.length - 1]);
+
+    if (begin && end && begin !== end) {
+      updates.injuryType = "cumulative";
+      updates.injuryDateBegin = begin;
+      updates.injuryDateEnd = end;
+      updates.injuryDate = "";
+      return;
+    }
+  }
+
+  const datesInText = extractDateTokens(text);
+  const cumulativeHint = /\b(cumulative|continuous\s+trauma|\bct\b)/i.test(
+    text
+  );
+
+  if (cumulativeHint && datesInText.length >= 1) {
+    updates.injuryType = "cumulative";
+    updates.injuryDateBegin = datesInText[0];
+    updates.injuryDateEnd = datesInText[1] || "";
+    updates.injuryDate = "";
+    return;
+  }
+
+  if (datesInText.length >= 2) {
+    updates.injuryType = "cumulative";
+    updates.injuryDateBegin = datesInText[0];
+    updates.injuryDateEnd = datesInText[1];
+    updates.injuryDate = "";
+    return;
+  }
+
+  const single =
+    datesInText[0] ||
+    parseSingleDateToInput(text) ||
+    parseSingleDateToInput(hints.dateOfInjury);
+
+  if (single) {
+    updates.injuryType = "specific";
+    updates.injuryDate = single;
+    updates.injuryDateBegin = "";
+    updates.injuryDateEnd = "";
+  }
+}
+
+export function parseUsAddress(fullAddress) {
+  const trimmed = String(fullAddress || "").trim();
+  if (!trimmed) {
+    return { address: "", city: "", state: "", zip: "" };
+  }
+
+  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+
+  if (parts.length === 1) {
+    const inlineMatch = trimmed.match(
+      /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
+    );
+
+    if (inlineMatch) {
+      return {
+        address: inlineMatch[1].trim(),
+        city: "",
+        state: inlineMatch[2].toUpperCase(),
+        zip: inlineMatch[3],
+      };
+    }
+
+    return { address: trimmed, city: "", state: "", zip: "" };
+  }
+
+  const last = parts[parts.length - 1];
+  const stateZipMatch = last.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+
+  if (stateZipMatch) {
+    return {
+      address: parts.slice(0, -2).join(", "),
+      city: parts.length >= 2 ? parts[parts.length - 2] : "",
+      state: stateZipMatch[1].toUpperCase(),
+      zip: stateZipMatch[2],
+    };
+  }
+
+  const cityStateZipMatch = last.match(
+    /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
+  );
+
+  if (cityStateZipMatch) {
+    return {
+      address: parts.slice(0, -1).join(", "),
+      city: cityStateZipMatch[1].trim(),
+      state: cityStateZipMatch[2].toUpperCase(),
+      zip: cityStateZipMatch[3],
+    };
+  }
+
+  return {
+    address: parts.slice(0, -1).join(", "),
+    city: parts[parts.length - 1],
+    state: "",
+    zip: "",
+  };
+}
+
+function applyParsedServeAddress(updates, fullAddress) {
+  const parsed = parseUsAddress(fullAddress);
+  updates.address = parsed.address || String(fullAddress).trim();
+
+  if (!updates.city && parsed.city) updates.city = parsed.city;
+  if (!updates.state && parsed.state) updates.state = parsed.state;
+  if (!updates.zip && parsed.zip) updates.zip = parsed.zip;
+}
+
+function fillMissingServeAddressParts(updates) {
+  if (!updates.address || (updates.city && updates.state && updates.zip)) {
+    return;
+  }
+
+  const parsed = parseUsAddress(updates.address);
+  if (!parsed.address) return;
+
+  updates.address = parsed.address;
+  if (!updates.city && parsed.city) updates.city = parsed.city;
+  if (!updates.state && parsed.state) updates.state = parsed.state;
+  if (!updates.zip && parsed.zip) updates.zip = parsed.zip;
+}
+
 export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [] } = {}) {
   if (!hints) {
     return { updates: {}, meta: {} };
@@ -127,13 +315,15 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   const meta = {};
 
   if (hints.orderNumber) updates.orderNumber = hints.orderNumber;
+  if (hints.recNumber) updates.recNumber = hints.recNumber;
   if (hints.caseName) updates.caseNumber = hints.caseName;
   if (hints.ssn) {
     const formattedSsn = normalizeAutofillSSN(hints.ssn);
     if (formattedSsn) updates.ssn = formattedSsn;
   }
   if (hints.dateOfBirth) updates.dob = hints.dateOfBirth;
-  if (hints.companyAddress) updates.address = hints.companyAddress;
+  applyDateOfInjuryFromHints(updates, hints);
+  if (hints.companyAddress) applyParsedServeAddress(updates, hints.companyAddress);
   if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
   if (hints.doctorAddress) updates.fullAddress = hints.doctorAddress;
   if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
@@ -191,6 +381,8 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
     }
   }
 
+  fillMissingServeAddressParts(updates);
+
   const recordText = `${hints.recordType || ""} ${hints.requestedRecord || ""}`;
   const mappedType = mapRecordTypeToOrderType(
     hints.recordType,
@@ -219,7 +411,12 @@ export function buildFormFromExtract(
   { facilityList = [], providerList = [] } = {},
   subpoenaFile
 ) {
-  const orderHints = extract?.orderHints || {};
+  const orderHints = {
+    ...(extract?.orderHints || {}),
+    ...(extract?.dateOfInjury && !extract?.orderHints?.dateOfInjury
+      ? { dateOfInjury: extract.dateOfInjury }
+      : {}),
+  };
   const { updates, meta } = mapOrderHintsToForm(orderHints, {
     facilityList,
     providerList,
