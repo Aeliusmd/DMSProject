@@ -22,8 +22,12 @@ function trimOrNull(value) {
   return trimmed === "" ? null : trimmed;
 }
 
-function getInvoiceRecipientEmail(invoice) {
-  return trimOrNull(invoice?.provider_email);
+function getInvoiceRecipientEmail(row) {
+  return trimOrNull(row?.provider_email);
+}
+
+function getInvoiceDisplayEmail(row) {
+  return getInvoiceRecipientEmail(row) || "";
 }
 
 async function resolveInvoiceRecipientFromOrder(order, connection = null) {
@@ -1186,7 +1190,7 @@ function groupXrayOutstandingRows(rows = [], paymentsByOrderId = {}) {
     if (!groups.has(company)) {
       groups.set(company, {
         company,
-        emails: row.facility_email || "",
+        emails: getXrayRecipientEmail(row) || "",
         rows: [],
         total: { invoiced: 0, paid: 0, due: 0 },
       });
@@ -1245,7 +1249,7 @@ function mapResendRow(row, orderPayments = []) {
     invoiceId: invoiceDbId,
     orderId: row.order_id,
     company: row.facility_name || "",
-    email: getInvoiceRecipientEmail(row) || "",
+    email: getInvoiceDisplayEmail(row),
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
     isSent,
@@ -1296,7 +1300,7 @@ function groupOutstandingRows(rows = [], paymentsByOrderId = {}) {
     if (!groups.has(company)) {
       groups.set(company, {
         company,
-        emails: row.facility_email || "",
+        emails: getInvoiceDisplayEmail(row),
         rows: [],
         total: { invoiced: 0, paid: 0, due: 0 },
       });
@@ -1740,7 +1744,7 @@ function ensureCompanyEntry(companiesMap, row) {
     companiesMap.set(facilityId, {
       id: facilityId,
       company: row.facility_name || "Unknown Company",
-      email: row.facility_email || "",
+      email: getInvoiceDisplayEmail(row),
       cases: 0,
       needsResend: 0,
       invoiced: 0,
@@ -2066,7 +2070,10 @@ async function getByCompany(facilityId, query = {}) {
     company: {
       id: companyId,
       name: referenceRow.facility_name || "Company",
-      email: referenceRow.facility_email || "",
+      email:
+        getInvoiceDisplayEmail(referenceRow) ||
+        getXrayRecipientEmail(referenceRow) ||
+        "",
     },
     invoices,
     summary: {
