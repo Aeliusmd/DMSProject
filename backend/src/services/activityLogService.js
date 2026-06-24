@@ -354,6 +354,11 @@ async function recordSafe(payload) {
   }
 }
 
+async function getMyLogs(employeeId) {
+  const logs = await ActivityLog.findByPerformerId(employeeId);
+  return logs.map(mapLogRow);
+}
+
 async function getEmployeeLogs(employeeId) {
   const employee = await Employee.findByIdPublic(employeeId);
 
@@ -385,6 +390,7 @@ module.exports = {
   recordActivity,
   recordFromRequest,
   recordSafe,
+  getMyLogs,
   getEmployeeLogs,
   getAllLogs,
   getLogById,

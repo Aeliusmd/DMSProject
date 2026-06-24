@@ -7,7 +7,7 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import MatrixEmployeesTable from "@/components/employees/MatrixEmployeesTable";
 import EmployeeFormModal from "@/components/employees/EmployeeFormModal";
 import { getStoredUser } from "@/lib/auth/authStorage";
-import { canAccessEmployeesPage } from "@/lib/auth/roles";
+import { canAccessEmployeesPage, canManageEmployees } from "@/lib/auth/roles";
 import {
   activateEmployee,
   createEmployee,
@@ -23,10 +23,13 @@ export default function EmployeesPage() {
   const [pageError, setPageError] = useState("");
   const [isNewEmployeeModalOpen, setIsNewEmployeeModalOpen] = useState(false);
 
-  useEffect(() => {
-    const user = getStoredUser();
+  const user = getStoredUser();
+  const readOnly = !canManageEmployees(user);
 
-    if (!canAccessEmployeesPage(user)) {
+  useEffect(() => {
+    const currentUser = getStoredUser();
+
+    if (!canAccessEmployeesPage(currentUser)) {
       router.replace("/dashboard");
       return;
     }
@@ -96,14 +99,16 @@ export default function EmployeesPage() {
               Return to Orders
             </Link>
 
-            <button
-              type="button"
-              onClick={() => setIsNewEmployeeModalOpen(true)}
-              className="inline-flex h-[36px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-[#0086A0]"
-            >
-              <UserPlusIcon />
-              New Matrix Employee
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => setIsNewEmployeeModalOpen(true)}
+                className="inline-flex h-[36px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white shadow-sm hover:bg-[#0086A0]"
+              >
+                <UserPlusIcon />
+                New Matrix Employee
+              </button>
+            )}
           </div>
         </div>
 
@@ -120,17 +125,20 @@ export default function EmployeesPage() {
         ) : (
           <MatrixEmployeesTable
             employees={employees}
+            readOnly={readOnly}
             onTerminateEmployee={handleTerminateEmployee}
             onDeleteEmployee={handleDeleteEmployee}
             onActivateEmployee={handleActivateEmployee}
           />
         )}
 
-        <EmployeeFormModal
-          open={isNewEmployeeModalOpen}
-          onClose={() => setIsNewEmployeeModalOpen(false)}
-          onCreate={handleCreateEmployee}
-        />
+        {!readOnly && (
+          <EmployeeFormModal
+            open={isNewEmployeeModalOpen}
+            onClose={() => setIsNewEmployeeModalOpen(false)}
+            onCreate={handleCreateEmployee}
+          />
+        )}
       </div>
     </DashboardShell>
   );

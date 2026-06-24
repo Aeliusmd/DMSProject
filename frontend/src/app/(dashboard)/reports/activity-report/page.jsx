@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getActivityReport } from "@/lib/reports/reportApi";
 
@@ -40,17 +43,25 @@ function getPresetRange(preset) {
 }
 
 function getDefaultFilters() {
-  const range = getPresetRange("Last Month");
   return {
-    reportDate: range.from,
-    throughDate: range.to,
+    reportDate: "",
+    throughDate: "",
     facility: "all",
     activity: "All",
   };
 }
 
 export default function ActivityReportPage() {
+  const router = useRouter();
+  const user = getStoredUser();
+  const allowed = canAccessActivityReport(user);
   const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!allowed) {
+      router.replace("/reports");
+    }
+  }, [allowed, router]);
 
   const [filters, setFilters] = useState(getDefaultFilters);
   const [facilities, setFacilities] = useState([]);
@@ -214,7 +225,7 @@ export default function ActivityReportPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `activity-report-${filters.reportDate}-${filters.throughDate}.csv`;
+    link.download = `activity-report-${filters.reportDate || "all"}-${filters.throughDate || "all"}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -224,6 +235,16 @@ export default function ActivityReportPage() {
       current === companyId ? null : companyId
     );
   };
+
+  if (!allowed) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+          <p className="text-[13px] text-[#64748B]">Redirecting...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>

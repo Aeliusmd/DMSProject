@@ -18,6 +18,22 @@ class ActivityLog {
     return result.insertId;
   }
 
+  static async findByPerformerId(employeeId, { limit = 200 } = {}) {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(
+      `SELECT id, log_date, log_time, action, module, company_name, facility_id,
+              performed_by, performer_name, performer_initials, details, created_at
+       FROM activity_logs
+       WHERE performed_by = :employeeId
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${Number(limit)}`,
+      { employeeId }
+    );
+
+    return rows;
+  }
+
   static async findByEmployeeId(employeeId, { limit = 200 } = {}) {
     const pool = getPool();
     const targetTag = `%target_employee_id:${Number(employeeId)}%`;

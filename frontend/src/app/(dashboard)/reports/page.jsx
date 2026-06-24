@@ -5,6 +5,8 @@ import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ReportsOrdersTable from "@/components/reports/ReportsOrdersTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getOrdersReport } from "@/lib/reports/reportApi";
 import { RUSH_LEVEL_LEGEND } from "@/lib/orders/rushUtils";
 
@@ -18,6 +20,8 @@ const initialFilters = {
 };
 
 export default function ReportsPage() {
+  const user = getStoredUser();
+  const showActivityReportLink = canAccessActivityReport(user);
   const [filters, setFilters] = useState(initialFilters);
   const [showUnpaidOrders, setShowUnpaidOrders] = useState(false);
   const [minimumColumns, setMinimumColumns] = useState(false);
@@ -116,13 +120,15 @@ export default function ReportsPage() {
                   Show Duplicates
                 </button>
 
-                <Link
-                  href="/reports/activity-report"
-                  className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[5px] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
-                >
-                  <ReportIcon />
-                  Activity Report
-                </Link>
+                {showActivityReportLink && (
+                  <Link
+                    href="/reports/activity-report"
+                    className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[5px] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
+                  >
+                    <ReportIcon />
+                    Activity Report
+                  </Link>
+                )}
 
                 <div className="hidden h-[22px] w-px bg-[#E2E8F0] md:block" />
 
