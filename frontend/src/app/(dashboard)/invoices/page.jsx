@@ -1,12 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
+import {
+  buildSummaryFromOutstandingGroups,
+  buildSummaryFromRows,
+  countOutstandingRows,
+  filterInvoiceGroups,
+  filterResendInvoices,
+} from "@/lib/invoices/invoiceFilters";
 import {
   getInvoices,
   resendInvoices,
@@ -27,7 +34,9 @@ export default function InvoicesPage() {
   const [filters, setFilters] = useState({
     from: "",
     through: "",
+    orderId: "",
   });
+  const [appliedOrderId, setAppliedOrderId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [outstanding, setOutstanding] = useState({
@@ -99,7 +108,8 @@ export default function InvoicesPage() {
     }));
   };
 
-  const handleFilterByDate = () => {
+  const handleApplyFilters = () => {
+    setAppliedOrderId(filters.orderId.trim());
     setRefreshKey((value) => value + 1);
   };
 
@@ -107,15 +117,67 @@ export default function InvoicesPage() {
     setFilters({
       from: "",
       through: "",
+      orderId: "",
     });
+    setAppliedOrderId("");
     setRefreshKey((value) => value + 1);
   };
 
+  const filteredOutstanding = useMemo(
+    () => filterInvoiceGroups(outstanding.groups, appliedOrderId),
+    [outstanding.groups, appliedOrderId]
+  );
+  const filteredResend = useMemo(
+    () => filterResendInvoices(resend.invoices, appliedOrderId),
+    [resend.invoices, appliedOrderId]
+  );
+  const filteredXrayOutstanding = useMemo(
+    () => filterInvoiceGroups(xrayOutstanding.groups, appliedOrderId),
+    [xrayOutstanding.groups, appliedOrderId]
+  );
+  const filteredXrayResend = useMemo(
+    () => filterResendInvoices(xrayResend.invoices, appliedOrderId),
+    [xrayResend.invoices, appliedOrderId]
+  );
+
   const isXray = invoiceCategory === "xray";
-  const currentOutstanding = isXray ? xrayOutstanding : outstanding;
-  const currentResend = isXray ? xrayResend : resend;
-  const activeSummary =
-    activeTab === "resend" ? currentResend.summary : currentOutstanding.summary;
+  const currentOutstandingGroups = isXray
+    ? filteredXrayOutstanding
+    : filteredOutstanding;
+  const currentResendInvoices = isXray ? filteredXrayResend : filteredResend;
+
+  const currentOutstandingCount = isXray
+    ? countOutstandingRows(filteredXrayOutstanding)
+    : countOutstandingRows(filteredOutstanding);
+  const currentResendCount = currentResendInvoices.length;
+
+  const activeSummary = useMemo(() => {
+    if (loading) {
+      return activeTab === "resend"
+        ? isXray
+          ? xrayResend.summary
+          : resend.summary
+        : isXray
+          ? xrayOutstanding.summary
+          : outstanding.summary;
+    }
+
+    if (activeTab === "resend") {
+      return buildSummaryFromRows(currentResendInvoices);
+    }
+
+    return buildSummaryFromOutstandingGroups(currentOutstandingGroups);
+  }, [
+    activeTab,
+    currentOutstandingGroups,
+    currentResendInvoices,
+    isXray,
+    loading,
+    outstanding.summary,
+    resend.summary,
+    xrayOutstanding.summary,
+    xrayResend.summary,
+  ]);
 
   return (
     <DashboardShell>
@@ -140,10 +202,20 @@ export default function InvoicesPage() {
                 setInvoiceCategory(category);
                 setActiveTab("outstanding");
               }}
-              invoiceOutstandingCount={outstanding.count}
-              invoiceResendCount={resend.count}
-              xrayOutstandingCount={xrayOutstanding.count}
-              xrayResendCount={xrayResend.count}
+              invoiceOutstandingCount={countOutstandingRows(
+                filterInvoiceGroups(outstanding.groups, appliedOrderId)
+              )}
+              invoiceResendCount={filterResendInvoices(
+                resend.invoices,
+                appliedOrderId
+              ).length}
+              xrayOutstandingCount={countOutstandingRows(
+                filterInvoiceGroups(xrayOutstanding.groups, appliedOrderId)
+              )}
+              xrayResendCount={filterResendInvoices(
+                xrayResend.invoices,
+                appliedOrderId
+              ).length}
             />
 
             <Link
@@ -158,8 +230,8 @@ export default function InvoicesPage() {
           <InvoiceTabs
             activeTab={activeTab}
             onChange={setActiveTab}
-            outstandingCount={currentOutstanding.count}
-            resendCount={currentResend.count}
+            outstandingCount={currentOutstandingCount}
+            resendCount={currentResendCount}
             labelPrefix={isXray ? "X-Ray " : ""}
           />
         </div>
@@ -168,7 +240,7 @@ export default function InvoicesPage() {
           <InvoiceFilters
             filters={filters}
             onChange={handleFilterChange}
-            onFilter={handleFilterByDate}
+            onFilter={handleApplyFilters}
             onReset={handleReset}
           />
 
@@ -177,7 +249,7 @@ export default function InvoicesPage() {
 
         {activeTab === "outstanding" ? (
           <InvoiceReportTable
-            invoiceGroups={currentOutstanding.groups}
+            invoiceGroups={currentOutstandingGroups}
             loading={loading}
             onRefresh={loadInvoices}
             onSent={() => setActiveTab("resend")}
@@ -186,7 +258,7 @@ export default function InvoicesPage() {
           />
         ) : (
           <ResendInvoicesPanel
-            invoices={currentResend.invoices}
+            invoices={currentResendInvoices}
             loading={loading}
             onRefresh={loadInvoices}
             invoiceType={isXray ? "xray" : "invoice"}
@@ -280,7 +352,15 @@ function InvoiceFilters({ filters, onChange, onFilter, onReset }) {
         Filters
       </h2>
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+        <TextField
+          label="Order ID"
+          name="orderId"
+          value={filters.orderId}
+          onChange={onChange}
+          placeholder="Enter order number"
+        />
+
         <DateField
           label="From"
           name="from"
@@ -300,7 +380,7 @@ function InvoiceFilters({ filters, onChange, onFilter, onReset }) {
           onClick={onFilter}
           className="h-[38px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
         >
-          Filter by Date
+          Apply Filters
         </button>
 
         <button
@@ -312,6 +392,25 @@ function InvoiceFilters({ filters, onChange, onFilter, onReset }) {
         </button>
       </div>
     </section>
+  );
+}
+
+function TextField({ label, name, value, onChange, placeholder = "" }) {
+  return (
+    <div className="min-w-0 flex-1 lg:max-w-[180px]">
+      <label className="mb-2 block text-[11px] font-medium text-[#64748B]">
+        {label}
+      </label>
+
+      <input
+        type="text"
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+      />
+    </div>
   );
 }
 

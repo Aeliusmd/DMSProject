@@ -50,7 +50,12 @@ import {
   formatMoneyAmount,
   parsePaymentAmount,
 } from "@/lib/orders/paymentUtils";
-import { deriveDisplayOrderStatus } from "@/lib/orders/rushUtils";
+import {
+  deriveDisplayOrderStatus,
+  getOrderAgeDate,
+  resolveRushLabel,
+  RUSH_LEVEL_STYLES,
+} from "@/lib/orders/rushUtils";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
 const ORDERS_PER_PAGE = 6;
@@ -249,8 +254,8 @@ function toRenderOrder(order) {
     orderStatus: order.status || "",
     displayOrderStatus:
       order.displayStatus ||
-      deriveDisplayOrderStatus(order.status, order.createdAt),
-    rushLabel: order.rushLabel || "",
+      deriveDisplayOrderStatus(order.status, getOrderAgeDate(order)),
+    rushLabel: resolveRushLabel(order) || "",
     isSubpoena: Boolean(order.isSubpoena),
     isRecords: Boolean(order.isRecords),
     isWriteOffs: Boolean(order.isWriteOffs),
@@ -927,8 +932,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <div className="mb-2">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
                         <OrderStatusBadge status={order.displayOrderStatus} />
+                        {order.rushLabel ? (
+                          <RushBadge rush={order.rushLabel} />
+                        ) : null}
                       </div>
 
                       <div className="space-y-1">
@@ -2164,6 +2172,20 @@ function formatLastUpdatedLabel(date) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function RushBadge({ rush }) {
+  if (!rush) return null;
+
+  return (
+    <span
+      className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
+        RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
+      }`}
+    >
+      {rush}
+    </span>
+  );
 }
 
 function TrashIcon() {

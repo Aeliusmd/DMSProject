@@ -4,12 +4,12 @@ const { authenticate, authorize } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-router.use(authenticate, authorize("Admin"));
+router.use(authenticate);
 
-router.get("/", employeeController.getAll);
-router.post("/", employeeController.create);
-router.patch("/:id/terminate", employeeController.terminate);
-router.patch("/:id/activate", employeeController.activate);
-router.delete("/:id", employeeController.remove);
+router.get("/", authorize("Admin", "Manager"), employeeController.getAll);
+router.post("/", authorize("Admin"), employeeController.create);
+router.patch("/:id/terminate", authorize("Admin"), employeeController.terminate);
+router.patch("/:id/activate", authorize("Admin"), employeeController.activate);
+router.delete("/:id", authorize("Admin"), employeeController.remove);
 
 module.exports = router;

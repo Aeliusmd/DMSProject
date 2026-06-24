@@ -1,9 +1,13 @@
+"use client";
+
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
 import DashboardRecentOrders from "@/components/dashboard/DashboardRecentOrders";
 import DashboardFinancialSummary from "@/components/dashboard/DashboardFinancialSummary";
 import DashboardTopProviders from "@/components/dashboard/DashboardTopProviders";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessNavItem, isAdmin } from "@/lib/auth/roles";
 
 const quickActions = [
   {
@@ -32,11 +36,11 @@ const quickActions = [
     href: "/orders/unprocessed",
     icon: <DocumentIcon />,
   },
-{
-  label: "Batch Scan",
-  href: "/orders/batch-scan",
-  icon: <ScanIcon />,
-},
+  {
+    label: "Batch Scan",
+    href: "/orders/batch-scan",
+    icon: <ScanIcon />,
+  },
   {
     label: "Facilities",
     href: "/facilities",
@@ -50,13 +54,20 @@ const quickActions = [
 ];
 
 export default function DashboardPage() {
+  const user = getStoredUser();
+  const showFinancialWidgets = isAdmin(user);
+
+  const visibleQuickActions = quickActions.filter((action) =>
+    canAccessNavItem(user, action.href)
+  );
+
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] flex-col gap-5 overflow-hidden">
         <DashboardOverview />
 
         <div className="flex flex-wrap items-center gap-3">
-          {quickActions.map((action) => (
+          {visibleQuickActions.map((action) => (
             <QuickActionButton key={action.label} {...action} />
           ))}
         </div>
@@ -64,10 +75,12 @@ export default function DashboardPage() {
         <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
           <DashboardRecentOrders />
 
-          <div className="grid grid-cols-1 gap-4">
-            <DashboardFinancialSummary />
-            <DashboardTopProviders />
-          </div>
+          {showFinancialWidgets && (
+            <div className="grid grid-cols-1 gap-4">
+              <DashboardFinancialSummary />
+              <DashboardTopProviders />
+            </div>
+          )}
         </div>
       </div>
     </DashboardShell>

@@ -3,9 +3,10 @@
  */
 
 const { getPool } = require("../config/database");
+const { RUSH_3_MIN_DAYS } = require("../utils/rushUtils");
 
-/** Matches orderService rush level 3: 21+ days since created_at */
-const RUSH_LEVEL_3_MIN_DAYS = 21;
+/** Matches rushUtils Rush 3 threshold: 4+ weeks since created_at */
+const RUSH_LEVEL_3_MIN_DAYS = RUSH_3_MIN_DAYS;
 
 /** Outstanding invoices older than this are counted as overdue */
 const OVERDUE_INVOICE_DAYS = 30;

@@ -1,5 +1,10 @@
 import { request } from "@/lib/auth/authApi";
 
+export async function getMyActivityLogs() {
+  const data = await request("/activity-log/me", { auth: true });
+  return data?.data?.logs || [];
+}
+
 export async function getActivityLogs() {
   const data = await request("/activity-log", { auth: true });
   return data?.data?.logs || [];

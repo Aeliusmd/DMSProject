@@ -1,16 +1,18 @@
 const express = require("express");
 const activityLogController = require("../controllers/activityLogController");
 const { authenticate, authorize } = require("../middleware/authMiddleware");
+const { authorizeSelfOrAdmin } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
 
 router.use(authenticate);
 
-router.get("/", authorize("Admin"), activityLogController.getAll);
+router.get("/me", activityLogController.getMyLogs);
+router.get("/", activityLogController.list);
 
 router.get(
   "/employees/:employeeId",
-  authorize("Admin"),
+  authorizeSelfOrAdmin("employeeId"),
   activityLogController.getEmployeeLogs
 );
 

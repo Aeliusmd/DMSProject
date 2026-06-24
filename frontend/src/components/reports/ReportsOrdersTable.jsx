@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import { API_BASE_URL } from "@/config/api";
 import {
-  calculateOrderRushLevel,
+  resolveRushLabel,
   RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
 
@@ -281,10 +281,7 @@ export default function ReportsOrdersTable({
 
             <tbody>
               {paginatedOrders.map((order) => {
-                const rushLabel =
-                  order.rushLabel ||
-                  order.rushLevel ||
-                  calculateOrderRushLevel(order.createdAt);
+                const rushLabel = resolveRushLabel(order);
 
                 return (
                   <tr
