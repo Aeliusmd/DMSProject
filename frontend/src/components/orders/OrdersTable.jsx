@@ -41,6 +41,7 @@ import {
 } from "@/lib/orders/deliveryActions";
 import { getOrderPeriodStartDate } from "@/lib/orders/orderFilterConstants";
 import {
+  emailInvoiceByOrderId,
   emailXrayInvoiceByOrderId,
   resendInvoices,
   sendInvoices,
