@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getOrders } from "@/lib/orders/orderApi";
+import { resolveRushLabel } from "@/lib/orders/rushUtils";
 
 const RECENT_LIMIT = 8;
 
@@ -132,7 +133,7 @@ export default function DashboardRecentOrders() {
                   </td>
 
                   <td className="px-4 py-3">
-                    <RushBadge rush={order.rushLabel} />
+                    <RushBadge rush={resolveRushLabel(order)} />
                   </td>
 
                   <td className="px-4 py-3">

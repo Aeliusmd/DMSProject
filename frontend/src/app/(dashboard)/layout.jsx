@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { clearAuth, getAccessToken } from "@/lib/auth/authStorage";
+import RoleRouteGuard from "@/components/auth/RoleRouteGuard";
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -47,5 +48,5 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  return children;
+  return <RoleRouteGuard>{children}</RoleRouteGuard>;
 }

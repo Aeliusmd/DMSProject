@@ -17,7 +17,7 @@ const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const { getPool } = require("../config/database");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
-const { calculateOrderRushLevel } = require("../utils/rushUtils");
+const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const fileStorage = require("../utils/fileStorage");
 const {
@@ -40,10 +40,6 @@ const WORKFLOW_STAGE_NAMES = [
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const DEFAULT_PREPAYMENT_CHARGE = 15;
 const DEFAULT_CUSTODIAN_CHARGE = 15;
-
-/** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
-const RUSH_READY_MIN_DAYS = 14;
-
 const STATUS_FILTER_MAP = {
   active: "Active",
   ready_pickup: "Ready to Pickup",

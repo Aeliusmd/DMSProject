@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getActivityReport } from "@/lib/reports/reportApi";
 
@@ -49,7 +52,16 @@ function getDefaultFilters() {
 }
 
 export default function ActivityReportPage() {
+  const router = useRouter();
+  const user = getStoredUser();
+  const allowed = canAccessActivityReport(user);
   const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!allowed) {
+      router.replace("/reports");
+    }
+  }, [allowed, router]);
 
   const [filters, setFilters] = useState(getDefaultFilters);
   const [facilities, setFacilities] = useState([]);
@@ -223,6 +235,16 @@ export default function ActivityReportPage() {
       current === companyId ? null : companyId
     );
   };
+
+  if (!allowed) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+          <p className="text-[13px] text-[#64748B]">Redirecting...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>

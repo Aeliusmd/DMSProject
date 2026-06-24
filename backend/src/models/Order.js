@@ -3,6 +3,7 @@
  */
 
 const { getPool } = require("../config/database");
+const { RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 
 const REQUIRED_WORKFLOW_COMPLETION = {
   "Upload Records": "complete",
@@ -23,9 +24,6 @@ const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
 const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
-/** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
-const RUSH_READY_MIN_DAYS = 14;
-
 const ORDER_COLUMNS = `
   order_number, rec_number, facility_id, provider_id, order_type, status, court,
   case_number, order_ref, ssn_last_four, dob,

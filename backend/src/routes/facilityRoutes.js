@@ -3,18 +3,22 @@ const facilityController = require("../controllers/facilityController");
 const facilityDocumentController = require("../controllers/facilityDocumentController");
 const facilityNoteController = require("../controllers/facilityNoteController");
 const { authenticate } = require("../middleware/authMiddleware");
+const { denyRoles } = require("../middleware/roleMiddleware");
 const { facilityDocumentUpload } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
 router.use(authenticate);
 
+const employeeWriteGuard = denyRoles("Employee");
+
 router.get("/", facilityController.getAll);
-router.post("/", facilityController.create);
+router.post("/", employeeWriteGuard, facilityController.create);
 
 router.get("/:id/documents", facilityDocumentController.listDocuments);
 router.post(
   "/:id/documents",
+  employeeWriteGuard,
   facilityDocumentUpload.single("file"),
   facilityDocumentController.uploadDocument
 );
@@ -28,19 +32,32 @@ router.get(
 );
 router.delete(
   "/:id/documents/:documentId",
+  employeeWriteGuard,
   facilityDocumentController.deleteDocument
 );
 
 router.get("/:id/notes", facilityNoteController.listNotes);
-router.post("/:id/notes", facilityNoteController.createNote);
+router.post("/:id/notes", employeeWriteGuard, facilityNoteController.createNote);
 
 router.get("/:id", facilityController.getById);
-router.put("/:id", facilityController.update);
-router.delete("/:id", facilityController.remove);
+router.put("/:id", employeeWriteGuard, facilityController.update);
+router.delete("/:id", employeeWriteGuard, facilityController.remove);
 
-router.post("/:id/doctors", facilityController.createDoctors);
-router.patch("/:id/doctors/:doctorId/deactivate", facilityController.deactivateDoctor);
-router.patch("/:id/doctors/:doctorId/reactivate", facilityController.reactivateDoctor);
-router.patch("/:id/doctors/:doctorId/default", facilityController.setDefaultDoctor);
+router.post("/:id/doctors", employeeWriteGuard, facilityController.createDoctors);
+router.patch(
+  "/:id/doctors/:doctorId/deactivate",
+  employeeWriteGuard,
+  facilityController.deactivateDoctor
+);
+router.patch(
+  "/:id/doctors/:doctorId/reactivate",
+  employeeWriteGuard,
+  facilityController.reactivateDoctor
+);
+router.patch(
+  "/:id/doctors/:doctorId/default",
+  employeeWriteGuard,
+  facilityController.setDefaultDoctor
+);
 
 module.exports = router;
