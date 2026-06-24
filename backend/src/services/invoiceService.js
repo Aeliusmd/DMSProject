@@ -22,8 +22,12 @@ function trimOrNull(value) {
   return trimmed === "" ? null : trimmed;
 }
 
-function getInvoiceRecipientEmail(invoice) {
-  return trimOrNull(invoice?.provider_email);
+function getInvoiceRecipientEmail(row) {
+  return trimOrNull(row?.provider_email);
+}
+
+function getInvoiceDisplayEmail(row) {
+  return getInvoiceRecipientEmail(row) || "";
 }
 
 async function resolveInvoiceRecipientFromOrder(order, connection = null) {
@@ -255,17 +259,29 @@ function buildApplicantName(row) {
     .trim();
 }
 
+function formatOrderRecordTypesLabel(orderRow) {
+  const raw = orderRow?.order_record_types || orderRow?.order_type || "";
+  const types = `${raw}`
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (!types.length) {
+    return "";
+  }
+
+  return types
+    .map((type) => ORDER_TYPE_LABELS[type] || type)
+    .join(", ");
+}
+
 function resolveYourFileNumber(orderRow) {
   if (!orderRow) return "";
 
-  const typeLabel = trimOrNull(ORDER_TYPE_LABELS[orderRow.order_type]);
+  const typeLabel = trimOrNull(formatOrderRecordTypesLabel(orderRow));
   if (typeLabel) return typeLabel;
 
-  return (
-    trimOrNull(orderRow.specific_record) ||
-    trimOrNull(orderRow.order_type) ||
-    ""
-  );
+  return trimOrNull(orderRow.specific_record) || "";
 }
 
 function buildOrderDetailsText(row, orderPayments = []) {
@@ -285,7 +301,7 @@ function buildOrderDetailsText(row, orderPayments = []) {
   push("Defendant", row.defendant);
   push(
     "Record Type",
-    ORDER_TYPE_LABELS[row.order_type] || row.order_type
+    formatOrderRecordTypesLabel(row) || trimOrNull(row.specific_record)
   );
   push("Specific Record", row.specific_record);
   push("Doctor", row.specific_doctor);
@@ -1174,7 +1190,7 @@ function groupXrayOutstandingRows(rows = [], paymentsByOrderId = {}) {
     if (!groups.has(company)) {
       groups.set(company, {
         company,
-        emails: row.facility_email || "",
+        emails: getXrayRecipientEmail(row) || "",
         rows: [],
         total: { invoiced: 0, paid: 0, due: 0 },
       });
@@ -1233,7 +1249,7 @@ function mapResendRow(row, orderPayments = []) {
     invoiceId: invoiceDbId,
     orderId: row.order_id,
     company: row.facility_name || "",
-    email: getInvoiceRecipientEmail(row) || "",
+    email: getInvoiceDisplayEmail(row),
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
     isSent,
@@ -1284,7 +1300,7 @@ function groupOutstandingRows(rows = [], paymentsByOrderId = {}) {
     if (!groups.has(company)) {
       groups.set(company, {
         company,
-        emails: row.facility_email || "",
+        emails: getInvoiceDisplayEmail(row),
         rows: [],
         total: { invoiced: 0, paid: 0, due: 0 },
       });
@@ -1728,7 +1744,7 @@ function ensureCompanyEntry(companiesMap, row) {
     companiesMap.set(facilityId, {
       id: facilityId,
       company: row.facility_name || "Unknown Company",
-      email: row.facility_email || "",
+      email: getInvoiceDisplayEmail(row),
       cases: 0,
       needsResend: 0,
       invoiced: 0,
@@ -2054,7 +2070,10 @@ async function getByCompany(facilityId, query = {}) {
     company: {
       id: companyId,
       name: referenceRow.facility_name || "Company",
-      email: referenceRow.facility_email || "",
+      email:
+        getInvoiceDisplayEmail(referenceRow) ||
+        getXrayRecipientEmail(referenceRow) ||
+        "",
     },
     invoices,
     summary: {

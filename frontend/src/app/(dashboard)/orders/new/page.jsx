@@ -14,6 +14,7 @@ import DoctorSearchField from "@/components/orders/new-order/DoctorSearchField";
 import DoctorAddressSearchField from "@/components/orders/new-order/DoctorAddressSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 import CertificateNoRecordsPanel from "@/components/orders/new-order/CertificateNoRecordsPanel";
+import RecordTypeMultiSelect from "@/components/orders/new-order/RecordTypeMultiSelect";
 
 import {
   formatMoneyInput,
@@ -599,6 +600,14 @@ function NewOrderPageContent() {
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
 
+    if (name === "recordTypes" && value && typeof value === "object") {
+      setFormData((prev) => ({
+        ...prev,
+        ...value,
+      }));
+      return;
+    }
+
     if (name === "certificateNoRecords") {
       setFormData((prev) => ({
         ...prev,
@@ -638,7 +647,6 @@ function NewOrderPageContent() {
     setFormData((prev) => ({
       ...prev,
       [name]: nextValue,
-      ...(name === "type" && nextValue === "other" ? { otherRecord: true } : {}),
     }));
 
     if (name === "facility") {
@@ -979,22 +987,12 @@ function OrderDetailsForm({
           </p>
         )}
 
-        <NewOrderField
-          label="Type"
-          name="type"
-          value={formData.type}
+        <RecordTypeMultiSelect
+          formData={formData}
           onChange={onChange}
           onBlur={onBlur}
           required
           error={getError("type")}
-          options={[
-            { label: "Select type", value: "", disabled: true, hidden: true },
-            { label: "Medical Records", value: "medical" },
-            { label: "Billing Records", value: "billing" },
-            { label: "Employment Records", value: "employment" },
-            { label: "X-Rays", value: "xrays" },
-            { label: "Other", value: "other" },
-          ]}
         />
 
         <NewOrderField
@@ -1516,55 +1514,6 @@ function ServeInfoForm({
             placeholder="-"
           />
         </div>
-
-        <div>
-          <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">
-            Records
-          </p>
-
-          <p className="mb-2 text-[10px] italic text-[#94A3B8]">
-            Ctrl+Click for multiple selections
-          </p>
-
-          <div className="rounded-[8px] border border-[#E2E8F0] bg-white">
-            <RecordCheckbox
-              label="Medical Records"
-              name="medicalRecords"
-              checked={formData.medicalRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="Billing Records"
-              name="billingRecords"
-              checked={formData.billingRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="Employment Records"
-              name="employmentRecords"
-              checked={formData.employmentRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="X-Rays"
-              name="xrays"
-              checked={formData.xrays}
-              onChange={onChange}
-            />
-
-            <div className="px-3 py-2">
-              <CheckboxOption
-                label="Other"
-                name="otherRecord"
-                checked={formData.otherRecord}
-                onChange={onChange}
-              />
-            </div>
-          </div>
-        </div>
       </div>
 
       <Divider />
@@ -1830,19 +1779,6 @@ function ExistingFileLink({ label, name, href }) {
         View
       </span>
     </a>
-  );
-}
-
-function RecordCheckbox({ label, name, checked, onChange }) {
-  return (
-    <div className="border-b border-[#F1F5F9] px-3 py-2 last:border-b-0">
-      <CheckboxOption
-        label={label}
-        name={name}
-        checked={checked}
-        onChange={onChange}
-      />
-    </div>
   );
 }
 

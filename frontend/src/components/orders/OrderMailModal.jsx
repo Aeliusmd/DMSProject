@@ -1,25 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import { resolveProviderEmail } from "@/lib/orders/deliveryActions";
+import {
+  buildOrderMailDefaultBody,
+  getOrderRecordsForMail,
+} from "@/lib/orders/recordTypeUtils";
 
 export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   const mounted = useIsClient();
   const [email, setEmail] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
+  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const needsEmail = order ? !resolveProviderEmail(order) : true;
+  const uploadedRecords = useMemo(() => {
+    if (!order) return [];
+    return getOrderRecordsForMail(order).filter((slot) => slot.hasFile);
+  }, [order]);
 
   useEffect(() => {
     if (!isOpen || !order) return;
 
     setEmail(resolveProviderEmail(order) || "");
     setDeliveryDate(getTodayInputDate());
+    setMessage(buildOrderMailDefaultBody(order));
     setError("");
   }, [isOpen, order]);
 
@@ -39,6 +49,12 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
   const handleSubmit = async () => {
     if (!deliveryDate) {
       setError("Mail sent date is required");
+      return;
+    }
+
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      setError("Email message is required");
       return;
     }
 
@@ -65,6 +81,7 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
       await onSent?.({
         email: trimmed,
         deliveryDate,
+        message: trimmedMessage,
       });
       onClose();
     } catch (err) {
@@ -76,15 +93,15 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
-      <section className="w-full max-w-[420px] overflow-hidden rounded-[10px] bg-white shadow-2xl">
-        <div className="border-b border-[#E2E8F0] px-5 py-4">
+      <section className="flex max-h-[92vh] w-full max-w-[520px] flex-col overflow-hidden rounded-[10px] bg-white shadow-2xl">
+        <div className="shrink-0 border-b border-[#E2E8F0] px-5 py-4">
           <h2 className="text-[14px] font-semibold text-[#111827]">Mail Records</h2>
           <p className="mt-1 text-[11px] text-[#64748B]">
             Order {order.id} • {order.applicant || "N/A"}
           </p>
         </div>
 
-        <div className="space-y-3 px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
           <div>
             <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
               Mail sent date
@@ -125,16 +142,43 @@ export default function OrderMailModal({ isOpen, order, onClose, onSent }) {
             </div>
           )}
 
-          {!needsEmail ? (
-            <p className="text-[10px] text-[#94A3B8]">
-              Medical records PDF will be attached to the email.
-            </p>
-          ) : null}
+          {uploadedRecords.length > 0 && (
+            <div className="rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64748B]">
+                Attachments
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {uploadedRecords.map((record) => (
+                  <li
+                    key={record.recordType}
+                    className="text-[11px] font-medium text-[#334155]"
+                  >
+                    {record.label} PDF
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div>
+            <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
+              Email message
+            </label>
+            <textarea
+              value={message}
+              onChange={(e) => {
+                setMessage(e.target.value);
+                setError("");
+              }}
+              rows={10}
+              className="w-full resize-y rounded-[6px] border border-[#CBD5E1] bg-white px-3 py-2 text-[12px] leading-[1.5] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+            />
+          </div>
 
           {error ? <p className="text-[11px] text-red-500">{error}</p> : null}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-[#E2E8F0] px-5 py-4">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-[#E2E8F0] px-5 py-4">
           <button
             type="button"
             onClick={onClose}

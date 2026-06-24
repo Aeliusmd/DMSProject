@@ -6,7 +6,6 @@ const { getPool } = require("../config/database");
 const { RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 
 const REQUIRED_WORKFLOW_COMPLETION = {
-  "Upload Records": "complete",
   "Review Records": "complete",
   Serve: "complete",
   Custodian: "complete",
@@ -25,7 +24,7 @@ const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
 const ORDER_COLUMNS = `
-  order_number, rec_number, facility_id, provider_id, order_type, status, court,
+  order_number, rec_number, facility_id, provider_id, status, court,
   case_number, order_ref, ssn_last_four, dob,
   applicant_first_name, applicant_middle_name, applicant_last_name,
   applicant_aka, defendant, injury_type, injury_date, injury_date_begin, injury_date_end,
@@ -35,14 +34,12 @@ const ORDER_COLUMNS = `
   contact2_name, contact2_title, contact2_phone, contact2_fax, contact2_email,
   date_served, depo_due_date, delivery_date, subpoena_date,
   ready_date, invoice_date, xray_invoice_date,
-  flag_medical_records, flag_billing_records, flag_employment_records,
-  flag_xrays, flag_other_record,
   specific_record, specific_doctor, full_address,
   certificate_no_records, cnr_reason, cnr_delivery, cnr_date_sent, cnr_memo,
-  subpoena_storage_path, has_note, is_subpoena, created_by`;
+  subpoena_storage_path, has_note, has_subpoena, created_by`;
 
 const ORDER_VALUES = `
-  :orderNumber, :recNumber, :facilityId, :providerId, :orderType, :status, :court,
+  :orderNumber, :recNumber, :facilityId, :providerId, :status, :court,
   :caseNumber, :orderRef, :ssnLastFour, :dob,
   :applicantFirstName, :applicantMiddleName, :applicantLastName,
   :applicantAka, :defendant, :injuryType, :injuryDate, :injuryDateBegin, :injuryDateEnd,
@@ -52,18 +49,15 @@ const ORDER_VALUES = `
   :contact2Name, :contact2Title, :contact2Phone, :contact2Fax, :contact2Email,
   :dateServed, :depoDueDate, :deliveryDate, :subpoenaDate,
   :readyDate, :invoiceDate, :xrayInvoiceDate,
-  :flagMedicalRecords, :flagBillingRecords, :flagEmploymentRecords,
-  :flagXrays, :flagOtherRecord,
   :specificRecord, :specificDoctor, :fullAddress,
   :certificateNoRecords, :cnrReason, :cnrDelivery, :cnrDateSent, :cnrMemo,
-  :subpoenaStoragePath, :hasNote, :isSubpoena, :createdBy`;
+  :subpoenaStoragePath, :hasNote, :hasSubpoena, :createdBy`;
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
   rec_number = :recNumber,
   facility_id = :facilityId,
   provider_id = :providerId,
-  order_type = :orderType,
   court = :court,
   case_number = :caseNumber,
   order_ref = :orderRef,
@@ -103,11 +97,6 @@ const ORDER_UPDATE_SET = `
   ready_date = :readyDate,
   invoice_date = :invoiceDate,
   xray_invoice_date = :xrayInvoiceDate,
-  flag_medical_records = :flagMedicalRecords,
-  flag_billing_records = :flagBillingRecords,
-  flag_employment_records = :flagEmploymentRecords,
-  flag_xrays = :flagXrays,
-  flag_other_record = :flagOtherRecord,
   specific_record = :specificRecord,
   specific_doctor = :specificDoctor,
   full_address = :fullAddress,
@@ -117,7 +106,7 @@ const ORDER_UPDATE_SET = `
   cnr_date_sent = :cnrDateSent,
   cnr_memo = :cnrMemo,
   subpoena_storage_path = :subpoenaStoragePath,
-  is_subpoena = :isSubpoena,
+  has_subpoena = :hasSubpoena,
   updated_at = NOW()`;
 
 const ORDER_DETAIL_SELECT = `
@@ -487,13 +476,7 @@ class Order {
   }
 
   static async seedWorkflowStages(connection, orderId) {
-    const stages = [
-      "Upload Records",
-      "Review Records",
-      "Serve",
-      "Custodian",
-      "SENT",
-    ];
+    const stages = ["Review Records", "Serve", "Custodian", "SENT"];
 
     for (const stageName of stages) {
       await connection.execute(
@@ -513,7 +496,7 @@ class Order {
       `SELECT id, order_id, stage_name, stage_status, completed_at
        FROM order_workflow_stages
        WHERE order_id = :orderId
-       ORDER BY FIELD(stage_name, 'Upload Records', 'Review Records', 'Serve', 'Custodian', 'SENT')`,
+       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'Custodian', 'SENT')`,
       { orderId }
     );
 
@@ -535,7 +518,7 @@ class Order {
       `SELECT id, order_id, stage_name, stage_status, completed_at
        FROM order_workflow_stages
        WHERE order_id IN (${placeholders})
-       ORDER BY FIELD(stage_name, 'Upload Records', 'Review Records', 'Serve', 'Custodian', 'SENT')`,
+       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'Custodian', 'SENT')`,
       params
     );
 
@@ -639,23 +622,26 @@ class Order {
 
   static async findReminders({ createdBy = null, limit = 500 } = {}) {
     const pool = getPool();
-    const conditions = ["n.callback_date IS NOT NULL"];
+    const conditions = [];
     const params = {};
 
     if (createdBy) {
-      conditions.push("n.created_by = :createdBy");
+      conditions.push("(r.created_by = :createdBy OR r.assigned_to = :createdBy)");
       params.createdBy = createdBy;
     }
 
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
     const [rows] = await pool.execute(
-      `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
-              n.author_name, n.note, n.callback_date, n.attachment_path, n.is_called,
+      `SELECT r.id AS note_id, r.order_id, r.created_at AS note_date, r.created_by,
+              r.author_name, r.note, r.callback_date, r.attachment_path,
+              r.is_completed AS is_called,
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
-       FROM order_notes n
-       INNER JOIN orders o ON o.id = n.order_id AND ${ACTIVE_ORDER_ALIAS}
-       WHERE ${conditions.join(" AND ")}
-       ORDER BY n.callback_date ASC, n.note_date DESC
+       FROM reminders r
+       INNER JOIN orders o ON o.id = r.order_id AND ${ACTIVE_ORDER_ALIAS}
+       ${whereClause}
+       ORDER BY r.callback_date ASC, r.created_at DESC
        LIMIT ${Number(limit)}`,
       params
     );
@@ -666,26 +652,26 @@ class Order {
   static async findDueRemindersOnDate({ createdBy = null, date }) {
     const pool = getPool();
     const conditions = [
-      "n.callback_date IS NOT NULL",
-      "n.is_called = 0",
-      "DATE(n.callback_date) = :dueDate",
+      "r.is_completed = 0",
+      "DATE(r.callback_date) = :dueDate",
     ];
     const params = { dueDate: date };
 
     if (createdBy) {
-      conditions.push("n.created_by = :createdBy");
+      conditions.push("(r.created_by = :createdBy OR r.assigned_to = :createdBy)");
       params.createdBy = createdBy;
     }
 
     const [rows] = await pool.execute(
-      `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
-              n.author_name, n.note, n.callback_date, n.attachment_path, n.is_called,
+      `SELECT r.id AS note_id, r.order_id, r.created_at AS note_date, r.created_by,
+              r.author_name, r.note, r.callback_date, r.attachment_path,
+              r.is_completed AS is_called,
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
-       FROM order_notes n
-       INNER JOIN orders o ON o.id = n.order_id AND ${ACTIVE_ORDER_ALIAS}
+       FROM reminders r
+       INNER JOIN orders o ON o.id = r.order_id AND ${ACTIVE_ORDER_ALIAS}
        WHERE ${conditions.join(" AND ")}
-       ORDER BY n.callback_date ASC, o.order_number ASC`,
+       ORDER BY r.callback_date ASC, o.order_number ASC`,
       params
     );
 

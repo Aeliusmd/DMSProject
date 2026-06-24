@@ -38,7 +38,13 @@ const {
 } = require("../utils/dateUtils");
 
 function buildRecordsRequested(row) {
-  const type = RECORD_TITLES[row.order_type] || "Records";
+  const rawTypes = row.order_record_types || row.order_type || "";
+  const types = `${rawTypes}`
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const type =
+    types.map((value) => RECORD_TITLES[value] || value).join(", ") || "Records";
   const parts = [];
 
   if (row.specific_record) parts.push(row.specific_record);

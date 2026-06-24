@@ -441,6 +441,15 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
 
   applyRecordFlags(updates, recordText);
 
+  const typeOrder = ["medical", "billing", "employment", "xrays", "other"];
+  const firstSelectedType = typeOrder.find((type) => {
+    if (type === "other") return updates.otherRecord;
+    return updates[RECORD_FLAG_MAP[type]];
+  });
+  if (firstSelectedType) {
+    updates.type = firstSelectedType;
+  }
+
   return { updates, meta };
 }
 

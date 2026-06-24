@@ -7,7 +7,13 @@ const INVOICE_SELECT = `
          o.order_number,
          o.case_number,
          o.defendant,
-         o.order_type,
+         (SELECT GROUP_CONCAT(
+            r.record_type
+            ORDER BY FIELD(r.record_type, 'medical', 'billing', 'employment', 'xrays', 'other')
+            SEPARATOR ','
+          )
+          FROM order_records r
+          WHERE r.order_id = o.id) AS order_record_types,
          o.subpoena_date,
          o.created_at AS order_created_at,
          o.depo_due_date,

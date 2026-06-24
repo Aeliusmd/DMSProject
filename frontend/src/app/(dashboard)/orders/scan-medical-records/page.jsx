@@ -10,6 +10,11 @@ import {
   removeMedicalRecords,
   uploadMedicalRecordsScan,
 } from "@/lib/orders/orderApi";
+import {
+  allOrderRecordSlotsUploaded,
+  getOrderRecordSlots,
+  getSavedOrderRecordTypeLabel,
+} from "@/lib/orders/recordTypeUtils";
 
 export default function ScanMedicalRecordsPage() {
   const router = useRouter();
@@ -17,20 +22,23 @@ export default function ScanMedicalRecordsPage() {
   const orderId = searchParams.get("orderId");
   const isEditMode = searchParams.get("mode") === "edit";
 
-  const fileInputRef = useRef(null);
+  const fileInputRefs = useRef({});
   const [order, setOrder] = useState(null);
   const [loadingOrder, setLoadingOrder] = useState(true);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState({});
+  const [draggingType, setDraggingType] = useState("");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  const [removingType, setRemovingType] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [confirmAction, setConfirmAction] = useState(null);
 
-  const hasMedicalRecords = Boolean(
-    order?.medicalRecordsStoragePath || order?.medicalRecordsUrl
-  );
+  const recordSlots = order ? getOrderRecordSlots(order) : [];
+  const isMultiType = recordSlots.length > 1;
+  const uploadedCount = recordSlots.filter((slot) => slot.hasFile).length;
+  const allUploaded = order ? allOrderRecordSlotsUploaded(order) : false;
+  const savedRecordTypeLabel = order ? getSavedOrderRecordTypeLabel(order) : "";
+  const canUpload = recordSlots.length > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -69,109 +77,140 @@ export default function ScanMedicalRecordsPage() {
   }, [orderId]);
 
   useEffect(() => {
-    if (!loadingOrder && hasMedicalRecords && !isEditMode) {
+    if (!loadingOrder && allUploaded && !isEditMode) {
       router.replace("/orders");
     }
-  }, [hasMedicalRecords, isEditMode, loadingOrder, router]);
+  }, [allUploaded, isEditMode, loadingOrder, router]);
 
-  const handleChooseFile = () => {
-    fileInputRef.current?.click();
-  };
-
-  const validateAndSetFile = (file) => {
+  const validateAndSetFile = (recordType, file) => {
     setError("");
     setSuccessMessage("");
 
-    if (!file) return;
+    if (!file) return false;
 
     if (file.type !== "application/pdf") {
-      setSelectedFile(null);
+      setSelectedFiles((prev) => {
+        const next = { ...prev };
+        delete next[recordType];
+        return next;
+      });
       setError("Only PDF files are allowed.");
-      return;
+      return false;
     }
 
-    setSelectedFile(file);
+    setSelectedFiles((prev) => ({ ...prev, [recordType]: file }));
+    return true;
   };
 
-  const handleFileChange = (e) => {
-    const file = e.target.files?.[0];
-    validateAndSetFile(file);
+  const handleChooseFile = (recordType) => {
+    fileInputRefs.current[recordType]?.click();
   };
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-    setIsDragging(true);
+  const handleFileChange = (recordType, event) => {
+    const file = event.target.files?.[0];
+    validateAndSetFile(recordType, file);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
+  const handleDrop = (recordType, event) => {
+    event.preventDefault();
+    setDraggingType("");
+
+    const file = event.dataTransfer.files?.[0];
+    validateAndSetFile(recordType, file);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    const file = e.dataTransfer.files?.[0];
-    validateAndSetFile(file);
+  const refreshOrder = async () => {
+    const data = await getOrder(orderId);
+    setOrder(data);
+    return data;
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile || uploading || !orderId) return;
-    if (!isEditMode && hasMedicalRecords) return;
+  const selectedUploadSlots = recordSlots.filter((slot) => {
+    if (!selectedFiles[slot.recordType]) return false;
+    if (!isEditMode && slot.hasFile) return false;
+    return true;
+  });
+
+  const hasSelectedFiles = selectedUploadSlots.length > 0;
+
+  const getUploadQueue = () =>
+    recordSlots.filter((slot) => {
+      if (!selectedFiles[slot.recordType]) return false;
+      if (!isEditMode && slot.hasFile) return false;
+      return true;
+    });
+
+  const handleUploadAll = async () => {
+    const queue = getUploadQueue();
+    if (!queue.length || uploading || !orderId) return;
 
     setError("");
     setSuccessMessage("");
     setUploading(true);
 
     try {
-      await uploadMedicalRecordsScan(orderId, selectedFile, {
-        replace: isEditMode && hasMedicalRecords,
-      });
-      setSuccessMessage(
-        isEditMode
-          ? "Medical records updated. Review Records is ready for review again."
-          : "Medical records uploaded. Open Review Records from the orders table to review."
-      );
-      setSelectedFile(null);
-      setConfirmAction(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+      let latest = order;
+
+      for (const slot of queue) {
+        const selectedFile = selectedFiles[slot.recordType];
+        if (!selectedFile) continue;
+
+        latest = await uploadMedicalRecordsScan(orderId, selectedFile, {
+          replace: isEditMode && slot.hasFile,
+          recordType: slot.recordType,
+        });
+
+        if (latest) setOrder(latest);
+
+        setSelectedFiles((prev) => {
+          const next = { ...prev };
+          delete next[slot.recordType];
+          return next;
+        });
+
+        if (fileInputRefs.current[slot.recordType]) {
+          fileInputRefs.current[slot.recordType].value = "";
+        }
       }
 
-      setTimeout(() => {
-        router.push("/orders");
-      }, 1200);
+      setConfirmAction(null);
+
+      const uploadedLabels = queue.map((slot) => slot.label).join(", ");
+      setSuccessMessage(
+        queue.length > 1
+          ? `${uploadedLabels} uploaded.`
+          : `${queue[0].label} uploaded.`
+      );
+
+      latest = latest || (await refreshOrder());
+      if (allOrderRecordSlotsUploaded(latest) && !isEditMode) {
+        setTimeout(() => router.push("/orders"), 1200);
+      }
     } catch (err) {
-      setError(err.message || "Medical records upload failed.");
+      setError(err.message || "Records upload failed.");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleRemove = async () => {
-    if (!orderId || removing || !hasMedicalRecords) return;
+  const handleRemove = async (recordType) => {
+    if (!orderId || removingType) return;
 
     setError("");
     setSuccessMessage("");
-    setRemoving(true);
+    setRemovingType(recordType);
 
     try {
-      await removeMedicalRecords(orderId);
-      setSuccessMessage("Medical records removed.");
+      const updated = await removeMedicalRecords(orderId, { recordType });
+      if (updated) setOrder(updated);
+      setSuccessMessage("Scanned records removed.");
       setConfirmAction(null);
-      setTimeout(() => {
-        router.push("/orders");
-      }, 900);
     } catch (err) {
-      setError(err.message || "Failed to remove medical records.");
+      setError(err.message || "Failed to remove scanned records.");
     } finally {
-      setRemoving(false);
+      setRemovingType("");
     }
   };
-
-  const uploadConfirmMessage = isEditMode && hasMedicalRecords
-    ? "Are you sure you want to replace the existing medical records with this file?"
-    : "Are you sure you want to upload medical records for this order?";
 
   const applicantName = order
     ? [order.firstName, order.middleName, order.lastName]
@@ -179,7 +218,7 @@ export default function ScanMedicalRecordsPage() {
         .join(" ")
     : "";
 
-  if (loadingOrder || (!isEditMode && hasMedicalRecords)) {
+  if (loadingOrder || (!isEditMode && allUploaded)) {
     return (
       <DashboardShell>
         <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
@@ -189,23 +228,29 @@ export default function ScanMedicalRecordsPage() {
     );
   }
 
-  if (isEditMode && !hasMedicalRecords) {
+  if (isEditMode && !recordSlots.some((slot) => slot.hasFile)) {
     return (
       <DashboardShell>
         <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-3 px-4">
           <p className="text-[13px] text-[#64748B]">
-            No medical records are uploaded for this order.
+            No scanned records are uploaded for this order.
           </p>
           <Link
             href={`/orders/scan-medical-records?orderId=${encodeURIComponent(orderId)}`}
             className="text-[12px] font-semibold text-[#007F96] hover:underline"
           >
-            Upload medical records
+            Upload scanned records
           </Link>
         </div>
       </DashboardShell>
     );
   }
+
+  const pendingConfirmSlot = confirmAction?.type === "remove"
+    ? recordSlots.find((slot) => slot.recordType === confirmAction.recordType)
+    : null;
+
+  const uploadQueue = confirmAction?.type === "upload" ? getUploadQueue() : [];
 
   return (
     <DashboardShell>
@@ -218,20 +263,26 @@ export default function ScanMedicalRecordsPage() {
             Back to Orders
           </Link>
           <h1 className="mt-2 text-[15px] font-semibold text-[#111827]">
-            {isEditMode ? "Edit Medical Records" : "Scan Medical Records"}
+            {isEditMode ? "Edit Scanned Records" : "Scan Records"}
           </h1>
         </div>
 
-        <div className="flex flex-1 items-center justify-center px-4 py-10">
-          <div className="w-full max-w-[340px] text-center">
+        <div className="flex flex-1 items-start justify-center px-4 py-10">
+          <div
+            className={`w-full text-center ${
+              isMultiType ? "max-w-[560px]" : "max-w-[340px]"
+            }`}
+          >
             <h2 className="text-[20px] font-semibold text-[#111827]">
-              {isEditMode ? "Edit Medical Records" : "Scan Medical Records"}
+              {isEditMode ? "Edit Scanned Records" : "Scan Records"}
             </h2>
 
             <p className="mt-2 text-[11px] text-[#94A3B8]">
-              {isEditMode
-                ? "Upload a new PDF to replace the current file. Removal is optional."
-                : "Upload scanned medical records PDF for this order"}
+              {isMultiType
+                ? "Upload a PDF for each record type on this order."
+                : isEditMode
+                  ? "Upload a new PDF to replace the current file. Removal is optional."
+                  : "Upload scanned records PDF for this order"}
             </p>
 
             {order ? (
@@ -247,70 +298,220 @@ export default function ScanMedicalRecordsPage() {
                     Case: {order.caseNumber}
                   </p>
                 )}
-                {isEditMode && hasMedicalRecords && (
-                  <p className="mt-2 text-[#059669]">
-                    Current medical records are uploaded.
+
+                {canUpload && isMultiType && (
+                  <div className="mt-3 space-y-2 border-t border-[#E2E8F0] pt-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      {recordSlots.map((slot) => (
+                        <span
+                          key={slot.recordType}
+                          className={`inline-flex items-center gap-1 rounded-[4px] px-2 py-0.5 text-[10px] font-semibold ${
+                            slot.hasFile
+                              ? "bg-[#DCFCE7] text-[#166534]"
+                              : "bg-[#F1F5F9] text-[#64748B]"
+                          }`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              slot.hasFile ? "bg-[#22C55E]" : "bg-[#CBD5E1]"
+                            }`}
+                          />
+                          {slot.label.replace(" Records", "")}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#E2E8F0]">
+                        <span
+                          className="block h-full rounded-full bg-[#0097B2] transition-all"
+                          style={{
+                            width: `${recordSlots.length ? (uploadedCount / recordSlots.length) * 100 : 0}%`,
+                          }}
+                        />
+                      </span>
+                      <span className="shrink-0 text-[10px] font-semibold text-[#64748B]">
+                        {uploadedCount}/{recordSlots.length}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {canUpload && !isMultiType ? (
+                  <p className="mt-3 border-t border-[#E2E8F0] pt-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-[#64748B]">
+                      Record type
+                    </span>
+                    <span className="mt-1 block font-semibold text-[#111827]">
+                      {savedRecordTypeLabel}
+                    </span>
+                  </p>
+                ) : null}
+
+                {!canUpload && (
+                  <p className="mt-3 border-t border-[#E2E8F0] pt-3 text-[11px] font-medium text-amber-600">
+                    No record types saved on this order. Set record types on
+                    create or edit order first.
                   </p>
                 )}
               </div>
             ) : null}
 
             <div
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`mt-8 flex h-[190px] w-full flex-col items-center justify-center rounded-[8px] border border-dashed transition ${
-                isDragging
-                  ? "border-[#0097B2] bg-[#E6F7FA]"
-                  : "border-[#CBD5E1] bg-white"
-              } ${!order ? "pointer-events-none opacity-50" : ""}`}
+              className={`mt-8 ${
+                isMultiType ? "space-y-4" : "flex flex-col items-center"
+              } ${!canUpload ? "opacity-50" : ""}`}
             >
-              <div className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#F8FAFC] text-[#94A3B8]">
-                <UploadCloudIcon />
-              </div>
+              {recordSlots.map((slot) => {
+                const selectedFile = selectedFiles[slot.recordType];
+                const isRemoving = removingType === slot.recordType;
+                const isDragging = draggingType === slot.recordType;
+                const uploadDisabled =
+                  !canUpload ||
+                  uploading ||
+                  Boolean(removingType) ||
+                  (!isEditMode && slot.hasFile);
 
-              <p className="mt-5 text-[12px] font-medium text-[#111827]">
-                Drag and drop your PDF here
-              </p>
+                const uploadPanel = (
+                  <>
+                    <div
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        if (!uploadDisabled) {
+                          setDraggingType(slot.recordType);
+                        }
+                      }}
+                      onDragLeave={() => setDraggingType("")}
+                      onDrop={(event) => {
+                        if (!uploadDisabled) {
+                          handleDrop(slot.recordType, event);
+                        }
+                      }}
+                      className={`flex flex-col items-center justify-center rounded-[8px] border border-dashed px-4 transition ${
+                        isMultiType ? "mt-3 min-h-[96px]" : "min-h-[140px] w-full"
+                      } ${
+                        isDragging
+                          ? "border-[#0097B2] bg-[#E6F7FA]"
+                          : "border-[#CBD5E1] bg-[#F8FAFC]"
+                      } ${uploadDisabled ? "pointer-events-none opacity-60" : ""}`}
+                    >
+                      <p className="text-[11px] font-medium text-[#334155]">
+                        Drop PDF here
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-[#94A3B8]">or</p>
+                      <button
+                        type="button"
+                        onClick={() => handleChooseFile(slot.recordType)}
+                        disabled={uploadDisabled}
+                        className="mt-2 inline-flex h-[26px] items-center justify-center rounded-[5px] border border-[#BAE6FD] bg-white px-3 text-[10px] font-semibold text-[#007F96] hover:bg-[#F0FBFD] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        Browse
+                      </button>
+                      <input
+                        ref={(node) => {
+                          fileInputRefs.current[slot.recordType] = node;
+                        }}
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        onChange={(event) =>
+                          handleFileChange(slot.recordType, event)
+                        }
+                        className="hidden"
+                      />
+                    </div>
 
-              <button
-                type="button"
-                onClick={handleChooseFile}
-                disabled={uploading || removing || !order}
-                className="mt-5 inline-flex h-[30px] items-center justify-center rounded-[5px] bg-[#E6F7FA] px-4 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Choose File
-              </button>
+                    {selectedFile && (
+                      <p
+                        className={`mt-2 truncate text-[10px] font-medium text-[#007F96] ${
+                          isMultiType ? "text-left" : "text-center"
+                        }`}
+                      >
+                        Selected: {selectedFile.name}
+                      </p>
+                    )}
+                  </>
+                );
 
-              <p className="mt-4 text-[10px] text-[#94A3B8]">PDF files only</p>
+                if (!isMultiType) {
+                  if (!slot.hasFile || isEditMode) {
+                    return (
+                      <div key={slot.recordType} className="w-full text-center">
+                        {isEditMode && slot.hasFile && (
+                          <div className="mb-3 flex items-center justify-between rounded-[6px] border border-[#E2E8F0] bg-white px-3 py-2 text-left">
+                            <span className="text-[11px] font-medium text-[#059669]">
+                              Current file uploaded
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfirmAction({
+                                  type: "remove",
+                                  recordType: slot.recordType,
+                                })
+                              }
+                              disabled={uploading || isRemoving}
+                              className="text-[10px] font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {isRemoving ? "Removing..." : "Remove"}
+                            </button>
+                          </div>
+                        )}
+                        {uploadPanel}
+                      </div>
+                    );
+                  }
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf,.pdf"
-                onChange={handleFileChange}
-                className="hidden"
-              />
+                  return null;
+                }
+
+                return (
+                  <div
+                    key={slot.recordType}
+                    className="rounded-[8px] border border-[#E2E8F0] bg-white p-3 text-left"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[12px] font-semibold text-[#111827]">
+                          {slot.label}
+                        </p>
+                        <p
+                          className={`mt-0.5 text-[10px] font-medium ${
+                            slot.hasFile ? "text-[#059669]" : "text-[#94A3B8]"
+                          }`}
+                        >
+                          {slot.hasFile ? "Done" : "Pending"}
+                        </p>
+                      </div>
+                      {isEditMode && slot.hasFile && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmAction({
+                              type: "remove",
+                              recordType: slot.recordType,
+                            })
+                          }
+                          disabled={uploading || isRemoving}
+                          className="shrink-0 rounded-[4px] px-2 py-1 text-[10px] font-medium text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isRemoving ? "..." : "Remove"}
+                        </button>
+                      )}
+                    </div>
+
+                    {(!slot.hasFile || isEditMode) && uploadPanel}
+                  </div>
+                );
+              })}
             </div>
 
-            {selectedFile && (
-              <p className="mt-4 truncate text-[11px] font-medium text-[#007F96]">
-                Selected: {selectedFile.name}
-              </p>
-            )}
-
-            {selectedFile && (
+            {canUpload && (
               <button
                 type="button"
-                onClick={() => setConfirmAction("upload")}
-                disabled={uploading || removing || !order}
-                className="mt-4 inline-flex h-[34px] w-full items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#007F96] disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => setConfirmAction({ type: "upload" })}
+                disabled={!hasSelectedFiles || uploading || Boolean(removingType)}
+                className="mt-6 inline-flex h-[34px] min-w-[140px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#007F96] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {uploading
-                  ? "Uploading..."
-                  : isEditMode
-                    ? "Upload New Records"
-                    : "Upload Medical Records"}
+                {uploading ? "Uploading..." : "Upload"}
               </button>
             )}
 
@@ -326,64 +527,49 @@ export default function ScanMedicalRecordsPage() {
               </p>
             )}
 
-            {isEditMode && hasMedicalRecords && (
-              <button
-                type="button"
-                onClick={() => setConfirmAction("remove")}
-                disabled={removing || uploading}
-                className="mt-6 text-[11px] font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {removing ? "Removing..." : "Remove existing records"}
-              </button>
+            {isMultiType && canUpload && !isEditMode && (
+              <p className="mt-4 text-[10px] text-[#64748B]">
+                Review Records completes when every record type has been uploaded.
+                You can upload one type at a time and return later for the rest.
+              </p>
             )}
           </div>
         </div>
       </div>
 
       <ConfirmModal
-        open={confirmAction === "upload"}
-        title={isEditMode && hasMedicalRecords ? "Replace Medical Records" : "Upload Medical Records"}
-        message={uploadConfirmMessage}
+        open={confirmAction?.type === "upload"}
+        title={
+          uploadQueue.some((slot) => slot.hasFile)
+            ? "Replace Records"
+            : "Upload Records"
+        }
+        message={
+          uploadQueue.length > 1
+            ? `Upload PDFs for ${uploadQueue.map((slot) => slot.label).join(", ")}?`
+            : uploadQueue[0]?.hasFile
+              ? `Replace the existing ${uploadQueue[0].label} file with this PDF?`
+              : `Upload ${uploadQueue[0]?.label || "records"} for this order?`
+        }
         variant="warning"
         confirmLabel={uploading ? "Uploading..." : "Upload"}
         cancelLabel="Cancel"
         confirmDisabled={uploading}
         onCancel={() => setConfirmAction(null)}
-        onConfirm={handleUpload}
+        onConfirm={handleUploadAll}
       />
 
       <ConfirmModal
-        open={confirmAction === "remove"}
-        title="Remove Medical Records"
-        message="Are you sure you want to remove the uploaded medical records for this order?"
+        open={confirmAction?.type === "remove"}
+        title={`Remove ${pendingConfirmSlot?.label || "Records"}`}
+        message={`Remove the uploaded ${pendingConfirmSlot?.label || "records"} file for this order?`}
         variant="danger"
-        confirmLabel={removing ? "Removing..." : "Remove"}
+        confirmLabel={removingType ? "Removing..." : "Remove"}
         cancelLabel="Cancel"
-        confirmDisabled={removing}
+        confirmDisabled={Boolean(removingType)}
         onCancel={() => setConfirmAction(null)}
-        onConfirm={handleRemove}
+        onConfirm={() => handleRemove(confirmAction?.recordType)}
       />
     </DashboardShell>
-  );
-}
-
-function UploadCloudIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M12 15V7M8.5 10.5 12 7l3.5 3.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M6.5 18.5A4.5 4.5 0 0 1 7 9.52 5.5 5.5 0 0 1 17.58 11 3.75 3.75 0 0 1 17 18.5H6.5Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
