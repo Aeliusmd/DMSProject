@@ -96,7 +96,6 @@ function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "")
 }
 
 const WORKFLOW_STAGES = [
-  "Upload Records",
   "Review Records",
   "Serve",
   "Custodian",
@@ -139,7 +138,7 @@ function buildWorkflowStagesForOrder(order) {
   return mapWorkflowStages(order.workflowStages)
     .filter((stage) => !(isCnrOrder && stage.key === "Custodian"))
     .map((stage) => {
-    if (stage.key === "Upload Records") {
+    if (stage.key === "Review Records") {
       const isComplete =
         isWorkflowStageComplete(stage.status) || hasMedicalRecords;
 
@@ -149,16 +148,6 @@ function buildWorkflowStagesForOrder(order) {
         label: isComplete ? "Uploaded Records" : "Scan Records",
         actionLink: !isComplete,
         showRemoveRecords: isComplete && hasMedicalRecords,
-      };
-    }
-
-    if (stage.key === "Review Records") {
-      const isComplete =
-        isWorkflowStageComplete(stage.status) || hasMedicalRecords;
-
-      return {
-        ...stage,
-        status: isComplete ? "complete" : stage.status,
       };
     }
 
@@ -1518,7 +1507,7 @@ function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
 }
 
 function getWorkflowStageHref(stage, order) {
-  if (stage.key === "Upload Records") {
+  if (stage.key === "Review Records") {
     const hasMedicalRecords = Boolean(order.hasMedicalRecords);
     const isComplete =
       isWorkflowStageComplete(stage.status) || hasMedicalRecords;

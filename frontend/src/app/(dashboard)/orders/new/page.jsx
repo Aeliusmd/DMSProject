@@ -40,7 +40,10 @@ import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
-import { API_BASE_URL } from "@/config/api";
+import {
+  ORDER_RECORD_TYPES,
+  ORDER_TYPE_TO_RECORD_FLAG,
+} from "@/lib/orders/recordTypeUtils";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -638,7 +641,9 @@ function NewOrderPageContent() {
     setFormData((prev) => ({
       ...prev,
       [name]: nextValue,
-      ...(name === "type" && nextValue === "other" ? { otherRecord: true } : {}),
+      ...(name === "type" && ORDER_TYPE_TO_RECORD_FLAG[nextValue]
+        ? { [ORDER_TYPE_TO_RECORD_FLAG[nextValue]]: true }
+        : {}),
     }));
 
     if (name === "facility") {
@@ -1527,42 +1532,15 @@ function ServeInfoForm({
           </p>
 
           <div className="rounded-[8px] border border-[#E2E8F0] bg-white">
-            <RecordCheckbox
-              label="Medical Records"
-              name="medicalRecords"
-              checked={formData.medicalRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="Billing Records"
-              name="billingRecords"
-              checked={formData.billingRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="Employment Records"
-              name="employmentRecords"
-              checked={formData.employmentRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="X-Rays"
-              name="xrays"
-              checked={formData.xrays}
-              onChange={onChange}
-            />
-
-            <div className="px-3 py-2">
-              <CheckboxOption
-                label="Other"
-                name="otherRecord"
-                checked={formData.otherRecord}
+            {ORDER_RECORD_TYPES.map((recordType) => (
+              <RecordCheckbox
+                key={recordType.key}
+                label={recordType.label}
+                name={recordType.key}
+                checked={formData[recordType.key]}
                 onChange={onChange}
               />
-            </div>
+            ))}
           </div>
         </div>
       </div>

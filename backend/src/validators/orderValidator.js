@@ -1,7 +1,6 @@
 const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays", "other"];
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
 const WORKFLOW_STAGE_NAMES = [
-  "Upload Records",
   "Review Records",
   "Serve",
   "Custodian",

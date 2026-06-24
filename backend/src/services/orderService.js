@@ -31,7 +31,6 @@ const {
 const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
 
 const WORKFLOW_STAGE_NAMES = [
-  "Upload Records",
   "Review Records",
   "Serve",
   "Custodian",
@@ -168,9 +167,13 @@ function hasAnyRecordsRequested(row) {
   );
 }
 
+function readHasSubpoena(row = {}) {
+  return Boolean(Number(row.has_subpoena ?? row.is_subpoena));
+}
+
 function resolveOrderFlags(data, hasSubpoenaFile) {
   return {
-    isSubpoena: hasSubpoenaFile ? 1 : 0,
+    hasSubpoena: hasSubpoenaFile ? 1 : 0,
   };
 }
 
@@ -316,8 +319,53 @@ function resolveOrderSubpoenaAbsolutePath(storagePath) {
   return fileStorage.resolveAbsolutePath(normalized);
 }
 
+function resolveRecordFlagsFromOrderType(data, flagOtherRecord = 0) {
+  const type = trimOrNull(data.type);
+
+  return {
+    flagMedicalRecords: boolToInt(data.medicalRecords || type === "medical"),
+    flagBillingRecords: boolToInt(data.billingRecords || type === "billing"),
+    flagEmploymentRecords: boolToInt(
+      data.employmentRecords || type === "employment"
+    ),
+    flagXrays: boolToInt(data.xrays || type === "xrays"),
+    flagOtherRecord:
+      type === "other" ? 1 : Math.max(flagOtherRecord, boolToInt(data.otherRecord)),
+  };
+}
+
+function resolveRecordFlagsForScanUpload(row) {
+  const flags = {
+    flagMedicalRecords: Number(row.flag_medical_records) || 0,
+    flagBillingRecords: Number(row.flag_billing_records) || 0,
+    flagEmploymentRecords: Number(row.flag_employment_records) || 0,
+    flagXrays: Number(row.flag_xrays) || 0,
+    flagOtherRecord: Number(row.flag_other_record) || 0,
+  };
+
+  if (isOtherOnlyOrderType(row)) {
+    flags.flagOtherRecord = 1;
+    return flags;
+  }
+
+  const typeToFlag = {
+    medical: "flagMedicalRecords",
+    billing: "flagBillingRecords",
+    employment: "flagEmploymentRecords",
+    xrays: "flagXrays",
+  };
+
+  const flagKey = typeToFlag[row.order_type];
+  if (flagKey) {
+    flags[flagKey] = 1;
+  }
+
+  return flags;
+}
+
 function buildOrderDbPayload(data) {
   const { orderType, flagOtherRecord } = resolveOrderTypeForDb(data);
+  const recordFlags = resolveRecordFlagsFromOrderType(data, flagOtherRecord);
 
   return {
     facilityId: Number(data.facility),
@@ -361,11 +409,7 @@ function buildOrderDbPayload(data) {
     readyDate: dateOrNull(data.readyDate),
     invoiceDate: dateOrNull(data.invoiceDate),
     xrayInvoiceDate: dateOrNull(data.xrayInvoiceDate),
-    flagMedicalRecords: boolToInt(data.medicalRecords),
-    flagBillingRecords: boolToInt(data.billingRecords),
-    flagEmploymentRecords: boolToInt(data.employmentRecords),
-    flagXrays: boolToInt(data.xrays),
-    flagOtherRecord: flagOtherRecord,
+    ...recordFlags,
     specificRecord: trimOrNull(data.specificRecord),
     specificDoctor: trimOrNull(data.specificDoctor),
     fullAddress: trimOrNull(data.fullAddress),
@@ -851,8 +895,8 @@ function mapOrderListRow(
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
-    subpoena: Boolean(Number(row.is_subpoena)),
-    isSubpoena: Boolean(Number(row.is_subpoena)),
+    subpoena: readHasSubpoena(row),
+    isSubpoena: readHasSubpoena(row),
     hasSubpoenaFile: Boolean(row.subpoena_storage_path),
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
     isRecords: hasAnyRecordsRequested(row),
@@ -1059,7 +1103,7 @@ function mapOrderDetail(
     id: row.id,
     orderNumber: row.order_number || "",
     status: row.status || "",
-    isSubpoena: Boolean(Number(row.is_subpoena)),
+    isSubpoena: readHasSubpoena(row),
     isRecords: hasAnyRecordsRequested(row),
     isWriteOffs: Boolean(Number(row.is_write_offs)),
     workflowStages: workflowStages.map(mapWorkflowStage),
@@ -1668,7 +1712,7 @@ async function createOrder(data, actorId, files) {
       orderNumber,
       status: "Active",
       hasNote: 0,
-      isSubpoena: orderFlags.isSubpoena,
+      hasSubpoena: orderFlags.hasSubpoena,
       createdBy: actorId || null,
     });
 
@@ -1751,7 +1795,7 @@ async function updateOrder(id, data, actorId, files) {
     await Order.update(connection, existing.id, {
       ...payload,
       subpoenaStoragePath,
-      isSubpoena: orderFlags.isSubpoena,
+      hasSubpoena: orderFlags.hasSubpoena,
       orderNumber,
     });
 
@@ -1919,6 +1963,15 @@ async function scanMedicalRecords(orderId, file, _actorId, { replace = false } =
     throw new ApiError(404, "Order not found");
   }
 
+  const orderType = resolveOrderTypeForForm(existing);
+  const validRecordTypes = ["medical", "billing", "employment", "xrays", "other"];
+  if (!orderType || !validRecordTypes.includes(orderType)) {
+    throw new ApiError(
+      400,
+      "Order must have a record type set on create or edit before scanning records"
+    );
+  }
+
   const hasExistingRecords = Boolean(existing.medical_records_storage_path);
 
   if (hasExistingRecords && !replace) {
@@ -1939,19 +1992,19 @@ async function scanMedicalRecords(orderId, file, _actorId, { replace = false } =
       deleteStoredMedicalRecordsFile(existing.medical_records_storage_path);
     }
 
+    const recordFlags = resolveRecordFlagsForScanUpload(existing);
+
     await connection.execute(
       `UPDATE orders
-       SET medical_records_storage_path = :storagePath, updated_at = NOW()
+       SET medical_records_storage_path = :storagePath,
+           flag_medical_records = :flagMedicalRecords,
+           flag_billing_records = :flagBillingRecords,
+           flag_employment_records = :flagEmploymentRecords,
+           flag_xrays = :flagXrays,
+           flag_other_record = :flagOtherRecord,
+           updated_at = NOW()
        WHERE id = :orderId`,
-      { storagePath, orderId }
-    );
-
-    await Order.upsertWorkflowStage(
-      orderId,
-      "Upload Records",
-      "complete",
-      new Date(),
-      connection
+      { storagePath, orderId, ...recordFlags }
     );
 
     await Order.upsertWorkflowStage(
@@ -1998,13 +2051,6 @@ async function removeMedicalRecords(orderId, _actorId) {
       { orderId }
     );
 
-    await Order.upsertWorkflowStage(
-      orderId,
-      "Upload Records",
-      "pending",
-      null,
-      connection
-    );
     await Order.upsertWorkflowStage(
       orderId,
       "Review Records",

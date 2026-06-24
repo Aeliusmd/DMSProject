@@ -10,13 +10,16 @@ const RUSH_LEVEL_3_MIN_DAYS = 21;
 /** Outstanding invoices older than this are counted as overdue */
 const OVERDUE_INVOICE_DAYS = 30;
 
-async function getStandardInvoiceFinancials(pool) {
-  const invoiceTotalSql = `
+/** Standard invoice line total per schema (page + clerical + shipping + storage). */
+const STANDARD_INVOICE_TOTAL_SQL = `
     COALESCE(i.page_count, 0) * COALESCE(i.per_page_amount, 0)
     + COALESCE(i.clerical_time_hours, 0) * COALESCE(i.clerical_hourly_rate, 0)
     + COALESCE(i.shipping_handling, 0)
-    + COALESCE(i.storage_fee, COALESCE(i.other_fee, 0))
-  `;
+    + COALESCE(i.storage_fee, 0)
+`;
+
+async function getStandardInvoiceFinancials(pool) {
+  const invoiceTotalSql = STANDARD_INVOICE_TOTAL_SQL;
 
   const [rows] = await pool.execute(
     `SELECT
@@ -94,7 +97,7 @@ async function getXrayInvoiceFinancials(pool) {
     LEFT JOIN order_payments op
       ON op.order_id = x.order_id
      AND op.payment_type = 'xray'
-    WHERE o.status NOT IN ('Cancelled', 'Deleted')`,
+    WHERE o.status NOT IN ('Cancelled', 'Deleted', 'Write Offs')`,
     { overdueDays: OVERDUE_INVOICE_DAYS }
   );
 
@@ -126,12 +129,12 @@ async function getDashboardStats() {
         SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) AS active_cases,
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
       FROM orders
-      WHERE status NOT IN ('Cancelled', 'Deleted')
+      WHERE status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
     `),
     pool.execute(
       `SELECT COUNT(*) AS rush_orders
        FROM orders
-       WHERE status NOT IN ('Cancelled', 'Deleted')
+       WHERE status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
          AND DATEDIFF(CURDATE(), DATE(created_at)) >= :minDays`,
       { minDays: RUSH_LEVEL_3_MIN_DAYS }
     ),
@@ -151,8 +154,8 @@ async function getDashboardStats() {
     `),
     pool.execute(`
       SELECT COUNT(*) AS pending_reminders
-      FROM order_notes
-      WHERE is_called = 0
+      FROM reminders
+      WHERE is_completed = 0
     `),
   ]);
 
@@ -214,12 +217,12 @@ async function getTopProviders(limit = 5) {
         'Unknown Provider'
       ) AS provider_name,
       COUNT(DISTINCT o.id) AS case_count,
-      COALESCE(SUM(i.total_amount), 0) AS invoiced_total,
-      COALESCE(SUM(i.amount_paid), 0) AS paid_total
+      COALESCE(SUM(${STANDARD_INVOICE_TOTAL_SQL.trim()}), 0) AS invoiced_total,
+      COALESCE(SUM(COALESCE(i.amount_paid, 0)), 0) AS paid_total
     FROM orders o
     LEFT JOIN providers p ON p.id = o.provider_id
     LEFT JOIN invoices i ON i.order_id = o.id
-    WHERE o.status NOT IN ('Cancelled', 'Deleted')
+    WHERE o.status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
     GROUP BY provider_name
     ORDER BY case_count DESC, invoiced_total DESC, provider_name ASC
     LIMIT ${safeLimit}
