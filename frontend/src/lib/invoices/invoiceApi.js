@@ -170,6 +170,47 @@ export async function resendInvoices(invoiceIds = []) {
   return data?.data || { resentCount: 0 };
 }
 
+export function splitInvoicesForResend(invoices = []) {
+  const standardIds = [];
+  const xrayOrderIds = [];
+
+  invoices.forEach((invoice) => {
+    if (invoice.invoiceType === "xray") {
+      const orderId = Number(invoice.orderId);
+      if (Number.isFinite(orderId) && orderId > 0) {
+        xrayOrderIds.push(orderId);
+      }
+      return;
+    }
+
+    const invoiceId = Number(invoice.invoiceDbId || invoice.id);
+    if (Number.isFinite(invoiceId) && invoiceId > 0) {
+      standardIds.push(invoiceId);
+    }
+  });
+
+  return {
+    standardIds: [...new Set(standardIds)],
+    xrayOrderIds: [...new Set(xrayOrderIds)],
+  };
+}
+
+export async function resendInvoiceSelection(invoices = []) {
+  const { standardIds, xrayOrderIds } = splitInvoicesForResend(invoices);
+
+  if (!standardIds.length && !xrayOrderIds.length) {
+    throw new Error("No invoices selected for resend.");
+  }
+
+  if (standardIds.length) {
+    await resendInvoices(standardIds);
+  }
+
+  if (xrayOrderIds.length) {
+    await resendXrayInvoices(xrayOrderIds);
+  }
+}
+
 export async function emailInvoiceByOrderId(orderId) {
   const data = await request(`/invoices/order/${orderId}/email`, {
     method: "POST",
