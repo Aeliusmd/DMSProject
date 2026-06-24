@@ -143,7 +143,7 @@ const initialFormData = {
   custodianCheck: "",
   custodianDate: "",
   custodianPaid: "",
-  custodianDue: "0",
+  custodianDue: "15.00",
   custodianMemo: "",
 
   xrayCheck: "",
@@ -610,7 +610,7 @@ function NewOrderPageContent() {
         custodianCheck: checked ? "" : prev.custodianCheck,
         custodianDate: checked ? "" : prev.custodianDate,
         custodianPaid: checked ? "" : prev.custodianPaid,
-        custodianDue: checked ? "0" : prev.custodianDue,
+        custodianDue: checked ? "0" : "15.00",
         custodianMemo: checked ? "" : prev.custodianMemo,
       }));
 
@@ -1679,14 +1679,11 @@ function PaymentForm({
       {!formData.certificateNoRecords && (
         <PaymentChargeCard
           title="Custodian Charge"
+          chargeAmount={getPaymentChargeForType("custodian", invoiceFees)}
           paidAmount={formData.custodianPaid}
           showPaidField
-          paidReadOnly={false}
-          fieldsReadOnly={false}
           autoDueOnPaidChange
           capPaidToDue
-          paymentType="custodian"
-          invoiceFees={invoiceFees}
           theme="purple"
           prefix="custodian"
           formData={formData}
