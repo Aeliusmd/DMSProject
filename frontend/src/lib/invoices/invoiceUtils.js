@@ -30,3 +30,15 @@ export function canSendInvoice(invoice) {
 
   return !invoice.isSent;
 }
+
+export function canResendInvoice(invoice) {
+  if (!invoice || invoice.isWrittenOff) {
+    return false;
+  }
+
+  if (invoice.invoiceType === "xray") {
+    return Boolean(invoice.isSent);
+  }
+
+  return invoice.status === "Needs Resend" || Boolean(invoice.isSent);
+}

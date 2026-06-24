@@ -7,8 +7,8 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
-import { getCompanyInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
-import { canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
+import { getCompanyInvoices, resendInvoiceSelection, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
+import { canResendInvoice, canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
 
 const EMPTY_SUMMARY = {
   totalCases: 0,
@@ -52,6 +52,9 @@ export default function CompanyInvoiceDetailsPage() {
   const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
   const [writeOffError, setWriteOffError] = useState("");
+  const [resending, setResending] = useState(false);
+  const [resendingId, setResendingId] = useState(null);
+  const [resendError, setResendError] = useState("");
 
   const [filters, setFilters] = useState({
     search: "",
@@ -124,6 +127,10 @@ export default function CompanyInvoiceDetailsPage() {
     return selectedInvoices.filter((invoice) => canWriteOffInvoice(invoice));
   }, [selectedInvoices]);
 
+  const resendableSelectedInvoices = useMemo(() => {
+    return selectedInvoices.filter((invoice) => canResendInvoice(invoice));
+  }, [selectedInvoices]);
+
   const filteredInvoiceIds = filteredInvoices.map((invoice) => invoice.id);
 
   const allSelected =
@@ -131,9 +138,10 @@ export default function CompanyInvoiceDetailsPage() {
     filteredInvoiceIds.every((id) => selectedIds.includes(id));
 
   const selectedCount = selectedIds.length;
-  const hasSelectedInvoices = selectedCount > 0;
   const writableSelectedCount = writableSelectedInvoices.length;
   const hasWritableSelected = writableSelectedCount > 0;
+  const resendableSelectedCount = resendableSelectedInvoices.length;
+  const hasResendableSelected = resendableSelectedCount > 0;
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -179,10 +187,39 @@ export default function CompanyInvoiceDetailsPage() {
     );
   };
 
-  const handleResendSelected = () => {
-    if (selectedInvoices.length === 0) return;
+  const handleResendSelected = async () => {
+    if (!resendableSelectedInvoices.length || resending) return;
 
-    console.log("Resend selected invoices:", selectedInvoices);
+    setResending(true);
+    setResendError("");
+
+    try {
+      await resendInvoiceSelection(resendableSelectedInvoices);
+      setSelectedIds([]);
+      await reloadCompanyInvoices();
+    } catch (error) {
+      setResendError(error?.message || "Failed to resend invoices");
+      console.error("Failed to resend invoices:", error);
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleResendSingle = async (invoice) => {
+    if (!canResendInvoice(invoice) || resendingId || resending) return;
+
+    setResendingId(invoice.id);
+    setResendError("");
+
+    try {
+      await resendInvoiceSelection([invoice]);
+      await reloadCompanyInvoices();
+    } catch (error) {
+      setResendError(error?.message || "Failed to resend invoice");
+      console.error("Failed to resend invoice:", error);
+    } finally {
+      setResendingId(null);
+    }
   };
 
   const handleWriteOffSelected = () => {
@@ -303,15 +340,17 @@ export default function CompanyInvoiceDetailsPage() {
             <button
               type="button"
               onClick={handleResendSelected}
-              disabled={!hasSelectedInvoices}
+              disabled={!hasResendableSelected || resending}
               className={`inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border px-4 text-[12px] font-semibold transition disabled:cursor-not-allowed ${
-                hasSelectedInvoices
+                hasResendableSelected && !resending
                   ? "border-[#0097B2] bg-[#0097B2] text-white shadow-sm hover:bg-[#0086A0]"
                   : "border-[#E2E8F0] bg-white text-[#94A3B8] opacity-70"
               }`}
             >
               <SendIcon />
-              Resend Selected ({selectedCount})
+              {resending
+                ? "Sending..."
+                : `Resend Selected (${resendableSelectedCount})`}
             </button>
 
             <button
@@ -338,6 +377,12 @@ export default function CompanyInvoiceDetailsPage() {
           </p>
         )}
 
+        {resendError && (
+          <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+            {resendError}
+          </p>
+        )}
+
         <InvoiceFilters
           filters={filters}
           onChange={handleFilterChange}
@@ -350,8 +395,11 @@ export default function CompanyInvoiceDetailsPage() {
           selectedIds={selectedIds}
           allSelected={allSelected}
           loading={loading}
+          resendingId={resendingId}
+          resending={resending}
           onToggleAll={handleToggleAll}
           onToggleInvoice={handleToggleInvoice}
+          onResendSingle={handleResendSingle}
           onWriteOffSingle={handleWriteOffSingle}
           onOpenEditInvoice={handleOpenEditInvoice}
         />
@@ -522,8 +570,11 @@ function CompanyInvoiceTable({
   selectedIds,
   allSelected,
   loading,
+  resendingId,
+  resending,
   onToggleAll,
   onToggleInvoice,
+  onResendSingle,
   onWriteOffSingle,
   onOpenEditInvoice,
 }) {
@@ -630,14 +681,31 @@ function CompanyInvoiceTable({
 
                   <td className="px-4 py-4 text-center align-middle">
                     {!invoice.isWrittenOff && (
-                      <button
-                        type="button"
-                        onClick={() => onWriteOffSingle(invoice)}
-                        disabled={!canWriteOffInvoice(invoice)}
-                        className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Write Off
-                      </button>
+                      <div className="flex flex-col items-center gap-2">
+                        {canResendInvoice(invoice) && (
+                          <button
+                            type="button"
+                            onClick={() => onResendSingle(invoice)}
+                            disabled={
+                              resending ||
+                              resendingId === invoice.id ||
+                              !canResendInvoice(invoice)
+                            }
+                            className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#BAE6FD] bg-[#EFF6FF] px-3 text-[11px] font-semibold text-[#0097B2] hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {resendingId === invoice.id ? "Sending..." : "Resend"}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => onWriteOffSingle(invoice)}
+                          disabled={!canWriteOffInvoice(invoice)}
+                          className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Write Off
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
