@@ -60,7 +60,8 @@ function getXrayPayment(xrayRow) {
 }
 
 const ORDER_PAYMENT_TYPES = ["prepayment", "custodian", "xray"];
-const STANDARD_INVOICE_PAYMENT_TYPES = ["prepayment", "custodian"];
+const STANDARD_INVOICE_PAYMENT_TYPES = ["prepayment"];
+const DEFAULT_CUSTODIAN_CHARGE = 15;
 
 const ORDER_PAYMENT_LABELS = {
   prepayment: "Prepayment",
@@ -329,7 +330,6 @@ function buildInvoiceFeeSummaryLines(row, orderPayments = []) {
 
   const totals = calculateTotalsWithPayments(
     {
-      custodianFee: row.custodian_fee,
       pages: row.page_count,
       perPageAmount: row.per_page_amount,
       clericalTimeHours: row.clerical_time_hours,
@@ -346,8 +346,6 @@ function buildInvoiceFeeSummaryLines(row, orderPayments = []) {
       lines.push(`${label}: ${formatMoney(amount)}`);
     }
   };
-
-  pushFee("Custodian Fee", totals.custodianFee);
 
   if (totals.pageCount > 0 && totals.perPageAmount > 0) {
     lines.push(
@@ -381,7 +379,6 @@ function daysSince(dateValue) {
 }
 
 function calculateTotals(payload = {}, { includeXrayFee = false } = {}) {
-  const custodianFee = toNumber(payload.custodianFee);
   const xrayFee = includeXrayFee ? toNumber(payload.xrayFee) : 0;
   const pageCount = Math.max(0, Math.floor(toNumber(payload.pages)));
   const perPageAmount = toNumber(payload.perPageAmount);
@@ -393,7 +390,6 @@ function calculateTotals(payload = {}, { includeXrayFee = false } = {}) {
   const storageFee = getStorageFee(payload);
 
   const totalAmount =
-    custodianFee +
     xrayFee +
     pagesAmount +
     clericalAmount +
@@ -401,7 +397,7 @@ function calculateTotals(payload = {}, { includeXrayFee = false } = {}) {
     storageFee;
 
   return {
-    custodianFee,
+    custodianFee: 0,
     xrayFee,
     pageCount,
     perPageAmount,
@@ -438,13 +434,11 @@ function groupPaymentsByOrderId(paymentRows = []) {
 
 function calculateTotalsWithPayments(payload = {}, orderPayments = [], options = {}) {
   const includeXrayFee = options.includeXrayFee === true;
-  const custodianPaid = getOrderPaymentAmount(orderPayments, "custodian");
   const xrayPaid = getOrderPaymentAmount(orderPayments, "xray");
 
   return calculateTotals(
     {
       ...payload,
-      custodianFee: normalizeGrossFee(payload.custodianFee, custodianPaid),
       xrayFee: includeXrayFee
         ? normalizeGrossFee(payload.xrayFee, xrayPaid)
         : 0,
@@ -456,7 +450,6 @@ function calculateTotalsWithPayments(payload = {}, orderPayments = [], options =
 function resolveRowFinancials(row, orderPayments = []) {
   const totals = calculateTotalsWithPayments(
     {
-      custodianFee: row.custodian_fee,
       pages: row.page_count,
       perPageAmount: row.per_page_amount,
       clericalTimeHours: row.clerical_time_hours,
@@ -598,7 +591,6 @@ function mapXrayDetail(row, orderPayments = []) {
 function hasStandardInvoiceFields(row) {
   return (
     Boolean(row.invoice_date) ||
-    toNumber(row.custodian_fee) > 0 ||
     toNumber(row.page_count) > 0 ||
     toNumber(row.clerical_time_hours) > 0 ||
     toNumber(row.clerical_hourly_rate) > 0 ||
@@ -691,7 +683,6 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   const pageCount = Math.max(0, Math.floor(toNumber(invoiceRow.page_count)));
   const perPageAmount = toNumber(invoiceRow.per_page_amount);
   const pagesTotal = pageCount * perPageAmount;
-  const custodianFee = toNumber(invoiceRow.custodian_fee);
   const clericalTimeHours = Math.max(0, toNumber(invoiceRow.clerical_time_hours));
   const clericalHourlyRate = toNumber(invoiceRow.clerical_hourly_rate);
   const clericalAmount = clericalTimeHours * clericalHourlyRate;
@@ -699,14 +690,6 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   const storageFee = getStorageFee(invoiceRow);
 
   const feeLines = [];
-
-  if (custodianFee > 0) {
-    pushPrintFeeLine(feeLines, {
-      description: "Custodian Fee",
-      quantity: "",
-      total: custodianFee,
-    });
-  }
 
   if (clericalAmount > 0) {
     pushPrintFeeLine(feeLines, {
@@ -824,9 +807,7 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
     return {
       hasInvoice: false,
       hasXrayInvoice: Boolean(xrayRow),
-      custodianFee: 0,
       invoiceTotal: 0,
-      nonCustodianTotal: 0,
       prepaymentPaid: 0,
       writeoffAmount: 0,
       xrayFee: xrayPayment,
@@ -835,7 +816,6 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
 
   const totals = calculateTotalsWithPayments(
     {
-      custodianFee: invoiceRow.custodian_fee,
       pages: invoiceRow.page_count,
       perPageAmount: invoiceRow.per_page_amount,
       clericalTimeHours: invoiceRow.clerical_time_hours,
@@ -850,11 +830,9 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
   return {
     hasInvoice: true,
     hasXrayInvoice: Boolean(xrayRow),
-    custodianFee: totals.custodianFee,
     invoiceTotal: totals.totalAmount,
     invoiceAmountPaid: financials.amountPaid,
     invoiceAmountDue: financials.amountDue,
-    nonCustodianTotal: Math.max(0, totals.totalAmount - totals.custodianFee),
     prepaymentPaid: getOrderPaymentAmount(orderPayments, "prepayment"),
     writeoffAmount: toNumber(invoiceRow.writeoff_amount),
     xrayFee: xrayPayment,
@@ -862,64 +840,22 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
   };
 }
 
-function resolveCustodianDueAmount(invoiceFees = {}, custodianPaid = 0) {
+function resolveCustodianDueAmount(_invoiceFees = {}, custodianPaid = 0) {
   const paid = toNumber(custodianPaid);
-  const custodianFee = toNumber(invoiceFees.custodianFee);
-
-  if (custodianFee <= 0) {
-    return 0;
-  }
-
-  if (paid >= custodianFee) {
-    return 0;
-  }
-
-  const prepayment = toNumber(invoiceFees.prepaymentPaid);
-  const writeoff = toNumber(invoiceFees.writeoffAmount);
-  const nonCustodianBalance = Math.max(
-    0,
-    toNumber(invoiceFees.nonCustodianTotal) ||
-      toNumber(invoiceFees.invoiceTotal) - custodianFee
-  );
-  const creditsApplied = prepayment + writeoff;
-  const excessOverNonCustodian = Math.max(0, creditsApplied - nonCustodianBalance);
-
-  return Math.max(0, custodianFee - paid - excessOverNonCustodian);
+  return Math.max(0, DEFAULT_CUSTODIAN_CHARGE - paid);
 }
 
-function resolveCustodianPaymentDue(invoiceRow, orderPayments = []) {
-  if (!invoiceRow) {
-    return 0;
-  }
-
-  const invoiceFees = mapOrderInvoiceFees(invoiceRow, null, orderPayments);
+function resolveCustodianPaymentDue(_invoiceRow, orderPayments = []) {
   const custodianPaid = getOrderPaymentAmount(orderPayments, "custodian");
-
-  return resolveCustodianDueAmount(invoiceFees, custodianPaid);
+  return resolveCustodianDueAmount({}, custodianPaid);
 }
 
-function shouldMarkCustodianStageComplete(dueAmount, custodianPaid, invoiceRow = null) {
+function shouldMarkCustodianStageComplete(dueAmount, custodianPaid) {
   if (toNumber(dueAmount) > 0) {
     return false;
   }
 
-  if (toNumber(custodianPaid) > 0) {
-    return true;
-  }
-
-  if (!invoiceRow) {
-    return false;
-  }
-
-  if (toNumber(invoiceRow.custodian_fee) > 0) {
-    return true;
-  }
-
-  if (toNumber(invoiceRow.writeoff_amount) > 0) {
-    return true;
-  }
-
-  return false;
+  return toNumber(custodianPaid) > 0;
 }
 
 function resolveXrayPaymentDue(xrayRow, orderPayments = []) {
@@ -971,20 +907,14 @@ async function syncOrderCustodianDueFromInvoice(connection, orderId) {
     return;
   }
 
-  const invoice = await Invoice.findByOrderId(orderId, connection);
-
-  if (!invoice) {
-    return;
-  }
-
   const payments = await Order.findPaymentsByOrderId(orderId, connection);
-  const dueAmount = resolveCustodianPaymentDue(invoice, payments);
+  const dueAmount = resolveCustodianPaymentDue(null, payments);
 
   await upsertOrderPaymentDue(connection, orderId, "custodian", dueAmount, payments);
 
   const custodianPaid = getOrderPaymentAmount(payments, "custodian");
 
-  if (shouldMarkCustodianStageComplete(dueAmount, custodianPaid, invoice)) {
+  if (shouldMarkCustodianStageComplete(dueAmount, custodianPaid)) {
     await Order.upsertWorkflowStage(
       orderId,
       "Custodian",
@@ -1015,7 +945,7 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, options = {}
   const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
   const payments = await Order.findPaymentsByOrderId(orderId, connection);
 
-  if (!skipCustodian && !order.certificate_no_records && invoice) {
+  if (!skipCustodian && !order.certificate_no_records) {
     await syncOrderCustodianDueFromInvoice(connection, orderId);
   }
 
@@ -1080,7 +1010,9 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     printAmount: formatMoney(financials.totalAmount),
     invoiceDueMeta,
     custodianAmount:
-      toNumber(row.custodian_fee) > 0 ? formatMoney(row.custodian_fee) : null,
+      getOrderPaymentAmount(orderPayments, "custodian") > 0
+        ? formatMoney(getOrderPaymentAmount(orderPayments, "custodian"))
+        : null,
     sentDate: row.sent_date ? toShortDate(row.sent_date) : null,
     sentDateCompact: row.sent_date ? toCompactDate(row.sent_date) : null,
     xrayReviewDate: hasXray ? toShortDate(xrayRow.xray_invoice_date) : "",
@@ -1112,7 +1044,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     due: formatMoney(financials.amountDue),
     paidAmount: formatMoney(financials.amountPaid),
     ...paymentsSummary,
-    custodianFee: toNumber(row.custodian_fee).toFixed(2),
+    custodianFee: "0.00",
     xrayFee: toNumber(row.xray_fee).toFixed(2),
     storageFee: getStorageFee(row).toFixed(2),
     pages: String(row.page_count ?? 0),
@@ -1392,7 +1324,7 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     serviceDate: trimOrNull(body.serviceDate),
     sentDate: existing?.sent_date || null,
     ...LEGACY_INVOICE_AMOUNTS,
-    custodianFee: totals.custodianFee,
+    custodianFee: 0,
     xrayFee: totals.xrayFee,
     pageCount: totals.pageCount,
     perPageAmount: totals.perPageAmount,
@@ -2836,6 +2768,7 @@ module.exports = {
   resolveCustodianDueAmount,
   resolveCustodianPaymentDue,
   shouldMarkCustodianStageComplete,
+  DEFAULT_CUSTODIAN_CHARGE,
   syncOrderCustodianDueFromInvoice,
   syncOrderPaymentDuesFromInvoice,
   buildPrintInvoicePdfData,

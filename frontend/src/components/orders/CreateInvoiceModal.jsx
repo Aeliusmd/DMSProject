@@ -11,7 +11,6 @@ import {
 import {
   buildPaymentLinesFromOrder,
   formatMoneyAmount,
-  formatPaidBracket,
   getPaymentLineAmount,
   mapDueFormToInvoiceFees,
   mapInvoiceFeesToDueForm,
@@ -27,7 +26,6 @@ import { getTodayInputDate } from "@/lib/utils/dateUtils";
 const initialFormData = {
   invoiceDate: "",
   serviceDate: "",
-  custodianFee: "0.00",
   storageFee: "0.00",
   pages: "0",
   perPageAmount: "0.00",
@@ -100,7 +98,7 @@ export default function CreateInvoiceModal({
           if (cancelled) return;
 
           setFormData(
-            mapInvoiceFeesToDueForm(mapInvoiceToFormData(invoice, order), loadedPaymentLines)
+            mapInvoiceFeesToDueForm(mapInvoiceToFormData(invoice, order))
           );
           setPersistedInvoiceMeta({
             status: invoice.status,
@@ -166,12 +164,11 @@ export default function CreateInvoiceModal({
   }, [formData.clericalTimeHours, formData.clericalHourlyRate]);
 
   const fullFees = useMemo(() => {
-    return resolveFullFeeAmounts(formData, paymentLines);
-  }, [formData, paymentLines]);
+    return resolveFullFeeAmounts(formData);
+  }, [formData]);
 
   const totalAmount = useMemo(() => {
     return (
-      fullFees.custodianFee +
       pagesAmount +
       clericalAmount +
       toNumber(formData.shippingHandling) +
@@ -179,26 +176,13 @@ export default function CreateInvoiceModal({
     );
   }, [formData, fullFees, pagesAmount, clericalAmount]);
 
-  const paymentHints = useMemo(
-    () => ({
-      custodian: formatPaidBracket(
-        getPaymentLineAmount(paymentLines, "custodian")
-      ),
-    }),
-    [paymentLines]
-  );
-
   const prepaymentPaid = useMemo(() => {
     return toNumber(prepaymentAmount);
   }, [prepaymentAmount]);
 
-  const otherAmountPaid = useMemo(() => {
-    return getPaymentLineAmount(paymentLines, "custodian");
-  }, [paymentLines]);
-
   const amountPaid = useMemo(() => {
-    return prepaymentPaid + otherAmountPaid;
-  }, [prepaymentPaid, otherAmountPaid]);
+    return prepaymentPaid;
+  }, [prepaymentPaid]);
 
   const invoiceTotals = useMemo(
     () =>
@@ -314,7 +298,7 @@ export default function CreateInvoiceModal({
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    const feePayload = mapDueFormToInvoiceFees(formData, paymentLines);
+    const feePayload = mapDueFormToInvoiceFees(formData);
 
     const payload = {
       orderId: order.dbId,
@@ -437,15 +421,6 @@ export default function CreateInvoiceModal({
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MoneyField
-                label="Custodian Fee"
-                name="custodianFee"
-                value={formData.custodianFee}
-                onChange={handleMoneyChange}
-                error={errors.custodianFee}
-                paymentHint={paymentHints.custodian}
-              />
-
-              <MoneyField
                 label="Storage Fee"
                 name="storageFee"
                 value={formData.storageFee}
@@ -554,10 +529,6 @@ export default function CreateInvoiceModal({
 
             <div className="space-y-3">
               <SummaryRow
-                label="Custodian Fee"
-                value={formatMoney(fullFees.custodianFee)}
-              />
-              <SummaryRow
                 label="Storage Fee"
                 value={formatMoney(fullFees.storageFee)}
               />
@@ -578,13 +549,6 @@ export default function CreateInvoiceModal({
                 <SummaryRow
                   label="Prepayment"
                   value={`-${formatMoney(prepaymentPaid)}`}
-                  muted
-                />
-              )}
-              {otherAmountPaid > 0 && (
-                <SummaryRow
-                  label="Paid"
-                  value={`-${formatMoney(otherAmountPaid)}`}
                   muted
                 />
               )}
@@ -665,7 +629,6 @@ function getInitialInvoiceFormData(order, isEditMode) {
     ...initialFormData,
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
     serviceDate: toDateInput(invoice.sentDateRaw || invoice.sentDate) || "",
-    custodianFee: invoice.custodianFee || "0.00",
     storageFee: invoice.storageFee || invoice.other || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
@@ -686,7 +649,6 @@ function mapInvoiceToFormData(invoice, order) {
   return {
     invoiceDate: invoice.invoiceDate || initialFormData.invoiceDate,
     serviceDate: invoice.serviceDate || "",
-    custodianFee: invoice.custodianFee || "0.00",
     storageFee: invoice.storageFee || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
@@ -922,7 +884,6 @@ function validateInvoiceForm(data) {
   }
 
   const moneyFields = [
-    "custodianFee",
     "storageFee",
     "perPageAmount",
     "clericalHourlyRate",

@@ -12,8 +12,7 @@ const OVERDUE_INVOICE_DAYS = 30;
 
 async function getStandardInvoiceFinancials(pool) {
   const invoiceTotalSql = `
-    COALESCE(i.custodian_fee, 0)
-    + COALESCE(i.page_count, 0) * COALESCE(i.per_page_amount, 0)
+    COALESCE(i.page_count, 0) * COALESCE(i.per_page_amount, 0)
     + COALESCE(i.clerical_time_hours, 0) * COALESCE(i.clerical_hourly_rate, 0)
     + COALESCE(i.shipping_handling, 0)
     + COALESCE(i.storage_fee, COALESCE(i.other_fee, 0))
@@ -57,7 +56,7 @@ async function getStandardInvoiceFinancials(pool) {
     LEFT JOIN (
       SELECT order_id, SUM(amount) AS paid_total
       FROM order_payments
-      WHERE payment_type IN ('prepayment', 'custodian')
+      WHERE payment_type = 'prepayment'
       GROUP BY order_id
     ) payments ON payments.order_id = i.order_id`,
     { overdueDays: OVERDUE_INVOICE_DAYS }
