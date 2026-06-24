@@ -20,9 +20,23 @@ function validateOrderPayload(body = {}) {
     errors.push({ field: "facility", message: "Facility is invalid" });
   }
 
-  if (!body.type?.trim()) {
-    errors.push({ field: "type", message: "Type is required" });
-  } else if (!ALLOWED_ORDER_TYPES.includes(body.type)) {
+  const recordTypes = [
+    body.medicalRecords,
+    body.billingRecords,
+    body.employmentRecords,
+    body.xrays,
+    body.otherRecord,
+  ].filter(Boolean);
+
+  if (!recordTypes.length && !body.type?.trim()) {
+    errors.push({
+      field: "type",
+      message: "At least one record type is required",
+    });
+  } else if (
+    body.type?.trim() &&
+    !ALLOWED_ORDER_TYPES.includes(body.type.trim())
+  ) {
     errors.push({ field: "type", message: "Type is invalid" });
   }
 

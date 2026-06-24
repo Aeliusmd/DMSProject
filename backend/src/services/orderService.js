@@ -6,6 +6,7 @@ const ApiError = require("../utils/ApiError");
 const fs = require("fs");
 const path = require("path");
 const Order = require("../models/Order");
+const OrderRecord = require("../models/OrderRecord");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const { buildProviderPayload, findOrCreateProvider } = require("./providerService");
@@ -97,38 +98,71 @@ const RECORD_TITLES = {
   other: "Other",
 };
 
-function isOtherOnlyOrderType(row) {
-  return (
-    Boolean(row.flag_other_record) &&
-    !row.flag_medical_records &&
-    !row.flag_billing_records &&
-    !row.flag_employment_records &&
-    !row.flag_xrays
-  );
-}
+const VALID_RECORD_TYPES = ["medical", "billing", "employment", "xrays", "other"];
 
-function resolveOrderTypeForForm(row) {
-  if (isOtherOnlyOrderType(row)) {
-    return "other";
+const RECORD_TYPE_FLAG_MAP = {
+  medical: "medicalRecords",
+  billing: "billingRecords",
+  employment: "employmentRecords",
+  xrays: "xrays",
+  other: "otherRecord",
+};
+
+function resolveRecordTypesFromForm(data = {}) {
+  const types = [];
+
+  for (const recordType of VALID_RECORD_TYPES) {
+    const flagKey = RECORD_TYPE_FLAG_MAP[recordType];
+    if (parseBoolean(data[flagKey])) {
+      types.push(recordType);
+    }
   }
 
-  return row.order_type || "";
-}
-
-function resolveOrderTypeForDb(data) {
-  const type = trimOrNull(data.type);
-
-  if (type === "other") {
-    return {
-      orderType: "medical",
-      flagOtherRecord: 1,
-    };
+  if (!types.length && data.type) {
+    types.push(data.type === "other" ? "other" : data.type);
   }
 
+  return [...new Set(types.filter((type) => VALID_RECORD_TYPES.includes(type)))];
+}
+
+function mapOrderRecordRow(row = {}) {
   return {
-    orderType: type,
-    flagOtherRecord: boolToInt(data.otherRecord),
+    id: row.id,
+    recordType: row.record_type,
+    storagePath: row.storage_path || null,
+    storageUrl: buildSubpoenaUrl(row.storage_path),
+    uploadedAt: row.uploaded_at || null,
+    hasFile: Boolean(row.storage_path),
   };
+}
+
+function mapOrderRecords(rows = []) {
+  return rows.map(mapOrderRecordRow);
+}
+
+function getPrimaryRecordType(orderRecords = []) {
+  return orderRecords[0]?.record_type || "";
+}
+
+function resolveOrderTypeForForm(_row, orderRecords = []) {
+  const types = orderRecords.map((row) => row.record_type);
+  if (types.length === 1) {
+    return types[0];
+  }
+  return getPrimaryRecordType(orderRecords);
+}
+
+function hasAnyRecordsRequested(orderRecords = []) {
+  return orderRecords.length > 0;
+}
+
+function allOrderRecordsUploaded(orderRecords = []) {
+  if (!orderRecords.length) return false;
+  return orderRecords.every((row) => Boolean(row.storage_path));
+}
+
+function anyOrderRecordUploaded(orderRecords = []) {
+  return orderRecords.some((row) => Boolean(row.storage_path));
 }
 
 const DEFAULT_ORDER_FORMS = [
@@ -151,16 +185,6 @@ function dateOrNull(value) {
 
 function boolToInt(value) {
   return parseBoolean(value) ? 1 : 0;
-}
-
-function hasAnyRecordsRequested(row) {
-  return Boolean(
-    Number(row?.flag_medical_records) ||
-      Number(row?.flag_billing_records) ||
-      Number(row?.flag_employment_records) ||
-      Number(row?.flag_xrays) ||
-      Number(row?.flag_other_record)
-  );
 }
 
 function readHasSubpoena(row = {}) {
@@ -315,58 +339,10 @@ function resolveOrderSubpoenaAbsolutePath(storagePath) {
   return fileStorage.resolveAbsolutePath(normalized);
 }
 
-function resolveRecordFlagsFromOrderType(data, flagOtherRecord = 0) {
-  const type = trimOrNull(data.type);
-
-  return {
-    flagMedicalRecords: boolToInt(data.medicalRecords || type === "medical"),
-    flagBillingRecords: boolToInt(data.billingRecords || type === "billing"),
-    flagEmploymentRecords: boolToInt(
-      data.employmentRecords || type === "employment"
-    ),
-    flagXrays: boolToInt(data.xrays || type === "xrays"),
-    flagOtherRecord:
-      type === "other" ? 1 : Math.max(flagOtherRecord, boolToInt(data.otherRecord)),
-  };
-}
-
-function resolveRecordFlagsForScanUpload(row) {
-  const flags = {
-    flagMedicalRecords: Number(row.flag_medical_records) || 0,
-    flagBillingRecords: Number(row.flag_billing_records) || 0,
-    flagEmploymentRecords: Number(row.flag_employment_records) || 0,
-    flagXrays: Number(row.flag_xrays) || 0,
-    flagOtherRecord: Number(row.flag_other_record) || 0,
-  };
-
-  if (isOtherOnlyOrderType(row)) {
-    flags.flagOtherRecord = 1;
-    return flags;
-  }
-
-  const typeToFlag = {
-    medical: "flagMedicalRecords",
-    billing: "flagBillingRecords",
-    employment: "flagEmploymentRecords",
-    xrays: "flagXrays",
-  };
-
-  const flagKey = typeToFlag[row.order_type];
-  if (flagKey) {
-    flags[flagKey] = 1;
-  }
-
-  return flags;
-}
-
 function buildOrderDbPayload(data) {
-  const { orderType, flagOtherRecord } = resolveOrderTypeForDb(data);
-  const recordFlags = resolveRecordFlagsFromOrderType(data, flagOtherRecord);
-
   return {
     facilityId: Number(data.facility),
     providerId: data.providerId ? Number(data.providerId) : null,
-    orderType,
     court: trimOrNull(data.court) || "WCAB",
     caseNumber: trimOrNull(data.caseNumber),
     recNumber: trimOrNull(data.recNumber),
@@ -405,7 +381,6 @@ function buildOrderDbPayload(data) {
     readyDate: dateOrNull(data.readyDate),
     invoiceDate: dateOrNull(data.invoiceDate),
     xrayInvoiceDate: dateOrNull(data.xrayInvoiceDate),
-    ...recordFlags,
     specificRecord: trimOrNull(data.specificRecord),
     specificDoctor: trimOrNull(data.specificDoctor),
     fullAddress: trimOrNull(data.fullAddress),
@@ -828,23 +803,30 @@ function buildFacilityBlock(row) {
   };
 }
 
-function buildRecordsBlock(row) {
-  const title = RECORD_TITLES[row.order_type] || "Records";
+function buildRecordsBlock(row, orderRecords = []) {
+  const mappedRecords = mapOrderRecords(orderRecords);
+  const primaryType = getPrimaryRecordType(orderRecords);
+  const title = RECORD_TITLES[primaryType] || "Records";
 
   const lines = [];
   if (row.specific_record) lines.push(row.specific_record);
   if (row.specific_doctor) lines.push(row.specific_doctor);
 
-  const medicalRecordsUrl = buildSubpoenaUrl(row.medical_records_storage_path);
+  const uploadedRecords = mappedRecords.filter((record) => record.hasFile);
+  const hasMedicalRecords = allOrderRecordsUploaded(orderRecords);
+
   const hasCnr = Boolean(Number(row.certificate_no_records));
   const cnrReason = trimOrNull(row.cnr_reason) || "";
 
   return {
     title,
     lines,
-    links: medicalRecordsUrl ? ["View Medical Records"] : [],
-    hasMedicalRecords: Boolean(row.medical_records_storage_path),
-    medicalRecordsUrl,
+    links: [],
+    hasMedicalRecords,
+    allRecordsUploaded: hasMedicalRecords,
+    anyRecordsUploaded: anyOrderRecordUploaded(orderRecords),
+    orderRecords: mappedRecords,
+    medicalRecordsUrl: uploadedRecords[0]?.storageUrl || null,
     cnrNote:
       hasCnr && !Number(row.cnr_memo)
         ? {
@@ -869,7 +851,8 @@ function mapOrderListRow(
   workflowStages = [],
   invoiceRow = null,
   xrayRow = null,
-  orderPayments = []
+  orderPayments = [],
+  orderRecords = []
 ) {
   const orderYear = extractYear(row.subpoena_date) || extractYear(row.created_at) || "";
   const dob = formatDobDisplay(row.dob);
@@ -895,7 +878,7 @@ function mapOrderListRow(
     isSubpoena: readHasSubpoena(row),
     hasSubpoenaFile: Boolean(row.subpoena_storage_path),
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
-    isRecords: hasAnyRecordsRequested(row),
+    isRecords: hasAnyRecordsRequested(orderRecords),
     isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     applicant: buildFullName(
@@ -914,7 +897,7 @@ function mapOrderListRow(
     rushLevel: rush.level,
     rushLabel: rush.label,
     invoiceStatus: deriveInvoiceDisplayStatus(invoiceRow),
-    records: buildRecordsBlock(row),
+    records: buildRecordsBlock(row, orderRecords),
     company: buildCompanyBlock(row),
     dob,
     ssn,
@@ -1085,7 +1068,8 @@ function mapOrderDetail(
   workflowStages = [],
   notes = [],
   invoiceRow = null,
-  xrayRow = null
+  xrayRow = null,
+  orderRecords = []
 ) {
   const paymentSummary = invoiceService.mapOrderPaymentsSummary(payments);
   const paymentForm = enrichPaymentDueFields(
@@ -1094,13 +1078,15 @@ function mapOrderDetail(
     xrayRow,
     payments
   );
+  const mappedRecords = mapOrderRecords(orderRecords);
+  const primaryUploaded = mappedRecords.find((record) => record.hasFile);
 
   return {
     id: row.id,
     orderNumber: row.order_number || "",
     status: row.status || "",
     isSubpoena: readHasSubpoena(row),
-    isRecords: hasAnyRecordsRequested(row),
+    isRecords: hasAnyRecordsRequested(orderRecords),
     isWriteOffs: Boolean(Number(row.is_write_offs)),
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
@@ -1108,7 +1094,10 @@ function mapOrderDetail(
     facilityName: row.facility_name || "",
     providerId: row.provider_id ? String(row.provider_id) : "",
     providerName: row.provider_name || "",
-    type: resolveOrderTypeForForm(row),
+    type: resolveOrderTypeForForm(row, orderRecords),
+    recordTypes: orderRecords.map((record) => record.record_type),
+    orderRecords: mappedRecords,
+    allRecordsUploaded: allOrderRecordsUploaded(orderRecords),
     court: row.court || "",
     caseNumber: row.case_number || "",
     recNumber: row.rec_number || "",
@@ -1133,8 +1122,8 @@ function mapOrderDetail(
     additionalDocumentFile: null,
     subpoenaStoragePath: row.subpoena_storage_path || null,
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
-    medicalRecordsStoragePath: row.medical_records_storage_path || null,
-    medicalRecordsUrl: buildSubpoenaUrl(row.medical_records_storage_path),
+    medicalRecordsStoragePath: primaryUploaded?.storagePath || null,
+    medicalRecordsUrl: primaryUploaded?.storageUrl || null,
     documents: documents.map(mapDocument),
 
     serveCompanyName: row.serve_company_name || "",
@@ -1169,11 +1158,13 @@ function mapOrderDetail(
       row.xray_invoice_date || xrayRow?.xray_invoice_date
     ),
 
-    medicalRecords: Boolean(row.flag_medical_records),
-    billingRecords: Boolean(row.flag_billing_records),
-    employmentRecords: Boolean(row.flag_employment_records),
-    xrays: Boolean(row.flag_xrays),
-    otherRecord: Boolean(row.flag_other_record),
+    medicalRecords: orderRecords.some((record) => record.record_type === "medical"),
+    billingRecords: orderRecords.some((record) => record.record_type === "billing"),
+    employmentRecords: orderRecords.some(
+      (record) => record.record_type === "employment"
+    ),
+    xrays: orderRecords.some((record) => record.record_type === "xrays"),
+    otherRecord: orderRecords.some((record) => record.record_type === "other"),
 
     specificRecord: row.specific_record || "",
     specificDoctor: row.specific_doctor || "",
@@ -1239,6 +1230,7 @@ async function getAllOrders(query = {}) {
   const invoicesByOrderId = await invoiceService.getStandardInvoicesByOrderIds(orderIds);
   const xrayByOrderId = await invoiceService.getXrayDetailsByOrderIds(orderIds);
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const orderRecordRows = await OrderRecord.findByOrderIds(orderIds);
 
   const stagesByOrderId = stages.reduce((acc, stage) => {
     if (!acc[stage.order_id]) acc[stage.order_id] = [];
@@ -1252,6 +1244,12 @@ async function getAllOrders(query = {}) {
     return acc;
   }, {});
 
+  const recordsByOrderId = orderRecordRows.reduce((acc, record) => {
+    if (!acc[record.order_id]) acc[record.order_id] = [];
+    acc[record.order_id].push(record);
+    return acc;
+  }, {});
+
   return rows.map((row) => {
     const invoiceRow = invoicesByOrderId[row.id] || null;
     const xrayRow = xrayByOrderId[row.id] || null;
@@ -1261,7 +1259,8 @@ async function getAllOrders(query = {}) {
       stagesByOrderId[row.id] || [],
       invoiceRow,
       xrayRow,
-      paymentsByOrderId[row.id] || []
+      paymentsByOrderId[row.id] || [],
+      recordsByOrderId[row.id] || []
     );
   });
 }
@@ -1290,6 +1289,7 @@ async function getOrderById(id) {
   const notes = await Order.findNotesByOrderId(order.id);
   const invoiceRow = await Invoice.findByOrderId(order.id);
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
+  const orderRecords = await OrderRecord.findByOrderId(order.id);
 
   return mapOrderDetail(
     order,
@@ -1298,7 +1298,8 @@ async function getOrderById(id) {
     workflowStages,
     notes,
     invoiceRow,
-    xrayRow
+    xrayRow,
+    orderRecords
   );
 }
 
@@ -1699,6 +1700,10 @@ async function createOrder(data, actorId, files) {
     const payload = buildOrderDbPayload(
       applyInjuryFromExtract({ ...data, providerId }, linkedExtract)
     );
+    const recordTypes = resolveRecordTypesFromForm(data);
+    if (!recordTypes.length) {
+      throw new ApiError(400, "At least one record type is required");
+    }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
 
@@ -1711,6 +1716,12 @@ async function createOrder(data, actorId, files) {
       hasSubpoena: orderFlags.hasSubpoena,
       createdBy: actorId || null,
     });
+
+    await OrderRecord.syncForOrder(
+      connection,
+      orderId,
+      recordTypes
+    );
 
     await syncOrderPayments(connection, orderId, data);
 
@@ -1785,6 +1796,10 @@ async function updateOrder(id, data, actorId, files) {
 
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
+    const recordTypes = resolveRecordTypesFromForm(data);
+    if (!recordTypes.length) {
+      throw new ApiError(400, "At least one record type is required");
+    }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
 
@@ -1794,6 +1809,25 @@ async function updateOrder(id, data, actorId, files) {
       hasSubpoena: orderFlags.hasSubpoena,
       orderNumber,
     });
+
+    await OrderRecord.syncForOrder(
+      connection,
+      existing.id,
+      recordTypes
+    );
+
+    const refreshedRecords = await OrderRecord.findByOrderId(existing.id, connection);
+    const reviewStatus = allOrderRecordsUploaded(refreshedRecords)
+      ? "complete"
+      : "pending";
+
+    await Order.upsertWorkflowStage(
+      existing.id,
+      "Review Records",
+      reviewStatus,
+      reviewStatus === "complete" ? new Date() : null,
+      connection
+    );
 
     await syncOrderPayments(connection, existing.id, data);
 
@@ -1949,9 +1983,19 @@ function deleteStoredMedicalRecordsFile(storagePath) {
   }
 }
 
-async function scanMedicalRecords(orderId, file, _actorId, { replace = false } = {}) {
+async function scanMedicalRecords(
+  orderId,
+  file,
+  actorId,
+  { replace = false, recordType = "medical" } = {}
+) {
   if (!file) {
-    throw new ApiError(400, "Medical records PDF is required");
+    throw new ApiError(400, "Records PDF is required");
+  }
+
+  const normalizedType = `${recordType || ""}`.trim().toLowerCase();
+  if (!VALID_RECORD_TYPES.includes(normalizedType)) {
+    throw new ApiError(400, "Invalid record type");
   }
 
   const existing = await Order.findById(orderId);
@@ -1959,22 +2003,22 @@ async function scanMedicalRecords(orderId, file, _actorId, { replace = false } =
     throw new ApiError(404, "Order not found");
   }
 
-  const orderType = resolveOrderTypeForForm(existing);
-  const validRecordTypes = ["medical", "billing", "employment", "xrays", "other"];
-  if (!orderType || !validRecordTypes.includes(orderType)) {
+  const orderRecords = await OrderRecord.findByOrderId(orderId);
+  const targetRecord = orderRecords.find(
+    (record) => record.record_type === normalizedType
+  );
+
+  if (!targetRecord) {
     throw new ApiError(
       400,
-      "Order must have a record type set on create or edit before scanning records"
+      "This record type is not on the order. Update the order record types first."
     );
   }
 
-  const hasExistingRecords = Boolean(existing.medical_records_storage_path);
+  const hasExistingFile = Boolean(targetRecord.storage_path);
 
-  if (hasExistingRecords && !replace) {
-    throw new ApiError(
-      409,
-      "Medical records were already uploaded for this order"
-    );
+  if (hasExistingFile && !replace) {
+    throw new ApiError(409, "Records were already uploaded for this record type");
   }
 
   const storagePath = toRelativeStoragePath(file);
@@ -1984,30 +2028,27 @@ async function scanMedicalRecords(orderId, file, _actorId, { replace = false } =
   try {
     await connection.beginTransaction();
 
-    if (hasExistingRecords) {
-      deleteStoredMedicalRecordsFile(existing.medical_records_storage_path);
+    if (hasExistingFile) {
+      deleteStoredMedicalRecordsFile(targetRecord.storage_path);
     }
 
-    const recordFlags = resolveRecordFlagsForScanUpload(existing);
+    await OrderRecord.upsertScan(connection, {
+      orderId,
+      recordType: normalizedType,
+      storagePath,
+      uploadedBy: actorId || null,
+    });
 
-    await connection.execute(
-      `UPDATE orders
-       SET medical_records_storage_path = :storagePath,
-           flag_medical_records = :flagMedicalRecords,
-           flag_billing_records = :flagBillingRecords,
-           flag_employment_records = :flagEmploymentRecords,
-           flag_xrays = :flagXrays,
-           flag_other_record = :flagOtherRecord,
-           updated_at = NOW()
-       WHERE id = :orderId`,
-      { storagePath, orderId, ...recordFlags }
-    );
+    const refreshedRecords = await OrderRecord.findByOrderId(orderId, connection);
+    const reviewStatus = allOrderRecordsUploaded(refreshedRecords)
+      ? "complete"
+      : "pending";
 
     await Order.upsertWorkflowStage(
       orderId,
       "Review Records",
-      "complete",
-      new Date(),
+      reviewStatus,
+      reviewStatus === "complete" ? new Date() : null,
       connection
     );
 
@@ -2022,14 +2063,25 @@ async function scanMedicalRecords(orderId, file, _actorId, { replace = false } =
   return getOrderById(orderId);
 }
 
-async function removeMedicalRecords(orderId, _actorId) {
+async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {}) {
   const existing = await Order.findById(orderId);
   if (!existing) {
     throw new ApiError(404, "Order not found");
   }
 
-  if (!existing.medical_records_storage_path) {
-    throw new ApiError(404, "Medical records file not found for this order");
+  const orderRecords = await OrderRecord.findByOrderId(orderId);
+  const normalizedType = recordType
+    ? `${recordType}`.trim().toLowerCase()
+    : null;
+
+  const targets = normalizedType
+    ? orderRecords.filter(
+        (record) => record.record_type === normalizedType && record.storage_path
+      )
+    : orderRecords.filter((record) => record.storage_path);
+
+  if (!targets.length) {
+    throw new ApiError(404, "Records file not found for this order");
   }
 
   const pool = getPool();
@@ -2038,14 +2090,10 @@ async function removeMedicalRecords(orderId, _actorId) {
   try {
     await connection.beginTransaction();
 
-    deleteStoredMedicalRecordsFile(existing.medical_records_storage_path);
-
-    await connection.execute(
-      `UPDATE orders
-       SET medical_records_storage_path = NULL, updated_at = NOW()
-       WHERE id = :orderId`,
-      { orderId }
-    );
+    for (const target of targets) {
+      deleteStoredMedicalRecordsFile(target.storage_path);
+      await OrderRecord.clearScan(connection, orderId, target.record_type);
+    }
 
     await Order.upsertWorkflowStage(
       orderId,
@@ -2066,30 +2114,37 @@ async function removeMedicalRecords(orderId, _actorId) {
   return getOrderById(orderId);
 }
 
-async function getOrderMedicalRecordsFile(orderId) {
+async function getOrderMedicalRecordsFile(orderId, { recordType = "medical" } = {}) {
   const order = await Order.findById(orderId);
   if (!order) {
     throw new ApiError(404, "Order not found");
   }
 
-  if (!order.medical_records_storage_path) {
-    throw new ApiError(404, "Medical records file not found for this order");
+  const normalizedType = `${recordType || ""}`.trim().toLowerCase();
+  if (!VALID_RECORD_TYPES.includes(normalizedType)) {
+    throw new ApiError(400, "Invalid record type");
   }
 
-  const absolutePath = resolveOrderSubpoenaAbsolutePath(
-    order.medical_records_storage_path
-  );
+  const targetRecord = await OrderRecord.findByOrderAndType(orderId, normalizedType);
+  if (!targetRecord?.storage_path) {
+    throw new ApiError(404, "Records file not found for this order");
+  }
+
+  const absolutePath = resolveOrderSubpoenaAbsolutePath(targetRecord.storage_path);
 
   if (!absolutePath || !fs.existsSync(absolutePath)) {
-    throw new ApiError(404, "Medical records PDF file not found on disk");
+    throw new ApiError(404, "Records PDF file not found on disk");
   }
 
-  await Order.upsertWorkflowStage(
-    orderId,
-    "Review Records",
-    "complete",
-    new Date()
-  );
+  const orderRecords = await OrderRecord.findByOrderId(orderId);
+  if (allOrderRecordsUploaded(orderRecords)) {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Review Records",
+      "complete",
+      new Date()
+    );
+  }
 
   return {
     absolutePath,
@@ -2118,28 +2173,38 @@ function assertReadyForDelivery(order) {
   }
 }
 
-function resolveMedicalRecordsAttachment(order) {
-  if (!order?.medical_records_storage_path) {
-    return null;
-  }
-
-  const absolutePath = resolveOrderSubpoenaAbsolutePath(
-    order.medical_records_storage_path
-  );
-
-  if (!absolutePath || !fs.existsSync(absolutePath)) {
-    return null;
-  }
-
+async function resolveOrderRecordsAttachments(order) {
+  const records = await OrderRecord.findByOrderId(order.id);
+  const withFiles = records.filter((record) => record.storage_path);
   const safeOrderNumber = `${order.order_number || order.id}`.replace(
     /[^\w.-]+/g,
     "_"
   );
 
-  return {
-    filename: `${safeOrderNumber}-medical-records.pdf`,
-    path: absolutePath,
-  };
+  const attachments = [];
+  const recordLabels = [];
+
+  for (const record of withFiles) {
+    const absolutePath = resolveOrderSubpoenaAbsolutePath(record.storage_path);
+
+    if (!absolutePath || !fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    const typeSuffix = record.record_type || "records";
+    recordLabels.push(RECORD_TITLES[record.record_type] || "Records");
+    attachments.push({
+      filename: `${safeOrderNumber}-${typeSuffix}.pdf`,
+      path: absolutePath,
+    });
+  }
+
+  return { attachments, recordLabels };
+}
+
+async function resolveMedicalRecordsAttachment(order) {
+  const { attachments } = await resolveOrderRecordsAttachments(order);
+  return attachments[0] || null;
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -2269,7 +2334,7 @@ async function maybeSendCnrMemoEmail(orderId, data, existingOrder = null, actorI
   };
 }
 
-async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
+async function mailCompletedOrder(orderId, { email, deliveryDate, message } = {}) {
   const normalizedId = Number(orderId);
   const recipient = trimOrNull(email);
 
@@ -2288,11 +2353,11 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
   const order = await Order.findById(normalizedId);
   assertReadyForDelivery(order);
 
-  const medicalRecordsAttachment = resolveMedicalRecordsAttachment(order);
-  if (!medicalRecordsAttachment) {
+  const { attachments, recordLabels } = await resolveOrderRecordsAttachments(order);
+  if (!attachments.length) {
     throw new ApiError(
       400,
-      "Medical records file not found. Scan medical records before sending mail."
+      "Records files not found. Scan records before sending mail."
     );
   }
 
@@ -2312,7 +2377,9 @@ async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
     orderNumber: order.order_number,
     applicant: buildApplicantName(order),
     providerName: order.serve_company_name || order.provider_name || "",
-    attachments: [medicalRecordsAttachment],
+    attachments,
+    recordLabels,
+    message: trimOrNull(message),
   });
 
   if (!result.delivered && !result.devLogged) {

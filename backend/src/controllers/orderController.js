@@ -207,34 +207,39 @@ exports.scanMedicalRecords = asyncHandler(async (req, res) => {
   }
 
   const replace = req.query.replace === "true";
+  const recordType = req.query.recordType || req.body?.recordType || "medical";
 
   const order = await orderService.scanMedicalRecords(
     req.params.id,
     req.file,
     req.user.id,
-    { replace }
+    { replace, recordType }
   );
 
   return ApiResponse.success(
     res,
     { order },
-    replace
-      ? "Medical records replaced successfully"
-      : "Medical records uploaded successfully"
+    replace ? "Records replaced successfully" : "Records uploaded successfully"
   );
 });
 
 exports.removeMedicalRecords = asyncHandler(async (req, res) => {
+  const recordType = req.query.recordType || null;
+
   const order = await orderService.removeMedicalRecords(
     req.params.id,
-    req.user.id
+    req.user.id,
+    { recordType }
   );
 
-  return ApiResponse.success(res, { order }, "Medical records removed");
+  return ApiResponse.success(res, { order }, "Records removed");
 });
 
 exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
-  const fileInfo = await orderService.getOrderMedicalRecordsFile(req.params.id);
+  const recordType = req.query.recordType || "medical";
+  const fileInfo = await orderService.getOrderMedicalRecordsFile(req.params.id, {
+    recordType,
+  });
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
@@ -494,6 +499,7 @@ exports.mailCompletedOrder = asyncHandler(async (req, res) => {
   const result = await orderService.mailCompletedOrder(req.params.id, {
     email: req.body.email,
     deliveryDate: req.body.deliveryDate,
+    message: req.body.message,
   });
 
   const order = await orderService.getOrderById(req.params.id);

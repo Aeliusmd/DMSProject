@@ -217,11 +217,19 @@ export async function uploadBatchScan(file) {
   return data?.data || null;
 }
 
-export async function uploadMedicalRecordsScan(orderId, file, { replace = false } = {}) {
+export async function uploadMedicalRecordsScan(
+  orderId,
+  file,
+  { replace = false, recordType = "medical" } = {}
+) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const query = replace ? "?replace=true" : "";
+  const params = new URLSearchParams();
+  if (replace) params.set("replace", "true");
+  if (recordType) params.set("recordType", recordType);
+  const query = params.toString() ? `?${params.toString()}` : "";
+
   const data = await request(`/orders/${orderId}/scan-medical-records${query}`, {
     method: "POST",
     auth: true,
@@ -231,8 +239,12 @@ export async function uploadMedicalRecordsScan(orderId, file, { replace = false 
   return data?.data?.order || null;
 }
 
-export async function removeMedicalRecords(orderId) {
-  const data = await request(`/orders/${orderId}/medical-records`, {
+export async function removeMedicalRecords(orderId, { recordType = null } = {}) {
+  const params = new URLSearchParams();
+  if (recordType) params.set("recordType", recordType);
+  const query = params.toString() ? `?${params.toString()}` : "";
+
+  const data = await request(`/orders/${orderId}/medical-records${query}`, {
     method: "DELETE",
     auth: true,
   });
@@ -306,10 +318,13 @@ export async function fetchOrderSubpoenaPdf(orderId) {
   return response.blob();
 }
 
-export async function fetchOrderMedicalRecordsPdf(orderId) {
+export async function fetchOrderMedicalRecordsPdf(orderId, { recordType = "medical" } = {}) {
   const token = getAccessToken();
+  const params = new URLSearchParams();
+  if (recordType) params.set("recordType", recordType);
+  const query = params.toString() ? `?${params.toString()}` : "";
   const response = await fetch(
-    `${API_BASE_URL}/orders/${orderId}/medical-records/file`,
+    `${API_BASE_URL}/orders/${orderId}/medical-records/file${query}`,
     {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }

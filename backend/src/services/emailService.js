@@ -233,48 +233,94 @@ async function sendInvoiceEmail({
   }
 }
 
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function plainTextToHtml(text = "") {
+  const lines = String(text).split("\n");
+
+  return `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
+      ${lines
+        .map((line) => `<p>${line ? escapeHtml(line) : "&nbsp;"}</p>`)
+        .join("")}
+    </div>
+  `;
+}
+
+function formatRecordTypesPhrase(labels = []) {
+  const cleaned = labels.filter(Boolean);
+  if (!cleaned.length) return "records";
+
+  const lower = cleaned.map((label) => label.toLowerCase());
+  if (lower.length === 1) return lower[0];
+  if (lower.length === 2) return `${lower[0]} and ${lower[1]}`;
+  return `${lower.slice(0, -1).join(", ")}, and ${lower[lower.length - 1]}`;
+}
+
+function buildDefaultOrderCompletedMailText({
+  orderNumber,
+  applicant,
+  providerName,
+  recordLabels = [],
+}) {
+  const recordsPhrase = formatRecordTypesPhrase(recordLabels);
+  const sentenceStart =
+    recordsPhrase.charAt(0).toUpperCase() + recordsPhrase.slice(1);
+  const attachmentPhrase =
+    recordLabels.length > 1
+      ? `The ${recordsPhrase} PDFs are attached to this email.`
+      : `The ${recordsPhrase} PDF is attached to this email.`;
+
+  const lines = [
+    "Hello,",
+    "",
+    `${sentenceStart} for order ${orderNumber} are ready.`,
+  ];
+
+  if (applicant) {
+    lines.push(`Applicant: ${applicant}`);
+  }
+
+  if (providerName) {
+    lines.push(`Provider: ${providerName}`);
+  }
+
+  lines.push(
+    attachmentPhrase,
+    "",
+    "Please contact us if you have any questions.",
+    "",
+    "DMS Custodian"
+  );
+
+  return lines.join("\n");
+}
+
 async function sendOrderCompletedMail({
   to,
   orderNumber,
   applicant,
   providerName,
   attachments = [],
+  recordLabels = [],
+  message = "",
 }) {
   const subject = `Records Ready — Order ${orderNumber}`;
-  const attachmentNote =
-    attachments.length > 0
-      ? "The medical records PDF is attached to this email."
-      : "";
-  const text = [
-    `Hello,`,
-    ``,
-    `Medical records for order ${orderNumber} are ready.`,
-    applicant ? `Applicant: ${applicant}` : "",
-    providerName ? `Provider: ${providerName}` : "",
-    attachmentNote,
-    ``,
-    `Please contact us if you have any questions.`,
-    ``,
-    `DMS Custodian`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  const html = `
-    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
-      <p>Hello,</p>
-      <p>Medical records for order <strong>${orderNumber}</strong> are ready.</p>
-      ${applicant ? `<p><strong>Applicant:</strong> ${applicant}</p>` : ""}
-      ${providerName ? `<p><strong>Provider:</strong> ${providerName}</p>` : ""}
-      ${
-        attachments.length
-          ? "<p>The medical records PDF is attached to this email.</p>"
-          : ""
-      }
-      <p>Please contact us if you have any questions.</p>
-      <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
-    </div>
-  `;
+  const text =
+    message?.trim() ||
+    buildDefaultOrderCompletedMailText({
+      orderNumber,
+      applicant,
+      providerName,
+      recordLabels,
+    });
+  const html = plainTextToHtml(text);
 
   const mailTransporter = getTransporter();
 

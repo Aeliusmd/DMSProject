@@ -57,6 +57,7 @@ import {
   RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
+import { getOrderTypeLabel } from "@/lib/orders/recordTypeUtils";
 
 const ORDERS_PER_PAGE = 6;
 
@@ -138,7 +139,10 @@ function mapWorkflowStages(stages = []) {
 function buildWorkflowStagesForOrder(order) {
   const prepaymentPaid = parsePaymentAmount(order.invoice?.prepaymentPaid);
   const custodianPaid = parsePaymentAmount(order.invoice?.custodianPaid);
-  const hasMedicalRecords = Boolean(order.records?.hasMedicalRecords);
+  const hasAllRecordsUploaded = Boolean(order.records?.allRecordsUploaded);
+  const hasAnyRecordsUploaded = Boolean(
+    order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
+  );
   const isCnrOrder = Boolean(order.certificateNoRecords);
 
   return mapWorkflowStages(order.workflowStages)
@@ -146,14 +150,15 @@ function buildWorkflowStagesForOrder(order) {
     .map((stage) => {
     if (stage.key === "Review Records") {
       const isComplete =
-        isWorkflowStageComplete(stage.status) || hasMedicalRecords;
+        isWorkflowStageComplete(stage.status) || hasAllRecordsUploaded;
 
       return {
         ...stage,
-        status: isComplete ? "complete" : stage.status,
-        label: isComplete ? "Uploaded Records" : "Scan Records",
-        actionLink: !isComplete,
-        showRemoveRecords: isComplete && hasMedicalRecords,
+        status: isComplete ? "complete" : "pending",
+        label: "Review Records",
+        showScanRecordsLink: !isComplete,
+        showPreviewRecords: hasAnyRecordsUploaded,
+        showRemoveRecords: isComplete && hasAnyRecordsUploaded,
       };
     }
 
@@ -248,7 +253,10 @@ function toRenderOrder(order) {
     isSubpoena: Boolean(order.isSubpoena),
     isRecords: Boolean(order.isRecords),
     isWriteOffs: Boolean(order.isWriteOffs),
-    hasMedicalRecords: Boolean(order.records?.hasMedicalRecords),
+    hasMedicalRecords: Boolean(order.records?.allRecordsUploaded),
+    hasAnyRecordsUploaded: Boolean(
+      order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
+    ),
     note: order.note,
     subpoena: order.subpoena,
     hasSubpoenaFile: Boolean(order.hasSubpoenaFile),
@@ -442,7 +450,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       setRemoveRecordsModal({ open: false, order: null });
       await fetchOrders();
     } catch (err) {
-      setActionError(err.message || "Failed to remove medical records");
+      setActionError(err.message || "Failed to remove uploaded records");
     } finally {
       setActionLoading(false);
     }
@@ -627,8 +635,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     async (order) => {
       if (!order?.dbId || getDeliveryStatus(order, "mail").completed) return;
 
-      if (!order.hasMedicalRecords) {
-        setDeliveryError("Scan medical records before sending mail");
+      if (!order.hasAnyRecordsUploaded) {
+        setDeliveryError("Scan records before sending mail");
         return;
       }
 
@@ -934,16 +942,15 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                             key={stage.key || stage.label}
                             stage={stage}
                             href={getWorkflowStageHref(stage, order)}
-                            onClick={
-                              stage.key === "Review Records" &&
-                              order.hasMedicalRecords
-                                ? () => setSelectedMedicalRecordsOrder(order)
-                                : undefined
-                            }
                             onResend={
                               stage.showResend
                                 ? () =>
                                     handleResendInvoice(order, stage.invoiceId)
+                                : undefined
+                            }
+                            onPreviewRecords={
+                              stage.showPreviewRecords
+                                ? () => setSelectedMedicalRecordsOrder(order)
                                 : undefined
                             }
                             onRemoveRecords={
@@ -1283,7 +1290,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         onClose={() => setSelectedNoteOrder(null)}
       />
 
-      <MedicalRecordsPreviewModal
+      <UploadedRecordsPreviewModal
         isOpen={Boolean(selectedMedicalRecordsOrder)}
         order={selectedMedicalRecordsOrder}
         onClose={() => setSelectedMedicalRecordsOrder(null)}
@@ -1323,11 +1330,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedMailOrder)}
         order={selectedMailOrder}
         onClose={() => setSelectedMailOrder(null)}
-        onSent={async ({ email, deliveryDate }) => {
+        onSent={async ({ email, deliveryDate, message }) => {
           setDeliveryError("");
           const result = await mailCompletedOrder(selectedMailOrder.dbId, {
             email,
             deliveryDate,
+            message,
           });
           applyMailSentState(
             selectedMailOrder,
@@ -1393,10 +1401,10 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
       <ConfirmModal
         open={removeRecordsModal.open}
-        title="Remove Medical Records"
-        message="Are you sure you want to remove the uploaded medical records for this order?"
+        title="Remove Uploaded Records"
+        message="Remove all uploaded record files for this order? Review Records will return to pending."
         variant="danger"
-        confirmLabel={actionLoading ? "Removing..." : "Remove"}
+        confirmLabel={actionLoading ? "Removing..." : "Remove All"}
         cancelLabel="Cancel"
         confirmDisabled={actionLoading}
         onCancel={closeRemoveRecordsModal}
@@ -1422,6 +1430,8 @@ function OrderPdfPreviewModal({
   fileName,
   fetchPdf,
   loadingLabel = "Loading...",
+  headerExtra = null,
+  previewKey = "",
 }) {
   const [src, setSrc] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1464,7 +1474,7 @@ function OrderPdfPreviewModal({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [isOpen, order?.dbId, fetchPdf]);
+  }, [isOpen, order?.dbId, fetchPdf, previewKey]);
 
   if (!isOpen) return null;
 
@@ -1477,6 +1487,7 @@ function OrderPdfPreviewModal({
             <p className="text-[11px] text-[#64748B]">
               Order #{order?.id || order?.dbId}
             </p>
+            {headerExtra}
           </div>
     <button
       type="button"
@@ -1501,25 +1512,70 @@ function OrderPdfPreviewModal({
   );
 }
 
-function MedicalRecordsPreviewModal({ isOpen, order, onClose }) {
+function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
+  const uploadedRecords = (order?.records?.orderRecords || []).filter(
+    (record) => record.hasFile
+  );
+  const [activeType, setActiveType] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveType("");
+      return;
+    }
+
+    const firstType = uploadedRecords[0]?.recordType || "medical";
+    setActiveType(firstType);
+  }, [isOpen, order?.dbId]);
+
+  const activeRecord =
+    uploadedRecords.find((record) => record.recordType === activeType) ||
+    uploadedRecords[0];
+  const recordType = activeRecord?.recordType || "medical";
+  const title = getOrderTypeLabel(recordType) || "Uploaded Records";
+  const fileName = `${title}.pdf`;
+
   return (
     <OrderPdfPreviewModal
       isOpen={isOpen}
       order={order}
       onClose={onClose}
-      title="Medical Records"
-      fileName="Medical Records.pdf"
-      fetchPdf={fetchOrderMedicalRecordsPdf}
-      loadingLabel="Loading medical records..."
+      title={uploadedRecords.length > 1 ? "Uploaded Records" : title}
+      fileName={fileName}
+      fetchPdf={(orderId) =>
+        fetchOrderMedicalRecordsPdf(orderId, { recordType })
+      }
+      loadingLabel="Loading records..."
+      headerExtra={
+        uploadedRecords.length > 1 ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {uploadedRecords.map((record) => (
+              <button
+                key={record.recordType}
+                type="button"
+                onClick={() => setActiveType(record.recordType)}
+                className={`rounded-[5px] px-2 py-1 text-[10px] font-semibold ${
+                  activeType === record.recordType
+                    ? "bg-[#0097B2] text-white"
+                    : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
+                }`}
+              >
+                {getOrderTypeLabel(record.recordType)}
+              </button>
+            ))}
+          </div>
+        ) : null
+      }
+      previewKey={recordType}
     />
   );
 }
 
 function getWorkflowStageHref(stage, order) {
   if (stage.key === "Review Records") {
-    const hasMedicalRecords = Boolean(order.hasMedicalRecords);
+    const allUploaded = Boolean(order.hasMedicalRecords);
     const isComplete =
-      isWorkflowStageComplete(stage.status) || hasMedicalRecords;
+      isWorkflowStageComplete(stage.status) || allUploaded;
 
     if (!isComplete) {
       return `/orders/scan-medical-records?orderId=${encodeURIComponent(
@@ -1551,21 +1607,42 @@ function getWorkflowStageHref(stage, order) {
 
 function WorkflowStageItem({
   stage,
-  onClick,
   href,
+  onPreviewRecords,
   onResend,
   onRemoveRecords,
   resending = false,
   removingRecords = false,
 }) {
-  if (stage.actionLink && href) {
+  if (stage.showScanRecordsLink && href) {
+    const pendingStyle = WORKFLOW_STATUS_STYLES.pending;
+
     return (
-      <Link
-        href={href}
-        className="block text-[10px] font-semibold text-[#007F96] underline"
-      >
-        {stage.label}
-      </Link>
+      <div className="space-y-1">
+        <Link
+          href={href}
+          className="block text-[10px] font-semibold text-[#007F96] underline"
+        >
+          Scan Records
+        </Link>
+        <div
+          className={`flex w-full items-center gap-1.5 text-[10px] font-semibold ${pendingStyle.text}`}
+        >
+          <WorkflowStageIcon status="pending" />
+          {stage.showPreviewRecords ? (
+            <button
+              type="button"
+              onClick={onPreviewRecords}
+              disabled={!onPreviewRecords}
+              className="min-w-0 truncate text-left hover:underline disabled:cursor-default"
+            >
+              Review Records
+            </button>
+          ) : (
+            <span>Review Records</span>
+          )}
+        </div>
+      </div>
     );
   }
 
@@ -1577,13 +1654,20 @@ function WorkflowStageItem({
         className={`flex w-full flex-nowrap items-center gap-1.5 text-[10px] font-semibold ${style.text}`}
       >
         <WorkflowStageIcon status={stage.status} />
-        <span className="min-w-0 flex-1 truncate">{stage.label}</span>
+        <button
+          type="button"
+          onClick={onPreviewRecords}
+          disabled={!onPreviewRecords}
+          className="min-w-0 flex-1 truncate text-left hover:underline disabled:cursor-default"
+        >
+          {stage.label}
+        </button>
         <button
           type="button"
           onClick={onRemoveRecords}
           disabled={removingRecords || !onRemoveRecords}
           className="flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded text-red-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Remove medical records"
+          aria-label="Remove all uploaded records"
         >
           <CloseIcon />
     </button>
@@ -1592,7 +1676,7 @@ function WorkflowStageItem({
   }
 
   const className = `flex w-full items-center justify-between gap-2 text-left text-[10px] font-semibold ${style.text} ${
-    onClick || href ? "cursor-pointer hover:underline" : ""
+    href ? "hover:underline" : ""
   }`;
 
   const content = (
@@ -1609,18 +1693,13 @@ function WorkflowStageItem({
     </>
   );
 
-  const stageRow =
-    href ? (
-      <Link href={href} className={className}>
-        {content}
-      </Link>
-    ) : onClick ? (
-      <button type="button" onClick={onClick} className={className}>
-        {content}
-      </button>
-    ) : (
-      <div className={className}>{content}</div>
-    );
+  const stageRow = href ? (
+    <Link href={href} className={className}>
+      {content}
+    </Link>
+  ) : (
+    <div className={className}>{content}</div>
+  );
 
   if (!stage.showResend) {
     return stageRow;

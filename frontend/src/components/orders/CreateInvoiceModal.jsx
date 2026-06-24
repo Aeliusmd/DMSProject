@@ -25,7 +25,6 @@ import { getTodayInputDate } from "@/lib/utils/dateUtils";
 
 const initialFormData = {
   invoiceDate: "",
-  serviceDate: "",
   storageFee: "0.00",
   pages: "0",
   perPageAmount: "0.00",
@@ -398,14 +397,6 @@ export default function CreateInvoiceModal({
                 onChange={handleChange}
                 error={errors.invoiceDate}
               />
-
-              <DateField
-                label="Service Date"
-                name="serviceDate"
-                value={formData.serviceDate}
-                onChange={handleChange}
-                error={errors.serviceDate}
-              />
             </div>
 
             <SectionTitle title="Fees" />
@@ -628,7 +619,6 @@ function getInitialInvoiceFormData(order, isEditMode) {
   return {
     ...initialFormData,
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
-    serviceDate: toDateInput(invoice.sentDateRaw || invoice.sentDate) || "",
     storageFee: invoice.storageFee || invoice.other || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",
@@ -648,7 +638,6 @@ function mapInvoiceToFormData(invoice, order) {
 
   return {
     invoiceDate: invoice.invoiceDate || initialFormData.invoiceDate,
-    serviceDate: invoice.serviceDate || "",
     storageFee: invoice.storageFee || "0.00",
     pages: invoice.pages || "0",
     perPageAmount: invoice.perPageAmount || "0.00",

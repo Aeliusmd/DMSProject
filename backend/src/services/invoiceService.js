@@ -255,17 +255,29 @@ function buildApplicantName(row) {
     .trim();
 }
 
+function formatOrderRecordTypesLabel(orderRow) {
+  const raw = orderRow?.order_record_types || orderRow?.order_type || "";
+  const types = `${raw}`
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (!types.length) {
+    return "";
+  }
+
+  return types
+    .map((type) => ORDER_TYPE_LABELS[type] || type)
+    .join(", ");
+}
+
 function resolveYourFileNumber(orderRow) {
   if (!orderRow) return "";
 
-  const typeLabel = trimOrNull(ORDER_TYPE_LABELS[orderRow.order_type]);
+  const typeLabel = trimOrNull(formatOrderRecordTypesLabel(orderRow));
   if (typeLabel) return typeLabel;
 
-  return (
-    trimOrNull(orderRow.specific_record) ||
-    trimOrNull(orderRow.order_type) ||
-    ""
-  );
+  return trimOrNull(orderRow.specific_record) || "";
 }
 
 function buildOrderDetailsText(row, orderPayments = []) {
@@ -285,7 +297,7 @@ function buildOrderDetailsText(row, orderPayments = []) {
   push("Defendant", row.defendant);
   push(
     "Record Type",
-    ORDER_TYPE_LABELS[row.order_type] || row.order_type
+    formatOrderRecordTypesLabel(row) || trimOrNull(row.specific_record)
   );
   push("Specific Record", row.specific_record);
   push("Doctor", row.specific_doctor);

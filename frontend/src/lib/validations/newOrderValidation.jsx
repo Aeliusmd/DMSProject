@@ -1,3 +1,7 @@
+import {
+  hasFormRecordTypesSelected,
+} from "@/lib/orders/recordTypeUtils";
+
 export const immediateRequiredFields = [
   "facility",
   "type",
@@ -37,7 +41,9 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
 
   if (!data.facility) errors.facility = "Facility is required";
-  if (!data.type) errors.type = "Type is required";
+  if (!hasFormRecordTypesSelected(data)) {
+    errors.type = "Select at least one record type";
+  }
   if (!data.firstName.trim()) errors.firstName = "First name is required";
   if (!data.lastName.trim()) errors.lastName = "Last name is required";
 
