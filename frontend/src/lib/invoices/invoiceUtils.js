@@ -8,6 +8,25 @@ export function parseInvoiceDueAmount(value) {
 }
 
 export function canWriteOffInvoice(invoice) {
-  if (!invoice || invoice.isWrittenOff) return false;
-  return parseInvoiceDueAmount(invoice.due) > 0;
+  if (!invoice || invoice.invoiceType === "xray") {
+    return false;
+  }
+
+  if (
+    invoice.isWrittenOff ||
+    invoice.status === "Written Off" ||
+    invoice.status === "Write Offs"
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function canSendInvoice(invoice) {
+  if (!invoice) {
+    return false;
+  }
+
+  return !invoice.isSent;
 }

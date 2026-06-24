@@ -168,6 +168,18 @@ function extractDateTokens(text) {
 }
 
 export function applyDateOfInjuryFromHints(updates, hints = {}) {
+  const parsedFromHint =
+    parseSingleDateToInput(hints.dateOfInjury) ||
+    parseSingleDateToInput(hints.date_of_injury);
+
+  if (!hints.dateOfInjuryText && parsedFromHint) {
+    updates.injuryType = "specific";
+    updates.injuryDate = parsedFromHint;
+    updates.injuryDateBegin = "";
+    updates.injuryDateEnd = "";
+    return;
+  }
+
   const rawText =
     hints.dateOfInjuryText ||
     hints.dateOfInjury ||
@@ -321,7 +333,10 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
     const formattedSsn = normalizeAutofillSSN(hints.ssn);
     if (formattedSsn) updates.ssn = formattedSsn;
   }
-  if (hints.dateOfBirth) updates.dob = hints.dateOfBirth;
+  if (hints.dateOfBirth) {
+    updates.dob =
+      parseSingleDateToInput(hints.dateOfBirth) || hints.dateOfBirth;
+  }
   applyDateOfInjuryFromHints(updates, hints);
   if (hints.companyAddress) applyParsedServeAddress(updates, hints.companyAddress);
   if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
@@ -332,7 +347,6 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   if (hints.amount) {
     const amount = normalizeAutofillAmount(hints.amount);
     if (amount) {
-      updates.subpoenaPrepaymentAmount = amount;
       updates.prepaymentPaid = amount;
     }
   }
@@ -363,7 +377,31 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   }
 
   const providerName = hints.companyName;
-  if (providerName) {
+
+  if (hints.providerId) {
+    const matched =
+      providerList.find((provider) => String(provider.id) === String(hints.providerId)) ||
+      null;
+
+    updates.providerId = String(hints.providerId);
+    updates.serveCompanyName =
+      hints.companyName || getProviderLabel(matched) || updates.serveCompanyName || "";
+
+    if (matched) {
+      updates.address = matched.address || updates.address || "";
+      updates.zip = matched.zipCode || matched.zip || updates.zip || "";
+      updates.city = matched.city || updates.city || "";
+      updates.state = matched.state || updates.state || "";
+      updates.phone = matched.phone || updates.phone || "";
+      updates.fax = matched.fax || updates.fax || "";
+      updates.email = matched.email || updates.email || "";
+    } else if (hints.companyAddress) {
+      applyParsedServeAddress(updates, hints.companyAddress);
+    }
+
+    meta.providerName = updates.serveCompanyName;
+    meta.providerCreated = Boolean(hints.providerCreated);
+  } else if (providerName) {
     const providerMatch = findProviderMatch(providerName, providerList);
     if (providerMatch) {
       updates.providerId = String(providerMatch.id);
@@ -415,6 +453,12 @@ export function buildFormFromExtract(
     ...(extract?.orderHints || {}),
     ...(extract?.dateOfInjury && !extract?.orderHints?.dateOfInjury
       ? { dateOfInjury: extract.dateOfInjury }
+      : {}),
+    ...(extract?.providerId != null
+      ? { providerId: String(extract.providerId) }
+      : {}),
+    ...(extract?.providerCreated != null
+      ? { providerCreated: extract.providerCreated }
       : {}),
   };
   const { updates, meta } = mapOrderHintsToForm(orderHints, {

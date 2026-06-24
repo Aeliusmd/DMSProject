@@ -7,6 +7,7 @@ import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
 import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
+import CnrNoteModal from "@/components/orders/CnrNoteModal";
 import CertificateOfRecordsModal from "@/components/orders/CertificateOfRecordsModal";
 import SendCopyLetterModal from "@/components/orders/SendCopyLetterModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
@@ -16,6 +17,7 @@ import OrderPickupModal from "@/components/orders/OrderPickupModal";
 import OrderFaxModal from "@/components/orders/OrderFaxModal";
 import OrderCancelModal from "@/components/orders/OrderCancelModal";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import OrderStatusBadge from "@/components/orders/OrderStatusBadge";
 import CompletedDeliveryLink from "@/components/orders/CompletedDeliveryLink";
 import {
   cancelOrder,
@@ -42,11 +44,13 @@ import {
   emailInvoiceByOrderId,
   emailXrayInvoiceByOrderId,
   resendInvoices,
+  sendInvoices,
 } from "@/lib/invoices/invoiceApi";
 import {
   formatMoneyAmount,
   parsePaymentAmount,
 } from "@/lib/orders/paymentUtils";
+import { deriveDisplayOrderStatus } from "@/lib/orders/rushUtils";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 
 const ORDERS_PER_PAGE = 6;
@@ -68,6 +72,29 @@ const DEFAULT_ORDER_FORMS = [
   "Certification of Records",
   "CNR",
 ];
+
+const CNR_DELIVERY_LABELS = {
+  email: "Email",
+  fax: "Fax",
+  pickup: "Pickup",
+};
+
+function formatCnrDisplayDate(dateValue) {
+  if (!dateValue) return "";
+
+  const value = String(dateValue).slice(0, 10);
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    return `${isoMatch[2]}/${isoMatch[3]}/${isoMatch[1].slice(-2)}`;
+  }
+
+  return value;
+}
+
+function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "") {
+  setModal({ title, note });
+}
 
 const WORKFLOW_STAGES = [
   "Upload Records",
@@ -108,8 +135,11 @@ function buildWorkflowStagesForOrder(order) {
   const prepaymentPaid = parsePaymentAmount(order.invoice?.prepaymentPaid);
   const custodianPaid = parsePaymentAmount(order.invoice?.custodianPaid);
   const hasMedicalRecords = Boolean(order.records?.hasMedicalRecords);
+  const isCnrOrder = Boolean(order.certificateNoRecords);
 
-  return mapWorkflowStages(order.workflowStages).map((stage) => {
+  return mapWorkflowStages(order.workflowStages)
+    .filter((stage) => !(isCnrOrder && stage.key === "Custodian"))
+    .map((stage) => {
     if (stage.key === "Upload Records") {
       const isComplete =
         isWorkflowStageComplete(stage.status) || hasMedicalRecords;
@@ -217,6 +247,10 @@ function toRenderOrder(order) {
     id: order.id,
     dbId: order.dbId,
     orderStatus: order.status || "",
+    displayOrderStatus:
+      order.displayStatus ||
+      deriveDisplayOrderStatus(order.status, order.createdAt),
+    rushLabel: order.rushLabel || "",
     isSubpoena: Boolean(order.isSubpoena),
     isRecords: Boolean(order.isRecords),
     isWriteOffs: Boolean(order.isWriteOffs),
@@ -242,6 +276,8 @@ function toRenderOrder(order) {
     facilityName:
       order.facilityName || order.facilityInfo?.name || "",
     certificateNoRecords: Boolean(order.certificateNoRecords),
+    cnrReason: order.cnrReason || "",
+    cnrMemo: Boolean(order.cnrMemo),
     cnrDelivery: order.cnrDelivery || "",
     mailSentDate: order.readyDate || order.mailSentDate || "",
     readyDate: order.readyDate || "",
@@ -269,6 +305,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedXrayCoverSheetOrder, setSelectedXrayCoverSheetOrder] =
     useState(null);
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
+  const [cnrTextModal, setCnrTextModal] = useState(null);
   const [selectedCertificationOrder, setSelectedCertificationOrder] = useState(null);
   const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
@@ -284,6 +321,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
   const [selectedFaxOrder, setSelectedFaxOrder] = useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
+  const [sendingInvoiceOrderId, setSendingInvoiceOrderId] = useState(null);
   const [emailingXrayOrderId, setEmailingXrayOrderId] = useState(null);
   const [resendingOrderId, setResendingOrderId] = useState(null);
   const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
@@ -361,11 +399,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       }
     },
     [
-      normalizedFilters.facility,
-      normalizedFilters.year,
+    normalizedFilters.facility,
+    normalizedFilters.year,
       normalizedFilters.period,
-      normalizedFilters.status,
-      normalizedFilters.search,
+    normalizedFilters.status,
+    normalizedFilters.search,
     ]
   );
 
@@ -480,9 +518,36 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     );
   }, []);
 
-  const handleEmailInvoice = useCallback(
+  const handleSendInvoice = useCallback(
     async (order) => {
-      if (!order?.dbId || emailingOrderId) return;
+      const invoiceId = Number(order.invoice?.invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(invoiceId) || sendingInvoiceOrderId) {
+        return;
+      }
+
+      setEmailError("");
+      setSendingInvoiceOrderId(order.dbId);
+
+      try {
+        await sendInvoices([invoiceId]);
+        await fetchOrders({ silent: true, force: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to send invoice");
+      } finally {
+        setSendingInvoiceOrderId(null);
+      }
+    },
+    [fetchOrders, sendingInvoiceOrderId]
+  );
+
+  const handleResendInvoiceEmail = useCallback(
+    async (order) => {
+      const invoiceId = Number(order.invoice?.invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(invoiceId) || emailingOrderId) {
+        return;
+      }
 
       const providerEmail =
         order.providerEmail || order.invoice?.providerEmail || "";
@@ -497,12 +562,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       setEmailingOrderId(order.dbId);
 
       try {
-        const result = await emailInvoiceByOrderId(order.dbId);
-        applyInvoiceEmailState(order.dbId, {
-          sentDate: result.sentDate,
-          sentDateCompact: result.sentDateCompact,
-          recipientEmail: result.recipientEmail || result.recipient || "",
-        });
+        await resendInvoices([invoiceId]);
         await fetchOrders({ silent: true, force: true });
       } catch (err) {
         setEmailError(err.message || "Failed to email invoice");
@@ -510,7 +570,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         setEmailingOrderId(null);
       }
     },
-    [emailingOrderId, fetchOrders, applyInvoiceEmailState]
+    [emailingOrderId, fetchOrders]
   );
 
   const handleEmailXrayInvoice = useCallback(
@@ -805,13 +865,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         </p>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => setSelectedNoteOrder(order)}
-                        className="mt-1 block text-[10px] text-[#007F96] underline"
-                      >
+                        <button
+                          type="button"
+                          onClick={() => setSelectedNoteOrder(order)}
+                          className="mt-1 block text-[10px] text-[#007F96] underline"
+                        >
                         {order.note ? "Note ●" : "Note"}
-                      </button>
+                        </button>
 
                       <button
                         type="button"
@@ -862,11 +922,15 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       {order.facilityInfo?.address ? (
                         <p className="mt-1 text-[10px] leading-[15px] text-[#64748B]">
                           {order.facilityInfo.address}
-                        </p>
+                      </p>
                       ) : null}
                     </td>
 
                     <td className="px-4 py-5 align-top">
+                      <div className="mb-2">
+                        <OrderStatusBadge status={order.displayOrderStatus} />
+                      </div>
+
                       <div className="space-y-1">
                         {order.status.map((stage) => (
                           <WorkflowStageItem
@@ -954,6 +1018,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <InvoiceBlock
                         invoice={order.invoice}
                         orderDbId={order.dbId}
+                        isCnr={order.certificateNoRecords}
+                        cnrDelivery={order.cnrDelivery}
+                        cnrDateSent={order.cnrDateSent}
+                        onCnrReasonClick={() =>
+                          openCnrTextModal(setCnrTextModal, order, "Reason")
+                        }
+                        allowStandardInvoice={!order.certificateNoRecords}
                         providerEmail={
                           order.providerEmail ||
                           order.invoice?.providerEmail ||
@@ -980,19 +1051,53 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         onXrayCoverSheet={() =>
                           setSelectedXrayCoverSheetOrder(order)
                         }
-                        onEmailInvoice={() => handleEmailInvoice(order)}
+                        onSendInvoice={() => handleSendInvoice(order)}
+                        onResendInvoice={() => handleResendInvoiceEmail(order)}
                         onEmailXrayInvoice={() => handleEmailXrayInvoice(order)}
                         onPrintInvoice={() => setSelectedPrintInvoiceOrder(order)}
                         onPrintXrayInvoice={() =>
                           setSelectedPrintXrayInvoiceOrder(order)
                         }
+                        sending={sendingInvoiceOrderId === order.dbId}
                         emailing={emailingOrderId === order.dbId}
                         emailingXray={emailingXrayOrderId === order.dbId}
                       />
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <RecordsBlock records={order.records} />
+                      <RecordsBlock
+                        records={order.records}
+                        isCnr={order.certificateNoRecords}
+                        cnrMemo={order.cnrMemo}
+                        cnrDelivery={order.cnrDelivery}
+                        cnrDateSent={order.cnrDateSent}
+                        onPrintedSentOutClick={() =>
+                          openCnrTextModal(
+                            setCnrTextModal,
+                            order,
+                            "Printed/Sent Out Note",
+                            [
+                              CNR_DELIVERY_LABELS[order.cnrDelivery] ||
+                                order.cnrDelivery,
+                              order.cnrDateSent
+                                ? `Date: ${formatCnrDisplayDate(order.cnrDateSent)}`
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join("\n")
+                          )
+                        }
+                        onCnrNoteClick={
+                          !order.cnrMemo
+                            ? () =>
+                                openCnrTextModal(
+                                  setCnrTextModal,
+                                  order,
+                                  "CNR Note"
+                                )
+                            : undefined
+                        }
+                      />
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -1141,6 +1246,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         isOpen={Boolean(selectedCnrOrder)}
         order={selectedCnrOrder}
         onClose={() => setSelectedCnrOrder(null)}
+      />
+
+      <CnrNoteModal
+        isOpen={Boolean(cnrTextModal)}
+        title={cnrTextModal?.title || "CNR Note"}
+        note={cnrTextModal?.note || ""}
+        onClose={() => setCnrTextModal(null)}
       />
 
       <CertificateOfRecordsModal
@@ -1369,8 +1481,8 @@ function OrderPdfPreviewModal({
               Order #{order?.id || order?.dbId}
             </p>
           </div>
-          <button
-            type="button"
+    <button
+      type="button"
             onClick={onClose}
             className="rounded-[6px] px-3 py-1.5 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
           >
@@ -1477,7 +1589,7 @@ function WorkflowStageItem({
           aria-label="Remove medical records"
         >
           <CloseIcon />
-        </button>
+    </button>
       </div>
     );
   }
@@ -1566,6 +1678,11 @@ function WorkflowStageIcon({ status }) {
 function InvoiceBlock({
   invoice,
   orderDbId,
+  isCnr = false,
+  cnrDelivery = "",
+  cnrDateSent = "",
+  onCnrReasonClick,
+  allowStandardInvoice = true,
   providerEmail = "",
   onCreateInvoice,
   onReviewInvoice,
@@ -1573,10 +1690,12 @@ function InvoiceBlock({
   onReviewXrayInvoice,
   onCoverSheet,
   onXrayCoverSheet,
-  onEmailInvoice,
+  onSendInvoice,
+  onResendInvoice,
   onEmailXrayInvoice,
   onPrintInvoice,
   onPrintXrayInvoice,
+  sending = false,
   emailing = false,
   emailingXray = false,
 }) {
@@ -1586,33 +1705,143 @@ function InvoiceBlock({
   const xraySentDate =
     invoice.xraySentDateCompact || invoice.xraySentDate || null;
 
-  const emailInvoiceButton = !invoice.sentDate ? (
+  const sendInvoiceButton = !invoice.sentDate ? (
     <div className="space-y-0.5">
       {hasProviderEmail ? (
         <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
       ) : (
         <MissingProviderEmailNotice orderDbId={orderDbId} />
       )}
-      <button
-        type="button"
-        onClick={onEmailInvoice}
-        disabled={emailing}
+        <button
+          type="button"
+        onClick={onSendInvoice}
+        disabled={sending}
         className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {emailing ? "Sending..." : "Email Invoice"}
-      </button>
+        >
+        {sending ? "Sending..." : "Send Invoice"}
+        </button>
     </div>
   ) : null;
 
-  const invoiceEmailedStatus = invoice.sentDate ? (
-    <InvoiceEmailedStatus
-      label="Invoice Emailed"
-      sentDate={invoiceSentDate}
-      recipientEmail={providerEmail || invoice.recipientEmail}
-    />
+  const resendInvoiceButton = invoice.sentDate ? (
+    <div className="space-y-0.5">
+      <p className="font-semibold text-[#2563EB]">Invoice Sent</p>
+      {invoiceSentDate ? (
+        <p className="text-[#94A3B8]">Sent: {invoiceSentDate}</p>
+      ) : null}
+      {hasProviderEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+      ) : (
+        <MissingProviderEmailNotice orderDbId={orderDbId} />
+      )}
+        <button
+          type="button"
+        onClick={onResendInvoice}
+        disabled={emailing}
+        className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+        {emailing ? "Emailing..." : "Email Invoice"}
+        </button>
+    </div>
   ) : null;
 
-  const xraySection = invoice.hasXray ? (
+  const xrayCreateLink = invoice.hasXray ? (
+    <>
+      <InvoiceReviewRows
+        label={
+          <button
+            type="button"
+            onClick={onReviewXrayInvoice}
+            className="text-[#007F96] underline"
+          >
+            Review Xray Invoice
+          </button>
+        }
+        dateCompact={invoice.xrayReviewDateCompact || invoice.xrayReviewDate}
+        dueAmount={invoice.xrayReviewAmount}
+      />
+
+      <button
+        type="button"
+        onClick={onPrintXrayInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Print Xray Invoice
+      </button>
+
+        <button
+          type="button"
+          onClick={onXrayCoverSheet}
+        className="block text-left text-[#007F96] underline"
+        >
+          X-ray Cover Sheet
+      </button>
+
+      {!invoice.xraySentDate ? (
+        <div className="space-y-0.5">
+          {hasProviderEmail ? (
+            <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+          ) : (
+            <MissingProviderEmailNotice orderDbId={orderDbId} />
+          )}
+          <button
+            type="button"
+            onClick={onEmailXrayInvoice}
+            disabled={emailingXray}
+            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {emailingXray ? "Sending..." : "Email Xray Invoice"}
+        </button>
+      </div>
+      ) : null}
+
+      {invoice.xraySentDate ? (
+        <InvoiceEmailedStatus
+          label="Xray Invoice Emailed"
+          sentDate={xraySentDate}
+          recipientEmail={providerEmail || invoice.recipientEmail}
+        />
+      ) : null}
+    </>
+  ) : (
+    <button
+      type="button"
+      onClick={onCreateXrayInvoice}
+      className="block text-left text-[#007F96] underline"
+    >
+      Create Xray Invoice
+    </button>
+  );
+
+  const cnrSection = isCnr ? (
+    <>
+      {xrayCreateLink}
+
+      <span className="mt-1 inline-flex rounded-[4px] bg-[#111827] px-2 py-[2px] text-[10px] font-bold uppercase tracking-wide text-white">
+        CNR
+      </span>
+
+      {cnrDelivery ? (
+        <p className="text-[#334155]">
+          {CNR_DELIVERY_LABELS[cnrDelivery] || cnrDelivery}
+        </p>
+      ) : null}
+
+      {cnrDateSent ? (
+        <p className="text-[#334155]">Date:{formatCnrDisplayDate(cnrDateSent)}</p>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={onCnrReasonClick}
+        className="block text-left text-[#007F96] underline"
+      >
+        Reason
+      </button>
+    </>
+  ) : null;
+
+  const xraySection = !isCnr && invoice.hasXray ? (
     <>
       <InvoiceReviewRows
         label={
@@ -1670,40 +1899,52 @@ function InvoiceBlock({
         />
       ) : null}
     </>
-  ) : (
-    <button
-      type="button"
-      onClick={onCreateXrayInvoice}
+  ) : !isCnr ? (
+        <button
+          type="button"
+          onClick={onCreateXrayInvoice}
       className="block text-left text-[#007F96] underline"
-    >
-      Create Xray Invoice
-    </button>
-  );
+        >
+          Create Xray Invoice
+        </button>
+  ) : null;
+
+  if (isCnr) {
+    return <div className="space-y-1 text-[10px]">{cnrSection}</div>;
+  }
 
   if (invoice.createOnly) {
     return (
       <div className="space-y-1 text-[10px]">
-        <button
-          type="button"
-          onClick={onCreateInvoice}
-          className="block text-left text-[#007F96] underline"
-        >
-          Create Invoice
+        {allowStandardInvoice ? (
+          <>
+            <button
+              type="button"
+              onClick={onCreateInvoice}
+              className="block text-left text-[#007F96] underline"
+            >
+              Create Invoice
         </button>
 
-        <button
-          type="button"
-          onClick={onCoverSheet}
-          className="block text-left text-[#007F96] underline"
-        >
-          Cover Sheet
-        </button>
+            <button
+              type="button"
+              onClick={onCoverSheet}
+              className="block text-left text-[#007F96] underline"
+            >
+              Cover Sheet
+            </button>
 
-        {emailInvoiceButton}
-        {invoiceEmailedStatus}
-        {xraySection}
-      </div>
-    );
+            {sendInvoiceButton}
+            {resendInvoiceButton}
+          </>
+        ) : null}
+        {!isCnr ? xraySection : null}
+    </div>
+  );
+}
+
+  if (!allowStandardInvoice) {
+    return <div className="space-y-1 text-[10px]">{xraySection}</div>;
   }
 
   return (
@@ -1738,8 +1979,8 @@ function InvoiceBlock({
         Cover Sheet
       </button>
 
-      {emailInvoiceButton}
-      {invoiceEmailedStatus}
+      {sendInvoiceButton}
+      {resendInvoiceButton}
       {xraySection}
     </div>
   );
@@ -1820,16 +2061,48 @@ function InvoiceMoneyRow({ label, date, amount, amountClassName = "" }) {
   );
 }
 
-function RecordsBlock({ records }) {
+function RecordsBlock({
+  records,
+  isCnr = false,
+  cnrMemo = false,
+  cnrDelivery = "",
+  cnrDateSent = "",
+  onCnrNoteClick,
+  onPrintedSentOutClick,
+}) {
+  const showPrintedSentOutNote = isCnr && cnrDelivery && cnrDateSent;
+  const showCnrNote = isCnr && !cnrMemo && records.cnrNote;
+
   return (
     <div className="space-y-1 text-[10px]">
       <p className="font-semibold text-[#111827]">{records.title}</p>
 
-      {records.lines.map((line) => (
+      {!isCnr &&
+        records.lines.map((line) => (
         <p key={line} className="text-[#334155]">
           {line}
         </p>
       ))}
+
+      {showPrintedSentOutNote ? (
+        <button
+          type="button"
+          onClick={onPrintedSentOutClick}
+          className="block text-left font-medium text-[#007F96] underline"
+        >
+          Printed/Sent Out Note
+        </button>
+      ) : null}
+
+      {showCnrNote && onCnrNoteClick ? (
+        <button
+          type="button"
+          onClick={onCnrNoteClick}
+          className="block text-left font-medium text-[#007F96] underline"
+        >
+          {records.cnrNote?.label || "CNR Note"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1852,12 +2125,12 @@ function FormsList({ forms, onCnrClick, onCertificationClick, onCopyLetterClick 
     "Send Copy/Letter": onCopyLetterClick,
   };
 
-  return (
+        return (
     <div className="space-y-1">
       {forms.map((form) => (
-        <button
-          key={form}
-          type="button"
+          <button
+            key={form}
+            type="button"
           onClick={handlers[form]}
           disabled={!handlers[form]}
           className={`block text-left text-[10px] font-medium underline ${
@@ -1865,9 +2138,9 @@ function FormsList({ forms, onCnrClick, onCertificationClick, onCopyLetterClick 
               ? "text-[#007F96] hover:opacity-80"
               : "cursor-default text-[#94A3B8] no-underline"
           }`}
-        >
-          {form}
-        </button>
+          >
+            {form}
+          </button>
       ))}
     </div>
   );

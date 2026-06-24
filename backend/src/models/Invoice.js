@@ -46,10 +46,10 @@ class Invoice {
     return rows[0] || null;
   }
 
-  static async findByOrderId(orderId) {
-    const pool = getPool();
+  static async findByOrderId(orderId, connection = null) {
+    const db = connection || getPool();
 
-    const [rows] = await pool.execute(
+    const [rows] = await db.execute(
       `${INVOICE_SELECT}
        WHERE i.order_id = :orderId AND ${ORDER_VISIBLE}
        ORDER BY i.id DESC
@@ -91,7 +91,7 @@ class Invoice {
     const pool = getPool();
     const conditions = [
       ORDER_VISIBLE,
-      "i.status NOT IN ('Written Off', 'Needs Resend')",
+      "i.status <> 'Needs Resend'",
       "i.sent_date IS NULL",
     ];
     const params = {};
@@ -159,8 +159,45 @@ class Invoice {
     const conditions = [
       ORDER_VISIBLE,
       "i.facility_id = :facilityId",
-      "i.status NOT IN ('Written Off', 'Needs Resend')",
+      "i.status <> 'Needs Resend'",
       "i.sent_date IS NULL",
+    ];
+    const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("i.invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("i.invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY i.invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findResendByFacilityId(facilityId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "i.facility_id = :facilityId",
+      `(
+        i.status = 'Needs Resend'
+        OR (
+          i.sent_date IS NOT NULL
+          AND i.status <> 'Written Off'
+        )
+      )`,
     ];
     const params = { facilityId };
 
@@ -196,7 +233,7 @@ class Invoice {
          served_amount, service_fee, custodian_fee, xray_fee,
          mileage, parking, other_fee,
          page_count, per_page_amount,
-         clerical_time_hours, clerical_hourly_rate, shipping_handling,
+         clerical_time_hours, clerical_hourly_rate, shipping_handling, storage_fee,
          total_amount, amount_paid, amount_due,
          notes, send_order_details, is_rush_order, recipient_emails, created_by,
          created_at, updated_at
@@ -206,7 +243,7 @@ class Invoice {
          :servedAmount, :serviceFee, :custodianFee, :xrayFee,
          :mileage, :parking, :otherFee,
          :pageCount, :perPageAmount,
-         :clericalTimeHours, :clericalHourlyRate, :shippingHandling,
+         :clericalTimeHours, :clericalHourlyRate, :shippingHandling, :storageFee,
          :totalAmount, :amountPaid, :amountDue,
          :notes, :sendOrderDetails, :isRushOrder, :recipientEmails, :createdBy,
          NOW(), NOW()
@@ -238,6 +275,7 @@ class Invoice {
          clerical_time_hours = :clericalTimeHours,
          clerical_hourly_rate = :clericalHourlyRate,
          shipping_handling = :shippingHandling,
+         storage_fee = :storageFee,
          total_amount = :totalAmount,
          amount_paid = :amountPaid,
          amount_due = :amountDue,
@@ -324,13 +362,11 @@ class Invoice {
       `UPDATE invoices
        SET sent_date = CURDATE(),
            status = CASE
-             WHEN status IN ('Paid', 'Partial', 'Unpaid') THEN status
-             WHEN status = 'Written Off' THEN status
+             WHEN status IN ('Paid', 'Partial', 'Unpaid', 'Written Off') THEN status
              ELSE 'Needs Resend'
            END,
            updated_at = NOW()
-       WHERE id IN (${placeholders})
-         AND status <> 'Written Off'`,
+       WHERE id IN (${placeholders})`,
       params
     );
 

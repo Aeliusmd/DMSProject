@@ -24,10 +24,10 @@ class Provider {
       `SELECT id, company_name, address, zip_code, city, state, phone, fax, email, is_active
        FROM providers
        WHERE is_active = 1
-         AND company_name LIKE :query
+         AND LOWER(company_name) LIKE :query
        ORDER BY company_name ASC
        LIMIT ${Number(limit)}`,
-      { query: `%${trimmed}%` }
+      { query: `%${trimmed.toLowerCase()}%` }
     );
 
     return rows;
@@ -79,6 +79,26 @@ class Provider {
     );
 
     return result.insertId;
+  }
+
+  static async update(connection, id, data) {
+    const db = connection || getPool();
+
+    await db.execute(
+      `UPDATE providers
+       SET company_name = :companyName,
+           address = :address,
+           zip_code = :zipCode,
+           city = :city,
+           state = :state,
+           phone = :phone,
+           fax = :fax,
+           email = :email,
+           updated_at = NOW()
+       WHERE id = :id
+         AND is_active = 1`,
+      { ...data, id }
+    );
   }
 }
 

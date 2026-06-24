@@ -22,6 +22,19 @@ export function calculateOrderRushLevel(createdAt) {
   return "Rush 3";
 }
 
+export function deriveDisplayOrderStatus(status, createdAt) {
+  if (status === "Ready" || status === "Ready to Pickup") {
+    return status;
+  }
+
+  const rush = calculateOrderRushLevel(createdAt);
+  if (status === "Active" && (rush === "Rush 2" || rush === "Rush 3")) {
+    return "Ready";
+  }
+
+  return status || "Active";
+}
+
 /** @deprecated Use calculateOrderRushLevel — rush is based on order created date. */
 export function calculateRushLevel(createdAt) {
   return calculateOrderRushLevel(createdAt);

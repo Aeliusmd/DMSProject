@@ -24,10 +24,11 @@ export const numericOnlyFields = [
 ];
 
 export const moneyFields = [
-  "subpoenaPrepaymentAmount",
   "prepaymentPaid",
   "custodianPaid",
+  "custodianDue",
   "xrayPaid",
+  "xrayDue",
 ];
 
 export const paymentPrefixes = ["prepayment", "custodian", "xray"];
@@ -117,6 +118,15 @@ export function validateNewOrderForm(data, fileErrors = {}) {
 
   if (data.injuryType === "specific" && !data.injuryDate) {
     errors.injuryDate = "Injury date is required";
+  }
+
+  if (
+    data.certificateNoRecords &&
+    data.cnrDelivery &&
+    ["email", "fax", "pickup"].includes(data.cnrDelivery) &&
+    !data.cnrDateSent
+  ) {
+    errors.cnrDateSent = "Date is required for the selected delivery method";
   }
 
   return errors;

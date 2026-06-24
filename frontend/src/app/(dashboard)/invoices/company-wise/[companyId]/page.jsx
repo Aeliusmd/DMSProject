@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 import { getCompanyInvoices, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
 import { canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
@@ -48,6 +49,7 @@ export default function CompanyInvoiceDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
   const [writeOffError, setWriteOffError] = useState("");
 
@@ -199,6 +201,17 @@ export default function CompanyInvoiceDetailsPage() {
     setWriteOffInvoices([buildWriteOffInvoice(company, invoice)]);
   };
 
+  const reloadCompanyInvoices = async () => {
+    const data = await getCompanyInvoices(companyId, {
+      dateFrom: filters.fromDate || undefined,
+      dateTo: filters.toDate || undefined,
+    });
+
+    setCompany(data.company);
+    setInvoices(data.invoices);
+    setSummary(data.summary);
+  };
+
   const handleSubmitWriteOff = async (payload) => {
     setWriteOffError("");
 
@@ -214,14 +227,7 @@ export default function CompanyInvoiceDetailsPage() {
 
       setWriteOffInvoices([]);
 
-      const data = await getCompanyInvoices(companyId, {
-        dateFrom: filters.fromDate || undefined,
-        dateTo: filters.toDate || undefined,
-      });
-
-      setCompany(data.company);
-      setInvoices(data.invoices);
-      setSummary(data.summary);
+      await reloadCompanyInvoices();
     } catch (error) {
       setWriteOffError(error?.message || "Failed to write off invoices");
       console.error("Failed to write off invoices:", error);
@@ -229,6 +235,26 @@ export default function CompanyInvoiceDetailsPage() {
   };
 
   const handleOpenEditInvoice = (invoice) => {
+    if (invoice.invoiceType === "xray") {
+      setSelectedXrayOrder({
+        id: invoice.invoiceId,
+        dbId: invoice.orderId,
+        applicant: invoice.invoiceId,
+        court: "N/A",
+        company: {
+          name: company.name,
+        },
+        invoice: {
+          date: invoice.invoiceDate,
+          sentDate: invoice.invoiceDate,
+          invoiced: invoice.invoiced,
+          paid: invoice.paid,
+          due: invoice.due,
+        },
+      });
+      return;
+    }
+
     setSelectedInvoiceOrder({
       id: invoice.invoiceId,
       dbId: invoice.orderId,
@@ -336,6 +362,14 @@ export default function CompanyInvoiceDetailsPage() {
         mode="edit"
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
+        onSaved={reloadCompanyInvoices}
+      />
+
+      <CreateXrayInvoiceModal
+        isOpen={Boolean(selectedXrayOrder)}
+        order={selectedXrayOrder}
+        onClose={() => setSelectedXrayOrder(null)}
+        onSaved={reloadCompanyInvoices}
       />
 
       <WriteOffInvoiceModal
@@ -532,12 +566,12 @@ function CompanyInvoiceTable({
             {!loading &&
               invoices.map((invoice) => {
               const selected = selectedIds.includes(invoice.id);
+              const rowClassName = invoice.isWrittenOff
+                ? "border-b border-[#F1F5F9] last:border-b-0 bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
+                : "border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]";
 
               return (
-                <tr
-                  key={invoice.id}
-                  className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-                >
+                <tr key={invoice.id} className={rowClassName}>
                   <td className="px-4 py-4 align-middle">
                     <input
                       type="checkbox"
@@ -556,6 +590,12 @@ function CompanyInvoiceTable({
                     >
                       {invoice.invoiceId}
                     </Link>
+
+                    {invoice.invoiceType === "xray" && (
+                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-[#7C3AED]">
+                        X-Ray Invoice
+                      </p>
+                    )}
                   </td>
 
                   <td className="px-4 py-4 align-middle">
@@ -589,14 +629,16 @@ function CompanyInvoiceTable({
                   </td>
 
                   <td className="px-4 py-4 text-center align-middle">
-                    <button
-                      type="button"
-                      onClick={() => onWriteOffSingle(invoice)}
-                      disabled={!canWriteOffInvoice(invoice)}
-                      className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Write Off
-                    </button>
+                    {!invoice.isWrittenOff && (
+                      <button
+                        type="button"
+                        onClick={() => onWriteOffSingle(invoice)}
+                        disabled={!canWriteOffInvoice(invoice)}
+                        className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Write Off
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

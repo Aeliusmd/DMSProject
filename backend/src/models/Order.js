@@ -23,6 +23,8 @@ const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
 const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
+/** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
+const RUSH_READY_MIN_DAYS = 14;
 
 const ORDER_COLUMNS = `
   order_number, rec_number, facility_id, provider_id, order_type, status, court,
@@ -137,7 +139,16 @@ class Order {
     const conditions = [];
     const params = {};
 
-    if (filters.status) {
+    if (filters.readyFilter) {
+      conditions.push(`(
+        o.status IN ('Ready', 'Ready to Pickup')
+        OR (
+          o.status = 'Active'
+          AND DATEDIFF(CURDATE(), DATE(o.created_at)) >= :rushReadyMinDays
+        )
+      )`);
+      params.rushReadyMinDays = RUSH_READY_MIN_DAYS;
+    } else if (filters.status) {
       conditions.push("o.status = :status");
       params.status = filters.status;
     } else {
@@ -321,10 +332,10 @@ class Order {
     return rows[0] || {};
   }
 
-  static async findById(id) {
-    const pool = getPool();
+  static async findById(id, connection = null) {
+    const db = connection || getPool();
 
-    const [rows] = await pool.execute(
+    const [rows] = await db.execute(
       `${ORDER_DETAIL_SELECT}
        WHERE o.id = :id AND ${ACTIVE_ORDER_ALIAS}
        LIMIT 1`,
@@ -365,7 +376,7 @@ class Order {
     const db = connection || getPool();
 
     const [rows] = await db.execute(
-      `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo
        FROM order_payments
        WHERE order_id = :orderId`,
       { orderId }
@@ -386,7 +397,7 @@ class Order {
     }, {});
 
     const [rows] = await pool.execute(
-      `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo
        FROM order_payments
        WHERE order_id IN (${placeholders})`,
       params
@@ -415,17 +426,36 @@ class Order {
   static async upsertPayment(connection, payment) {
     await connection.execute(
       `INSERT INTO order_payments
-        (order_id, payment_type, check_number, payment_date, amount, is_paid, memo, created_at, updated_at)
+        (order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo, created_at, updated_at)
        VALUES
-        (:orderId, :paymentType, :checkNumber, :paymentDate, :amount, :isPaid, :memo, NOW(), NOW())
+        (:orderId, :paymentType, :checkNumber, :paymentDate, :amount, :dueAmount, :isPaid, :memo, NOW(), NOW())
        ON DUPLICATE KEY UPDATE
         check_number = VALUES(check_number),
         payment_date = VALUES(payment_date),
         amount = VALUES(amount),
+        due_amount = VALUES(due_amount),
         is_paid = VALUES(is_paid),
         memo = VALUES(memo),
         updated_at = NOW()`,
-      payment
+      {
+        orderId: payment.orderId,
+        paymentType: payment.paymentType,
+        checkNumber: payment.checkNumber ?? null,
+        paymentDate: payment.paymentDate ?? null,
+        amount: payment.amount ?? null,
+        dueAmount: payment.dueAmount ?? null,
+        isPaid: payment.isPaid ?? 0,
+        memo: payment.memo ?? null,
+      }
+    );
+  }
+
+  static async deletePaymentByType(connection, orderId, paymentType) {
+    await connection.execute(
+      `DELETE FROM order_payments
+       WHERE order_id = :orderId
+         AND payment_type = :paymentType`,
+      { orderId, paymentType }
     );
   }
 

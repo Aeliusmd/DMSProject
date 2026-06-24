@@ -10,6 +10,8 @@ router.get("/", invoiceController.getAll);
 router.get("/company-wise", invoiceController.getCompanyWise);
 router.get("/company-wise/:companyId", invoiceController.getByCompany);
 router.get("/xray/order/:orderId", invoiceController.getXrayByOrder);
+router.post("/xray/send", invoiceController.sendXray);
+router.post("/xray/resend", invoiceController.resendXray);
 router.post("/xray", invoiceController.createXray);
 router.post("/send", invoiceController.send);
 router.post("/resend", invoiceController.resend);

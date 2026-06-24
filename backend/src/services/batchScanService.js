@@ -11,6 +11,7 @@ const {
   enrichOrderHintsFromRow,
 } = require("../utils/extractionMapper");
 const subpoenaExtractionService = require("./subpoenaExtractionService");
+const { resolveProviderFromHints } = require("./providerService");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const { withTransaction } = require("../config/database");
 
@@ -49,7 +50,7 @@ function formatUploadDate(value) {
   return `${mm}/${dd}/${yy} ${h12}:${mins} ${ampm}`;
 }
 
-function mapExtractRowToApi(row) {
+async function mapExtractRowToApi(row) {
   const confidence =
     typeof row.extraction_confidence === "string"
       ? JSON.parse(row.extraction_confidence || "{}")
@@ -59,7 +60,13 @@ function mapExtractRowToApi(row) {
       ? JSON.parse(row.raw_extraction || "{}")
       : row.raw_extraction || {};
   const schema = resolveExtractionSchema(rawExtraction);
-  const orderHints = enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), row);
+  let orderHints = enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), row);
+
+  let providerResolution = { provider: null, created: false };
+  if (orderHints.companyName) {
+    providerResolution = await resolveProviderFromHints(orderHints);
+    orderHints = providerResolution.orderHints;
+  }
 
   return {
     id: row.id,
@@ -74,6 +81,9 @@ function mapExtractRowToApi(row) {
     uploadedAt: formatUploadDate(row.uploaded_at || row.created_at),
     isProcessed: Boolean(row.is_processed),
     orderHints,
+    providerId: providerResolution.provider?.id || null,
+    providerCreated: providerResolution.created,
+    providerName: providerResolution.provider?.companyName || null,
     dateOfInjury: orderHints.dateOfInjury || null,
     extractionConfidence: confidence,
     batchReferenceCode: row.batch_reference_code,
@@ -295,7 +305,7 @@ async function getUnprocessedExtract(extractId) {
   if (!row || row.is_processed) {
     throw new ApiError(404, "Unprocessed subpoena not found");
   }
-  return mapExtractRowToApi(row);
+  return await mapExtractRowToApi(row);
 }
 
 async function getUnprocessedExtractFile(extractId) {

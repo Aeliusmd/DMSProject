@@ -1,5 +1,30 @@
 const { getPool } = require("../config/database");
 
+const ORDER_VISIBLE = "o.status NOT IN ('Cancelled', 'Deleted')";
+
+const XRAY_INVOICE_SELECT = `
+  SELECT x.*,
+         o.order_number,
+         o.case_number,
+         o.defendant,
+         o.order_type,
+         o.subpoena_date,
+         o.created_at AS order_created_at,
+         o.serve_company_name,
+         o.serve_email,
+         o.applicant_first_name,
+         o.applicant_middle_name,
+         o.applicant_last_name,
+         o.facility_id,
+         f.facility_name,
+         f.email AS facility_email,
+         p.email AS provider_email,
+         p.company_name AS provider_name
+  FROM invoice_xray_details x
+  INNER JOIN orders o ON o.id = x.order_id
+  INNER JOIN facilities f ON f.id = o.facility_id
+  LEFT JOIN providers p ON p.id = o.provider_id`;
+
 class InvoiceXray {
   static async findByOrderId(orderId, connection = null) {
     const db = connection || getPool();
@@ -36,6 +61,141 @@ class InvoiceXray {
       acc[row.order_id] = row;
       return acc;
     }, {});
+  }
+
+  static async findOutstanding(filters = {}) {
+    const pool = getPool();
+    const conditions = [ORDER_VISIBLE, "x.sent_date IS NULL"];
+    const params = {};
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY f.facility_name ASC, x.xray_invoice_date ASC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findByFacilityId(facilityId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "o.facility_id = :facilityId",
+      "x.sent_date IS NULL",
+    ];
+    const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findResendByFacilityId(facilityId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "o.facility_id = :facilityId",
+      "x.sent_date IS NOT NULL",
+    ];
+    const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findResend(filters = {}) {
+    const pool = getPool();
+    const conditions = [ORDER_VISIBLE, "x.sent_date IS NOT NULL"];
+    const params = {};
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date ASC, f.facility_name ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findByOrderIdsWithDetails(orderIds = []) {
+    if (!orderIds.length) return [];
+
+    const pool = getPool();
+    const placeholders = orderIds.map((_, index) => `:orderId${index}`).join(", ");
+    const params = orderIds.reduce((acc, id, index) => {
+      acc[`orderId${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       WHERE x.order_id IN (${placeholders}) AND ${ORDER_VISIBLE}`,
+      params
+    );
+
+    return rows;
   }
 
   static async upsert(connection, orderId, data) {

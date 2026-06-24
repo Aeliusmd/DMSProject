@@ -11,6 +11,7 @@ const EMPTY_SUMMARY = {
 function buildInvoiceQuery(filters = {}) {
   const params = new URLSearchParams();
 
+  if (filters.type) params.set("type", filters.type);
   if (filters.tab) params.set("tab", filters.tab);
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
@@ -137,6 +138,26 @@ export async function writeOffInvoices(payload) {
   });
 
   return data?.data || { writtenOffCount: 0, invoices: [] };
+}
+
+export async function sendXrayInvoices(orderIds = []) {
+  const data = await request("/invoices/xray/send", {
+    method: "POST",
+    auth: true,
+    body: { orderIds },
+  });
+
+  return data?.data || { sentCount: 0 };
+}
+
+export async function resendXrayInvoices(orderIds = []) {
+  const data = await request("/invoices/xray/resend", {
+    method: "POST",
+    auth: true,
+    body: { orderIds },
+  });
+
+  return data?.data || { resentCount: 0 };
 }
 
 export async function resendInvoices(invoiceIds = []) {

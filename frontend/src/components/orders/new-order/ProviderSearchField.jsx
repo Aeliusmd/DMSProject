@@ -9,6 +9,7 @@ export default function ProviderSearchField({
   providerId = "",
   onInputChange,
   onSelect,
+  onBlur,
   hint,
   required = false,
   error = "",
@@ -85,6 +86,7 @@ export default function ProviderSearchField({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={onBlur}
         placeholder="Search or type company name"
         className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
           hasError

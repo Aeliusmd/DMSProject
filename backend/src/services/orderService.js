@@ -8,6 +8,7 @@ const path = require("path");
 const Order = require("../models/Order");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
+const { buildProviderPayload, findOrCreateProvider } = require("./providerService");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -40,9 +41,12 @@ const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const DEFAULT_PREPAYMENT_CHARGE = 15;
 const DEFAULT_CUSTODIAN_CHARGE = 15;
 
+/** Rush 2+ begins at 14 days since created_at (matches rushUtils). */
+const RUSH_READY_MIN_DAYS = 14;
+
 const STATUS_FILTER_MAP = {
   active: "Active",
-  ready: "Ready to Pickup",
+  ready_pickup: "Ready to Pickup",
   completed: "Completed",
   cancelled: "Cancelled",
   deleted: "Deleted",
@@ -51,6 +55,42 @@ const STATUS_FILTER_MAP = {
 
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
 const ALLOWED_CNR_DELIVERY = ["email", "fax", "pickup"];
+
+function parseBoolean(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return (
+      normalized === "true" ||
+      normalized === "1" ||
+      normalized === "yes" ||
+      normalized === "on"
+    );
+  }
+  return Boolean(value);
+}
+
+function isCnrOrder(data = {}) {
+  return (
+    parseBoolean(data.certificateNoRecords) ||
+    parseBoolean(data.certificate_no_records)
+  );
+}
+
+function assertValidCnrDeliveryDate(data = {}) {
+  if (!isCnrOrder(data)) {
+    return;
+  }
+
+  if (
+    ALLOWED_CNR_DELIVERY.includes(data.cnrDelivery) &&
+    !dateOrNull(data.cnrDateSent)
+  ) {
+    throw new ApiError(400, "CNR date is required for the selected delivery method");
+  }
+}
 
 const PAYMENT_PREFIXES = ["prepayment", "custodian", "xray"];
 
@@ -115,17 +155,7 @@ function dateOrNull(value) {
 }
 
 function boolToInt(value) {
-  // FormData/multipart sends booleans as strings ("true"/"false").
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    return normalized === "true" ||
-      normalized === "1" ||
-      normalized === "yes" ||
-      normalized === "on"
-      ? 1
-      : 0;
-  }
-  return value ? 1 : 0;
+  return parseBoolean(value) ? 1 : 0;
 }
 
 function hasAnyRecordsRequested(row) {
@@ -186,6 +216,51 @@ function formatDoiDisplay(row) {
 
 function hasDoi(row) {
   return Boolean(formatDoiDisplay(row));
+}
+
+function hasInjuryPayload(data = {}) {
+  const injuryType = trimOrNull(data.injuryType);
+  if (!injuryType) return false;
+
+  if (injuryType === "specific") {
+    return Boolean(trimOrNull(data.injuryDate));
+  }
+
+  return Boolean(trimOrNull(data.injuryDateBegin) || trimOrNull(data.injuryDateEnd));
+}
+
+function applyInjuryFromExtract(data = {}, extract = null) {
+  if (!extract || hasInjuryPayload(data)) {
+    return data;
+  }
+
+  const {
+    resolveExtractionSchema,
+    mapSchemaToExtractRow,
+  } = require("../utils/extractionMapper");
+
+  let injuryDate = extract.date_of_injury ? toInputDate(extract.date_of_injury) : "";
+
+  if (!injuryDate && extract.raw_extraction) {
+    const raw =
+      typeof extract.raw_extraction === "string"
+        ? JSON.parse(extract.raw_extraction || "{}")
+        : extract.raw_extraction;
+    const mapped = mapSchemaToExtractRow(resolveExtractionSchema(raw));
+    injuryDate = mapped.date_of_injury ? toInputDate(mapped.date_of_injury) : "";
+  }
+
+  if (!injuryDate) {
+    return data;
+  }
+
+  return {
+    ...data,
+    injuryType: "specific",
+    injuryDate,
+    injuryDateBegin: "",
+    injuryDateEnd: "",
+  };
 }
 
 function buildInjuryDatePayload(data) {
@@ -328,18 +403,17 @@ async function syncOrderWorkflowFromState(
   orderId,
   {
     payments = [],
-    subpoenaPrepaymentAmount = 0,
     invoiceServiceFee = 0,
     invoiceCustodianFee = 0,
+    skipCustodian = false,
+    resolvedCustodianDue = null,
+    invoiceRow = null,
   } = {}
 ) {
   const prepayment = getPrepaymentPayment(payments);
   const paidAmount = parsePaymentAmount(prepayment?.amount);
 
-  let chargeAmount = parsePaymentAmount(subpoenaPrepaymentAmount);
-  if (chargeAmount <= 0) {
-    chargeAmount = parsePaymentAmount(invoiceServiceFee);
-  }
+  let chargeAmount = parsePaymentAmount(invoiceServiceFee);
   if (chargeAmount <= 0) {
     chargeAmount = DEFAULT_PREPAYMENT_CHARGE;
   }
@@ -352,23 +426,48 @@ async function syncOrderWorkflowFromState(
       new Date(),
       connection
     );
+  } else {
+    await Order.upsertWorkflowStage(
+      orderId,
+      "Serve",
+      "pending",
+      null,
+      connection
+    );
   }
 
   const custodian = getPaymentByType(payments, "custodian");
   const custodianPaid = parsePaymentAmount(custodian?.amount);
-  let custodianCharge = parsePaymentAmount(invoiceCustodianFee);
-  if (custodianCharge <= 0) {
-    custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
-  }
+  const custodianDue = parsePaymentAmount(custodian?.dueAmount);
+  const custodianDueAmount =
+    resolvedCustodianDue !== null && resolvedCustodianDue !== undefined
+      ? parsePaymentAmount(resolvedCustodianDue)
+      : custodianDue;
+  const custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
 
-  if (custodianCharge > 0 && custodianPaid >= custodianCharge) {
-    await Order.upsertWorkflowStage(
-      orderId,
-      "Custodian",
-      "complete",
-      new Date(),
-      connection
-    );
+  if (!skipCustodian) {
+    const custodianIsComplete =
+      custodianCharge > 0 &&
+      (custodianPaid >= custodianCharge ||
+        (custodianDueAmount <= 0 && custodianPaid > 0));
+
+    if (custodianIsComplete) {
+      await Order.upsertWorkflowStage(
+        orderId,
+        "Custodian",
+        "complete",
+        new Date(),
+        connection
+      );
+    } else {
+      await Order.upsertWorkflowStage(
+        orderId,
+        "Custodian",
+        "pending",
+        null,
+        connection
+      );
+    }
   }
 }
 
@@ -382,28 +481,153 @@ async function markOrderWorkflowSent(orderId, connection = null) {
   );
 }
 
+function buildPaymentPayload(data, prefix) {
+  const checkNumber = trimOrNull(data[`${prefix}Check`]);
+  const paymentDate = dateOrNull(data[`${prefix}Date`]);
+  const rawAmount = trimOrNull(data[`${prefix}Paid`]);
+  const rawDue = trimOrNull(data[`${prefix}Due`]);
+  const memo = trimOrNull(data[`${prefix}Memo`]);
+
+  if (!checkNumber && !paymentDate && !rawAmount && !rawDue && !memo) {
+    return null;
+  }
+
+  const amount = rawAmount !== null ? Number(rawAmount) : null;
+  const dueAmount = rawDue !== null ? Number(rawDue) : null;
+
+  return {
+    paymentType: prefix,
+    checkNumber,
+    paymentDate,
+    amount: Number.isNaN(amount) ? null : amount,
+    dueAmount: Number.isNaN(dueAmount) ? null : dueAmount,
+    isPaid: amount && amount > 0 ? 1 : 0,
+    memo,
+  };
+}
+
 function collectPayments(data) {
-  return PAYMENT_PREFIXES.map((prefix) => {
-    const checkNumber = trimOrNull(data[`${prefix}Check`]);
-    const paymentDate = dateOrNull(data[`${prefix}Date`]);
-    const rawAmount = trimOrNull(data[`${prefix}Paid`]);
-    const memo = trimOrNull(data[`${prefix}Memo`]);
+  const prefixes = isCnrOrder(data)
+    ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
+    : PAYMENT_PREFIXES;
 
-    if (!checkNumber && !paymentDate && !rawAmount && !memo) {
-      return null;
+  return prefixes
+    .map((prefix) => buildPaymentPayload(data, prefix))
+    .filter(Boolean);
+}
+
+function resolvePrepaymentDueAmount(data) {
+  const paid = parsePaymentAmount(trimOrNull(data.prepaymentPaid));
+  const rawDue = trimOrNull(data.prepaymentDue);
+
+  if (rawDue !== null) {
+    const due = Number(rawDue);
+    if (!Number.isNaN(due)) {
+      return Math.max(0, due);
     }
+  }
 
-    const amount = rawAmount !== null ? Number(rawAmount) : null;
+  return Math.max(0, DEFAULT_PREPAYMENT_CHARGE - paid);
+}
 
-    return {
-      paymentType: prefix,
-      checkNumber,
-      paymentDate,
-      amount: Number.isNaN(amount) ? null : amount,
-      isPaid: amount && amount > 0 ? 1 : 0,
-      memo,
-    };
-  }).filter(Boolean);
+async function ensurePrepaymentPayment(connection, orderId, data) {
+  const payment = buildPaymentPayload(data, "prepayment");
+  const dueAmount = resolvePrepaymentDueAmount(data);
+  const paid = parsePaymentAmount(trimOrNull(data.prepaymentPaid));
+
+  if (payment) {
+    await Order.upsertPayment(connection, {
+      ...payment,
+      orderId,
+      dueAmount: payment.dueAmount ?? dueAmount,
+    });
+    return;
+  }
+
+  await Order.upsertPayment(connection, {
+    orderId,
+    paymentType: "prepayment",
+    checkNumber: null,
+    paymentDate: null,
+    amount: paid > 0 ? paid : null,
+    dueAmount,
+    isPaid: paid > 0 ? 1 : 0,
+    memo: null,
+  });
+}
+
+async function ensureCustodianPayment(connection, orderId, data) {
+  if (isCnrOrder(data)) {
+    return;
+  }
+
+  const payment = buildPaymentPayload(data, "custodian");
+  const dueAmount = resolveCustodianDueAmount(data);
+  const paid = parsePaymentAmount(trimOrNull(data.custodianPaid));
+
+  if (payment) {
+    await Order.upsertPayment(connection, {
+      ...payment,
+      orderId,
+      dueAmount: payment.dueAmount ?? dueAmount,
+    });
+    return;
+  }
+
+  await Order.upsertPayment(connection, {
+    orderId,
+    paymentType: "custodian",
+    checkNumber: null,
+    paymentDate: null,
+    amount: paid > 0 ? paid : null,
+    dueAmount,
+    isPaid: paid > 0 ? 1 : 0,
+    memo: null,
+  });
+}
+
+function resolveCustodianDueAmount(data) {
+  const paid = parsePaymentAmount(trimOrNull(data.custodianPaid));
+  const rawDue = trimOrNull(data.custodianDue);
+
+  if (rawDue !== null) {
+    const due = Number(rawDue);
+    if (!Number.isNaN(due)) {
+      return Math.max(0, due);
+    }
+  }
+
+  return Math.max(0, DEFAULT_CUSTODIAN_CHARGE - paid);
+}
+
+async function syncOrderPayments(connection, orderId, data) {
+  const prefixes = isCnrOrder(data)
+    ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
+    : PAYMENT_PREFIXES;
+
+  for (const prefix of prefixes) {
+    const payment = buildPaymentPayload(data, prefix);
+
+    if (payment) {
+      await Order.upsertPayment(connection, { ...payment, orderId });
+    } else {
+      await Order.deletePaymentByType(connection, orderId, prefix);
+    }
+  }
+
+  if (isCnrOrder(data)) {
+    await Order.deletePaymentByType(connection, orderId, "custodian");
+  }
+
+  await ensurePrepaymentPayment(connection, orderId, data);
+
+  if (!isCnrOrder(data)) {
+    await ensureCustodianPayment(connection, orderId, data);
+  }
+
+  await invoiceService.syncOrderPaymentDuesFromInvoice(connection, orderId, {
+    skipCustodian: isCnrOrder(data),
+  });
 }
 
 function mapPaymentsToForm(payments = []) {
@@ -411,14 +635,17 @@ function mapPaymentsToForm(payments = []) {
     prepaymentCheck: "",
     prepaymentDate: "",
     prepaymentPaid: "",
+    prepaymentDue: "",
     prepaymentMemo: "",
     custodianCheck: "",
     custodianDate: "",
     custodianPaid: "",
+    custodianDue: "",
     custodianMemo: "",
     xrayCheck: "",
     xrayDate: "",
     xrayPaid: "",
+    xrayDue: "",
     xrayMemo: "",
   };
 
@@ -432,10 +659,65 @@ function mapPaymentsToForm(payments = []) {
       payment.amount !== null && payment.amount !== undefined
         ? String(payment.amount)
         : "";
+    formFields[`${prefix}Due`] =
+      payment.due_amount !== null && payment.due_amount !== undefined
+        ? String(payment.due_amount)
+        : "";
     formFields[`${prefix}Memo`] = payment.memo || "";
   });
 
   return formFields;
+}
+
+function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = []) {
+  const invoiceFees = invoiceService.mapOrderInvoiceFees(
+    invoiceRow,
+    xrayRow,
+    payments
+  );
+  const prepaymentPaid = parsePaymentAmount(paymentForm.prepaymentPaid);
+  paymentForm.prepaymentDue = Math.max(
+    0,
+    DEFAULT_PREPAYMENT_CHARGE - prepaymentPaid
+  ).toFixed(2);
+
+  const custodianPaid = parsePaymentAmount(paymentForm.custodianPaid);
+  paymentForm.custodianDue = Math.max(
+    0,
+    DEFAULT_CUSTODIAN_CHARGE - custodianPaid
+  ).toFixed(2);
+
+  const targets = [
+    ["xray", invoiceFees.hasXrayInvoice, Number(invoiceFees.xrayFee) || 0],
+  ];
+
+  targets.forEach(([prefix, hasFee, fee]) => {
+    const paid = parsePaymentAmount(paymentForm[`${prefix}Paid`]);
+
+    if (hasFee && fee > 0) {
+      paymentForm[`${prefix}Due`] = Math.max(0, fee - paid).toFixed(2);
+      return;
+    }
+
+    if (paymentForm[`${prefix}Due`] === "") {
+      paymentForm[`${prefix}Due`] = "0";
+    }
+  });
+
+  return paymentForm;
+}
+
+function deriveDisplayOrderStatus(status, createdAt) {
+  if (status === "Ready" || status === "Ready to Pickup") {
+    return status;
+  }
+
+  const rush = calculateOrderRushLevel(createdAt);
+  if (status === "Active" && rush.level >= 2) {
+    return "Ready";
+  }
+
+  return status || "Active";
 }
 
 function deriveFilterStatus(status) {
@@ -514,6 +796,8 @@ function buildRecordsBlock(row) {
   if (row.specific_doctor) lines.push(row.specific_doctor);
 
   const medicalRecordsUrl = buildSubpoenaUrl(row.medical_records_storage_path);
+  const hasCnr = Boolean(Number(row.certificate_no_records));
+  const cnrReason = trimOrNull(row.cnr_reason) || "";
 
   return {
     title,
@@ -521,6 +805,14 @@ function buildRecordsBlock(row) {
     links: medicalRecordsUrl ? ["View Medical Records"] : [],
     hasMedicalRecords: Boolean(row.medical_records_storage_path),
     medicalRecordsUrl,
+    cnrNote:
+      hasCnr && !Number(row.cnr_memo)
+        ? {
+            label: "CNR Note",
+            text: cnrReason,
+            hasNote: true,
+          }
+        : null,
   };
 }
 
@@ -555,6 +847,7 @@ function mapOrderListRow(
     facilityInfo: buildFacilityBlock(row),
     year: orderYear,
     status: row.status,
+    displayStatus: deriveDisplayOrderStatus(row.status, row.created_at),
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
@@ -563,7 +856,7 @@ function mapOrderListRow(
     hasSubpoenaFile: Boolean(row.subpoena_storage_path),
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
     isRecords: hasAnyRecordsRequested(row),
-    isWriteOffs: row.status === "Write Offs",
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -595,6 +888,8 @@ function mapOrderListRow(
       orderPayments
     ),
     certificateNoRecords: Boolean(Number(row.certificate_no_records)),
+    cnrReason: row.cnr_reason || "",
+    cnrMemo: Boolean(Number(row.cnr_memo)),
     cnrDelivery: row.cnr_delivery || "",
     mailSentDate: toInputDate(row.ready_date),
     readyDate: toInputDate(row.ready_date),
@@ -750,16 +1045,23 @@ function mapOrderDetail(
   workflowStages = [],
   notes = [],
   invoiceRow = null,
-  xrayRow = null,
-  subpoenaPrepaymentDue = 0
+  xrayRow = null
 ) {
+  const paymentSummary = invoiceService.mapOrderPaymentsSummary(payments);
+  const paymentForm = enrichPaymentDueFields(
+    mapPaymentsToForm(payments),
+    invoiceRow,
+    xrayRow,
+    payments
+  );
+
   return {
     id: row.id,
     orderNumber: row.order_number || "",
     status: row.status || "",
     isSubpoena: Boolean(Number(row.is_subpoena)),
     isRecords: hasAnyRecordsRequested(row),
-    isWriteOffs: row.status === "Write Offs",
+    isWriteOffs: Boolean(Number(row.is_write_offs)),
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",
@@ -843,11 +1145,10 @@ function mapOrderDetail(
     cnrDateSent: toInputDate(row.cnr_date_sent),
     cnrMemo: Boolean(row.cnr_memo),
 
-    ...mapPaymentsToForm(payments),
-    ...invoiceService.mapOrderPaymentsSummary(payments),
-    invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow),
-    subpoenaPrepaymentAmount:
-      subpoenaPrepaymentDue > 0 ? String(subpoenaPrepaymentDue) : "",
+    ...paymentForm,
+    paymentLines: paymentSummary.paymentLines,
+    orderAmountPaid: paymentSummary.orderAmountPaid,
+    invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow, payments),
   };
 }
 
@@ -858,7 +1159,9 @@ async function getAllOrders(query = {}) {
     filters.facilityId = Number(query.facility);
   }
 
-  if (query.status && STATUS_FILTER_MAP[query.status]) {
+  if (query.status === "ready") {
+    filters.readyFilter = true;
+  } else if (query.status && STATUS_FILTER_MAP[query.status]) {
     filters.status = STATUS_FILTER_MAP[query.status];
   }
 
@@ -934,28 +1237,6 @@ async function getOrderStats() {
   };
 }
 
-async function resolveSubpoenaPrepaymentDue(orderId, invoiceRow) {
-  if (invoiceRow) {
-    const fee = Number(invoiceRow.service_fee);
-    if (Number.isFinite(fee) && fee > 0) {
-      return fee;
-    }
-  }
-
-  const pool = getPool();
-  const [rows] = await pool.execute(
-    `SELECT amount
-     FROM batch_scan_extracts
-     WHERE order_id = :orderId AND is_deleted = 0
-     ORDER BY id DESC
-     LIMIT 1`,
-    { orderId }
-  );
-
-  const amount = Number(rows[0]?.amount);
-  return Number.isFinite(amount) && amount > 0 ? amount : 0;
-}
-
 async function getOrderById(id) {
   const order = await Order.findById(id);
 
@@ -969,9 +1250,6 @@ async function getOrderById(id) {
   const notes = await Order.findNotesByOrderId(order.id);
   const invoiceRow = await Invoice.findByOrderId(order.id);
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
-  const subpoenaPrepaymentDue = order.subpoena_storage_path
-    ? await resolveSubpoenaPrepaymentDue(order.id, invoiceRow)
-    : 0;
 
   return mapOrderDetail(
     order,
@@ -980,8 +1258,7 @@ async function getOrderById(id) {
     workflowStages,
     notes,
     invoiceRow,
-    xrayRow,
-    subpoenaPrepaymentDue
+    xrayRow
   );
 }
 
@@ -1312,34 +1589,31 @@ async function resolveProviderId(connection, data) {
     return data.providerId ? Number(data.providerId) : null;
   }
 
+  let providerPayload;
+  try {
+    providerPayload = buildProviderPayload(data);
+  } catch {
+    return data.providerId ? Number(data.providerId) : null;
+  }
+
   if (data.providerId) {
     const selected = await Provider.findById(Number(data.providerId), connection);
-    if (
-      selected &&
-      selected.company_name.toLowerCase().trim() === companyName.toLowerCase()
-    ) {
+    if (selected) {
+      await Provider.update(connection, selected.id, providerPayload);
       return selected.id;
     }
   }
 
-  const existing = await Provider.findByCompanyName(companyName, connection);
-  if (existing) {
-    return existing.id;
-  }
-
-  return Provider.create(connection, {
-    companyName,
-    address: trimOrNull(data.address),
-    zipCode: trimOrNull(data.zip),
-    city: trimOrNull(data.city),
-    state: trimOrNull(data.state),
-    phone: trimOrNull(data.phone),
-    fax: trimOrNull(data.fax),
-    email: trimOrNull(data.email),
-  });
+  const { provider } = await findOrCreateProvider(
+    { ...data, ...providerPayload },
+    connection
+  );
+  return provider.id;
 }
 
 async function createOrder(data, actorId, files) {
+  assertValidCnrDeliveryDate(data);
+
   const facility = await Facility.findById(Number(data.facility));
 
   if (!facility) {
@@ -1353,18 +1627,19 @@ async function createOrder(data, actorId, files) {
   const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
   const subpoenaExtractId = Number(data.subpoenaExtractId) || null;
 
+  let linkedExtract = null;
   let subpoenaStoragePath = null;
   if (subpoenaExtractId) {
-    const extract = await batchScanRepository.getExtractById(subpoenaExtractId);
-    if (!extract) {
+    linkedExtract = await batchScanRepository.getExtractById(subpoenaExtractId);
+    if (!linkedExtract) {
       throw new ApiError(400, "Subpoena extract not found");
     }
-    if (extract.is_processed) {
+    if (linkedExtract.is_processed) {
       throw new ApiError(409, "This subpoena extract was already processed into an order");
     }
     try {
       subpoenaStoragePath = fileStorage.archiveBatchScanSubpoenaToProcessed(
-        extract.storage_path,
+        linkedExtract.storage_path,
         orderNumber
       );
     } catch (error) {
@@ -1381,10 +1656,11 @@ async function createOrder(data, actorId, files) {
     await connection.beginTransaction();
 
     const providerId = await resolveProviderId(connection, data);
-    const payload = buildOrderDbPayload({ ...data, providerId });
+    const payload = buildOrderDbPayload(
+      applyInjuryFromExtract({ ...data, providerId }, linkedExtract)
+    );
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
-    const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     const orderId = await Order.create(connection, {
       ...payload,
@@ -1396,9 +1672,7 @@ async function createOrder(data, actorId, files) {
       createdBy: actorId || null,
     });
 
-    for (const payment of payments) {
-      await Order.upsertPayment(connection, { ...payment, orderId });
-    }
+    await syncOrderPayments(connection, orderId, data);
 
     await saveOrderDocuments(connection, {
       orderId,
@@ -1418,12 +1692,14 @@ async function createOrder(data, actorId, files) {
 
     await syncOrderWorkflowFromState(connection, orderId, {
       payments,
-      subpoenaPrepaymentAmount,
       invoiceServiceFee: 0,
       invoiceCustodianFee: 0,
+      skipCustodian: isCnrOrder(data),
     });
 
     await connection.commit();
+
+    await maybeSendCnrMemoEmail(orderId, data, null, actorId);
 
     return getOrderById(orderId);
   } catch (error) {
@@ -1435,6 +1711,8 @@ async function createOrder(data, actorId, files) {
 }
 
 async function updateOrder(id, data, actorId, files) {
+  assertValidCnrDeliveryDate(data);
+
   const existing = await Order.findById(id);
 
   if (!existing) {
@@ -1469,7 +1747,6 @@ async function updateOrder(id, data, actorId, files) {
     const payload = buildOrderDbPayload({ ...data, providerId });
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
-    const subpoenaPrepaymentAmount = parsePaymentAmount(data.subpoenaPrepaymentAmount);
 
     await Order.update(connection, existing.id, {
       ...payload,
@@ -1478,14 +1755,7 @@ async function updateOrder(id, data, actorId, files) {
       orderNumber,
     });
 
-    for (const payment of payments) {
-      await Order.upsertPayment(connection, {
-        ...payment,
-        orderId: existing.id,
-      });
-    }
-
-    await invoiceService.syncInvoiceAmountPaidFromOrder(connection, existing.id);
+    await syncOrderPayments(connection, existing.id, data);
 
     await saveOrderDocuments(connection, {
       orderId: existing.id,
@@ -1494,18 +1764,24 @@ async function updateOrder(id, data, actorId, files) {
       actorId,
     });
 
-    const invoiceRow = await Invoice.findByOrderId(existing.id);
-    const invoiceServiceFee = invoiceRow ? Number(invoiceRow.service_fee) : 0;
-    const invoiceCustodianFee = invoiceRow ? Number(invoiceRow.custodian_fee) : 0;
+    const savedPayments = await Order.findPaymentsByOrderId(existing.id, connection);
+    const resolvedCustodianDue = invoiceService.resolveCustodianPaymentDue(
+      null,
+      savedPayments
+    );
 
     await syncOrderWorkflowFromState(connection, existing.id, {
-      payments,
-      subpoenaPrepaymentAmount,
-      invoiceServiceFee,
-      invoiceCustodianFee,
+      payments: isCnrOrder(data)
+        ? payments.filter((payment) => payment.paymentType !== "custodian")
+        : payments,
+      invoiceServiceFee: 0,
+      skipCustodian: isCnrOrder(data),
+      resolvedCustodianDue,
     });
 
     await connection.commit();
+
+    await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 
     return getOrderById(existing.id);
   } catch (error) {
@@ -1850,6 +2126,105 @@ function normalizeRecipientEmails(primaryEmail, additionalEmails = []) {
   }
 
   return recipients;
+}
+
+function resolveCnrRecipientEmail(row = {}, data = {}) {
+  return (
+    trimOrNull(data.email || data.serveEmail) ||
+    trimOrNull(row.serve_email) ||
+    trimOrNull(row.contact1_email) ||
+    trimOrNull(row.contact2_email) ||
+    trimOrNull(row.provider_email) ||
+    null
+  );
+}
+
+function buildCnrMemoPdfData(order) {
+  return {
+    memoDate: order.cnr_date_sent || new Date(),
+    recipientCompany: order.serve_company_name || order.provider_name || "",
+    applicant: buildApplicantName(order),
+    reference: order.order_number || "",
+    facilityName: order.facility_name || "",
+    cnrReason: trimOrNull(order.cnr_reason) || "",
+  };
+}
+
+function shouldSendCnrMemoEmail(existingOrder, data) {
+  if (!isCnrOrder(data) || !parseBoolean(data.cnrMemo)) {
+    return false;
+  }
+
+  if (data.cnrDelivery !== "email") {
+    return false;
+  }
+
+  if (!dateOrNull(data.cnrDateSent)) {
+    return false;
+  }
+
+  const recipient = resolveCnrRecipientEmail(existingOrder || {}, data);
+  if (!recipient || !EMAIL_PATTERN.test(recipient)) {
+    return false;
+  }
+
+  if (!existingOrder) {
+    return true;
+  }
+
+  if (!Number(existingOrder.certificate_no_records)) {
+    return true;
+  }
+
+  return (
+    existingOrder.cnr_delivery !== "email" ||
+    Boolean(Number(existingOrder.cnr_memo)) !== parseBoolean(data.cnrMemo) ||
+    toInputDate(existingOrder.cnr_date_sent) !==
+      toInputDate(dateOrNull(data.cnrDateSent)) ||
+    trimOrNull(existingOrder.cnr_reason) !== trimOrNull(data.cnrReason) ||
+    resolveCnrRecipientEmail(existingOrder) !==
+      resolveCnrRecipientEmail(existingOrder, data)
+  );
+}
+
+async function maybeSendCnrMemoEmail(orderId, data, existingOrder = null, actorId = null) {
+  if (!shouldSendCnrMemoEmail(existingOrder, data)) {
+    return null;
+  }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    return null;
+  }
+
+  const recipient = resolveCnrRecipientEmail(order, data);
+  const { generateCnrMemoPdf } = require("../utils/cnrMemoPdf");
+  const { sendCnrMemoEmail } = require("./emailService");
+  const pdfBuffer = await generateCnrMemoPdf(buildCnrMemoPdfData(order));
+  const result = await sendCnrMemoEmail({
+    to: recipient,
+    orderNumber: order.order_number,
+    applicantName: buildApplicantName(order),
+    memoDate: order.cnr_date_sent,
+    pdfBuffer,
+  });
+
+  await Order.createActivityLog({
+    orderId,
+    activityDate: new Date(),
+    performedBy: actorId || null,
+    authorName: "System",
+    callbackDate: null,
+    note: `CNR Memo emailed to ${recipient}`,
+    attachmentPath: null,
+  });
+
+  return {
+    recipient,
+    sentDate: toInputDate(order.cnr_date_sent),
+    delivered: Boolean(result.delivered),
+    devLogged: Boolean(result.devLogged),
+  };
 }
 
 async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {

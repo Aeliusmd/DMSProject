@@ -31,37 +31,23 @@ export function dueMoneyInputFromFee(feeAmount, paidAmount) {
   return dueAmountFromFee(feeAmount, paidAmount).toFixed(2);
 }
 
-export function mapInvoiceFeesToDueForm(feeFormData, paymentLines = []) {
-  const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
-  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
-
+export function mapInvoiceFeesToDueForm(feeFormData) {
   return {
     ...feeFormData,
-    custodianFee: dueMoneyInputFromFee(feeFormData.custodianFee, custodianPaid),
-    xrayFee: dueMoneyInputFromFee(feeFormData.xrayFee, xrayPaid),
+    storageFee: parsePaymentAmount(feeFormData.storageFee).toFixed(2),
   };
 }
 
-export function mapDueFormToInvoiceFees(formData, paymentLines = []) {
-  const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
-  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
-
+export function mapDueFormToInvoiceFees(formData) {
   return {
     ...formData,
-    serviceFee: parsePaymentAmount(formData.serviceFee).toFixed(2),
-    custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid).toFixed(2),
-    xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid).toFixed(2),
+    storageFee: parsePaymentAmount(formData.storageFee).toFixed(2),
   };
 }
 
-export function resolveFullFeeAmounts(formData, paymentLines = []) {
-  const custodianPaid = getPaymentLineAmount(paymentLines, "custodian");
-  const xrayPaid = getPaymentLineAmount(paymentLines, "xray");
-
+export function resolveFullFeeAmounts(formData) {
   return {
-    serviceFee: parsePaymentAmount(formData.serviceFee),
-    custodianFee: feeAmountFromDue(formData.custodianFee, custodianPaid),
-    xrayFee: feeAmountFromDue(formData.xrayFee, xrayPaid),
+    storageFee: parsePaymentAmount(formData.storageFee),
   };
 }
 
@@ -80,16 +66,151 @@ export function formatPaymentDue(chargeAmount, paidValue, options = {}) {
   return formatMoneyAmount(Math.max(0, charge - paid));
 }
 
-export function getPaymentChargeForType(type, invoiceFees) {
-  if (invoiceFees?.hasInvoice) {
-    if (type === "prepayment") {
-      return parsePaymentAmount(invoiceFees.serviceFee);
-    }
-    if (type === "custodian") return parsePaymentAmount(invoiceFees.custodianFee);
-    if (type === "xray") return parsePaymentAmount(invoiceFees.xrayFee);
+export function getPaymentChargeForType(type, invoiceFees = {}) {
+  if (type === "xray" && invoiceFees?.hasXrayInvoice) {
+    return parsePaymentAmount(invoiceFees.xrayFee);
   }
 
   return PAYMENT_CHARGE_AMOUNTS[type] ?? 0;
+}
+
+export function resolveCustodianDue(_invoiceFees = {}, custodianPaid = 0) {
+  return dueAmountFromFee(PAYMENT_CHARGE_AMOUNTS.custodian, custodianPaid);
+}
+
+export function resolveXrayDue(invoiceFees = {}, xrayPaid = 0) {
+  const charge = invoiceFees?.hasXrayInvoice
+    ? parsePaymentAmount(invoiceFees.xrayFee)
+    : parsePaymentAmount(invoiceFees?.xrayFee);
+
+  return dueAmountFromFee(charge, xrayPaid);
+}
+
+export function getPaymentTotalOwed(type, invoiceFees = {}, storedDue = "") {
+  if (type === "xray") {
+    return resolvePaymentDue(type, invoiceFees, 0);
+  }
+
+  if (type === "custodian" || type === "prepayment") {
+    return getPaymentChargeForType(type, invoiceFees);
+  }
+
+  const charge = resolvePaymentCharge(type, invoiceFees, 0, storedDue);
+  return dueAmountFromFee(charge, 0);
+}
+
+export function capPaymentPaidEntry(
+  type,
+  invoiceFees = {},
+  currentPaid = 0,
+  storedDue = "",
+  rawValue = ""
+) {
+  if (type !== "custodian" && type !== "xray") {
+    return { paidValue: rawValue, capped: false };
+  }
+
+  if (rawValue === "") {
+    return { paidValue: "", capped: false };
+  }
+
+  const totalOwed = getPaymentTotalOwed(type, invoiceFees, storedDue);
+  const entered = parsePaymentAmount(rawValue);
+
+  if (entered <= totalOwed) {
+    return { paidValue: rawValue, capped: false };
+  }
+
+  return {
+    paidValue: totalOwed > 0 ? totalOwed.toFixed(2) : "0.00",
+    capped: true,
+  };
+}
+
+export function validateOrderPaymentAmounts(data = {}, invoiceFees = {}) {
+  const errors = {};
+
+  if (!data.certificateNoRecords) {
+    validatePaymentPaidCap(errors, "custodian", data, invoiceFees);
+  }
+
+  validatePaymentPaidCap(errors, "xray", data, invoiceFees);
+
+  return errors;
+}
+
+function validatePaymentPaidCap(errors, prefix, data, invoiceFees) {
+  const paidField = `${prefix}Paid`;
+  const rawPaid = data[paidField];
+
+  if (!rawPaid) {
+    return;
+  }
+
+  const paid = parsePaymentAmount(rawPaid);
+  const totalOwed = getPaymentTotalOwed(
+    prefix,
+    invoiceFees,
+    data[`${prefix}Due`]
+  );
+
+  if (paid > totalOwed) {
+    errors[paidField] = "Paid cannot exceed due";
+  }
+}
+
+export function resolvePaymentCharge(type, invoiceFees = {}, paidValue = 0, dueValue = 0) {
+  if (type === "xray" && invoiceFees?.hasXrayInvoice) {
+    return getPaymentChargeForType(type, invoiceFees);
+  }
+
+  if (type === "custodian" || type === "prepayment") {
+    return getPaymentChargeForType(type, invoiceFees);
+  }
+
+  const paid = parsePaymentAmount(paidValue);
+  const due = parsePaymentAmount(dueValue);
+  return paid + due;
+}
+
+export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0) {
+  if (type === "xray" && invoiceFees?.hasXrayInvoice) {
+    return resolveXrayDue(invoiceFees, paidValue);
+  }
+
+  const charge = getPaymentChargeForType(type, invoiceFees);
+  return dueAmountFromFee(charge, paidValue);
+}
+
+export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFees || {}) {
+  const next = { ...formData };
+  const fixedChargePrefixes = ["prepayment", "custodian"];
+
+  for (const prefix of fixedChargePrefixes) {
+    if (prefix === "custodian" && formData.certificateNoRecords) {
+      continue;
+    }
+
+    const charge = getPaymentChargeForType(prefix, invoiceFees);
+    next[`${prefix}Due`] = dueAmountFromFee(
+      charge,
+      formData[`${prefix}Paid`]
+    ).toFixed(2);
+  }
+
+  if (!formData.certificateNoRecords && invoiceFees?.hasXrayInvoice) {
+    next.xrayDue = resolveXrayDue(invoiceFees, formData.xrayPaid).toFixed(2);
+  } else if (formData.xrayDue === "" || formData.xrayDue === undefined) {
+    const charge = resolvePaymentCharge(
+      "xray",
+      invoiceFees,
+      formData.xrayPaid,
+      formData.xrayDue
+    );
+    next.xrayDue = dueAmountFromFee(charge, formData.xrayPaid).toFixed(2);
+  }
+
+  return next;
 }
 
 export function deriveInvoiceStatusLabel(totalAmount, amountPaid, writeoffAmount = 0) {
@@ -122,14 +243,16 @@ export function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 
   const paid = parsePaymentAmount(amountPaid);
   const writeoff = parsePaymentAmount(writeoffAmount);
   const amountDue = Math.max(0, total - paid - writeoff);
-  const overpayment = Math.max(0, paid - total);
+
   const status = deriveInvoiceStatusLabel(total, paid, writeoff);
 
   return {
+    total,
+    amountPaid: paid,
+    writeoffAmount: writeoff,
     amountDue,
-    overpayment,
     status,
-    isOverpaid: overpayment > 0,
+    overpayment: Math.max(0, paid - total),
   };
 }
 
@@ -151,42 +274,30 @@ export function resolvePersistedInvoiceAmounts(
   return totals;
 }
 
-export function formatMoneyAmount(amount) {
+export function formatMoneyAmount(value) {
+  const amount = parsePaymentAmount(value);
   return `$${amount.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-const ORDER_PAYMENT_FIELDS = [
+export const ORDER_PAYMENT_SUMMARY_LINES = [
   { type: "prepayment", label: "Prepayment", field: "prepaymentPaid" },
   { type: "custodian", label: "Custodian", field: "custodianPaid" },
-  { type: "xray", label: "X-Ray Fee", field: "xrayPaid" },
+  { type: "xray", label: "X-Ray", field: "xrayPaid" },
 ];
 
-export function buildPaymentLinesFromOrder(orderData) {
-  if (Array.isArray(orderData?.paymentLines) && orderData.paymentLines.length) {
-    return orderData.paymentLines;
-  }
+export function buildPaymentLinesFromOrder(order = {}) {
+  return ORDER_PAYMENT_SUMMARY_LINES.map(({ type, label, field }) => {
+    const amount = parsePaymentAmount(order[field]);
+    if (amount <= 0) return null;
 
-  return ORDER_PAYMENT_FIELDS.reduce((lines, { type, label, field }) => {
-    const amount = parsePaymentAmount(orderData?.[field]);
-    if (amount <= 0) return lines;
-
-    lines.push({
+    return {
       type,
       label,
       amount,
       bracketLabel: `${label} (${formatMoneyAmount(amount)})`,
-    });
-
-    return lines;
-  }, []);
-}
-
-export function sumPaymentLineAmounts(paymentLines = []) {
-  return paymentLines.reduce(
-    (sum, line) => sum + parsePaymentAmount(line?.amount),
-    0
-  );
+    };
+  }).filter(Boolean);
 }
