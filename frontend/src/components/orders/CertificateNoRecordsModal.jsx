@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import SheetLetterhead from "@/components/orders/SheetLetterhead";
-import { buildCertificateFormData } from "@/lib/orders/certificateFormData";
+import { buildCnrDocumentFormData } from "@/lib/orders/certificateFormData";
 import {
   CNR_SIGNER,
   SHEET_COLORS,
@@ -25,9 +25,13 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
     };
   }, [isOpen]);
 
-  const certificateData = useMemo(() => buildCertificateFormData(order), [order]);
+  const certificateData = useMemo(() => buildCnrDocumentFormData(order), [order]);
 
   if (!mounted || !isOpen || !order || !certificateData) return null;
+
+  const isMemo = certificateData.isMemo;
+  const documentTitle = isMemo ? "Memo" : "Certificate of No Records";
+  const modalTitle = `${documentTitle} — ${certificateData.orderId}`;
 
   const handlePrint = () => {
     window.print();
@@ -43,9 +47,7 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
               style={{ backgroundColor: SHEET_COLORS.purple }}
             />
 
-            <h2 className="text-[13px] font-semibold text-[#111827]">
-              Certificate of No Records — {certificateData.orderId}
-            </h2>
+            <h2 className="text-[13px] font-semibold text-[#111827]">{modalTitle}</h2>
           </div>
 
           <div className="flex items-center gap-2">
@@ -77,71 +79,60 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
         <div className="min-h-0 flex-1 overflow-y-auto bg-white px-8 py-7 print:overflow-visible">
           <div className="certificate-sheet mx-auto w-full max-w-[610px] bg-white font-serif text-[#111827]">
             <SheetLetterhead />
-
-            <h1 className="mt-6 text-center text-[16px] font-bold">
-              Certificate of No Records
-            </h1>
-
-            <div className="mt-7 space-y-4 text-[13px] leading-[21px]">
-              <p>{certificateData.date}</p>
-
-              <div>
-                <p className="font-bold">{certificateData.companyName}</p>
-                {certificateData.companyAddressLines.map((line) => (
-                  <p key={line} className="font-bold">
-                    {line}
-                  </p>
-                ))}
-              </div>
-
-              <div className="space-y-1">
-                <p>
-                  <span className="ml-8 font-bold">Regarding:</span>{" "}
-                  <span className="text-[#B45309]">{certificateData.applicant}</span>
-                </p>
-
-                <p>
-                  <span className="ml-8 font-bold">Reference #</span>{" "}
-                  <span className="text-[#B45309]">{certificateData.reference}</span>
-                </p>
-              </div>
-
-              <p>
-                I understand, being the{" "}
-                <span className="text-[#B45309]">authorized Release of Information</span>{" "}
-                for:{" "}
-                <span className="font-bold text-[#B45309]">
-                  {certificateData.facilityName}
-                </span>
-              </p>
-
-              <p>Declare the following:</p>
-
-              <p>
-                We certify that a thorough search of our files, carried out under{" "}
-                <span className="text-[#B45309]">our direction and control</span> revealed
-                no records on the patient named in the{" "}
-                <span className="text-[#B45309]">Subpoena / Authorization</span> for the
-                above named{" "}
-                <span className="text-[#B45309]">medical facility / doctor.</span>
-              </p>
-
-              <p className="text-[#B45309]">
-                I declare under penalty of perjury, under the law of the State of
-                California, that the foregoing is true and correct.
-              </p>
-
-              <div className="pt-7">
-                <p className="font-bold">{CNR_SIGNER.name}</p>
-                <p className="underline">{CNR_SIGNER.title}</p>
-                <p>{SHEET_COMPANY_INFO.companyName}</p>
-              </div>
-            </div>
+            <CnrDocumentContent data={certificateData} title={documentTitle} />
           </div>
         </div>
       </section>
     </div>,
     document.body
+  );
+}
+
+function CnrDocumentContent({ data, title }) {
+  return (
+    <>
+      <h1 className="mt-6 text-center text-[16px] font-bold">{title}</h1>
+
+      <div className="mt-7 space-y-4 text-[13px] leading-[21px]">
+        <p>{data.documentDate}</p>
+        <p className="font-bold">{data.recipientCompany}</p>
+
+        <div className="space-y-1">
+          <p>
+            <span className="ml-8 font-bold">Regarding:</span> {data.applicant}
+          </p>
+          <p>
+            <span className="ml-8 font-bold">Reference #</span> {data.reference}
+          </p>
+        </div>
+
+        <p>
+          I understand, being the authorized Release of Information for:{" "}
+          {data.facilityName}
+        </p>
+
+        <p>Declare the following:</p>
+
+        <p>
+          We certify that a thorough search of our files, carried out under our
+          direction and control revealed no records on the patient named in the
+          Subpoena / Authorization for the above named medical facility / doctor.
+        </p>
+
+        {data.cnrReason ? <p className="font-bold">{data.cnrReason}</p> : null}
+
+        <p>
+          I declare under penalty of perjury, under the law of the State of
+          California, that the foregoing is true and correct.
+        </p>
+
+        <div className="pt-7">
+          <p className="font-bold">{CNR_SIGNER.name}</p>
+          <p>{CNR_SIGNER.title}</p>
+          <p>{SHEET_COMPANY_INFO.companyName}</p>
+        </div>
+      </div>
+    </>
   );
 }
 

@@ -14,7 +14,13 @@ const COPY_SERVICE_SIGNER = {
   department: "Legal Department",
 };
 
+const CNR_SIGNER = {
+  name: "Matthew Perera",
+  title: "Release of Information Coordinator",
+};
+
 module.exports = {
   SHEET_COMPANY_INFO,
   COPY_SERVICE_SIGNER,
+  CNR_SIGNER,
 };

@@ -398,11 +398,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       }
     },
     [
-      normalizedFilters.facility,
-      normalizedFilters.year,
+    normalizedFilters.facility,
+    normalizedFilters.year,
       normalizedFilters.period,
-      normalizedFilters.status,
-      normalizedFilters.search,
+    normalizedFilters.status,
+    normalizedFilters.search,
     ]
   );
 
@@ -864,13 +864,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         </p>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => setSelectedNoteOrder(order)}
-                        className="mt-1 block text-[10px] text-[#007F96] underline"
-                      >
+                        <button
+                          type="button"
+                          onClick={() => setSelectedNoteOrder(order)}
+                          className="mt-1 block text-[10px] text-[#007F96] underline"
+                        >
                         {order.note ? "Note ●" : "Note"}
-                      </button>
+                        </button>
 
                       <button
                         type="button"
@@ -921,7 +921,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       {order.facilityInfo?.address ? (
                         <p className="mt-1 text-[10px] leading-[15px] text-[#64748B]">
                           {order.facilityInfo.address}
-                        </p>
+                      </p>
                       ) : null}
                     </td>
 
@@ -1067,6 +1067,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <RecordsBlock
                         records={order.records}
                         isCnr={order.certificateNoRecords}
+                        cnrMemo={order.cnrMemo}
                         cnrDelivery={order.cnrDelivery}
                         cnrDateSent={order.cnrDateSent}
                         onPrintedSentOutClick={() =>
@@ -1085,12 +1086,15 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                               .join("\n")
                           )
                         }
-                        onCnrNoteClick={() =>
-                          openCnrTextModal(
-                            setCnrTextModal,
-                            order,
-                            order.cnrMemo ? "Memo" : "CNR Note"
-                          )
+                        onCnrNoteClick={
+                          !order.cnrMemo
+                            ? () =>
+                                openCnrTextModal(
+                                  setCnrTextModal,
+                                  order,
+                                  "CNR Note"
+                                )
+                            : undefined
                         }
                       />
                     </td>
@@ -1476,8 +1480,8 @@ function OrderPdfPreviewModal({
               Order #{order?.id || order?.dbId}
             </p>
           </div>
-          <button
-            type="button"
+    <button
+      type="button"
             onClick={onClose}
             className="rounded-[6px] px-3 py-1.5 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
           >
@@ -1584,7 +1588,7 @@ function WorkflowStageItem({
           aria-label="Remove medical records"
         >
           <CloseIcon />
-        </button>
+    </button>
       </div>
     );
   }
@@ -1707,14 +1711,14 @@ function InvoiceBlock({
       ) : (
         <MissingProviderEmailNotice orderDbId={orderDbId} />
       )}
-      <button
-        type="button"
+        <button
+          type="button"
         onClick={onSendInvoice}
         disabled={sending}
         className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-      >
+        >
         {sending ? "Sending..." : "Send Invoice"}
-      </button>
+        </button>
     </div>
   ) : null;
 
@@ -1729,14 +1733,14 @@ function InvoiceBlock({
       ) : (
         <MissingProviderEmailNotice orderDbId={orderDbId} />
       )}
-      <button
-        type="button"
+        <button
+          type="button"
         onClick={onResendInvoice}
         disabled={emailing}
         className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-      >
+        >
         {emailing ? "Emailing..." : "Email Invoice"}
-      </button>
+        </button>
     </div>
   ) : null;
 
@@ -1764,12 +1768,12 @@ function InvoiceBlock({
         Print Xray Invoice
       </button>
 
-      <button
-        type="button"
-        onClick={onXrayCoverSheet}
+        <button
+          type="button"
+          onClick={onXrayCoverSheet}
         className="block text-left text-[#007F96] underline"
-      >
-        X-ray Cover Sheet
+        >
+          X-ray Cover Sheet
       </button>
 
       {!invoice.xraySentDate ? (
@@ -1786,8 +1790,8 @@ function InvoiceBlock({
             className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
           >
             {emailingXray ? "Sending..." : "Email Xray Invoice"}
-          </button>
-        </div>
+        </button>
+      </div>
       ) : null}
 
       {invoice.xraySentDate ? (
@@ -1895,13 +1899,13 @@ function InvoiceBlock({
       ) : null}
     </>
   ) : !isCnr ? (
-    <button
-      type="button"
-      onClick={onCreateXrayInvoice}
+        <button
+          type="button"
+          onClick={onCreateXrayInvoice}
       className="block text-left text-[#007F96] underline"
-    >
-      Create Xray Invoice
-    </button>
+        >
+          Create Xray Invoice
+        </button>
   ) : null;
 
   if (isCnr) {
@@ -1919,7 +1923,7 @@ function InvoiceBlock({
               className="block text-left text-[#007F96] underline"
             >
               Create Invoice
-            </button>
+        </button>
 
             <button
               type="button"
@@ -1934,9 +1938,9 @@ function InvoiceBlock({
           </>
         ) : null}
         {!isCnr ? xraySection : null}
-      </div>
-    );
-  }
+    </div>
+  );
+}
 
   if (!allowStandardInvoice) {
     return <div className="space-y-1 text-[10px]">{xraySection}</div>;
@@ -2059,12 +2063,14 @@ function InvoiceMoneyRow({ label, date, amount, amountClassName = "" }) {
 function RecordsBlock({
   records,
   isCnr = false,
+  cnrMemo = false,
   cnrDelivery = "",
   cnrDateSent = "",
   onCnrNoteClick,
   onPrintedSentOutClick,
 }) {
   const showPrintedSentOutNote = isCnr && cnrDelivery && cnrDateSent;
+  const showCnrNote = isCnr && !cnrMemo && records.cnrNote;
 
   return (
     <div className="space-y-1 text-[10px]">
@@ -2072,10 +2078,10 @@ function RecordsBlock({
 
       {!isCnr &&
         records.lines.map((line) => (
-          <p key={line} className="text-[#334155]">
-            {line}
-          </p>
-        ))}
+        <p key={line} className="text-[#334155]">
+          {line}
+        </p>
+      ))}
 
       {showPrintedSentOutNote ? (
         <button
@@ -2087,7 +2093,7 @@ function RecordsBlock({
         </button>
       ) : null}
 
-      {isCnr && onCnrNoteClick ? (
+      {showCnrNote && onCnrNoteClick ? (
         <button
           type="button"
           onClick={onCnrNoteClick}
@@ -2118,12 +2124,12 @@ function FormsList({ forms, onCnrClick, onCertificationClick, onCopyLetterClick 
     "Send Copy/Letter": onCopyLetterClick,
   };
 
-  return (
+        return (
     <div className="space-y-1">
       {forms.map((form) => (
-        <button
-          key={form}
-          type="button"
+          <button
+            key={form}
+            type="button"
           onClick={handlers[form]}
           disabled={!handlers[form]}
           className={`block text-left text-[10px] font-medium underline ${
@@ -2131,9 +2137,9 @@ function FormsList({ forms, onCnrClick, onCertificationClick, onCopyLetterClick 
               ? "text-[#007F96] hover:opacity-80"
               : "cursor-default text-[#94A3B8] no-underline"
           }`}
-        >
-          {form}
-        </button>
+          >
+            {form}
+          </button>
       ))}
     </div>
   );

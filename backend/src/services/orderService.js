@@ -805,13 +805,14 @@ function buildRecordsBlock(row) {
     links: medicalRecordsUrl ? ["View Medical Records"] : [],
     hasMedicalRecords: Boolean(row.medical_records_storage_path),
     medicalRecordsUrl,
-    cnrNote: hasCnr
-      ? {
-          label: Boolean(Number(row.cnr_memo)) ? "Memo" : "CNR Note",
-          text: cnrReason,
-          hasNote: true,
-        }
-      : null,
+    cnrNote:
+      hasCnr && !Number(row.cnr_memo)
+        ? {
+            label: "CNR Note",
+            text: cnrReason,
+            hasNote: true,
+          }
+        : null,
   };
 }
 
@@ -1698,6 +1699,8 @@ async function createOrder(data, actorId, files) {
 
     await connection.commit();
 
+    await maybeSendCnrMemoEmail(orderId, data, null, actorId);
+
     return getOrderById(orderId);
   } catch (error) {
     await connection.rollback();
@@ -1777,6 +1780,8 @@ async function updateOrder(id, data, actorId, files) {
     });
 
     await connection.commit();
+
+    await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 
     return getOrderById(existing.id);
   } catch (error) {
@@ -2121,6 +2126,105 @@ function normalizeRecipientEmails(primaryEmail, additionalEmails = []) {
   }
 
   return recipients;
+}
+
+function resolveCnrRecipientEmail(row = {}, data = {}) {
+  return (
+    trimOrNull(data.email || data.serveEmail) ||
+    trimOrNull(row.serve_email) ||
+    trimOrNull(row.contact1_email) ||
+    trimOrNull(row.contact2_email) ||
+    trimOrNull(row.provider_email) ||
+    null
+  );
+}
+
+function buildCnrMemoPdfData(order) {
+  return {
+    memoDate: order.cnr_date_sent || new Date(),
+    recipientCompany: order.serve_company_name || order.provider_name || "",
+    applicant: buildApplicantName(order),
+    reference: order.order_number || "",
+    facilityName: order.facility_name || "",
+    cnrReason: trimOrNull(order.cnr_reason) || "",
+  };
+}
+
+function shouldSendCnrMemoEmail(existingOrder, data) {
+  if (!isCnrOrder(data) || !parseBoolean(data.cnrMemo)) {
+    return false;
+  }
+
+  if (data.cnrDelivery !== "email") {
+    return false;
+  }
+
+  if (!dateOrNull(data.cnrDateSent)) {
+    return false;
+  }
+
+  const recipient = resolveCnrRecipientEmail(existingOrder || {}, data);
+  if (!recipient || !EMAIL_PATTERN.test(recipient)) {
+    return false;
+  }
+
+  if (!existingOrder) {
+    return true;
+  }
+
+  if (!Number(existingOrder.certificate_no_records)) {
+    return true;
+  }
+
+  return (
+    existingOrder.cnr_delivery !== "email" ||
+    Boolean(Number(existingOrder.cnr_memo)) !== parseBoolean(data.cnrMemo) ||
+    toInputDate(existingOrder.cnr_date_sent) !==
+      toInputDate(dateOrNull(data.cnrDateSent)) ||
+    trimOrNull(existingOrder.cnr_reason) !== trimOrNull(data.cnrReason) ||
+    resolveCnrRecipientEmail(existingOrder) !==
+      resolveCnrRecipientEmail(existingOrder, data)
+  );
+}
+
+async function maybeSendCnrMemoEmail(orderId, data, existingOrder = null, actorId = null) {
+  if (!shouldSendCnrMemoEmail(existingOrder, data)) {
+    return null;
+  }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    return null;
+  }
+
+  const recipient = resolveCnrRecipientEmail(order, data);
+  const { generateCnrMemoPdf } = require("../utils/cnrMemoPdf");
+  const { sendCnrMemoEmail } = require("./emailService");
+  const pdfBuffer = await generateCnrMemoPdf(buildCnrMemoPdfData(order));
+  const result = await sendCnrMemoEmail({
+    to: recipient,
+    orderNumber: order.order_number,
+    applicantName: buildApplicantName(order),
+    memoDate: order.cnr_date_sent,
+    pdfBuffer,
+  });
+
+  await Order.createActivityLog({
+    orderId,
+    activityDate: new Date(),
+    performedBy: actorId || null,
+    authorName: "System",
+    callbackDate: null,
+    note: `CNR Memo emailed to ${recipient}`,
+    attachmentPath: null,
+  });
+
+  return {
+    recipient,
+    sentDate: toInputDate(order.cnr_date_sent),
+    delivered: Boolean(result.delivered),
+    devLogged: Boolean(result.devLogged),
+  };
 }
 
 async function mailCompletedOrder(orderId, { email, deliveryDate } = {}) {
