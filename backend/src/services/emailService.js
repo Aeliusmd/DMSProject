@@ -414,9 +414,87 @@ function formatCopyLetterDate(date) {
   });
 }
 
+async function sendCnrMemoEmail({
+  to,
+  orderNumber,
+  applicantName,
+  memoDate,
+  pdfBuffer,
+}) {
+  const subject = `CNR Memo - Order ${orderNumber}`;
+  const sentLabel = formatCopyLetterDate(memoDate);
+
+  const text = [
+    "Dear Copy Service,",
+    "",
+    `Attached is the Certificate of No Records memo for order ${orderNumber}.`,
+    applicantName ? `Applicant: ${applicantName}` : "",
+    "",
+    `Memo date: ${sentLabel}.`,
+    "",
+    "DMS Custodian",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
+      <p>Dear Copy Service,</p>
+      <p>Attached is the Certificate of No Records memo for order <strong>${orderNumber}</strong>.</p>
+      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
+      <p>Memo date: <strong>${sentLabel}</strong>.</p>
+      <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
+    </div>
+  `;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] CNR memo email", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = buildMailOptions({
+    to,
+    subject,
+    text,
+    html,
+    attachments: [
+      {
+        filename: `cnr-memo-${orderNumber}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("CNR memo email sent", { to, orderNumber });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send CNR memo email", {
+      to,
+      error: error.message,
+    });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] CNR memo email fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
 module.exports = {
   sendTwoFactorCode,
   sendInvoiceEmail,
   sendOrderCompletedMail,
   sendCopyServiceLetterEmail,
+  sendCnrMemoEmail,
 };
