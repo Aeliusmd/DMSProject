@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getOrderReminders } from "@/lib/orders/orderApi";
+import { filterReminders } from "@/lib/orders/reminderFilters";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
+
+const EMPTY_FILTERS = {
+  orderId: "",
+  performedBy: "",
+};
 
 export default function ReminderNotesModal({ isOpen, onClose }) {
   const router = useRouter();
@@ -14,6 +20,8 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [selectedReminder, setSelectedReminder] = useState(null);
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(EMPTY_FILTERS);
 
   const isAdmin =
     String(currentUser?.role || "").toLowerCase() === "admin";
@@ -56,8 +64,45 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
   useEffect(() => {
     if (!isOpen) {
       setSelectedReminder(null);
+      setFilters(EMPTY_FILTERS);
+      setAppliedFilters(EMPTY_FILTERS);
     }
   }, [isOpen]);
+
+  const filteredReminders = useMemo(
+    () => filterReminders(reminders, appliedFilters),
+    [reminders, appliedFilters]
+  );
+
+  const performerOptions = useMemo(() => {
+    const names = new Set();
+
+    reminders.forEach((reminder) => {
+      const name = String(reminder.by || "").trim();
+      if (name && name !== "—") {
+        names.add(name);
+      }
+    });
+
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [reminders]);
+
+  const handleFilterChange = (event) => {
+    const { name, value } = event.target;
+    setFilters((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedFilters({
+      orderId: filters.orderId.trim(),
+      performedBy: filters.performedBy.trim(),
+    });
+  };
+
+  const handleResetFilters = () => {
+    setFilters(EMPTY_FILTERS);
+    setAppliedFilters(EMPTY_FILTERS);
+  };
 
   if (!isOpen) return null;
 
@@ -120,11 +165,26 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
           )}
         </div>
 
+        <ReminderFilters
+          filters={filters}
+          performerOptions={performerOptions}
+          resultCount={filteredReminders.length}
+          totalCount={reminders.length}
+          onChange={handleFilterChange}
+          onApply={handleApplyFilters}
+          onReset={handleResetFilters}
+        />
+
         <div className="flex min-h-0 flex-1 flex-col">
           <ReminderTable
-            reminders={reminders}
+            reminders={filteredReminders}
             loading={loading}
             error={loadError}
+            emptyMessage={
+              appliedFilters.orderId || appliedFilters.performedBy
+                ? "No reminders match your filters."
+                : "No reminders found."
+            }
             onOrderClick={openOrderForEdit}
             onDateClick={(reminder) => setSelectedReminder(reminder)}
           />
@@ -167,7 +227,106 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
   );
 }
 
-function ReminderTable({ reminders, loading, error, onOrderClick, onDateClick }) {
+function ReminderFilters({
+  filters,
+  performerOptions,
+  resultCount,
+  totalCount,
+  onChange,
+  onApply,
+  onReset,
+}) {
+  const hasActiveFilters =
+    Boolean(filters.orderId.trim()) || Boolean(filters.performedBy.trim());
+
+  return (
+    <div className="shrink-0 border-b border-[#E2E8F0] px-5 py-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+        <FilterField
+          label="Order ID"
+          name="orderId"
+          value={filters.orderId}
+          onChange={onChange}
+          placeholder="Enter order number"
+        />
+
+        <FilterField
+          label="Performed By"
+          name="performedBy"
+          value={filters.performedBy}
+          onChange={onChange}
+          placeholder="Enter user name"
+          listId="reminder-performer-options"
+        />
+
+        <datalist id="reminder-performer-options">
+          {performerOptions.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+
+        <button
+          type="button"
+          onClick={onApply}
+          className="h-[38px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+        >
+          Apply Filters
+        </button>
+
+        <button
+          type="button"
+          onClick={onReset}
+          className="h-[38px] whitespace-nowrap rounded-[6px] bg-[#F1F5F9] px-5 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+        >
+          Reset
+        </button>
+      </div>
+
+      {hasActiveFilters && (
+        <p className="mt-3 text-[12px] text-[#64748B]">
+          Showing {resultCount} of {totalCount} reminder
+          {totalCount === 1 ? "" : "s"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FilterField({
+  label,
+  name,
+  value,
+  onChange,
+  placeholder = "",
+  listId,
+}) {
+  return (
+    <div className="min-w-0 flex-1 lg:max-w-[200px]">
+      <label className="mb-2 block text-[11px] font-medium text-[#64748B]">
+        {label}
+      </label>
+
+      <input
+        type="text"
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        list={listId}
+        className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+      />
+    </div>
+  );
+}
+
+function ReminderTable({
+  reminders,
+  loading,
+  error,
+  emptyMessage = "No reminders found.",
+  onOrderClick,
+  onDateClick,
+}) {
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <table className="w-full min-w-[760px] border-collapse">
@@ -269,7 +428,7 @@ function ReminderTable({ reminders, loading, error, onOrderClick, onDateClick })
                 colSpan={4}
                 className="px-5 py-12 text-center text-[14px] text-[#94A3B8]"
               >
-                No reminders found.
+                {emptyMessage}
               </td>
             </tr>
           )}
