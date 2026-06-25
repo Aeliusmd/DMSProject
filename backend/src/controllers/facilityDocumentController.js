@@ -5,6 +5,7 @@ const ApiResponse = require("../utils/ApiResponse");
 const facilityDocumentService = require("../services/facilityDocumentService");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
+const notificationService = require("../services/notificationService");
 
 function buildFacilityLogBase(req, facility) {
   return {
@@ -30,9 +31,15 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
 
   await activityLogService.recordFromRequest(req, {
     ...buildFacilityLogBase(req, facility),
-    context: "facilities",
+    context: "documents",
     action: "upload_document",
     details: `Uploaded document "${document.documentName}" (${document.documentType}) to ${facility.facilityName}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Facility Document Uploaded",
+    description: `"${document.documentName}" uploaded to ${facility.facilityName}`,
+    facilityId: facility.id,
   });
 
   return ApiResponse.created(res, { document }, "Document uploaded successfully");
@@ -86,9 +93,15 @@ exports.deleteDocument = asyncHandler(async (req, res) => {
 
   await activityLogService.recordFromRequest(req, {
     ...buildFacilityLogBase(req, facility),
-    context: "facilities",
+    context: "documents",
     action: "delete_document",
     details: `Deleted document "${document.document_name}" from ${facility.facilityName}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Facility Document Deleted",
+    description: `"${document.document_name}" removed from ${facility.facilityName}`,
+    facilityId: facility.id,
   });
 
   return ApiResponse.success(res, result, result.message);

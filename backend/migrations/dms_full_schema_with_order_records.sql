@@ -621,7 +621,7 @@ CREATE TABLE activity_logs (
   log_date        DATE            NOT NULL,
   log_time        TIME            NOT NULL,
   action          VARCHAR(100)    NOT NULL,
-  module          ENUM('Orders', 'Billing', 'Employees', 'Processing', 'Reports', 'Security') NOT NULL,
+  module          VARCHAR(50)     NOT NULL,
   company_name    VARCHAR(200)    NULL,
   facility_id     BIGINT UNSIGNED NULL,
   performed_by    BIGINT UNSIGNED NULL,

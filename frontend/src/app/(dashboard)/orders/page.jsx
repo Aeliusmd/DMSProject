@@ -10,6 +10,7 @@ import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal
 
 const defaultFilters = {
   facility: "",
+  company: "",
   year: "",
   period: "",
   status: "",

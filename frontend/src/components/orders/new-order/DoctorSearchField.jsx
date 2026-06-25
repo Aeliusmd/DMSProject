@@ -7,6 +7,7 @@ export default function DoctorSearchField({
   label = "Specific Doctor",
   name = "specificDoctor",
   value = "",
+  facilityId = "",
   onChange,
   onBlur,
   placeholder = "Doctor name",
@@ -34,7 +35,7 @@ export default function DoctorSearchField({
     setSearchError("");
 
     const timer = setTimeout(() => {
-      searchOrderDoctors(query)
+      searchOrderDoctors(query, { facility: facilityId })
         .then((doctors) => {
           if (!active) return;
           setSuggestions(doctors);
@@ -53,7 +54,7 @@ export default function DoctorSearchField({
       active = false;
       clearTimeout(timer);
     };
-  }, [value, open]);
+  }, [value, open, facilityId]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {

@@ -6,6 +6,7 @@ const ApiError = require("../utils/ApiError");
 const fs = require("fs");
 const path = require("path");
 const Order = require("../models/Order");
+const FacilityDoctor = require("../models/FacilityDoctor");
 const OrderRecord = require("../models/OrderRecord");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
@@ -1080,6 +1081,7 @@ function mapOrderDetail(
   );
   const mappedRecords = mapOrderRecords(orderRecords);
   const primaryUploaded = mappedRecords.find((record) => record.hasFile);
+  const rush = calculateOrderRushLevel(row.created_at);
 
   return {
     id: row.id,
@@ -1152,6 +1154,8 @@ function mapOrderDetail(
     deliveryDate: toInputDate(row.delivery_date),
     subpoenaDate: toInputDate(row.subpoena_date),
     createdAt: row.created_at || null,
+    rushLevel: rush.level,
+    rushLabel: rush.label,
     readyDate: toInputDate(row.ready_date),
     invoiceDate: toInputDate(row.invoice_date || invoiceRow?.invoice_date),
     xrayInvoiceDate: toInputDate(
@@ -1188,6 +1192,10 @@ async function getAllOrders(query = {}) {
 
   if (query.facility) {
     filters.facilityId = Number(query.facility);
+  }
+
+  if (query.company && `${query.company}`.trim()) {
+    filters.company = `${query.company}`.trim();
   }
 
   if (query.status === "ready") {
@@ -2636,8 +2644,38 @@ async function recordOrderPickup(orderId, { pickupDate, pickupPersonName, notes 
   };
 }
 
-async function searchOrderDoctors(query) {
-  return Order.searchDoctors(query);
+async function getOrderFilterCompanies() {
+  return Order.findDistinctCompanyNames();
+}
+
+async function searchOrderDoctors(query, facilityId = null) {
+  const trimmed = `${query || ""}`.trim();
+
+  if (!trimmed) return [];
+
+  const limit = 25;
+  const normalizedFacilityId = Number(facilityId);
+
+  const [orderDoctors, facilityDoctors] = await Promise.all([
+    Order.searchDoctors(trimmed, limit),
+    Number.isFinite(normalizedFacilityId) && normalizedFacilityId > 0
+      ? FacilityDoctor.searchByQuery(normalizedFacilityId, trimmed, limit)
+      : Promise.resolve([]),
+  ]);
+
+  const merged = new Map();
+
+  for (const name of facilityDoctors) {
+    const key = name.toLowerCase();
+    if (!merged.has(key)) merged.set(key, name);
+  }
+
+  for (const name of orderDoctors) {
+    const key = name.toLowerCase();
+    if (!merged.has(key)) merged.set(key, name);
+  }
+
+  return Array.from(merged.values()).slice(0, limit);
 }
 
 async function searchOrderDoctorAddresses(query) {
@@ -2647,6 +2685,7 @@ async function searchOrderDoctorAddresses(query) {
 module.exports = {
   getAllOrders,
   getOrderStats,
+  getOrderFilterCompanies,
   getOrderById,
   getOrderReminders,
   createOrder,

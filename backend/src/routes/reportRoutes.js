@@ -9,6 +9,11 @@ router.use(authenticate);
 
 router.get("/orders", denyRoles("Employee"), reportController.getOrdersReport);
 router.get(
+  "/activity/export",
+  authorize("Admin"),
+  reportController.exportActivityReportPdf
+);
+router.get(
   "/activity",
   authorize("Admin"),
   reportController.getActivityReport

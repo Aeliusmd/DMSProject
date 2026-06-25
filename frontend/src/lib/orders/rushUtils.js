@@ -1,7 +1,11 @@
-/** Rush 1 = 2 weeks, Rush 2 = 3 weeks, Rush 3 = 4+ weeks since order created. */
-export const RUSH_1_MIN_DAYS = 14;
-export const RUSH_2_MIN_DAYS = 21;
-export const RUSH_3_MIN_DAYS = 28;
+/**
+ * Rush levels are based on order created_at (calendar days, local date).
+ * Rush 1: creation through 14 days (inclusive)
+ * Rush 2: more than 14 days and up to 21 days (inclusive)
+ * Rush 3: more than 21 days
+ */
+export const RUSH_1_MAX_DAYS = 14;
+export const RUSH_2_MAX_DAYS = 21;
 
 function parseOrderDate(value) {
   if (!value) return null;
@@ -24,40 +28,32 @@ function parseOrderDate(value) {
 }
 
 function getOrderAgeDays(createdAt) {
-  const created = parseOrderDate(createdAt);
-  if (!created) return null;
+  const reference = parseOrderDate(createdAt);
+  if (!reference) return null;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   const diffDays = Math.floor(
-    (today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+    (today.getTime() - reference.getTime()) / (1000 * 60 * 60 * 24)
   );
 
   return diffDays < 0 ? null : diffDays;
 }
 
-/** Rush based on order age — matches orders list / dashboard / reports. */
 export function calculateOrderRushLevel(createdAt) {
   const diffDays = getOrderAgeDays(createdAt);
   if (diffDays == null) return null;
 
-  if (diffDays >= RUSH_3_MIN_DAYS) return "Rush 3";
-  if (diffDays >= RUSH_2_MIN_DAYS) return "Rush 2";
-  if (diffDays >= RUSH_1_MIN_DAYS) return "Rush 1";
-  return null;
+  if (diffDays > RUSH_2_MAX_DAYS) return "Rush 3";
+  if (diffDays > RUSH_1_MAX_DAYS) return "Rush 2";
+  return "Rush 1";
 }
 
 export function getOrderAgeDate(order) {
   if (!order) return null;
 
-  return (
-    order.createdAt ||
-    order.created_at ||
-    order.subpoenaDate ||
-    order.subpoena_date ||
-    null
-  );
+  return order.createdAt || order.created_at || null;
 }
 
 export function formatRushLevel(value) {
@@ -77,12 +73,10 @@ export function formatRushLevel(value) {
 export function resolveRushLabel(order) {
   if (!order) return null;
 
-  const ageDate = getOrderAgeDate(order);
-
   return (
     formatRushLevel(order.rushLabel) ||
     formatRushLevel(order.rushLevel) ||
-    calculateOrderRushLevel(ageDate) ||
+    calculateOrderRushLevel(getOrderAgeDate(order)) ||
     null
   );
 }
@@ -100,7 +94,7 @@ export function deriveDisplayOrderStatus(status, createdAt) {
   return status || "Active";
 }
 
-/** @deprecated Use calculateOrderRushLevel — rush is based on order created date. */
+/** @deprecated Use calculateOrderRushLevel */
 export function calculateRushLevel(createdAt) {
   return calculateOrderRushLevel(createdAt);
 }

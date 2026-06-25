@@ -270,8 +270,6 @@ export default function FacilityDetailsPage() {
 
     const updated = await updateFacility(facilityId, {
       facilityName: data.facilityName,
-      userName: data.userName,
-      password: data.password,
       firstName: data.firstName,
       middleName: data.middleName,
       lastName: data.lastName,
@@ -289,7 +287,6 @@ export default function FacilityDetailsPage() {
     const nextFormData = {
       ...updated,
       zip: updated.zip || updated.zipCode || "",
-      password: "",
     };
 
     setFormData(nextFormData);
@@ -715,26 +712,6 @@ export default function FacilityDetailsPage() {
                 "Williams & Co.",
               ]}
             /> */}
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <TextField
-              label="User Name"
-              name="userName"
-              value={formData.userName}
-              onChange={handleChange}
-              required
-              error={getError("userName")}
-            />
-
-            <TextField
-              label="Password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="Leave blank to keep existing"
-              type="password"
-            />
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -1620,7 +1597,6 @@ function mapApiErrors(errors) {
 function normalizeFacilityFormData(data) {
   return {
     facilityName: data.facilityName?.trim() || "",
-    userName: data.userName?.trim() || "",
     firstName: data.firstName?.trim() || "",
     middleName: data.middleName?.trim() || "",
     lastName: data.lastName?.trim() || "",
@@ -1632,7 +1608,6 @@ function normalizeFacilityFormData(data) {
     fax: data.fax?.trim() || "",
     email: data.email?.trim() || "",
     ipAddresses: data.ipAddresses?.trim() || "",
-    password: data.password?.trim() || "",
     officeManagers: (data.officeManagers || []).map((manager) => ({
       id: typeof manager.id === "number" ? manager.id : null,
       firstName: manager.firstName?.trim() || "",
@@ -1669,14 +1644,6 @@ function validateFacilityForm(data) {
 
   if (!data.facilityName?.trim()) {
     errors.facilityName = "Facility name is required";
-  }
-
-  if (!data.userName?.trim()) {
-    errors.userName = "User name is required";
-  }
-
-  if (data.password?.trim() && data.password.length < 8) {
-    errors.password = "Password must be at least 8 characters";
   }
 
   if (!data.email?.trim()) {
@@ -1717,12 +1684,7 @@ function validateFacilityForm(data) {
 function validateFacilityField(field, value) {
   if (!value?.trim()) {
     if (field === "facilityName") return "Facility name is required";
-    if (field === "userName") return "User name is required";
     if (field === "email") return "Email is required";
-  }
-
-  if (field === "password" && value && value.length < 8) {
-    return "Password must be at least 8 characters";
   }
 
   if (field === "email" && value && !isValidEmail(value)) {

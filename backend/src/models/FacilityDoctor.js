@@ -106,6 +106,46 @@ class FacilityDoctor {
 
     return rows[0] || null;
   }
+
+  static formatDoctorName(row) {
+    return [row.first_name, row.middle_name, row.last_name]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+  }
+
+  static async searchByQuery(facilityId, query, limit = 10) {
+    const pool = getPool();
+    const trimmed = `${query || ""}`.trim();
+
+    if (!trimmed || !facilityId) return [];
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
+
+    const [rows] = await pool.execute(
+      `SELECT first_name, middle_name, last_name, office_name, is_default
+       FROM facility_doctors
+       WHERE facility_id = :facilityId
+         AND is_active = 1
+         AND (
+           CONCAT_WS(' ', first_name, middle_name, last_name) LIKE :query
+           OR first_name LIKE :query
+           OR middle_name LIKE :query
+           OR last_name LIKE :query
+           OR office_name LIKE :query
+         )
+       ORDER BY is_default DESC,
+                last_name ASC,
+                first_name ASC,
+                middle_name ASC
+       LIMIT ${safeLimit}`,
+      { facilityId, query: `%${trimmed}%` }
+    );
+
+    return rows
+      .map((row) => FacilityDoctor.formatDoctorName(row))
+      .filter(Boolean);
+  }
 }
 
 module.exports = FacilityDoctor;

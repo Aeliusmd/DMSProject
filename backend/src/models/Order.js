@@ -3,7 +3,7 @@
  */
 
 const { getPool } = require("../config/database");
-const { RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
+const { RUSH_READY_MIN_DAYS, ORDER_AGE_SQL_ALIAS } = require("../utils/rushUtils");
 
 const REQUIRED_WORKFLOW_COMPLETION = {
   "Review Records": "complete",
@@ -131,7 +131,7 @@ class Order {
         o.status IN ('Ready', 'Ready to Pickup')
         OR (
           o.status = 'Active'
-          AND DATEDIFF(CURDATE(), DATE(o.created_at)) >= :rushReadyMinDays
+          AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL_ALIAS}) >= :rushReadyMinDays
         )
       )`);
       params.rushReadyMinDays = RUSH_READY_MIN_DAYS;
@@ -145,6 +145,14 @@ class Order {
     if (filters.facilityId) {
       conditions.push("o.facility_id = :facilityId");
       params.facilityId = filters.facilityId;
+    }
+
+    if (filters.company) {
+      conditions.push(`(
+        LOWER(TRIM(o.serve_company_name)) = LOWER(TRIM(:company))
+        OR LOWER(TRIM(p.company_name)) = LOWER(TRIM(:company))
+      )`);
+      params.company = filters.company;
     }
 
     if (filters.year) {
@@ -162,9 +170,50 @@ class Order {
     if (filters.search) {
       conditions.push(`(
         o.order_number LIKE :search
+        OR o.rec_number LIKE :search
         OR o.case_number LIKE :search
         OR o.order_ref LIKE :search
+        OR o.court LIKE :search
+        OR o.applicant_first_name LIKE :search
+        OR o.applicant_middle_name LIKE :search
+        OR o.applicant_last_name LIKE :search
+        OR o.applicant_aka LIKE :search
+        OR o.defendant LIKE :search
         OR o.serve_company_name LIKE :search
+        OR o.serve_address LIKE :search
+        OR o.serve_city LIKE :search
+        OR o.serve_state LIKE :search
+        OR o.serve_zip LIKE :search
+        OR o.serve_phone LIKE :search
+        OR o.serve_fax LIKE :search
+        OR o.serve_email LIKE :search
+        OR o.contact1_name LIKE :search
+        OR o.contact1_title LIKE :search
+        OR o.contact1_phone LIKE :search
+        OR o.contact1_fax LIKE :search
+        OR o.contact1_email LIKE :search
+        OR o.contact2_name LIKE :search
+        OR o.contact2_title LIKE :search
+        OR o.contact2_phone LIKE :search
+        OR o.contact2_fax LIKE :search
+        OR o.contact2_email LIKE :search
+        OR o.injury_type LIKE :search
+        OR o.specific_doctor LIKE :search
+        OR o.specific_record LIKE :search
+        OR CAST(o.ssn_last_four AS CHAR) LIKE :search
+        OR CAST(o.status AS CHAR) LIKE :search
+        OR DATE_FORMAT(o.dob, '%m/%d/%Y') LIKE :search
+        OR DATE_FORMAT(o.dob, '%Y-%m-%d') LIKE :search
+        OR DATE_FORMAT(o.injury_date, '%m/%d/%Y') LIKE :search
+        OR DATE_FORMAT(o.injury_date, '%Y-%m-%d') LIKE :search
+        OR DATE_FORMAT(o.injury_date_begin, '%m/%d/%Y') LIKE :search
+        OR DATE_FORMAT(o.injury_date_end, '%m/%d/%Y') LIKE :search
+        OR f.facility_name LIKE :search
+        OR f.address LIKE :search
+        OR f.city LIKE :search
+        OR f.state LIKE :search
+        OR f.zip_code LIKE :search
+        OR p.company_name LIKE :search
         OR CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name) LIKE :search
       )`);
       params.search = `%${filters.search}%`;
@@ -188,6 +237,31 @@ class Order {
     );
 
     return rows;
+  }
+
+  static async findDistinctCompanyNames() {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(`
+      SELECT DISTINCT company_name
+      FROM (
+        SELECT TRIM(o.serve_company_name) AS company_name
+        FROM orders o
+        WHERE o.serve_company_name IS NOT NULL
+          AND TRIM(o.serve_company_name) != ''
+        UNION
+        SELECT TRIM(p.company_name) AS company_name
+        FROM orders o
+        INNER JOIN providers p ON p.id = o.provider_id
+        WHERE p.company_name IS NOT NULL
+          AND TRIM(p.company_name) != ''
+      ) AS companies
+      WHERE company_name IS NOT NULL
+        AND company_name != ''
+      ORDER BY company_name ASC
+    `);
+
+    return rows.map((row) => row.company_name);
   }
 
   static async searchDoctors(query, limit = 10) {
@@ -622,26 +696,24 @@ class Order {
 
   static async findReminders({ createdBy = null, limit = 500 } = {}) {
     const pool = getPool();
-    const conditions = [];
+    const conditions = ["n.callback_date IS NOT NULL"];
     const params = {};
 
     if (createdBy) {
-      conditions.push("(r.created_by = :createdBy OR r.assigned_to = :createdBy)");
+      conditions.push("n.created_by = :createdBy");
       params.createdBy = createdBy;
     }
 
-    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
     const [rows] = await pool.execute(
-      `SELECT r.id AS note_id, r.order_id, r.created_at AS note_date, r.created_by,
-              r.author_name, r.note, r.callback_date, r.attachment_path,
-              r.is_completed AS is_called,
+      `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
+              n.author_name, n.note, n.callback_date, n.attachment_path,
+              n.is_called,
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
-       FROM reminders r
-       INNER JOIN orders o ON o.id = r.order_id AND ${ACTIVE_ORDER_ALIAS}
-       ${whereClause}
-       ORDER BY r.callback_date ASC, r.created_at DESC
+       FROM order_notes n
+       INNER JOIN orders o ON o.id = n.order_id AND ${ACTIVE_ORDER_ALIAS}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY n.callback_date ASC, n.note_date DESC
        LIMIT ${Number(limit)}`,
       params
     );
@@ -652,26 +724,27 @@ class Order {
   static async findDueRemindersOnDate({ createdBy = null, date }) {
     const pool = getPool();
     const conditions = [
-      "r.is_completed = 0",
-      "DATE(r.callback_date) = :dueDate",
+      "n.callback_date IS NOT NULL",
+      "n.is_called = 0",
+      "DATE(n.callback_date) = :dueDate",
     ];
     const params = { dueDate: date };
 
     if (createdBy) {
-      conditions.push("(r.created_by = :createdBy OR r.assigned_to = :createdBy)");
+      conditions.push("n.created_by = :createdBy");
       params.createdBy = createdBy;
     }
 
     const [rows] = await pool.execute(
-      `SELECT r.id AS note_id, r.order_id, r.created_at AS note_date, r.created_by,
-              r.author_name, r.note, r.callback_date, r.attachment_path,
-              r.is_completed AS is_called,
+      `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
+              n.author_name, n.note, n.callback_date, n.attachment_path,
+              n.is_called,
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
-       FROM reminders r
-       INNER JOIN orders o ON o.id = r.order_id AND ${ACTIVE_ORDER_ALIAS}
+       FROM order_notes n
+       INNER JOIN orders o ON o.id = n.order_id AND ${ACTIVE_ORDER_ALIAS}
        WHERE ${conditions.join(" AND ")}
-       ORDER BY r.callback_date ASC, o.order_number ASC`,
+       ORDER BY n.callback_date ASC, o.order_number ASC`,
       params
     );
 

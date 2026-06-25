@@ -5,6 +5,10 @@ import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getOrderActivityLogs } from "@/lib/orders/orderApi";
 import { API_BASE_URL } from "@/config/api";
+import PaginationBar, {
+  DEFAULT_PAGE_SIZE,
+  paginateItems,
+} from "@/components/ui/PaginationBar";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -16,6 +20,7 @@ function toFileUrl(path) {
 export default function OrderActivityLogModal({ isOpen, order, onClose }) {
   const mounted = useIsClient();
   const [searchValue, setSearchValue] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -30,6 +35,7 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
 
     if (openSession) {
       setSearchValue("");
+      setCurrentPage(1);
     }
   }
 
@@ -93,6 +99,15 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
       return searchable.includes(search);
     });
   }, [logs, searchValue]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchValue, logs]);
+
+  const pagination = useMemo(
+    () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
+    [filteredLogs, currentPage]
+  );
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -181,7 +196,7 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
 
               {!loading &&
                 !loadError &&
-                filteredLogs.map((log, index) => (
+                pagination.items.map((log, index) => (
                 <tr
                   key={log.id ?? `${log.date}-${index}`}
                   className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
@@ -244,11 +259,15 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
           </table>
         </div>
 
-        <div className="shrink-0 border-t border-[#F1F5F9] bg-white px-5 py-3">
-          <p className="text-[11px] text-[#94A3B8]">
-            Showing {filteredLogs.length} of {logs.length} entries
-          </p>
-        </div>
+        <PaginationBar
+          currentPage={pagination.currentPage}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.totalItems}
+          startRecord={pagination.startRecord}
+          endRecord={pagination.endRecord}
+          itemLabel="entries"
+          onPageChange={setCurrentPage}
+        />
       </section>
     </div>,
     document.body

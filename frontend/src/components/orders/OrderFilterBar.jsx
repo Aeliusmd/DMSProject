@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import { getOrderFilterCompanies } from "@/lib/orders/orderApi";
 import { ORDER_PERIOD_OPTIONS } from "@/lib/orders/orderFilterConstants";
 
 const defaultFilters = {
   facility: "",
+  company: "",
   year: "",
   period: "",
   status: "",
@@ -15,6 +17,7 @@ const defaultFilters = {
 export default function OrderFilterBar({ filters, onFiltersChange }) {
   const [localFilters, setLocalFilters] = useState(defaultFilters);
   const [facilities, setFacilities] = useState([]);
+  const [companies, setCompanies] = useState([]);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -31,6 +34,14 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
       })
       .catch(() => {
         if (active) setFacilities([]);
+      });
+
+    getOrderFilterCompanies()
+      .then((data) => {
+        if (active) setCompanies(data);
+      })
+      .catch(() => {
+        if (active) setCompanies([]);
       });
 
     return () => {
@@ -65,7 +76,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         Filters
       </h2>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_140px_170px_140px_minmax(220px,1fr)_auto]">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_minmax(220px,1fr)_auto]">
         <select
           value={activeFilters.facility}
           onChange={(e) => updateFilter("facility", e.target.value)}
@@ -75,6 +86,19 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           {facilities.map((facility) => (
             <option key={facility.id} value={String(facility.id)}>
               {facility.facility || facility.facilityName || facility.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={activeFilters.company}
+          onChange={(e) => updateFilter("company", e.target.value)}
+          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+        >
+          <option value="">All Company</option>
+          {companies.map((company) => (
+            <option key={company} value={company}>
+              {company}
             </option>
           ))}
         </select>
@@ -124,7 +148,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           <input
             value={activeFilters.search}
             onChange={(e) => updateFilter("search", e.target.value)}
-            placeholder="Search orders..."
+            placeholder="Search order ID, facility, company, case, applicant..."
             className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
           />
         </div>

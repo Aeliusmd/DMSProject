@@ -35,3 +35,27 @@ exports.getActivityReport = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, report);
 });
+
+exports.exportActivityReportPdf = asyncHandler(async (req, res) => {
+  const facilityId =
+    req.query.facilityId && req.query.facilityId !== "all"
+      ? req.query.facilityId
+      : null;
+
+  const { pdfBuffer, fileName } = await reportService.getActivityReportPdf({
+    dateFrom: req.query.dateFrom || req.query.reportDate || null,
+    dateTo: req.query.dateTo || req.query.throughDate || null,
+    facilityId,
+    facilityLabel: req.query.facilityLabel || "All Facilities",
+    activity: req.query.activity || "All",
+    search: req.query.search || "",
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${fileName.replace(/"/g, "")}"`
+  );
+
+  return res.send(pdfBuffer);
+});

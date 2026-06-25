@@ -6,6 +6,7 @@ function buildOrdersQuery(filters = {}) {
   const params = new URLSearchParams();
 
   if (filters.facility) params.set("facility", filters.facility);
+  if (filters.company) params.set("company", filters.company);
   if (filters.year) params.set("year", filters.year);
   if (filters.period) params.set("period", filters.period);
   if (filters.status) params.set("status", filters.status);
@@ -60,9 +61,15 @@ export async function getOrders(filters = {}) {
   return data?.data?.orders || [];
 }
 
-export async function searchOrderDoctors(query) {
+export async function getOrderFilterCompanies() {
+  const data = await request("/orders/companies", { auth: true });
+  return data?.data?.companies || [];
+}
+
+export async function searchOrderDoctors(query, { facility = "" } = {}) {
   const params = new URLSearchParams();
   params.set("q", query);
+  if (facility) params.set("facility", String(facility));
 
   const data = await request(`/orders/doctors/search?${params.toString()}`, {
     auth: true,

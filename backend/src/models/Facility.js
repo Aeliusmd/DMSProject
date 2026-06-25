@@ -69,7 +69,6 @@ class Facility {
       `UPDATE facilities SET
         facility_name = :facilityName,
         slug = :slug,
-        user_name = :userName,
         contact_first_name = :contactFirstName,
         contact_middle_name = :contactMiddleName,
         contact_last_name = :contactLastName,
@@ -82,7 +81,6 @@ class Facility {
         email = :email,
         ip_addresses = :ipAddresses,
         updated_at = NOW()
-        ${data.passwordHash ? ", password_hash = :passwordHash" : ""}
        WHERE id = :id AND is_active = 1`,
       { ...data, id }
     );

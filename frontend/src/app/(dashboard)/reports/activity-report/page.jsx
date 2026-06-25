@@ -7,7 +7,7 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
-import { getActivityReport } from "@/lib/reports/reportApi";
+import { getActivityReport, downloadActivityReportPdf } from "@/lib/reports/reportApi";
 
 function formatDateInput(date) {
   const year = date.getFullYear();
@@ -74,6 +74,8 @@ export default function ActivityReportPage() {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   useEffect(() => {
     getFacilities()
@@ -206,28 +208,37 @@ export default function ActivityReportPage() {
     window.print();
   };
 
-  const handleExport = () => {
-    const header = ["Facility", "Cases", "Invoiced", "Paid"];
-    const rows = companies.map((company) => [
-      company.name,
-      company.cases,
-      company.invoicedDisplay || company.invoiced,
-      company.paidDisplay || company.paid,
-    ]);
+  const handleExport = async () => {
+    if (!companies.length || exporting) return;
 
-    const csv = [header, ...rows]
-      .map((row) =>
-        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
-      )
-      .join("\n");
+    setExporting(true);
+    setExportError("");
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `activity-report-${filters.reportDate || "all"}-${filters.throughDate || "all"}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+    const selectedFacility = facilityOptions.find(
+      (option) => option.value === filters.facility
+    );
+
+    try {
+      const { blob, fileName } = await downloadActivityReportPdf({
+        reportDate: filters.reportDate,
+        throughDate: filters.throughDate,
+        facilityId: filters.facility,
+        facilityLabel: selectedFacility?.label || "All Facilities",
+        activity: filters.activity,
+        search: appliedSearch,
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.message || "Failed to export activity report PDF");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const toggleCompany = (companyId) => {
@@ -413,9 +424,16 @@ export default function ActivityReportPage() {
         </section>
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[11px] text-[#94A3B8]">
-            Report generated on {generatedOn}
-          </p>
+          <div>
+            <p className="text-[11px] text-[#94A3B8]">
+              Report generated on {generatedOn}
+            </p>
+            {exportError && (
+              <p className="mt-1 text-[11px] font-medium text-red-500">
+                {exportError}
+              </p>
+            )}
+          </div>
 
           <div className="flex items-center gap-3">
             <button
@@ -430,11 +448,11 @@ export default function ActivityReportPage() {
             <button
               type="button"
               onClick={handleExport}
-              disabled={!companies.length}
+              disabled={!companies.length || exporting}
               className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-5 text-[12px] font-semibold text-[#475569] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ExportIcon />
-              Export
+              {exporting ? "Exporting..." : "Export PDF"}
             </button>
           </div>
         </div>
