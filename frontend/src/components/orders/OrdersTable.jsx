@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
@@ -47,6 +48,11 @@ import {
   sendInvoices,
 } from "@/lib/invoices/invoiceApi";
 import {
+  handleMissingProviderEmail,
+  isNoProviderEmailError,
+  NO_PROVIDER_EMAIL_MESSAGE,
+} from "@/lib/invoices/invoiceUtils";
+import {
   formatMoneyAmount,
   parsePaymentAmount,
 } from "@/lib/orders/paymentUtils";
@@ -60,9 +66,6 @@ import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPrevie
 import { getOrderTypeLabel } from "@/lib/orders/recordTypeUtils";
 
 const ORDERS_PER_PAGE = 6;
-
-const NO_PROVIDER_EMAIL_MESSAGE =
-  "No provider email on file. Please edit the order to add the provider email.";
 
 const defaultOrderFilters = {
   facility: "",
@@ -299,6 +302,7 @@ function toRenderOrder(order) {
 }
 
 export default function OrdersTable({ filters = defaultOrderFilters }) {
+  const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [invoiceModalMode, setInvoiceModalMode] = useState("create");
@@ -528,6 +532,15 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         return;
       }
 
+      const providerEmail =
+        order.providerEmail || order.invoice?.providerEmail || "";
+
+      if (!providerEmail.trim()) {
+        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+        handleMissingProviderEmail(order.dbId, router);
+        return;
+      }
+
       setEmailError("");
       setSendingInvoiceOrderId(order.dbId);
 
@@ -535,12 +548,18 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         await sendInvoices([invoiceId]);
         await fetchOrders({ silent: true, force: true });
       } catch (err) {
+        if (isNoProviderEmailError(err)) {
+          setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+          handleMissingProviderEmail(order.dbId, router);
+          return;
+        }
+
         setEmailError(err.message || "Failed to send invoice");
       } finally {
         setSendingInvoiceOrderId(null);
       }
     },
-    [fetchOrders, sendingInvoiceOrderId]
+    [fetchOrders, router, sendingInvoiceOrderId]
   );
 
   const handleResendInvoiceEmail = useCallback(

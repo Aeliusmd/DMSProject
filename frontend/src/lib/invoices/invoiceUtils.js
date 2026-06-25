@@ -1,3 +1,24 @@
+export const NO_PROVIDER_EMAIL_MESSAGE =
+  "No provider email on file. Edit the order to add the provider email.";
+
+export function buildEditOrderUrl(orderId) {
+  if (!orderId) return "/orders";
+  return `/orders/new?mode=edit&orderId=${encodeURIComponent(orderId)}`;
+}
+
+export function isNoProviderEmailError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("no provider email");
+}
+
+export function handleMissingProviderEmail(orderId, router) {
+  window.alert(NO_PROVIDER_EMAIL_MESSAGE);
+
+  if (orderId && router?.push) {
+    router.push(buildEditOrderUrl(orderId));
+  }
+}
+
 export function parseInvoiceDueAmount(value) {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : 0;
