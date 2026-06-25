@@ -12,12 +12,32 @@ const standardReasons = [
   "Patient was not treated at the above named facility.",
 ];
 
+function formatCnrEmailNoteDate(value) {
+  if (!value) return "";
+  const parsed = new Date(
+    typeof value === "string" && !value.includes("T") ? `${value}T12:00:00` : value
+  );
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return parsed.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function CertificateNoRecordsPanel({
   formData,
   onChange,
   onBlur,
   getError,
 }) {
+  const showEmailNote =
+    formData.cnrMemo &&
+    formData.cnrDelivery === "email" &&
+    formData.cnrDateSent &&
+    String(formData.email || "").trim();
+
   return (
     <div className="mt-4 rounded-[8px] border border-[#FACC15] bg-[#FFFBEB] px-4 py-4">
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_170px]">
@@ -92,9 +112,21 @@ export default function CertificateNoRecordsPanel({
             />
           </div>
 
+          {getError("cnrDelivery") && (
+            <p className="mt-2 text-[11px] font-medium text-red-500">
+              {getError("cnrDelivery")}
+            </p>
+          )}
+
           <div className="mt-5">
             <NewOrderField
-              label="Date Sent"
+              label={
+                formData.cnrDelivery
+                  ? formData.cnrDelivery === "pickup"
+                    ? "Pickup date *"
+                    : "Date Sent *"
+                  : "Date Sent"
+              }
               name="cnrDateSent"
               value={formData.cnrDateSent}
               onChange={onChange}
@@ -102,6 +134,13 @@ export default function CertificateNoRecordsPanel({
               type="date"
               error={getError("cnrDateSent")}
             />
+
+            {showEmailNote ? (
+              <p className="mt-2 text-[11px] italic leading-[16px] text-[#64748B]">
+                Email will be sent on {formatCnrEmailNoteDate(formData.cnrDateSent)} for
+                information.
+              </p>
+            ) : null}
           </div>
 
           <div className="mt-3">

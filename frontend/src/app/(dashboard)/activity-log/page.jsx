@@ -4,9 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
-import { getActivityLogs } from "@/lib/activityLog/activityLogApi";
+import { getCurrentUser } from "@/lib/auth/authApi";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { usesOwnActivityLogsOnly } from "@/lib/auth/roles";
+import {
+  getActivityLogs,
+  getMyActivityLogs,
+} from "@/lib/activityLog/activityLogApi";
 
-const filters = [
+const adminFilters = [
   "All Modules",
   "Orders",
   "Billing",
@@ -17,7 +23,17 @@ const filters = [
   "Security",
 ];
 
+const employeeFilters = [
+  "All Modules",
+  "Orders",
+  "Billing",
+  "Processing",
+];
+
 export default function ActivityLogPage() {
+  const [user, setUser] = useState(() => getStoredUser());
+  const ownLogsOnly = usesOwnActivityLogsOnly(user);
+  const filters = ownLogsOnly ? employeeFilters : adminFilters;
   const [activityLogs, setActivityLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState("All Modules");
@@ -29,10 +45,35 @@ export default function ActivityLogPage() {
   useEffect(() => {
     let cancelled = false;
 
-    getActivityLogs()
+    getCurrentUser()
+      .then((currentUser) => {
+        if (!cancelled && currentUser) {
+          setUser(currentUser);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setLogsLoading(true);
+
+    const loadLogs = ownLogsOnly ? getMyActivityLogs : getActivityLogs;
+
+    loadLogs()
       .then((logs) => {
         if (!cancelled) {
           setActivityLogs(logs);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActivityLogs([]);
         }
       })
       .finally(() => {
@@ -44,7 +85,7 @@ export default function ActivityLogPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ownLogsOnly, user?.id, user?.role]);
 
   const filteredLogs = useMemo(() => {
     return activityLogs.filter((log) => {
@@ -90,7 +131,9 @@ export default function ActivityLogPage() {
             </h1>
 
             <p className="mt-1 text-[12px] text-[#64748B]">
-              Track all system activities and user actions
+              {ownLogsOnly
+                ? "Your activity history"
+                : "Track all system activities and user actions"}
             </p>
           </div>
 

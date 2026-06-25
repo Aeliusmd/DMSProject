@@ -3,21 +3,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import {
+  getXrayInvoiceByOrderId,
+  saveXrayInvoice,
+} from "@/lib/invoices/invoiceApi";
 
 const initialFormData = {
-  xrayInvoiceDate: "2026-06-02",
+  xrayInvoiceDate: "",
   examDate: "",
   views: "0",
-  perViewAmount: "15.00",
-  prepayment: "15.00",
-  checkNumber: "9805",
+  perViewAmount: "0.00",
+  xrayPaidEarlier: "0.00",
+  checkNumber: "",
   description: "",
 };
 
-export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
+export default function CreateXrayInvoiceModal({
+  isOpen,
+  order,
+  onClose,
+  onSaved,
+}) {
   const mounted = useIsClient();
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [loadingXray, setLoadingXray] = useState(false);
 
   const openSession =
     isOpen && order ? String(order.id || order.orderNo) : null;
@@ -27,10 +40,54 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
     setPrevOpenSession(openSession);
 
     if (openSession) {
-      setFormData(initialFormData);
+      setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
       setErrors({});
+      setSubmitError("");
     }
   }
+
+  useEffect(() => {
+    if (!isOpen || !order?.dbId) return;
+
+    let cancelled = false;
+
+    async function loadXrayInvoice() {
+      setLoadingXray(true);
+
+      try {
+        const data = await getXrayInvoiceByOrderId(order.dbId);
+        if (cancelled) return;
+
+        const xray = data?.xray;
+        const xrayPaidEarlier =
+          xray?.xrayPaidEarlier ?? xray?.prepayment ?? "0.00";
+
+        setFormData({
+          xrayInvoiceDate: xray?.xrayInvoiceDate || getTodayInputDate(),
+          examDate: xray?.examDate || "",
+          views: xray?.views ?? initialFormData.views,
+          perViewAmount: xray?.perViewAmount ?? initialFormData.perViewAmount,
+          xrayPaidEarlier,
+          checkNumber: xray?.checkNumber ?? "",
+          description: xray?.description || "",
+        });
+      } catch {
+        if (!cancelled) {
+          setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingXray(false);
+        }
+      }
+    }
+
+    loadXrayInvoice();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, order?.dbId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -48,8 +105,8 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
   }, [formData.views, formData.perViewAmount]);
 
   const totalInvoiced = useMemo(() => {
-    return viewsAmount - toNumber(formData.prepayment);
-  }, [viewsAmount, formData.prepayment]);
+    return viewsAmount - toNumber(formData.xrayPaidEarlier);
+  }, [viewsAmount, formData.xrayPaidEarlier]);
 
   const balanceDue = totalInvoiced;
 
@@ -102,27 +159,42 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
     }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const validationErrors = validateXrayInvoiceForm(formData);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    console.log("Create X-Ray invoice:", {
-      order,
-      formData,
-      viewsAmount,
-      totalInvoiced,
-      balanceDue,
-    });
+    setSubmitting(true);
+    setSubmitError("");
 
-    onClose();
+    try {
+      await saveXrayInvoice({
+        orderId: order.dbId,
+        xrayInvoiceDate: formData.xrayInvoiceDate,
+        examDate: formData.examDate,
+        views: formData.views,
+        perViewAmount: formData.perViewAmount,
+        checkNumber: formData.checkNumber,
+        description: formData.description,
+      });
+
+      if (onSaved) {
+        await onSaved();
+      }
+
+      onClose();
+    } catch (error) {
+      setSubmitError(error?.message || "Failed to save X-Ray invoice");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
-      <section className="flex max-h-[calc(100vh-42px)] w-full max-w-[640px] flex-col overflow-hidden rounded-[10px] bg-white shadow-2xl">
-        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-5 py-4 text-white">
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+      <section className="flex max-h-[100dvh] w-full max-w-[720px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
+        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
             type="button"
             onClick={onClose}
@@ -146,9 +218,10 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
           </p>
         </div>
 
-        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5 py-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
-            <MetaItem label="Ref #" value={order.orderRef || "W-2785-3"} />
+        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-3 sm:px-5">
+          <div className="-mx-1 overflow-x-auto px-1">
+            <div className="flex min-w-max flex-wrap items-center gap-x-5 gap-y-2 text-[11px] sm:min-w-0">
+            <MetaItem label="Ref #" value={order.orderRef || "—"} />
 
             <MetaItem
               label=""
@@ -157,11 +230,12 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
             />
 
             <MetaItem label="WCAB:" value={order.court || "N/A"} />
+            </div>
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_170px]">
-          <div className="min-h-0 overflow-y-auto px-5 py-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_200px]">
+          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DateField
                 label="X-Ray Invoice Date"
@@ -246,7 +320,7 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
             </div>
           </div>
 
-          <aside className="flex min-h-[220px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 lg:border-l lg:border-t-0">
+          <aside className="flex min-h-[220px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 md:border-l md:border-t-0">
             <h3 className="mb-4 text-[12px] font-semibold text-[#334155]">
               Summary
             </h3>
@@ -258,14 +332,16 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
               />
 
               <SummaryRow
-                label="Prepayment"
-                value={`-${formatMoney(toNumber(formData.prepayment))}`}
+                label="X-Ray Paid Earlier"
+                value={`-${formatMoney(toNumber(formData.xrayPaidEarlier))}`}
                 danger
               />
 
-              <p className="text-[10px] font-semibold text-[#059669]">
-                ✓ CHK #{formData.checkNumber}
-              </p>
+              {formData.checkNumber ? (
+                <p className="text-[10px] font-semibold text-[#059669]">
+                  ✓ CHK #{formData.checkNumber}
+                </p>
+              ) : null}
             </div>
 
             <div className="mt-5 space-y-3">
@@ -293,12 +369,19 @@ export default function CreateXrayInvoiceModal({ isOpen, order, onClose }) {
             </div>
 
             <div className="mt-auto pt-6">
+              {submitError && (
+                <p className="mb-3 text-center text-[11px] text-red-500">
+                  {submitError}
+                </p>
+              )}
+
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937]"
+                disabled={submitting || loadingXray}
+                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Save Invoice
+                {submitting ? "Saving..." : "Save Invoice"}
               </button>
 
               <button
@@ -396,10 +479,6 @@ function validateXrayInvoiceForm(data) {
     errors.perViewAmount = "Required";
   } else if (Number.isNaN(Number(data.perViewAmount))) {
     errors.perViewAmount = "Invalid amount";
-  }
-
-  if (data.prepayment === "" || Number.isNaN(Number(data.prepayment))) {
-    errors.prepayment = "Invalid prepayment";
   }
 
   return errors;

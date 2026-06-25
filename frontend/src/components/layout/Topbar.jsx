@@ -1,53 +1,37 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import NotificationsModal from "@/components/layout/NotificationsModal";
 import { getStoredUser } from "@/lib/auth/authStorage";
-
-const notifications = [
-  {
-    id: 1,
-    type: "order",
-    title: "New Order Added — ORD-2026-012",
-    description: "Taylor Bankruptcy Filing",
-    time: "5 min ago",
-    read: false,
-  },
-  {
-    id: 2,
-    type: "invoice",
-    title: "Invoice Generated — INV-019",
-    description: "Thompson Industries",
-    time: "18 min ago",
-    read: false,
-  },
-  {
-    id: 3,
-    type: "reminder",
-    title: "Reminder Alert — Smith vs. Johnson",
-    description: "forms due in 2 days",
-    time: "1 hour ago",
-    read: false,
-  },
-  {
-    id: 4,
-    type: "employee",
-    title: "Employee Activity — Sarah J. updated",
-    description: "case notes for ORD-2026-009",
-    time: "2 hours ago",
-    read: false,
-  },
-];
+import { getNotifications } from "@/lib/notifications/notificationsApi";
 
 export default function Topbar({ onToggleSidebar }) {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const notificationButtonRef = useRef(null);
 
   const user = getStoredUser();
   const displayName = user?.name || "User";
   const initials = getInitials(displayName);
 
-  const unreadCount = notifications.filter((item) => !item.read).length;
+  const loadNotifications = useCallback(async () => {
+    try {
+      const data = await getNotifications({ limit: 8 });
+      setNotifications(data.notifications);
+      setUnreadCount(data.unreadCount);
+    } catch {
+      setNotifications([]);
+      setUnreadCount(0);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadNotifications();
+
+    const interval = setInterval(loadNotifications, 60000);
+    return () => clearInterval(interval);
+  }, [loadNotifications]);
 
   return (
     <header className="sticky top-0 z-30 flex min-h-[52px] items-center gap-2 border-b border-[#E2E8F0] bg-white px-2 py-2 sm:gap-3 sm:px-[18px]">
@@ -67,23 +51,37 @@ export default function Topbar({ onToggleSidebar }) {
             ref={notificationButtonRef}
             type="button"
             onClick={() => setIsNotificationsOpen((prev) => !prev)}
-            className={`relative flex h-[30px] w-[30px] items-center justify-center rounded-[6px] text-[#64748B] hover:bg-[#F8FAFC] ${
-              isNotificationsOpen ? "bg-[#F8FAFC] text-[#0097B2]" : ""
+            className={`relative flex h-[30px] w-[30px] items-center justify-center rounded-[6px] hover:bg-[#F8FAFC] ${
+              unreadCount > 0 ? "notification-bell-unread" : "text-[#64748B]"
+            } ${
+              isNotificationsOpen && unreadCount === 0
+                ? "bg-[#F8FAFC] text-[#0097B2]"
+                : ""
+            } ${
+              isNotificationsOpen && unreadCount > 0
+                ? "bg-[#FFF1F2] text-[#F87171]"
+                : ""
             }`}
-            aria-label="Open notifications"
+            aria-label={
+              unreadCount > 0
+                ? `Open notifications, ${unreadCount} unread`
+                : "Open notifications"
+            }
           >
             <BellIcon />
 
             {unreadCount > 0 && (
-              <span className="absolute right-[7px] top-[6px] h-[6px] w-[6px] rounded-full bg-[#EF4444]" />
+              <span className="notification-bell-dot absolute right-[7px] top-[6px] h-[6px] w-[6px] rounded-full" />
             )}
           </button>
 
           <NotificationsModal
             open={isNotificationsOpen}
             notifications={notifications}
+            unreadCount={unreadCount}
             triggerRef={notificationButtonRef}
             onClose={() => setIsNotificationsOpen(false)}
+            onRefresh={loadNotifications}
           />
         </div>
 

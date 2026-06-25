@@ -21,7 +21,7 @@ export default function UnprocessedSubpoenaCard({
 
       <div className="flex min-w-0 flex-1 flex-col justify-center">
         <h2 className="truncate text-[13px] font-semibold text-[#111827] sm:text-[14px]">
-          {subpoena.fileName}
+          {subpoena.displayTitle || subpoena.fileName}
         </h2>
 
         <div className="mt-3 flex flex-col gap-2">

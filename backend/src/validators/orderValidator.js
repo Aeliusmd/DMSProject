@@ -1,5 +1,11 @@
-const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays"];
-const WORKFLOW_STAGE_NAMES = ["Review Records", "Serve", "Custodian", "SENT"];
+const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays", "other"];
+const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
+const WORKFLOW_STAGE_NAMES = [
+  "Review Records",
+  "Serve",
+  "Custodian",
+  "SENT",
+];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const MAX_NOTE_LENGTH = 1000;
 
@@ -14,9 +20,23 @@ function validateOrderPayload(body = {}) {
     errors.push({ field: "facility", message: "Facility is invalid" });
   }
 
-  if (!body.type?.trim()) {
-    errors.push({ field: "type", message: "Type is required" });
-  } else if (!ALLOWED_ORDER_TYPES.includes(body.type)) {
+  const recordTypes = [
+    body.medicalRecords,
+    body.billingRecords,
+    body.employmentRecords,
+    body.xrays,
+    body.otherRecord,
+  ].filter(Boolean);
+
+  if (!recordTypes.length && !body.type?.trim()) {
+    errors.push({
+      field: "type",
+      message: "At least one record type is required",
+    });
+  } else if (
+    body.type?.trim() &&
+    !ALLOWED_ORDER_TYPES.includes(body.type.trim())
+  ) {
     errors.push({ field: "type", message: "Type is invalid" });
   }
 
@@ -32,7 +52,51 @@ function validateOrderPayload(body = {}) {
     errors.push({ field: "serveCompanyName", message: "Company name is required" });
   }
 
+  errors.push(...validateInjuryFields(body));
+
   return { valid: errors.length === 0, errors };
+}
+
+function validateInjuryFields(body = {}) {
+  const errors = [];
+  const injuryType = `${body.injuryType || ""}`.trim();
+
+  if (!injuryType || !ALLOWED_INJURY_TYPES.includes(injuryType)) {
+    return errors;
+  }
+
+  if (injuryType === "specific") {
+    if (!`${body.injuryDate || ""}`.trim()) {
+      errors.push({ field: "injuryDate", message: "Injury date is required" });
+    }
+    return errors;
+  }
+
+  const begin = `${body.injuryDateBegin || ""}`.trim();
+  const end = `${body.injuryDateEnd || ""}`.trim();
+
+  if (!begin) {
+    errors.push({
+      field: "injuryDateBegin",
+      message: "Start date is required",
+    });
+  }
+
+  if (!end) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "End date is required",
+    });
+  }
+
+  if (begin && end && end < begin) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "End date must be on or after start date",
+    });
+  }
+
+  return errors;
 }
 
 function validateCreateOrder(body = {}) {

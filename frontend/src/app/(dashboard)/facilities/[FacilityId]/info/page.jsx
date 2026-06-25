@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
@@ -36,6 +36,7 @@ const createEmptyDoctorInput = (id) => ({
 
 export default function FacilityDetailsPage() {
   const params = useParams();
+  const router = useRouter();
 
   const facilityId = String(
     params?.facilityId || params?.FacilityId || params?.id || ""
@@ -467,6 +468,7 @@ export default function FacilityDetailsPage() {
 
     try {
       await persistFacilityUpdate(formData);
+      router.push("/facilities");
     } catch (err) {
       if (err instanceof ApiRequestError && err.errors) {
         setErrors(mapApiErrors(err.errors));
@@ -681,14 +683,6 @@ export default function FacilityDetailsPage() {
             >
               <ArrowLeftIcon />
               Facilities
-            </Link>
-
-            <Link
-              href={`/facilities/${facilityId}/users`}
-              className="inline-flex h-[36px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
-            >
-              <UsersIcon />
-              Users
             </Link>
           </div>
         </div>
@@ -1809,26 +1803,6 @@ function ArrowLeftIcon() {
         strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function UsersIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.8" />
-      <path
-        d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
       />
     </svg>
   );

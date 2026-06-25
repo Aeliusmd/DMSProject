@@ -2,6 +2,18 @@
 
 import { useMemo, useState } from "react";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import { API_BASE_URL } from "@/config/api";
+import {
+  resolveRushLabel,
+  RUSH_LEVEL_STYLES,
+} from "@/lib/orders/rushUtils";
+
+function toFileUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  const origin = API_BASE_URL.replace(/\/api\/?$/, "");
+  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
+}
 
 const allColumns = [
   { key: "select", label: "", width: 34, minimum: true },
@@ -90,6 +102,7 @@ export default function ReportsOrdersTable({
   const handleOpenCreateInvoice = (order) => {
     setSelectedInvoiceOrder({
       id: order.orderNo,
+      dbId: order.dbId,
       court: "N/A",
       applicant: order.applicant || "N/A",
       company: {
@@ -268,11 +281,11 @@ export default function ReportsOrdersTable({
 
             <tbody>
               {paginatedOrders.map((order) => {
-                const rushLevel = calculateRushLevel(order.subpoenaDate);
+                const rushLabel = resolveRushLabel(order);
 
                 return (
                   <tr
-                    key={order.id}
+                    key={`${order.id}-${order.orderNo}`}
                     className="border-b border-[#E2E8F0] odd:bg-white even:bg-[#F8FBFC] hover:bg-[#EFF8FA]"
                   >
                     {isVisible("select") && (
@@ -294,18 +307,32 @@ export default function ReportsOrdersTable({
                           {order.subNo}
                         </p>
 
-                        <button
-                          type="button"
-                          className="mt-[2px] block text-left text-[9px] font-semibold leading-[12px] text-[#111827] hover:underline"
-                        >
-                          Review Subpoena
-                        </button>
+                        {order.recNumber ? (
+                          <p className="mt-[2px] text-[9px] leading-[12px] font-semibold text-[#334155]">
+                            REC {order.recNumber}
+                          </p>
+                        ) : null}
+
+                        {order.subpoenaUrl ? (
+                          <a
+                            href={toFileUrl(order.subpoenaUrl)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-[2px] block text-left text-[9px] font-semibold leading-[12px] text-[#111827] hover:underline"
+                          >
+                            Review Subpoena
+                          </a>
+                        ) : (
+                          <span className="mt-[2px] block text-[9px] leading-[12px] text-[#94A3B8]">
+                            No subpoena
+                          </span>
+                        )}
                       </td>
                     )}
 
                     {isVisible("status") && (
                       <td className="border-r border-[#E2E8F0] px-2 py-2 align-top">
-                        <StatusBlock />
+                        <StatusBlock status={order.status} />
                       </td>
                     )}
 
@@ -360,7 +387,7 @@ export default function ReportsOrdersTable({
 
                     {isVisible("rush") && (
                       <td className="px-2 py-2 text-center align-middle">
-                        <RushBadge rush={rushLevel} />
+                        <RushBadge rush={rushLabel} />
                       </td>
                     )}
                   </tr>
@@ -513,36 +540,25 @@ function InvoiceBlock({ order, onCreateInvoice }) {
         {order.invoiceAmount}
       </p>
 
-      {order.status === "Ready" && (
+      {order.invoicePaid && (
         <p className="text-[9px] font-semibold leading-[12px] text-[#059669]">
           Paid
         </p>
       )}
 
-      {order.status === "Active" && (
-        <button
-          type="button"
-          className="text-[9px] font-semibold leading-[12px] text-red-500 hover:underline"
-        >
-          Write Off
-        </button>
+      {!order.invoicePaid && order.invoiceStatus !== "Written Off" && (
+        <p className="text-[9px] font-semibold leading-[12px] text-[#EA580C]">
+          {order.invoiceStatus || "Unpaid"}
+        </p>
       )}
     </div>
   );
 }
 
-function StatusBlock() {
+function StatusBlock({ status }) {
   return (
     <div className="space-y-[2px] text-[9px] font-bold leading-[12px] text-[#111827]">
-      <button type="button" className="block text-left hover:underline">
-        Scan Records
-      </button>
-      <button type="button" className="block text-left hover:underline">
-        Serve Payment
-      </button>
-      <button type="button" className="block text-left hover:underline">
-        Custodian Payment
-      </button>
+      <p className="text-[10px] font-semibold text-[#007F96]">{status || "—"}</p>
     </div>
   );
 }
@@ -564,40 +580,15 @@ function RushBadge({ rush }) {
     return <span className="text-[10px] text-[#94A3B8]">–</span>;
   }
 
-  const styles = {
-    "Rush 1": "border-[#FDE68A] bg-[#FEF3C7] text-[#B45309]",
-    "Rush 2": "border-[#FDBA74] bg-[#FFEDD5] text-[#EA580C]",
-    "Rush 3": "border-[#FCA5A5] bg-[#FEE2E2] text-[#DC2626]",
-  };
-
   return (
     <span
       className={`inline-flex h-[20px] min-w-[46px] items-center justify-center rounded-[3px] border px-2 text-[9px] font-bold leading-none ${
-        styles[rush]
+        RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
       }`}
     >
       {rush}
     </span>
   );
-}
-
-function calculateRushLevel(dateValue) {
-  if (!dateValue) return null;
-
-  const orderDate = new Date(`${dateValue}T00:00:00`);
-  if (Number.isNaN(orderDate.getTime())) return null;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const diffInMs = today.getTime() - orderDate.getTime();
-  const daysOld = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-  if (daysOld < 0) return null;
-  if (daysOld <= 7) return "Rush 3";
-  if (daysOld <= 21) return "Rush 2";
-
-  return "Rush 1";
 }
 
 function formatShortDate(dateValue) {
@@ -613,5 +604,6 @@ function formatDob(dateValue) {
   const parts = dateValue.split("/");
   if (parts.length !== 3) return dateValue;
 
-  return `${parts[0]}/${parts[1]}/${parts[2].slice(-4)}`;
+  const year = parts[2].length === 2 ? `20${parts[2]}` : parts[2].slice(-4);
+  return `${parts[0]}/${parts[1]}/${year}`;
 }

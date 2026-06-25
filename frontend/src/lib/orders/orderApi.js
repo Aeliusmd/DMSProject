@@ -7,8 +7,10 @@ function buildOrdersQuery(filters = {}) {
 
   if (filters.facility) params.set("facility", filters.facility);
   if (filters.year) params.set("year", filters.year);
+  if (filters.period) params.set("period", filters.period);
   if (filters.status) params.set("status", filters.status);
   if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.limit) params.set("limit", String(filters.limit));
 
   const queryString = params.toString();
   return queryString ? `?${queryString}` : "";
@@ -52,9 +54,37 @@ function buildOrderFormData(payload = {}) {
 export async function getOrders(filters = {}) {
   const data = await request(`/orders${buildOrdersQuery(filters)}`, {
     auth: true,
+    cache: "no-store",
   });
 
   return data?.data?.orders || [];
+}
+
+export async function searchOrderDoctors(query) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+
+  const data = await request(`/orders/doctors/search?${params.toString()}`, {
+    auth: true,
+  });
+
+  return data?.data?.doctors || [];
+}
+
+export async function searchOrderDoctorAddresses(query) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+
+  const data = await request(`/orders/doctor-addresses/search?${params.toString()}`, {
+    auth: true,
+  });
+
+  return data?.data?.addresses || [];
+}
+
+export async function getOrderStats() {
+  const data = await request("/orders/stats", { auth: true });
+  return data?.data?.stats || null;
 }
 
 export async function getOrder(id) {
@@ -89,8 +119,37 @@ export async function deleteOrder(id) {
   });
 }
 
-export async function getOrderNotes(id) {
-  const data = await request(`/orders/${id}/notes`, { auth: true });
+export async function cancelOrder(id, { reason }) {
+  const data = await request(`/orders/${id}/cancel`, {
+    method: "POST",
+    auth: true,
+    body: { reason },
+  });
+
+  return data?.data?.order;
+}
+
+export async function getOrderReminders(scope = "my") {
+  const data = await request(`/orders/reminders?scope=${scope}`, {
+    auth: true,
+  });
+  return data?.data?.reminders || [];
+}
+
+export async function getDueRemindersToday() {
+  const data = await request("/orders/reminders/due-today", { auth: true });
+  return {
+    reminders: data?.data?.reminders || [],
+    enabled: data?.data?.enabled !== false,
+  };
+}
+
+export async function getOrderNotes(id, { includeCalled = false, noteId = null } = {}) {
+  const params = new URLSearchParams();
+  if (includeCalled) params.set("includeCalled", "1");
+  if (noteId) params.set("noteId", String(noteId));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const data = await request(`/orders/${id}/notes${query}`, { auth: true });
   return data?.data?.notes || [];
 }
 
@@ -158,6 +217,41 @@ export async function uploadBatchScan(file) {
   return data?.data || null;
 }
 
+export async function uploadMedicalRecordsScan(
+  orderId,
+  file,
+  { replace = false, recordType = "medical" } = {}
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const params = new URLSearchParams();
+  if (replace) params.set("replace", "true");
+  if (recordType) params.set("recordType", recordType);
+  const query = params.toString() ? `?${params.toString()}` : "";
+
+  const data = await request(`/orders/${orderId}/scan-medical-records${query}`, {
+    method: "POST",
+    auth: true,
+    body: formData,
+  });
+
+  return data?.data?.order || null;
+}
+
+export async function removeMedicalRecords(orderId, { recordType = null } = {}) {
+  const params = new URLSearchParams();
+  if (recordType) params.set("recordType", recordType);
+  const query = params.toString() ? `?${params.toString()}` : "";
+
+  const data = await request(`/orders/${orderId}/medical-records${query}`, {
+    method: "DELETE",
+    auth: true,
+  });
+
+  return data?.data?.order || null;
+}
+
 export async function uploadSingleSubpoena(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -202,4 +296,133 @@ export async function fetchUnprocessedSubpoenaPdf(extractId) {
   }
 
   return response.blob();
+}
+
+export async function fetchOrderSubpoenaPdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/orders/${orderId}/subpoena/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    let message = "Failed to load order subpoena PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function fetchOrderMedicalRecordsPdf(orderId, { recordType = "medical" } = {}) {
+  const token = getAccessToken();
+  const params = new URLSearchParams();
+  if (recordType) params.set("recordType", recordType);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(
+    `${API_BASE_URL}/orders/${orderId}/medical-records/file${query}`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+
+  if (!response.ok) {
+    let message = "Failed to load medical records PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function fetchOrderPrintInvoicePdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(`${API_BASE_URL}/orders/${orderId}/invoice/print`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+  if (!response.ok) {
+    let message = "Failed to load print invoice PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function fetchOrderPrintXrayInvoicePdf(orderId) {
+  const token = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/orders/${orderId}/invoice/xray/print`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+
+  if (!response.ok) {
+    let message = "Failed to load print X-Ray invoice PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  return response.blob();
+}
+
+export async function mailCompletedOrder(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/mail`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
+}
+
+export async function sendCopyServiceLetter(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/send-copy-letter`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
+}
+
+export async function recordOrderPickup(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/pickup`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
+}
+
+export async function recordOrderFax(orderId, payload = {}) {
+  const data = await request(`/orders/${orderId}/fax`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || {};
 }

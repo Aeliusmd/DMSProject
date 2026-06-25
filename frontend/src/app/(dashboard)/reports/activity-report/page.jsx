@@ -2,140 +2,73 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessActivityReport } from "@/lib/auth/roles";
+import { getFacilities } from "@/lib/facilities/facilityApi";
+import { getActivityReport } from "@/lib/reports/reportApi";
 
-const companiesSeed = [
-  {
-    id: 1,
-    name: "Adventist Health",
-    cases: 3,
-    invoiced: 2845,
-    paid: 2100,
-    activities: ["Invoiced", "Paid"],
-  },
-  {
-    id: 2,
-    name: "Cedars-Sinai Medical Center",
-    cases: 2,
-    invoiced: 1950,
-    paid: 1950,
-    activities: ["Paid"],
-  },
-  {
-    id: 3,
-    name: "Children's Hospital LA",
-    cases: 2,
-    invoiced: 1120,
-    paid: 560,
-    activities: ["Invoiced", "Unpaid"],
-  },
-  {
-    id: 4,
-    name: "Community Health Systems",
-    cases: 1,
-    invoiced: 750,
-    paid: 750,
-    activities: ["Paid"],
-  },
-  {
-    id: 5,
-    name: "Dignity Health",
-    cases: 2,
-    invoiced: 1680,
-    paid: 840,
-    activities: ["Invoiced", "Unpaid"],
-  },
-  {
-    id: 6,
-    name: "Hoag Hospital",
-    cases: 1,
-    invoiced: 920,
-    paid: 920,
-    activities: ["Paid"],
-  },
-  {
-    id: 7,
-    name: "Kaiser Permanente",
-    cases: 2,
-    invoiced: 2100,
-    paid: 1050,
-    activities: ["Invoiced", "Unpaid"],
-  },
-  {
-    id: 8,
-    name: "MemorialCare Medical Group",
-    cases: 1,
-    invoiced: 1450,
-    paid: 1450,
-    activities: ["Paid"],
-  },
-  {
-    id: 9,
-    name: "Pacific Diagnostic Center",
-    cases: 2,
-    invoiced: 1300,
-    paid: 650,
-    activities: ["Invoiced", "Unpaid"],
-  },
-  {
-    id: 10,
-    name: "Palo Alto Medical Foundation",
-    cases: 2,
-    invoiced: 1100,
-    paid: 550,
-    activities: ["Invoiced", "Unpaid"],
-  },
-  {
-    id: 11,
-    name: "Scripps Health",
-    cases: 2,
-    invoiced: 1780,
-    paid: 1780,
-    activities: ["Paid"],
-  },
-  {
-    id: 12,
-    name: "St. Joseph Hospital",
-    cases: 2,
-    invoiced: 1350,
-    paid: 675,
-    activities: ["Invoiced", "Unpaid"],
-  },
-  {
-    id: 13,
-    name: "Torrance Memorial Medical Center",
-    cases: 1,
-    invoiced: 990,
-    paid: 990,
-    activities: ["Paid"],
-  },
-  {
-    id: 14,
-    name: "UCLA Health",
-    cases: 2,
-    invoiced: 2400,
-    paid: 2400,
-    activities: ["Paid"],
-  },
-  {
-    id: 15,
-    name: "Valley Medical Group",
-    cases: 1,
-    invoiced: 780,
-    paid: 780,
-    activities: ["Paid"],
-  },
-];
+function formatDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getPresetRange(preset) {
+  const today = new Date();
+  const through = formatDateInput(today);
+
+  if (preset === "Last Month") {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const end = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { from: formatDateInput(start), to: formatDateInput(end) };
+  }
+
+  if (preset === "Last 6 Months") {
+    const start = new Date(today);
+    start.setMonth(start.getMonth() - 6);
+    return { from: formatDateInput(start), to: through };
+  }
+
+  if (preset === "Last Year") {
+    const year = today.getFullYear() - 1;
+    return { from: `${year}-01-01`, to: `${year}-12-31` };
+  }
+
+  const start = new Date(today);
+  start.setMonth(start.getMonth() - 1);
+  return { from: formatDateInput(start), to: through };
+}
+
+function getDefaultFilters() {
+  return {
+    reportDate: "",
+    throughDate: "",
+    facility: "all",
+    activity: "All",
+  };
+}
 
 export default function ActivityReportPage() {
+  const router = useRouter();
+  const user = getStoredUser();
+  const allowed = canAccessActivityReport(user);
   const searchInputRef = useRef(null);
 
-  const [filters, setFilters] = useState({
-    reportDate: "2026-06-02",
-    throughDate: "2026-06-02",
-    facility: "All Facilities",
-    activity: "All",
-  });
+  useEffect(() => {
+    if (!allowed) {
+      router.replace("/reports");
+    }
+  }, [allowed, router]);
+
+  const [filters, setFilters] = useState(getDefaultFilters);
+  const [facilities, setFacilities] = useState([]);
+  const [companies, setCompanies] = useState([]);
+  const [summary, setSummary] = useState({ facilityCount: 0, totalCases: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const [expandedCompanyId, setExpandedCompanyId] = useState(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -143,72 +76,105 @@ export default function ActivityReportPage() {
   const [appliedSearch, setAppliedSearch] = useState("");
 
   useEffect(() => {
+    getFacilities()
+      .then(setFacilities)
+      .catch(() => setFacilities([]));
+  }, []);
+
+  useEffect(() => {
     if (isSearchOpen) {
       searchInputRef.current?.focus();
     }
   }, [isSearchOpen]);
 
-  const filteredCompanies = useMemo(() => {
-    const search = appliedSearch.trim().toLowerCase();
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
 
-    return companiesSeed.filter((company) => {
-      const matchesFacility =
-        filters.facility === "All Facilities" ||
-        company.name === filters.facility;
+    getActivityReport({
+      reportDate: filters.reportDate,
+      throughDate: filters.throughDate,
+      facilityId: filters.facility,
+      activity: filters.activity,
+      search: appliedSearch,
+    })
+      .then((data) => {
+        if (!active) return;
+        setCompanies(data.companies || []);
+        setSummary(data.summary || { facilityCount: 0, totalCases: 0 });
+      })
+      .catch((err) => {
+        if (!active) return;
+        setCompanies([]);
+        setSummary({ facilityCount: 0, totalCases: 0 });
+        setError(err.message || "Failed to load activity report");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
-      const matchesActivity =
-        filters.activity === "All" ||
-        company.activities.includes(filters.activity);
+    return () => {
+      active = false;
+    };
+  }, [
+    filters.reportDate,
+    filters.throughDate,
+    filters.facility,
+    filters.activity,
+    appliedSearch,
+  ]);
 
-      const matchesSearch =
-        !search ||
-        company.name.toLowerCase().includes(search) ||
-        String(company.cases).includes(search) ||
-        String(company.invoiced).includes(search) ||
-        String(company.paid).includes(search);
-
-      return matchesFacility && matchesActivity && matchesSearch;
+  const facilityOptions = useMemo(() => {
+    const sorted = [...facilities].sort((a, b) => {
+      const nameA = (
+        a.facility ||
+        a.facilityName ||
+        a.name ||
+        ""
+      ).toLowerCase();
+      const nameB = (
+        b.facility ||
+        b.facilityName ||
+        b.name ||
+        ""
+      ).toLowerCase();
+      return nameA.localeCompare(nameB);
     });
-  }, [filters.facility, filters.activity, appliedSearch]);
 
-  const totalCases = filteredCompanies.reduce(
-    (sum, company) => sum + company.cases,
-    0
-  );
+    return [
+      { value: "all", label: "All Facilities" },
+      ...sorted.map((facility) => ({
+        value: String(facility.id),
+        label:
+          facility.facility ||
+          facility.facilityName ||
+          facility.name ||
+          `Facility ${facility.id}`,
+      })),
+    ];
+  }, [facilities]);
+
+  const generatedOn = useMemo(() => {
+    return new Date().toLocaleDateString("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "numeric",
+    });
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-
-    setFilters((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setFilters((prev) => ({ ...prev, [name]: value }));
   };
 
   const handlePreset = (preset) => {
-    if (preset === "Last Month") {
-      setFilters((prev) => ({
-        ...prev,
-        reportDate: "2026-05-01",
-        throughDate: "2026-05-31",
-      }));
-    }
-
-    if (preset === "Last 6 Months") {
-      setFilters((prev) => ({
-        ...prev,
-        reportDate: "2026-01-01",
-        throughDate: "2026-06-30",
-      }));
-    }
-
-    if (preset === "Last Year") {
-      setFilters((prev) => ({
-        ...prev,
-        reportDate: "2025-01-01",
-        throughDate: "2025-12-31",
-      }));
-    }
+    const range = getPresetRange(preset);
+    setFilters((prev) => ({
+      ...prev,
+      reportDate: range.from,
+      throughDate: range.to,
+    }));
   };
 
   const handleSearch = () => {
@@ -241,7 +207,27 @@ export default function ActivityReportPage() {
   };
 
   const handleExport = () => {
-    console.log("Export activity report:", filteredCompanies);
+    const header = ["Facility", "Cases", "Invoiced", "Paid"];
+    const rows = companies.map((company) => [
+      company.name,
+      company.cases,
+      company.invoicedDisplay || company.invoiced,
+      company.paidDisplay || company.paid,
+    ]);
+
+    const csv = [header, ...rows]
+      .map((row) =>
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `activity-report-${filters.reportDate || "all"}-${filters.throughDate || "all"}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const toggleCompany = (companyId) => {
@@ -249,6 +235,16 @@ export default function ActivityReportPage() {
       current === companyId ? null : companyId
     );
   };
+
+  if (!allowed) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+          <p className="text-[13px] text-[#64748B]">Redirecting...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
 
   return (
     <DashboardShell>
@@ -291,10 +287,7 @@ export default function ActivityReportPage() {
               type="select"
               value={filters.facility}
               onChange={handleChange}
-              options={[
-                "All Facilities",
-                ...companiesSeed.map((company) => company.name),
-              ]}
+              options={facilityOptions}
             />
 
             <ReportField
@@ -303,7 +296,14 @@ export default function ActivityReportPage() {
               type="select"
               value={filters.activity}
               onChange={handleChange}
-              options={["All", "Invoiced", "Paid", "Unpaid", "Produced"]}
+              options={[
+                { value: "All", label: "All" },
+                { value: "Invoiced", label: "Invoiced" },
+                { value: "Paid", label: "Paid" },
+                { value: "Unpaid", label: "Unpaid" },
+                { value: "Written Off", label: "Written Off" },
+                { value: "Produced", label: "Produced" },
+              ]}
             />
           </div>
 
@@ -373,25 +373,38 @@ export default function ActivityReportPage() {
         <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
             <p className="text-[12px] font-semibold text-[#475569]">
-              Showing {filteredCompanies.length} facilities
+              Showing {summary.facilityCount} facilities
             </p>
 
             <p className="text-[12px] text-[#94A3B8]">
-              {totalCases} total cases
+              {summary.totalCases} total cases
             </p>
           </div>
 
-          <div className="max-h-[calc(100vh-345px)] overflow-auto">
-            {filteredCompanies.map((company) => (
-              <CompanyReportRow
-                key={company.id}
-                company={company}
-                expanded={expandedCompanyId === company.id}
-                onToggle={() => toggleCompany(company.id)}
-              />
-            ))}
+          {error && (
+            <div className="border-b border-[#FEE2E2] bg-[#FEF2F2] px-4 py-3 text-[12px] font-medium text-red-600">
+              {error}
+            </div>
+          )}
 
-            {filteredCompanies.length === 0 && (
+          <div className="max-h-[calc(100vh-345px)] overflow-auto">
+            {loading && (
+              <div className="px-4 py-12 text-center text-[13px] text-[#94A3B8]">
+                Loading activity report...
+              </div>
+            )}
+
+            {!loading &&
+              companies.map((company) => (
+                <CompanyReportRow
+                  key={company.id}
+                  company={company}
+                  expanded={expandedCompanyId === company.id}
+                  onToggle={() => toggleCompany(company.id)}
+                />
+              ))}
+
+            {!loading && !error && companies.length === 0 && (
               <div className="px-4 py-12 text-center text-[13px] text-[#94A3B8]">
                 No activity report data found.
               </div>
@@ -401,7 +414,7 @@ export default function ActivityReportPage() {
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[11px] text-[#94A3B8]">
-            Report generated on 06/02/2026
+            Report generated on {generatedOn}
           </p>
 
           <div className="flex items-center gap-3">
@@ -417,7 +430,8 @@ export default function ActivityReportPage() {
             <button
               type="button"
               onClick={handleExport}
-              className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-5 text-[12px] font-semibold text-[#475569] hover:bg-[#F8FAFC]"
+              disabled={!companies.length}
+              className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-5 text-[12px] font-semibold text-[#475569] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <ExportIcon />
               Export
@@ -430,6 +444,8 @@ export default function ActivityReportPage() {
 }
 
 function CompanyReportRow({ company, expanded, onToggle }) {
+  const caseRows = company.caseRows || [];
+
   return (
     <div className="border-b border-[#F1F5F9] last:border-b-0">
       <button
@@ -461,7 +477,7 @@ function CompanyReportRow({ company, expanded, onToggle }) {
           <span className="text-[12px] text-[#475569]">
             Invoiced:{" "}
             <span className="font-semibold text-[#111827]">
-              {formatMoney(company.invoiced)}
+              {company.invoicedDisplay || formatMoney(company.invoiced)}
             </span>
           </span>
         </div>
@@ -470,7 +486,7 @@ function CompanyReportRow({ company, expanded, onToggle }) {
           <span className="text-[12px] text-[#475569]">
             Paid:{" "}
             <span className="font-semibold text-[#059669]">
-              {formatMoney(company.paid)}
+              {company.paidDisplay || formatMoney(company.paid)}
             </span>
           </span>
         </div>
@@ -490,25 +506,36 @@ function CompanyReportRow({ company, expanded, onToggle }) {
               </thead>
 
               <tbody>
-                {Array.from({ length: company.cases }, (_, index) => (
+                {caseRows.map((caseRow) => (
                   <tr
-                    key={index}
+                    key={`${company.id}-${caseRow.orderId}`}
                     className="border-b border-[#F1F5F9] last:border-b-0"
                   >
                     <td className="px-4 py-3 text-[12px] font-semibold text-[#007F96]">
-                      {72010 + company.id}-{index + 1}
+                      {caseRow.caseNo || "—"}
                     </td>
                     <td className="px-4 py-3 text-[12px] text-[#475569]">
-                      Sample Applicant {index + 1}
+                      {caseRow.applicant}
                     </td>
                     <td className="px-4 py-3 text-[12px] text-[#475569]">
-                      Invoice activity recorded
+                      {caseRow.activity}
                     </td>
                     <td className="px-4 py-3 text-right text-[12px] font-semibold text-[#111827]">
-                      {formatMoney(Math.round(company.invoiced / company.cases))}
+                      {caseRow.amountDisplay || formatMoney(caseRow.amount)}
                     </td>
                   </tr>
                 ))}
+
+                {caseRows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-4 py-6 text-center text-[12px] text-[#94A3B8]"
+                    >
+                      No case details available.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -539,11 +566,18 @@ function ReportField({
           onChange={onChange}
           className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
+          {options.map((option) => {
+            const optionValue =
+              typeof option === "string" ? option : option.value;
+            const optionLabel =
+              typeof option === "string" ? option : option.label;
+
+            return (
+              <option key={optionValue} value={optionValue}>
+                {optionLabel}
+              </option>
+            );
+          })}
         </select>
       ) : (
         <input
@@ -559,7 +593,8 @@ function ReportField({
 }
 
 function formatMoney(value) {
-  return `$${value.toLocaleString("en-US", {
+  const amount = Number(value) || 0;
+  return `$${amount.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

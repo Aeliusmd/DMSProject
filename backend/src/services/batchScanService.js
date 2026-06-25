@@ -4,8 +4,14 @@ const { randomUUID } = require("crypto");
 const ApiError = require("../utils/ApiError");
 const fileStorage = require("../utils/fileStorage");
 const { getPdfPageCount, extractPageRange } = require("../utils/pdfSplit");
-const { mapSchemaToExtractRow, mapSchemaToOrderHints } = require("../utils/extractionMapper");
+const {
+  mapSchemaToExtractRow,
+  mapSchemaToOrderHints,
+  resolveExtractionSchema,
+  enrichOrderHintsFromRow,
+} = require("../utils/extractionMapper");
 const subpoenaExtractionService = require("./subpoenaExtractionService");
+const { resolveProviderFromHints } = require("./providerService");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const { withTransaction } = require("../config/database");
 
@@ -44,7 +50,7 @@ function formatUploadDate(value) {
   return `${mm}/${dd}/${yy} ${h12}:${mins} ${ampm}`;
 }
 
-function mapExtractRowToApi(row) {
+async function mapExtractRowToApi(row) {
   const confidence =
     typeof row.extraction_confidence === "string"
       ? JSON.parse(row.extraction_confidence || "{}")
@@ -53,6 +59,14 @@ function mapExtractRowToApi(row) {
     typeof row.raw_extraction === "string"
       ? JSON.parse(row.raw_extraction || "{}")
       : row.raw_extraction || {};
+  const schema = resolveExtractionSchema(rawExtraction);
+  let orderHints = enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), row);
+
+  let providerResolution = { provider: null, created: false };
+  if (orderHints.companyName) {
+    providerResolution = await resolveProviderFromHints(orderHints);
+    orderHints = providerResolution.orderHints;
+  }
 
   return {
     id: row.id,
@@ -66,7 +80,11 @@ function mapExtractRowToApi(row) {
     fileSizeBytes: row.file_size_bytes,
     uploadedAt: formatUploadDate(row.uploaded_at || row.created_at),
     isProcessed: Boolean(row.is_processed),
-    orderHints: mapSchemaToOrderHints(rawExtraction),
+    orderHints,
+    providerId: providerResolution.provider?.id || null,
+    providerCreated: providerResolution.created,
+    providerName: providerResolution.provider?.companyName || null,
+    dateOfInjury: orderHints.dateOfInjury || null,
     extractionConfidence: confidence,
     batchReferenceCode: row.batch_reference_code,
     batchFileName: row.batch_file_name,
@@ -160,7 +178,7 @@ async function processBatchScan(file, uploadedBy, options = {}) {
       page_range_start: start,
       page_range_end: end,
       ...mapped,
-      order_hints: mapSchemaToOrderHints(schema),
+      order_hints: enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), mapped),
     });
   }
 
@@ -269,6 +287,7 @@ async function getUnprocessedQueue() {
     id: row.id,
     parentId: row.parent_id,
     referenceCode: row.reference_code,
+    subpoenaIndex: row.subpoena_index,
     fileName: row.file_name,
     uploadedAt: formatUploadDate(row.uploaded_at),
     pages: row.page_count,
@@ -277,20 +296,21 @@ async function getUnprocessedQueue() {
     caseName: row.case_name,
     orderNumber: row.order_number,
     batchReferenceCode: row.batch_reference_code,
+    batchFileName: row.batch_file_name,
   }));
 }
 
 async function getUnprocessedExtract(extractId) {
   const row = await batchScanRepository.getExtractById(extractId);
-  if (!row) {
+  if (!row || row.is_processed) {
     throw new ApiError(404, "Unprocessed subpoena not found");
   }
-  return mapExtractRowToApi(row);
+  return await mapExtractRowToApi(row);
 }
 
 async function getUnprocessedExtractFile(extractId) {
   const row = await batchScanRepository.getExtractById(extractId);
-  if (!row) {
+  if (!row || row.is_processed) {
     throw new ApiError(404, "Unprocessed subpoena not found");
   }
 

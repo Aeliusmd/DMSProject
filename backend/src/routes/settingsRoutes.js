@@ -1,10 +1,11 @@
 const express = require("express");
 const settingsController = require("../controllers/settingsController");
 const { authenticate } = require("../middleware/authMiddleware");
+const { denyRoles } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
 
-router.use(authenticate);
+router.use(authenticate, denyRoles("Employee", "Manager"));
 
 router.get("/", settingsController.getSettings);
 router.put("/profile", settingsController.updateProfile);

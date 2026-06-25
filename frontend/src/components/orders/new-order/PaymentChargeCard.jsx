@@ -1,4 +1,14 @@
+import { useState } from "react";
 import NewOrderField from "@/components/orders/new-order/NewOrderField";
+import {
+  capPaymentPaidEntry,
+  dueAmountFromFee,
+  formatMoneyAmount,
+  formatPaidBracket,
+  parsePaymentAmount,
+  resolvePaymentDue,
+  resolvePaymentCharge,
+} from "@/lib/orders/paymentUtils";
 
 const paymentThemes = {
   green: {
@@ -21,18 +31,142 @@ const paymentThemes = {
   },
 };
 
+function sanitizeMoneyInput(value) {
+  return String(value ?? "")
+    .replace(/[^\d.]/g, "")
+    .replace(/(\..*)\./g, "$1")
+    .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+}
+
+function AmountField({ label, value, onChange, onBlur, readOnly, colors, error }) {
+  return (
+    <div>
+      <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">{label}</p>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+        readOnly={readOnly}
+        placeholder="0.00"
+        className={`flex h-[38px] w-full items-center rounded-[6px] border px-3 text-[14px] font-semibold outline-none focus:ring-2 ${colors.due} ${
+          readOnly
+            ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+            : error
+              ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+              : "border-[#CBD5E1] bg-white focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+        }`}
+      />
+      {error && <p className="mt-1 text-[11px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function usesInvoiceDueRules(type, invoiceFees) {
+  return (
+    (type === "custodian" && invoiceFees?.hasInvoice) ||
+    (type === "xray" && invoiceFees?.hasXrayInvoice)
+  );
+}
+
 export default function PaymentChargeCard({
   title,
-  amount,
-  due,
+  chargeAmount,
+  paidAmount = 0,
   theme = "green",
   prefix,
   formData,
   onChange,
   onBlur,
   getError,
+  showPaidField = false,
+  mirrorPaidDue = false,
+  amountsReadOnly = false,
+  paidReadOnly,
+  fieldsReadOnly = false,
+  chargeAmountFieldName = "",
+  chargeAmountLabel = "Amount",
+  autoDueOnPaidChange = false,
+  invoiceFees = null,
+  paymentType = "",
+  capPaidToDue = false,
+  onValuesChange,
 }) {
   const colors = paymentThemes[theme];
+  const [paidCapError, setPaidCapError] = useState("");
+  const lockPaid = paidReadOnly ?? amountsReadOnly;
+  const lockFields = fieldsReadOnly || lockPaid;
+  const dueFieldName = `${prefix}Due`;
+  const type = paymentType || prefix;
+  const invoiceLinkedDue = usesInvoiceDueRules(type, invoiceFees);
+  const autoComputeDue = autoDueOnPaidChange || invoiceLinkedDue;
+
+  const resolvedPaid = showPaidField
+    ? parsePaymentAmount(formData[`${prefix}Paid`])
+    : parsePaymentAmount(paidAmount);
+  const storedDue = formData[dueFieldName];
+  const charge = chargeAmountFieldName
+    ? parsePaymentAmount(formData[chargeAmountFieldName] || chargeAmount)
+    : resolvePaymentCharge(type, invoiceFees, resolvedPaid, storedDue);
+  const paid = resolvedPaid;
+  const paidBracket = formatPaidBracket(paid);
+  const computedDue = invoiceLinkedDue
+    ? resolvePaymentDue(type, invoiceFees, resolvedPaid)
+    : mirrorPaidDue
+      ? charge
+      : dueAmountFromFee(charge, resolvedPaid);
+  const paidDisplay = mirrorPaidDue ? charge : paid;
+
+  const emitValues = (updates) => {
+    if (onValuesChange) {
+      onValuesChange(updates);
+      return;
+    }
+
+    Object.entries(updates).forEach(([name, value]) => {
+      onChange({ target: { name, value } });
+    });
+  };
+
+  const handlePaidChange = (event) => {
+    if (lockPaid) return;
+
+    const rawPaid = sanitizeMoneyInput(event.target.value);
+    let nextPaid = rawPaid;
+
+    if (capPaidToDue) {
+      const { paidValue, capped } = capPaymentPaidEntry(
+        type,
+        invoiceFees,
+        resolvedPaid,
+        storedDue,
+        rawPaid
+      );
+      nextPaid = paidValue;
+      setPaidCapError(capped ? "Paid cannot exceed due" : "");
+    } else {
+      setPaidCapError("");
+    }
+
+    const updates = { [`${prefix}Paid`]: nextPaid };
+
+    if (autoComputeDue) {
+      updates[dueFieldName] = resolvePaymentDue(
+        type,
+        invoiceFees,
+        nextPaid
+      ).toFixed(2);
+    }
+
+    emitValues(updates);
+  };
+
+  const dueDisplayValue = autoComputeDue
+    ? computedDue.toFixed(2)
+    : mirrorPaidDue
+      ? charge.toFixed(2)
+      : dueAmountFromFee(charge, paid).toFixed(2);
 
   return (
     <div className={`rounded-[10px] border ${colors.border} ${colors.bg} p-4`}>
@@ -40,9 +174,10 @@ export default function PaymentChargeCard({
         <div>
           <h3 className={`text-[14px] font-semibold ${colors.title}`}>
             {title}
+            {paidBracket ? ` ${paidBracket}` : ""}
           </h3>
           <p className={`mt-[2px] text-[11px] ${colors.title}`}>
-            Amount: {amount}
+            Charge: {formatMoneyAmount(charge)}
           </p>
         </div>
 
@@ -55,6 +190,22 @@ export default function PaymentChargeCard({
       </div>
 
       <div className="space-y-3">
+        {chargeAmountFieldName && (
+          <AmountField
+            label={chargeAmountLabel}
+            value={formData[chargeAmountFieldName] ?? ""}
+            onChange={(event) => {
+              emitValues({
+                [chargeAmountFieldName]: sanitizeMoneyInput(event.target.value),
+              });
+            }}
+            onBlur={onBlur}
+            readOnly={false}
+            colors={colors}
+            error={getError(chargeAmountFieldName)}
+          />
+        )}
+
         <NewOrderField
           label="Check #"
           name={`${prefix}Check`}
@@ -62,7 +213,7 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="Check number"
-          required
+          disabled={lockFields}
           inputMode="numeric"
           maxLength={12}
           error={getError(`${prefix}Check`)}
@@ -75,32 +226,33 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           type="date"
-          required
+          disabled={lockFields}
           error={getError(`${prefix}Date`)}
         />
 
-        <NewOrderField
-          label="Paid"
-          name={`${prefix}Paid`}
-          value={formData[`${prefix}Paid`]}
-          onChange={onChange}
-          onBlur={onBlur}
-          placeholder="$ 0.00"
-          required
-          inputMode="decimal"
-          error={getError(`${prefix}Paid`)}
-        />
+        {showPaidField && (
+          <AmountField
+            label="Paid"
+            value={
+              lockPaid
+                ? paidDisplay.toFixed(2)
+                : formData[`${prefix}Paid`] ?? ""
+            }
+            onChange={handlePaidChange}
+            onBlur={onBlur}
+            readOnly={lockPaid}
+            colors={colors}
+            error={getError(`${prefix}Paid`) || paidCapError}
+          />
+        )}
 
-        <div>
-          <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">
-            Due
-          </p>
-          <div
-            className={`flex h-[38px] items-center rounded-[6px] bg-white/50 px-3 text-[14px] font-semibold ${colors.due}`}
-          >
-            {due}
-          </div>
-        </div>
+        <AmountField
+          label="Due"
+          value={dueDisplayValue}
+          readOnly
+          colors={colors}
+          error={getError(dueFieldName)}
+        />
 
         <NewOrderField
           label="Memo"
@@ -109,6 +261,7 @@ export default function PaymentChargeCard({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="Memo"
+          disabled={lockFields}
         />
       </div>
     </div>

@@ -1,177 +1,98 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
-import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import {
+  buildSummaryFromOutstandingGroups,
+  buildSummaryFromRows,
+  countOutstandingRows,
+  filterInvoiceGroups,
+  filterResendInvoices,
+  groupResendInvoices,
+} from "@/lib/invoices/invoiceFilters";
+import { getInvoices } from "@/lib/invoices/invoiceApi";
 
-const resendInvoices = [
-  {
-    id: 1,
-    company: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-    caseNo: "71956-5",
-    sentDate: "04/01/2026",
-    days: 60,
-    invoiceDate: "04/01/2026",
-    invoiced: "$850.00",
-    paid: "$0.00",
-    due: "$850.00",
-  },
-  {
-    id: 2,
-    company: "Martinez Legal Group",
-    email: "invoices@martinezlegal.com",
-    caseNo: "72001-2",
-    sentDate: "03/25/2026",
-    days: 67,
-    invoiceDate: "03/25/2026",
-    invoiced: "$1,800.00",
-    paid: "$500.00",
-    due: "$1,300.00",
-  },
-  {
-    id: 3,
-    company: "Pacific Law Partners",
-    email: "billing@pacificlaw.com, ar@pacificlaw.com",
-    caseNo: "72012-2",
-    sentDate: "02/28/2026",
-    days: 92,
-    invoiceDate: "02/28/2026",
-    invoiced: "$1,500.00",
-    paid: "$0.00",
-    due: "$1,500.00",
-  },
-  {
-    id: 4,
-    company: "Williams & Co.",
-    email: "finance@williamsco.com",
-    caseNo: "72020-1",
-    sentDate: "02/20/2026",
-    days: 100,
-    invoiceDate: "02/20/2026",
-    invoiced: "$950.00",
-    paid: "$0.00",
-    due: "$950.00",
-  },
-  {
-    id: 5,
-    company: "Brown Family Trust",
-    email: "billing@browntrust.com",
-    caseNo: "72035-4",
-    sentDate: "02/10/2026",
-    days: 110,
-    invoiceDate: "02/10/2026",
-    invoiced: "$2,100.00",
-    paid: "$0.00",
-    due: "$2,100.00",
-  },
-  {
-    id: 6,
-    company: "Davis Law Firm",
-    email: "accounts@davislawfirm.com",
-    caseNo: "72058-2",
-    sentDate: "01/30/2026",
-    days: 121,
-    invoiceDate: "01/30/2026",
-    invoiced: "$1,250.00",
-    paid: "$0.00",
-    due: "$1,250.00",
-  },
-  {
-    id: 7,
-    company: "Rodriguez & Partners",
-    email: "billing@rodriguezpartners.com",
-    caseNo: "72067-1",
-    sentDate: "01/22/2026",
-    days: 129,
-    invoiceDate: "01/22/2026",
-    invoiced: "$1,600.00",
-    paid: "$0.00",
-    due: "$1,600.00",
-  },
-  {
-    id: 8,
-    company: "Thompson Industries",
-    email: "ap@thompsonindustries.com",
-    caseNo: "72070-2",
-    sentDate: "01/15/2026",
-    days: 136,
-    invoiceDate: "01/15/2026",
-    invoiced: "$2,500.00",
-    paid: "$0.00",
-    due: "$2,500.00",
-  },
-  {
-    id: 9,
-    company: "Garcia Legal Services",
-    email: "billing@garcialegal.com",
-    caseNo: "72088-3",
-    sentDate: "01/05/2026",
-    days: 146,
-    invoiceDate: "01/05/2026",
-    invoiced: "$975.00",
-    paid: "$0.00",
-    due: "$975.00",
-  },
-  {
-    id: 10,
-    company: "Lee Tech Holdings",
-    email: "payables@leetech.com",
-    caseNo: "72108-2",
-    sentDate: "12/28/2025",
-    days: 154,
-    invoiceDate: "12/28/2025",
-    invoiced: "$1,900.00",
-    paid: "$0.00",
-    due: "$1,900.00",
-  },
-  {
-    id: 11,
-    company: "Anderson Accounting",
-    email: "invoices@andersonaccounting.com",
-    caseNo: "72120-1",
-    sentDate: "12/20/2025",
-    days: 162,
-    invoiceDate: "12/20/2025",
-    invoiced: "$825.00",
-    paid: "$0.00",
-    due: "$825.00",
-  },
-  {
-    id: 12,
-    company: "Taylor Financial Group",
-    email: "billing@taylorfinancial.com",
-    caseNo: "72135-2",
-    sentDate: "12/12/2025",
-    days: 170,
-    invoiceDate: "12/12/2025",
-    invoiced: "$1,450.00",
-    paid: "$0.00",
-    due: "$1,450.00",
-  },
-  {
-    id: 13,
-    company: "Harrison Medical Group",
-    email: "ar@harrisonmedical.com",
-    caseNo: "72140-4",
-    sentDate: "12/01/2025",
-    days: 181,
-    invoiceDate: "12/01/2025",
-    invoiced: "$1,100.00",
-    paid: "$0.00",
-    due: "$1,100.00",
-  },
-];
+const EMPTY_SUMMARY = {
+  companies: 0,
+  cases: 0,
+  invoiced: "$0.00",
+  paid: "$0.00",
+  due: "$0.00",
+};
 
 export default function InvoicesPage() {
+  const [invoiceCategory, setInvoiceCategory] = useState("invoice");
   const [activeTab, setActiveTab] = useState("outstanding");
   const [filters, setFilters] = useState({
     from: "",
     through: "",
+    orderId: "",
   });
+  const [appliedOrderId, setAppliedOrderId] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [outstanding, setOutstanding] = useState({
+    groups: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+  const [resend, setResend] = useState({
+    invoices: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+  const [xrayOutstanding, setXrayOutstanding] = useState({
+    groups: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+  const [xrayResend, setXrayResend] = useState({
+    invoices: [],
+    summary: EMPTY_SUMMARY,
+    count: 0,
+  });
+
+  const loadInvoices = useCallback(async () => {
+    setLoading(true);
+
+    const dateFilters = {
+      dateFrom: filters.from || undefined,
+      dateTo: filters.through || undefined,
+    };
+
+    try {
+      const [
+        outstandingData,
+        resendData,
+        xrayOutstandingData,
+        xrayResendData,
+      ] = await Promise.all([
+        getInvoices({ ...dateFilters, tab: "outstanding", type: "invoice" }),
+        getInvoices({ ...dateFilters, tab: "resend", type: "invoice" }),
+        getInvoices({ ...dateFilters, tab: "outstanding", type: "xray" }),
+        getInvoices({ ...dateFilters, tab: "resend", type: "xray" }),
+      ]);
+
+      setOutstanding(outstandingData);
+      setResend(resendData);
+      setXrayOutstanding(xrayOutstandingData);
+      setXrayResend(xrayResendData);
+    } catch {
+      setOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+      setResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
+      setXrayOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+      setXrayResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
+    } finally {
+      setLoading(false);
+    }
+  }, [filters.from, filters.through]);
+
+  useEffect(() => {
+    loadInvoices();
+  }, [loadInvoices, refreshKey]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -182,16 +103,87 @@ export default function InvoicesPage() {
     }));
   };
 
-  const handleFilterByDate = () => {
-    console.log("Filter invoices:", filters);
+  const handleApplyFilters = () => {
+    setAppliedOrderId(filters.orderId.trim());
+    setRefreshKey((value) => value + 1);
   };
 
   const handleReset = () => {
     setFilters({
       from: "",
       through: "",
+      orderId: "",
     });
+    setAppliedOrderId("");
+    setRefreshKey((value) => value + 1);
   };
+
+  const filteredOutstanding = useMemo(
+    () => filterInvoiceGroups(outstanding.groups, appliedOrderId),
+    [outstanding.groups, appliedOrderId]
+  );
+  const filteredResend = useMemo(
+    () => filterResendInvoices(resend.invoices, appliedOrderId),
+    [resend.invoices, appliedOrderId]
+  );
+  const filteredXrayOutstanding = useMemo(
+    () => filterInvoiceGroups(xrayOutstanding.groups, appliedOrderId),
+    [xrayOutstanding.groups, appliedOrderId]
+  );
+  const filteredXrayResend = useMemo(
+    () => filterResendInvoices(xrayResend.invoices, appliedOrderId),
+    [xrayResend.invoices, appliedOrderId]
+  );
+  const filteredResendGroups = useMemo(
+    () => groupResendInvoices(filteredResend),
+    [filteredResend]
+  );
+  const filteredXrayResendGroups = useMemo(
+    () => groupResendInvoices(filteredXrayResend),
+    [filteredXrayResend]
+  );
+
+  const isXray = invoiceCategory === "xray";
+  const currentOutstandingGroups = isXray
+    ? filteredXrayOutstanding
+    : filteredOutstanding;
+  const currentResendGroups = isXray
+    ? filteredXrayResendGroups
+    : filteredResendGroups;
+  const currentResendInvoices = isXray ? filteredXrayResend : filteredResend;
+
+  const currentOutstandingCount = isXray
+    ? countOutstandingRows(filteredXrayOutstanding)
+    : countOutstandingRows(filteredOutstanding);
+  const currentResendCount = currentResendInvoices.length;
+
+  const activeSummary = useMemo(() => {
+    if (loading) {
+      return activeTab === "resend"
+        ? isXray
+          ? xrayResend.summary
+          : resend.summary
+        : isXray
+          ? xrayOutstanding.summary
+          : outstanding.summary;
+    }
+
+    if (activeTab === "resend") {
+      return buildSummaryFromRows(currentResendInvoices);
+    }
+
+    return buildSummaryFromOutstandingGroups(currentOutstandingGroups);
+  }, [
+    activeTab,
+    currentOutstandingGroups,
+    currentResendInvoices,
+    isXray,
+    loading,
+    outstanding.summary,
+    resend.summary,
+    xrayOutstanding.summary,
+    xrayResend.summary,
+  ]);
 
   return (
     <DashboardShell>
@@ -208,40 +200,130 @@ export default function InvoicesPage() {
           />
         </div>
 
-        <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0 lg:flex-row lg:items-end lg:justify-between">
-          <InvoiceTabs activeTab={activeTab} onChange={setActiveTab} />
+        <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <InvoiceCategoryTabs
+              activeCategory={invoiceCategory}
+              onChange={(category) => {
+                setInvoiceCategory(category);
+                setActiveTab("outstanding");
+              }}
+              invoiceOutstandingCount={countOutstandingRows(
+                filterInvoiceGroups(outstanding.groups, appliedOrderId)
+              )}
+              invoiceResendCount={filterResendInvoices(
+                resend.invoices,
+                appliedOrderId
+              ).length}
+              xrayOutstandingCount={countOutstandingRows(
+                filterInvoiceGroups(xrayOutstanding.groups, appliedOrderId)
+              )}
+              xrayResendCount={filterResendInvoices(
+                xrayResend.invoices,
+                appliedOrderId
+              ).length}
+            />
 
-          <Link
-            href="/invoices/company-wise"
-            className="mb-3 inline-flex h-[34px] w-fit items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-4 text-[12px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
-          >
-            <CompanyIcon />
-            View Company Wise
-          </Link>
+            <Link
+              href="/invoices/company-wise"
+              className="mb-3 inline-flex h-[34px] w-fit items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-4 text-[12px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+            >
+              <CompanyIcon />
+              View Company Wise
+            </Link>
+          </div>
+
+          <InvoiceTabs
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            outstandingCount={currentOutstandingCount}
+            resendCount={currentResendCount}
+            labelPrefix={isXray ? "X-Ray " : ""}
+          />
         </div>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(520px,650px)]">
           <InvoiceFilters
             filters={filters}
             onChange={handleFilterChange}
-            onFilter={handleFilterByDate}
+            onFilter={handleApplyFilters}
             onReset={handleReset}
           />
 
-          <InvoiceSummary activeTab={activeTab} />
+          <InvoiceSummary summary={activeSummary} loading={loading} />
         </div>
 
         {activeTab === "outstanding" ? (
-          <InvoiceReportTable />
+          <InvoiceReportTable
+            invoiceGroups={currentOutstandingGroups}
+            loading={loading}
+            onRefresh={loadInvoices}
+            onSent={() => setActiveTab("resend")}
+            invoiceType={isXray ? "xray" : "invoice"}
+            enableWriteOff={!isXray}
+          />
         ) : (
-          <ResendInvoicesPanel invoices={resendInvoices} />
+          <InvoiceReportTable
+            invoiceGroups={currentResendGroups}
+            loading={loading}
+            onRefresh={loadInvoices}
+            invoiceType={isXray ? "xray" : "invoice"}
+            enableWriteOff={false}
+            mode="resend"
+          />
         )}
       </div>
     </DashboardShell>
   );
 }
 
-function InvoiceTabs({ activeTab, onChange }) {
+function InvoiceCategoryTabs({
+  activeCategory,
+  onChange,
+  invoiceOutstandingCount,
+  invoiceResendCount,
+  xrayOutstandingCount,
+  xrayResendCount,
+}) {
+  const invoiceTotal = invoiceOutstandingCount + invoiceResendCount;
+  const xrayTotal = xrayOutstandingCount + xrayResendCount;
+
+  return (
+    <div className="flex items-center gap-3 overflow-x-auto">
+      <button
+        type="button"
+        onClick={() => onChange("invoice")}
+        className={`whitespace-nowrap rounded-t-[8px] border-b-2 px-5 py-3 text-[13px] font-semibold transition ${
+          activeCategory === "invoice"
+            ? "border-[#0097B2] bg-[#E6F7FA] text-[#007F96]"
+            : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
+        }`}
+      >
+        Invoices ({invoiceTotal})
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onChange("xray")}
+        className={`whitespace-nowrap rounded-t-[8px] border-b-2 px-5 py-3 text-[13px] font-semibold transition ${
+          activeCategory === "xray"
+            ? "border-[#0097B2] bg-[#E6F7FA] text-[#007F96]"
+            : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
+        }`}
+      >
+        X-Ray Invoices ({xrayTotal})
+      </button>
+    </div>
+  );
+}
+
+function InvoiceTabs({
+  activeTab,
+  onChange,
+  outstandingCount,
+  resendCount,
+  labelPrefix = "",
+}) {
   return (
     <div className="flex items-center gap-3 overflow-x-auto">
       <button
@@ -253,7 +335,7 @@ function InvoiceTabs({ activeTab, onChange }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Outstanding Invoices (66)
+        Outstanding {labelPrefix}Invoices ({outstandingCount})
       </button>
 
       <button
@@ -265,7 +347,7 @@ function InvoiceTabs({ activeTab, onChange }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Resend Invoices (13)
+        Resend {labelPrefix}Invoices ({resendCount})
       </button>
     </div>
   );
@@ -278,7 +360,15 @@ function InvoiceFilters({ filters, onChange, onFilter, onReset }) {
         Filters
       </h2>
 
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+        <TextField
+          label="Order ID"
+          name="orderId"
+          value={filters.orderId}
+          onChange={onChange}
+          placeholder="Enter order number"
+        />
+
         <DateField
           label="From"
           name="from"
@@ -298,7 +388,7 @@ function InvoiceFilters({ filters, onChange, onFilter, onReset }) {
           onClick={onFilter}
           className="h-[38px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
         >
-          Filter by Date
+          Apply Filters
         </button>
 
         <button
@@ -310,6 +400,25 @@ function InvoiceFilters({ filters, onChange, onFilter, onReset }) {
         </button>
       </div>
     </section>
+  );
+}
+
+function TextField({ label, name, value, onChange, placeholder = "" }) {
+  return (
+    <div className="min-w-0 flex-1 lg:max-w-[180px]">
+      <label className="mb-2 block text-[11px] font-medium text-[#64748B]">
+        {label}
+      </label>
+
+      <input
+        type="text"
+        name={name}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+      />
+    </div>
   );
 }
 
@@ -331,24 +440,7 @@ function DateField({ label, name, value, onChange }) {
   );
 }
 
-function InvoiceSummary({ activeTab }) {
-  const summary =
-    activeTab === "resend"
-      ? {
-          companies: "13",
-          cases: "13",
-          invoiced: "$18,800.00",
-          paid: "$500.00",
-          due: "$18,300.00",
-        }
-      : {
-          companies: "20",
-          cases: "66",
-          invoiced: "$108,065.00",
-          paid: "$39,450.00",
-          due: "$68,615.00",
-        };
-
+function InvoiceSummary({ summary, loading }) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-sm">
       <h2 className="mb-4 text-[13px] font-semibold text-[#334155]">
@@ -356,11 +448,28 @@ function InvoiceSummary({ activeTab }) {
       </h2>
 
       <div className="grid grid-cols-2 gap-x-10 gap-y-4 sm:grid-cols-3 xl:grid-cols-5">
-        <SummaryItem label="Companies" value={summary.companies} />
-        <SummaryItem label="Cases" value={summary.cases} />
-        <SummaryItem label="Invoiced" value={summary.invoiced} />
-        <SummaryItem label="Paid" value={summary.paid} green />
-        <SummaryItem label="Due" value={summary.due} red />
+        <SummaryItem
+          label="Companies"
+          value={loading ? "..." : String(summary.companies)}
+        />
+        <SummaryItem
+          label="Cases"
+          value={loading ? "..." : String(summary.cases)}
+        />
+        <SummaryItem
+          label="Invoiced"
+          value={loading ? "..." : summary.invoiced}
+        />
+        <SummaryItem
+          label="Paid"
+          value={loading ? "..." : summary.paid}
+          green
+        />
+        <SummaryItem
+          label="Due"
+          value={loading ? "..." : summary.due}
+          red
+        />
       </div>
     </section>
   );
@@ -376,200 +485,13 @@ function SummaryItem({ label, value, green = false, red = false }) {
           green
             ? "text-[#059669]"
             : red
-            ? "text-red-500"
-            : "text-[#111827]"
+              ? "text-red-500"
+              : "text-[#111827]"
         }`}
       >
         {value}
       </p>
     </div>
-  );
-}
-
-function ResendInvoicesPanel({ invoices }) {
-  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
-  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
-
-  const allSelected =
-    invoices.length > 0 && selectedInvoiceIds.length === invoices.length;
-
-  const handleToggleAll = () => {
-    if (allSelected) {
-      setSelectedInvoiceIds([]);
-      return;
-    }
-
-    setSelectedInvoiceIds(invoices.map((invoice) => invoice.id));
-  };
-
-  const handleToggleInvoice = (invoiceId) => {
-    setSelectedInvoiceIds((prev) => {
-      if (prev.includes(invoiceId)) {
-        return prev.filter((id) => id !== invoiceId);
-      }
-
-      return [...prev, invoiceId];
-    });
-  };
-
-  const handleOpenInvoiceModal = (invoice) => {
-    setSelectedInvoiceOrder({
-      id: invoice.caseNo,
-      applicant: invoice.caseNo,
-      court: "N/A",
-      company: {
-        name: invoice.company,
-      },
-      invoice: {
-        date: invoice.invoiceDate,
-        sentDate: invoice.sentDate,
-        invoiced: invoice.invoiced,
-        paid: invoice.paid,
-        due: invoice.due,
-      },
-    });
-  };
-
-  return (
-    <>
-      <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-        <div className="h-full max-h-[calc(100vh-330px)] overflow-auto">
-          <table className="w-full min-w-[1150px] border-collapse">
-            <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
-              <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
-                <th className="w-[48px] px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={handleToggleAll}
-                    className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
-                  />
-                </th>
-                <th className="w-[230px] px-4 py-3">All Company</th>
-                <th className="w-[310px] px-4 py-3">Email</th>
-                <th className="w-[170px] px-4 py-3">Case</th>
-                <th className="w-[130px] px-4 py-3">Inv Date</th>
-                <th className="w-[130px] px-4 py-3">Invoiced</th>
-                <th className="w-[130px] px-4 py-3">Paid</th>
-                <th className="w-[130px] px-4 py-3">Due</th>
-                <th className="w-[120px] px-4 py-3 text-center">Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {invoices.map((invoice) => {
-                const isSelected = selectedInvoiceIds.includes(invoice.id);
-
-                return (
-                  <tr
-                    key={invoice.id}
-                    className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-                  >
-                    <td className="px-4 py-4 align-middle">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => handleToggleInvoice(invoice.id)}
-                        className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
-                      />
-                    </td>
-
-                    <td className="px-4 py-4 align-middle">
-                      <p className="text-[12px] font-semibold text-[#111827]">
-                        {invoice.company}
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4 align-middle">
-                      <p className="max-w-[270px] truncate text-[12px] text-[#475569]">
-                        {invoice.email}
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4 align-middle">
-                      <div className="flex flex-wrap items-center gap-1 text-[12px]">
-                        <Link
-                          href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                            invoice.caseNo
-                          )}`}
-                          className="font-semibold text-[#007F96] hover:underline"
-                        >
-                          {invoice.caseNo}
-                        </Link>
-
-                        <span className="text-[#94A3B8]">(invoice sent)</span>
-
-                        <button
-                          type="button"
-                          onClick={() => handleOpenInvoiceModal(invoice)}
-                          className="font-semibold text-red-500 hover:underline"
-                        >
-                          {invoice.sentDate}
-                        </button>
-
-                        <span className="text-[#64748B]">
-                          ({invoice.days} days)
-                        </span>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenInvoiceModal(invoice)}
-                        className="text-[#475569] hover:text-[#007F96] hover:underline"
-                      >
-                        {invoice.invoiceDate}
-                      </button>
-                    </td>
-
-                    <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                      {invoice.invoiced}
-                    </td>
-
-                    <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#059669]">
-                      {invoice.paid}
-                    </td>
-
-                    <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#111827]">
-                      {invoice.due}
-                    </td>
-
-                    <td className="px-4 py-4 text-center align-middle">
-                      <button
-                        type="button"
-                        onClick={() => console.log("Resend invoice:", invoice)}
-                        className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
-                      >
-                        Resend
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {invoices.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
-                  >
-                    No resend invoices found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-     <CreateInvoiceModal
-  isOpen={Boolean(selectedInvoiceOrder)}
-  mode="edit"
-  order={selectedInvoiceOrder}
-  onClose={() => setSelectedInvoiceOrder(null)}
-/>
-    </>
   );
 }
 

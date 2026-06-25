@@ -3,31 +3,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
-
-const createInvoiceTypes = [
-  "Create Invoice",
-  "Create Insurance Bill",
-  "Create Custodian Invoice",
-];
-
-const editInvoiceTypes = [
-  "Edit Invoice",
-  "Create Insurance Bill",
-  "Create Custodian Invoice",
-];
+import {
+  createInvoice,
+  getInvoice,
+  updateInvoice,
+} from "@/lib/invoices/invoiceApi";
+import {
+  buildPaymentLinesFromOrder,
+  formatMoneyAmount,
+  getPaymentLineAmount,
+  mapDueFormToInvoiceFees,
+  mapInvoiceFeesToDueForm,
+  resolveFullFeeAmounts,
+  resolvePersistedInvoiceAmounts,
+} from "@/lib/orders/paymentUtils";
+import {
+  calculateOrderRushLevel,
+} from "@/lib/orders/rushUtils";
+import { getOrder } from "@/lib/orders/orderApi";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
 
 const initialFormData = {
-  invoiceDate: "2026-06-02",
-  serviceDate: "",
-  servedAmount: "10.00",
-  serviceFee: "250.00",
-  custodianFee: "100.00",
-  xrayFee: "0.00",
-  mileage: "0.00",
-  parking: "0.00",
-  other: "0.00",
+  invoiceDate: "",
+  storageFee: "0.00",
   pages: "0",
   perPageAmount: "0.00",
+  clericalTimeHours: "0",
+  clericalHourlyRate: "0.00",
+  shippingHandling: "0.00",
   notes: "",
   sendOrderDetails: false,
   rushOrder: false,
@@ -37,19 +40,21 @@ export default function CreateInvoiceModal({
   isOpen,
   order,
   onClose,
+  onSaved,
   mode = "create",
 }) {
   const mounted = useIsClient();
   const isEditMode = mode === "edit";
 
-  const invoiceTypes = isEditMode ? editInvoiceTypes : createInvoiceTypes;
-
-  const [activeType, setActiveType] = useState(
-    isEditMode ? "Edit Invoice" : "Create Invoice"
-  );
-
   const [formData, setFormData] = useState(initialFormData);
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [loadingInvoice, setLoadingInvoice] = useState(false);
+  const [paymentLines, setPaymentLines] = useState([]);
+  const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
+  const [rushLevel, setRushLevel] = useState(null);
+  const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -59,11 +64,82 @@ export default function CreateInvoiceModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
-      setActiveType(isEditMode ? "Edit Invoice" : "Create Invoice");
       setFormData(getInitialInvoiceFormData(order, isEditMode));
       setErrors({});
     }
   }
+
+  useEffect(() => {
+    if (!isOpen || !order?.dbId) return;
+
+    let cancelled = false;
+
+    async function loadInvoice() {
+      setLoadingInvoice(true);
+      setSubmitError("");
+
+      try {
+        const orderData = await getOrder(order.dbId);
+
+        if (cancelled) return;
+
+        const derivedRushLevel = calculateOrderRushLevel(orderData.createdAt);
+        setRushLevel(derivedRushLevel);
+        const loadedPaymentLines = buildPaymentLinesFromOrder(orderData);
+        setPaymentLines(loadedPaymentLines);
+        const loadedPrepayment = getPaymentLineAmount(loadedPaymentLines, "prepayment");
+        setPrepaymentAmount(loadedPrepayment > 0 ? loadedPrepayment.toFixed(2) : "0.00");
+
+        const invoiceId = order.invoiceId || order.invoice?.invoiceId;
+
+        if (isEditMode && invoiceId) {
+          const invoice = await getInvoice(invoiceId);
+          if (cancelled) return;
+
+          setFormData(
+            mapInvoiceFeesToDueForm(mapInvoiceToFormData(invoice, order))
+          );
+          setPersistedInvoiceMeta({
+            status: invoice.status,
+            writeoffAmount: invoice.writeoffAmount || 0,
+          });
+          setRushLevel(invoice.rushLevel || derivedRushLevel);
+          return;
+        }
+
+        setPersistedInvoiceMeta(null);
+        setFormData({
+          ...getInitialInvoiceFormData(order, isEditMode),
+          rushOrder: Boolean(derivedRushLevel),
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setSubmitError(error.message || "Failed to load invoice");
+          const fallbackLines = buildPaymentLinesFromOrder(order);
+          setPaymentLines(fallbackLines);
+          setFormData(getInitialInvoiceFormData(order, isEditMode));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingInvoice(false);
+        }
+      }
+    }
+
+    loadInvoice();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, order?.dbId, isEditMode, order?.invoiceId, order?.invoice?.invoiceId]);
+
+  useEffect(() => {
+    if (!openSession) {
+      setPaymentLines([]);
+      setPrepaymentAmount("0.00");
+      setRushLevel(null);
+    }
+  }, [openSession]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -80,18 +156,44 @@ export default function CreateInvoiceModal({
     return toNumber(formData.pages) * toNumber(formData.perPageAmount);
   }, [formData.pages, formData.perPageAmount]);
 
+  const clericalAmount = useMemo(() => {
+    return (
+      toNumber(formData.clericalTimeHours) * toNumber(formData.clericalHourlyRate)
+    );
+  }, [formData.clericalTimeHours, formData.clericalHourlyRate]);
+
+  const fullFees = useMemo(() => {
+    return resolveFullFeeAmounts(formData);
+  }, [formData]);
+
   const totalAmount = useMemo(() => {
     return (
-      toNumber(formData.servedAmount) +
-      toNumber(formData.serviceFee) +
-      toNumber(formData.custodianFee) +
-      toNumber(formData.xrayFee) +
-      toNumber(formData.mileage) +
-      toNumber(formData.parking) +
-      toNumber(formData.other) +
-      pagesAmount
+      pagesAmount +
+      clericalAmount +
+      toNumber(formData.shippingHandling) +
+      fullFees.storageFee
     );
-  }, [formData, pagesAmount]);
+  }, [formData, fullFees, pagesAmount, clericalAmount]);
+
+  const prepaymentPaid = useMemo(() => {
+    return toNumber(prepaymentAmount);
+  }, [prepaymentAmount]);
+
+  const amountPaid = useMemo(() => {
+    return prepaymentPaid;
+  }, [prepaymentPaid]);
+
+  const invoiceTotals = useMemo(
+    () =>
+      resolvePersistedInvoiceAmounts(totalAmount, amountPaid, {
+        writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+        persistedStatus: persistedInvoiceMeta?.status || null,
+      }),
+    [totalAmount, amountPaid, persistedInvoiceMeta]
+  );
+
+  const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
+    invoiceTotals;
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -146,40 +248,94 @@ export default function CreateInvoiceModal({
     }));
   };
 
-  const handleSubmit = () => {
+  const handleClericalHoursChange = (e) => {
+    const { value } = e.target;
+    const cleanValue = value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+
+    setFormData((prev) => ({
+      ...prev,
+      clericalTimeHours: cleanValue,
+    }));
+
+    setErrors((prev) => ({
+      ...prev,
+      clericalTimeHours: "",
+    }));
+  };
+
+  const handlePrepaymentChange = (e) => {
+    const cleanValue = e.target.value
+      .replace(/[^\d.]/g, "")
+      .replace(/(\..*)\./g, "$1")
+      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+
+    const amount = toNumber(cleanValue);
+    setPrepaymentAmount(cleanValue);
+
+    setPaymentLines((prev) => {
+      const others = prev.filter((line) => line.type !== "prepayment");
+      if (amount <= 0) return others;
+
+      return [
+        ...others,
+        {
+          type: "prepayment",
+          label: "Prepayment",
+          amount,
+          bracketLabel: `Prepayment (${formatMoney(amount)})`,
+        },
+      ];
+    });
+  };
+
+  const handleSubmit = async () => {
     const validationErrors = validateInvoiceForm(formData);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    if (isEditMode) {
-      console.log("Edit invoice:", {
-        type: activeType,
-        order,
-        formData,
-        pagesAmount,
-        totalAmount,
-      });
+    const feePayload = mapDueFormToInvoiceFees(formData);
 
-      onClose();
-      return;
-    }
-
-    console.log("Create invoice:", {
-      type: activeType,
-      order,
-      formData,
+    const payload = {
+      orderId: order.dbId,
+      activeType: isEditMode ? "Edit Invoice" : "Create Invoice",
+      ...feePayload,
       pagesAmount,
+      clericalAmount,
       totalAmount,
-    });
+      prepaymentAmount: toNumber(prepaymentAmount),
+    };
 
-    onClose();
+    setSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const invoiceId = order.invoiceId || order.invoice?.invoiceId;
+      const completingXrayOnlyStub =
+        !isEditMode && invoiceId && order.invoice?.createOnly;
+
+      if ((isEditMode || completingXrayOnlyStub) && invoiceId) {
+        await updateInvoice(invoiceId, payload);
+      } else {
+        await createInvoice(payload);
+      }
+
+      onSaved?.();
+      onClose();
+    } catch (error) {
+      setSubmitError(error.message || "Failed to save invoice");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-[2px]">
-      <section className="flex max-h-[calc(100vh-42px)] w-full max-w-[700px] flex-col overflow-hidden rounded-[10px] bg-white shadow-2xl">
-        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-5 py-4 text-white">
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+      <section className="flex max-h-[100dvh] w-full max-w-[880px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
+        <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
             type="button"
             onClick={onClose}
@@ -203,8 +359,9 @@ export default function CreateInvoiceModal({
           </p>
         </div>
 
-        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5 py-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px]">
+        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-3 sm:px-5">
+          <div className="-mx-1 overflow-x-auto px-1">
+            <div className="flex min-w-max flex-wrap items-center gap-x-5 gap-y-2 text-[11px] sm:min-w-0">
             <MetaItem label="# ID" value={order.id || order.orderNo} />
             <MetaItem
               label=""
@@ -212,41 +369,26 @@ export default function CreateInvoiceModal({
               linkStyle
             />
 
-            {isEditMode && order.invoice?.due && (
-              <MetaItem label="Due" value={order.invoice.due} />
+            <MetaItem label="Invoiced" value={formatMoney(totalAmount)} />
+            <MetaItem label="Paid" value={formatMoney(amountPaid)} />
+            <MetaItem label="Due" value={formatMoney(amountDue)} />
+            {persistedInvoiceMeta?.writeoffAmount > 0 && (
+              <MetaItem
+                label="Written Off"
+                value={formatMoney(persistedInvoiceMeta.writeoffAmount)}
+              />
             )}
-
-            {isEditMode && order.invoice?.paid && (
-              <MetaItem label="Paid" value={order.invoice.paid} />
+            {isOverpaid && (
+              <MetaItem label="Credit" value={formatMoney(overpayment)} />
             )}
+            <MetaItem label="Status" value={invoiceStatus} />
+            {rushLevel && <MetaItem label="Rush Level" value={rushLevel} />}
+            </div>
           </div>
         </div>
 
-        <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-5">
-          <div className="flex flex-wrap items-center gap-6">
-            {invoiceTypes.map((type) => (
-              <button
-                key={type}
-                type="button"
-                onClick={() => setActiveType(type)}
-                className={`relative h-[42px] text-[11px] font-semibold transition ${
-                  activeType === type
-                    ? "text-[#007F96]"
-                    : "text-[#475569] hover:text-[#007F96]"
-                }`}
-              >
-                {type}
-
-                {activeType === type && (
-                  <span className="absolute bottom-0 left-0 h-[2px] w-full rounded-full bg-[#0097B2]" />
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[1fr_170px]">
-          <div className="min-h-0 overflow-y-auto px-5 py-4">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_200px]">
+          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DateField
                 label="Invoice Date"
@@ -255,77 +397,26 @@ export default function CreateInvoiceModal({
                 onChange={handleChange}
                 error={errors.invoiceDate}
               />
-
-              <DateField
-                label="Service Date"
-                name="serviceDate"
-                value={formData.serviceDate}
-                onChange={handleChange}
-                error={errors.serviceDate}
-              />
             </div>
 
             <SectionTitle title="Fees" />
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <MoneyField
-                label="Served Amount"
-                name="servedAmount"
-                value={formData.servedAmount}
-                onChange={handleMoneyChange}
-                error={errors.servedAmount}
-              />
-
-              <MoneyField
-                label="Service Fee"
-                name="serviceFee"
-                value={formData.serviceFee}
-                onChange={handleMoneyChange}
-                error={errors.serviceFee}
-              />
-
-              <MoneyField
-                label="Custodian Fee"
-                name="custodianFee"
-                value={formData.custodianFee}
-                onChange={handleMoneyChange}
-                error={errors.custodianFee}
+                label="Prepayment"
+                name="prepaymentAmount"
+                value={prepaymentAmount}
+                onChange={handlePrepaymentChange}
               />
             </div>
 
-            <SectionTitle title="Additional Charges" />
-
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MoneyField
-                label="X-Ray Fee"
-                name="xrayFee"
-                value={formData.xrayFee}
+                label="Storage Fee"
+                name="storageFee"
+                value={formData.storageFee}
                 onChange={handleMoneyChange}
-                error={errors.xrayFee}
-              />
-
-              <MoneyField
-                label="Mileage"
-                name="mileage"
-                value={formData.mileage}
-                onChange={handleMoneyChange}
-                error={errors.mileage}
-              />
-
-              <MoneyField
-                label="Parking"
-                name="parking"
-                value={formData.parking}
-                onChange={handleMoneyChange}
-                error={errors.parking}
-              />
-
-              <MoneyField
-                label="Other"
-                name="other"
-                value={formData.other}
-                onChange={handleMoneyChange}
-                error={errors.other}
+                error={errors.storageFee}
               />
             </div>
 
@@ -349,6 +440,43 @@ export default function CreateInvoiceModal({
               <ReadOnlyMoneyField label="Pages Amount" value={pagesAmount} />
             </div>
 
+            <SectionTitle title="Clerical Time" />
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <NumberField
+                label="Clerical Time (Hours)"
+                name="clericalTimeHours"
+                value={formData.clericalTimeHours}
+                onChange={handleClericalHoursChange}
+                error={errors.clericalTimeHours}
+              />
+
+              <MoneyField
+                label="Per Hour Charge"
+                name="clericalHourlyRate"
+                value={formData.clericalHourlyRate}
+                onChange={handleMoneyChange}
+                error={errors.clericalHourlyRate}
+              />
+
+              <ReadOnlyMoneyField
+                label="Clerical Time Charge"
+                value={clericalAmount}
+              />
+            </div>
+
+            <SectionTitle title="Shipping & Handling" />
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <MoneyField
+                label="Shipping & Handling Fee"
+                name="shippingHandling"
+                value={formData.shippingHandling}
+                onChange={handleMoneyChange}
+                error={errors.shippingHandling}
+              />
+            </div>
+
             <div className="mt-3">
               <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
                 Notes
@@ -364,42 +492,72 @@ export default function CreateInvoiceModal({
               />
             </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-5">
-              <CheckboxField
-                label="Send Order Details"
-                name="sendOrderDetails"
-                checked={formData.sendOrderDetails}
-                onChange={handleChange}
-              />
+            <div className="mt-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-5">
+                <CheckboxField
+                  label="Send Order Details"
+                  name="sendOrderDetails"
+                  checked={formData.sendOrderDetails}
+                  onChange={handleChange}
+                />
 
-              <CheckboxField
-                label="Rush Order"
-                name="rushOrder"
-                checked={formData.rushOrder}
-                onChange={handleChange}
-              />
+                <CheckboxField
+                  label="Rush Order"
+                  name="rushOrder"
+                  checked={formData.rushOrder}
+                  onChange={handleChange}
+                />
+              </div>
+
+              
             </div>
           </div>
 
-          <aside className="flex min-h-[210px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 lg:border-l lg:border-t-0">
+          <aside className="flex min-h-[210px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 md:border-l md:border-t-0 md:px-4">
             <h3 className="mb-4 text-[12px] font-semibold text-[#334155]">
               Summary
             </h3>
 
             <div className="space-y-3">
               <SummaryRow
-                label="Served Amount"
-                value={formatMoney(toNumber(formData.servedAmount))}
-              />
-              <SummaryRow
-                label="Service Fee"
-                value={formatMoney(toNumber(formData.serviceFee))}
-              />
-              <SummaryRow
-                label="Custodian Fee"
-                value={formatMoney(toNumber(formData.custodianFee))}
+                label="Storage Fee"
+                value={formatMoney(fullFees.storageFee)}
               />
               <SummaryRow label="Pages" value={formatMoney(pagesAmount)} />
+              <SummaryRow
+                label="Clerical Time"
+                value={formatMoney(clericalAmount)}
+              />
+              <SummaryRow
+                label="Shipping & Handling"
+                value={formatMoney(toNumber(formData.shippingHandling))}
+              />
+            </div>
+
+            <div className="mt-4 space-y-3 border-t border-[#E2E8F0] pt-4">
+              <SummaryRow label="Subtotal" value={formatMoney(totalAmount)} />
+              {prepaymentPaid > 0 && (
+                <SummaryRow
+                  label="Prepayment"
+                  value={`-${formatMoney(prepaymentPaid)}`}
+                  muted
+                />
+              )}
+              {persistedInvoiceMeta?.writeoffAmount > 0 && (
+                <SummaryRow
+                  label="Written Off"
+                  value={`-${formatMoney(persistedInvoiceMeta.writeoffAmount)}`}
+                  muted
+                />
+              )}
+              <SummaryRow label="Due" value={formatMoney(amountDue)} highlight />
+              {isOverpaid && (
+                <SummaryRow
+                  label="Credit"
+                  value={formatMoney(overpayment)}
+                  highlight
+                />
+              )}
             </div>
 
             <div className="mt-5 rounded-[8px] border border-[#E2E8F0] bg-white px-3 py-3">
@@ -409,18 +567,27 @@ export default function CreateInvoiceModal({
                 </span>
 
                 <span className="text-[15px] font-bold text-[#007F96]">
-                  {formatMoney(totalAmount)}
+                  {formatMoney(amountDue)}
                 </span>
               </div>
             </div>
 
             <div className="mt-auto pt-6">
+              {submitError && (
+                <p className="mb-3 text-[11px] text-red-500">{submitError}</p>
+              )}
+
               <button
                 type="button"
                 onClick={handleSubmit}
-                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937]"
+                disabled={submitting || loadingInvoice}
+                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitLabel}
+                {submitting
+                  ? "Saving..."
+                  : loadingInvoice
+                    ? "Loading..."
+                    : submitLabel}
               </button>
 
               <button
@@ -441,28 +608,45 @@ export default function CreateInvoiceModal({
 
 function getInitialInvoiceFormData(order, isEditMode) {
   if (!isEditMode) {
-    return initialFormData;
+    return {
+      ...initialFormData,
+      invoiceDate: getTodayInputDate(),
+    };
   }
 
   const invoice = order?.invoice || {};
-  const invoiceAmount = moneyToInput(invoice.invoiced, "250.00");
 
   return {
     ...initialFormData,
     invoiceDate: toDateInput(invoice.date) || initialFormData.invoiceDate,
-    serviceDate: toDateInput(invoice.sentDate) || "",
-    servedAmount: "0.00",
-    serviceFee: invoiceAmount,
-    custodianFee: "0.00",
-    xrayFee: "0.00",
-    mileage: "0.00",
-    parking: "0.00",
-    other: "0.00",
-    pages: "0",
-    perPageAmount: "0.00",
-    notes: `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
-    sendOrderDetails: true,
-    rushOrder: false,
+    storageFee: invoice.storageFee || invoice.other || "0.00",
+    pages: invoice.pages || "0",
+    perPageAmount: invoice.perPageAmount || "0.00",
+    clericalTimeHours: invoice.clericalTimeHours || "0",
+    clericalHourlyRate: invoice.clericalHourlyRate || "0.00",
+    shippingHandling: invoice.shippingHandling || "0.00",
+    notes: invoice.notes || `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
+    sendOrderDetails: Boolean(invoice.sendOrderDetails),
+    rushOrder: Boolean(invoice.rushOrder),
+  };
+}
+
+function mapInvoiceToFormData(invoice, order) {
+  if (!invoice) {
+    return getInitialInvoiceFormData(order, true);
+  }
+
+  return {
+    invoiceDate: invoice.invoiceDate || initialFormData.invoiceDate,
+    storageFee: invoice.storageFee || "0.00",
+    pages: invoice.pages || "0",
+    perPageAmount: invoice.perPageAmount || "0.00",
+    clericalTimeHours: invoice.clericalTimeHours || "0",
+    clericalHourlyRate: invoice.clericalHourlyRate || "0.00",
+    shippingHandling: invoice.shippingHandling || "0.00",
+    notes: invoice.notes || "",
+    sendOrderDetails: Boolean(invoice.sendOrderDetails),
+    rushOrder: Boolean(invoice.rushOrder),
   };
 }
 
@@ -544,12 +728,34 @@ function DateField({ label, name, value, onChange, error = "" }) {
   );
 }
 
-function MoneyField({ label, name, value, onChange, error = "" }) {
+function FieldLabel({ label, paymentHint, helperText }) {
+  return (
+    <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
+      {label}
+      {paymentHint ? ` ${paymentHint}` : ""}
+      {helperText ? (
+        <span className="ml-1 font-normal text-[#94A3B8]">· {helperText}</span>
+      ) : null}
+    </label>
+  );
+}
+
+function MoneyField({
+  label,
+  name,
+  value,
+  onChange,
+  error = "",
+  paymentHint,
+  helperText,
+}) {
   return (
     <div>
-      <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
-        {label}
-      </label>
+      <FieldLabel
+        label={label}
+        paymentHint={paymentHint}
+        helperText={helperText}
+      />
 
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#94A3B8]">
@@ -575,12 +781,14 @@ function MoneyField({ label, name, value, onChange, error = "" }) {
   );
 }
 
-function ReadOnlyMoneyField({ label, value }) {
+function ReadOnlyMoneyField({ label, value, paymentHint, helperText }) {
   return (
     <div>
-      <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
-        {label}
-      </label>
+      <FieldLabel
+        label={label}
+        paymentHint={paymentHint}
+        helperText={helperText}
+      />
 
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#94A3B8]">
@@ -638,11 +846,21 @@ function CheckboxField({ label, name, checked, onChange }) {
   );
 }
 
-function SummaryRow({ label, value }) {
+function SummaryRow({ label, value, highlight = false, muted = false }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span className="text-[10px] text-[#64748B]">{label}</span>
-      <span className="text-[11px] font-semibold text-[#334155]">{value}</span>
+      <span
+        className={`text-[11px] font-semibold ${
+          highlight
+            ? "text-[#059669]"
+            : muted
+              ? "text-red-500"
+              : "text-[#334155]"
+        }`}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -655,14 +873,10 @@ function validateInvoiceForm(data) {
   }
 
   const moneyFields = [
-    "servedAmount",
-    "serviceFee",
-    "custodianFee",
-    "xrayFee",
-    "mileage",
-    "parking",
-    "other",
+    "storageFee",
     "perPageAmount",
+    "clericalHourlyRate",
+    "shippingHandling",
   ];
 
   moneyFields.forEach((field) => {
@@ -677,6 +891,12 @@ function validateInvoiceForm(data) {
     errors.pages = "Required";
   } else if (Number(data.pages) < 0) {
     errors.pages = "Invalid";
+  }
+
+  if (data.clericalTimeHours === "") {
+    errors.clericalTimeHours = "Required";
+  } else if (Number(data.clericalTimeHours) < 0) {
+    errors.clericalTimeHours = "Invalid";
   }
 
   return errors;

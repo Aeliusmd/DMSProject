@@ -23,10 +23,12 @@ export default function ActivityLogTable({ logs }) {
                 className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
               >
                 <td className="px-5 py-4 align-middle">
-                  <p className="text-[12px] text-[#475569]">{log.date}</p>
-                  <p className="mt-1 text-[11px] text-[#64748B]">
-                    {log.time}
+                  <p className="text-[12px] text-[#475569]">
+                    {log.displayDate || log.date}
                   </p>
+                  {!log.displayDate && log.time ? (
+                    <p className="mt-1 text-[11px] text-[#64748B]">{log.time}</p>
+                  ) : null}
                 </td>
 
                 <td className="px-5 py-4 align-middle">
@@ -165,6 +167,9 @@ function ActionIcon({ module, action }) {
 function getActionIcon(action) {
   const lowerAction = action.toLowerCase();
 
+  if (lowerAction.includes("x-ray") || lowerAction.includes("xray")) {
+    return <XrayIcon />;
+  }
   if (lowerAction.includes("invoice")) return <InvoiceIcon />;
   if (lowerAction.includes("employee")) return <EmployeeIcon />;
   if (lowerAction.includes("payment")) return <PaymentIcon />;
@@ -173,7 +178,9 @@ function getActionIcon(action) {
   if (lowerAction.includes("upload")) return <UploadIcon />;
   if (lowerAction.includes("reminder")) return <ReminderIcon />;
   if (lowerAction.includes("cancel")) return <CancelIcon />;
-  if (lowerAction.includes("writeoff")) return <WriteoffIcon />;
+  if (lowerAction.includes("written off") || lowerAction.includes("writeoff")) {
+    return <WriteoffIcon />;
+  }
   if (lowerAction.includes("security")) return <SecurityIcon />;
 
   return <OrderIcon />;
@@ -197,6 +204,15 @@ function InvoiceIcon() {
         strokeWidth="1.8"
       />
       <path d="M10 8h4M10 12h4" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function XrayIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M8 15l3-4 2 3 3-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
     </svg>
   );
 }

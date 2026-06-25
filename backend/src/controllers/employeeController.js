@@ -4,6 +4,7 @@ const ApiError = require("../utils/ApiError");
 const Employee = require("../models/Employee");
 const employeeService = require("../services/employeeService");
 const activityLogService = require("../services/activityLogService");
+const notificationService = require("../services/notificationService");
 const { validateCreateEmployee } = require("../validators/employeeValidator");
 
 exports.getAll = asyncHandler(async (_req, res) => {
@@ -28,6 +29,13 @@ exports.create = asyncHandler(async (req, res) => {
     companyName: "System",
   });
 
+  await notificationService.notifyActivityEvent({
+    title: "New Employee Added",
+    description: `${employee.name} joined with role ${employee.role}`,
+    referenceType: "Employee",
+    referenceId: employee.id,
+  });
+
   return ApiResponse.created(res, { employee }, "Employee created successfully");
 });
 
@@ -45,6 +53,13 @@ exports.terminate = asyncHandler(async (req, res) => {
     companyName: "System",
   });
 
+  await notificationService.notifyActivityEvent({
+    title: "Employee Terminated",
+    description: `${employee.name} was terminated`,
+    referenceType: "Employee",
+    referenceId: employee.id,
+  });
+
   return ApiResponse.success(res, { employee }, "Employee terminated successfully");
 });
 
@@ -57,6 +72,13 @@ exports.activate = asyncHandler(async (req, res) => {
     details: `Re-activated employee ${employee.name}`,
     targetEmployeeId: employee.id,
     companyName: "System",
+  });
+
+  await notificationService.notifyActivityEvent({
+    title: "Employee Activated",
+    description: `${employee.name} was re-activated`,
+    referenceType: "Employee",
+    referenceId: employee.id,
   });
 
   return ApiResponse.success(res, { employee }, "Employee activated successfully");
@@ -78,6 +100,13 @@ exports.remove = asyncHandler(async (req, res) => {
     details: `Deleted employee ${employee?.name || req.params.id}`,
     targetEmployeeId: Number(req.params.id),
     companyName: "System",
+  });
+
+  await notificationService.notifyActivityEvent({
+    title: "Employee Deleted",
+    description: `${employee?.name || req.params.id} was removed`,
+    referenceType: "Employee",
+    referenceId: Number(req.params.id),
   });
 
   return ApiResponse.success(res, result, result.message);

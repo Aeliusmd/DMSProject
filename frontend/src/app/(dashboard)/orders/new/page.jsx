@@ -10,8 +10,11 @@ import NewOrderField, {
 } from "@/components/orders/new-order/NewOrderField";
 import PaymentChargeCard from "@/components/orders/new-order/PaymentChargeCard";
 import ProviderSearchField from "@/components/orders/new-order/ProviderSearchField";
+import DoctorSearchField from "@/components/orders/new-order/DoctorSearchField";
+import DoctorAddressSearchField from "@/components/orders/new-order/DoctorAddressSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 import CertificateNoRecordsPanel from "@/components/orders/new-order/CertificateNoRecordsPanel";
+import RecordTypeMultiSelect from "@/components/orders/new-order/RecordTypeMultiSelect";
 
 import {
   formatMoneyInput,
@@ -33,8 +36,11 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import { getProviders, updateProvider } from "@/lib/providers/providerApi";
+import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
+import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
 import { API_BASE_URL } from "@/config/api";
 
 function toFileUrl(path) {
@@ -48,6 +54,16 @@ function subpoenaFileName(path) {
   if (!path) return "Subpoena";
   return path.split("/").pop() || "Subpoena";
 }
+
+const PROVIDER_SYNC_FIELDS = new Set([
+  "address",
+  "zip",
+  "city",
+  "state",
+  "phone",
+  "fax",
+  "email",
+]);
 
 const initialFormData = {
   facility: "",
@@ -63,6 +79,9 @@ const initialFormData = {
   aka: "",
   defendant: "",
   injuryType: "",
+  injuryDate: "",
+  injuryDateBegin: "",
+  injuryDateEnd: "",
 
   documentName: "",
   subpoenaFile: null,
@@ -70,6 +89,7 @@ const initialFormData = {
   additionalDocumentFile: null,
 
   orderNumber: "",
+  recNumber: "",
   serveCompanyName: "",
   address: "",
   zip: "",
@@ -118,91 +138,21 @@ const initialFormData = {
   prepaymentCheck: "",
   prepaymentDate: "",
   prepaymentPaid: "",
+  prepaymentDue: "15.00",
   prepaymentMemo: "",
 
   custodianCheck: "",
   custodianDate: "",
   custodianPaid: "",
+  custodianDue: "15.00",
   custodianMemo: "",
 
   xrayCheck: "",
   xrayDate: "",
   xrayPaid: "",
+  xrayDue: "0",
   xrayMemo: "",
 };
-
-function mapOrderHintsToForm(hints, facilityList = []) {
-  if (!hints) return {};
-
-  const updates = {};
-
-  if (hints.orderNumber) updates.orderNumber = hints.orderNumber;
-  if (hints.caseName) updates.caseNumber = hints.caseName;
-  if (hints.ssn) updates.ssn = hints.ssn;
-  if (hints.dateOfBirth) updates.dob = hints.dateOfBirth;
-  if (hints.companyName) updates.serveCompanyName = hints.companyName;
-  if (hints.companyAddress) updates.address = hints.companyAddress;
-  if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
-  if (hints.doctorAddress) updates.fullAddress = hints.doctorAddress;
-  if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
-  if (hints.depoDueDate) updates.depoDueDate = hints.depoDueDate;
-  if (hints.requestedRecord) updates.specificRecord = hints.requestedRecord;
-  if (hints.amount) updates.prepaymentPaid = hints.amount;
-  if (hints.chequeDate) updates.prepaymentDate = hints.chequeDate;
-  if (hints.chequeNumber) updates.prepaymentCheck = hints.chequeNumber;
-
-  if (hints.applicantName) {
-    const parts = hints.applicantName.trim().split(/\s+/);
-    if (parts.length === 1) {
-      updates.firstName = parts[0];
-    } else if (parts.length === 2) {
-      updates.firstName = parts[0];
-      updates.lastName = parts[1];
-    } else {
-      updates.firstName = parts[0];
-      updates.middleName = parts.slice(1, -1).join(" ");
-      updates.lastName = parts[parts.length - 1];
-    }
-  }
-
-  const facilityName = hints.customer || hints.companyName;
-  if (facilityName && facilityList.length) {
-    const normalized = facilityName.toLowerCase();
-    const match = facilityList.find((facility) => {
-      const name = (
-        facility.facility ||
-        facility.facilityName ||
-        facility.name ||
-        ""
-      ).toLowerCase();
-      return name && (normalized.includes(name) || name.includes(normalized));
-    });
-    if (match) {
-      updates.facility = String(match.id);
-    }
-  }
-
-  const recordText = `${hints.recordType || ""} ${hints.requestedRecord || ""}`.toLowerCase();
-  if (recordText.includes("medical")) updates.medicalRecords = true;
-  if (recordText.includes("billing")) updates.billingRecords = true;
-  if (recordText.includes("employment")) updates.employmentRecords = true;
-  if (recordText.includes("xray") || recordText.includes("x-ray")) {
-    updates.xrays = true;
-  }
-
-  return updates;
-}
-
-function buildFormFromExtract(extract, facilityList, subpoenaFile) {
-  const orderHints = extract?.orderHints || {};
-  return {
-    ...mapOrderHintsToForm(orderHints, facilityList),
-    ...(subpoenaFile ? { subpoenaFile } : {}),
-    ...(extract?.id || extract?.extractId
-      ? { subpoenaExtractId: String(extract.id || extract.extractId) }
-      : {}),
-  };
-}
 
 export default function NewOrderPage() {
   return (
@@ -224,11 +174,11 @@ function NewOrderPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const mode = searchParams.get("mode");
   const orderId = searchParams.get("orderId");
   const subpoenaId = searchParams.get("subpoenaId");
+  const panel = searchParams.get("panel");
 
-  const isEditMode = mode === "edit" && Boolean(orderId);
+  const isEditMode = Boolean(orderId);
 
   const [expandedPanels, setExpandedPanels] = useState({
     subpoena: false,
@@ -251,6 +201,11 @@ function NewOrderPageContent() {
   const [saveError, setSaveError] = useState("");
   const [extractingSubpoena, setExtractingSubpoena] = useState(false);
   const [extractError, setExtractError] = useState("");
+  const [extractionMeta, setExtractionMeta] = useState({
+    facilityName: "",
+    providerName: "",
+  });
+  const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -299,7 +254,12 @@ function NewOrderPageContent() {
           return;
         }
 
-        setFormData({ ...initialFormData, ...order });
+        setFormData(
+          syncPaymentDueFields(
+            { ...initialFormData, ...order },
+            order.invoiceFees
+          )
+        );
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -317,6 +277,135 @@ function NewOrderPageContent() {
   }, [isEditMode, orderId, subpoenaId]);
 
   useEffect(() => {
+    if (!isEditMode) return;
+
+    if (panel === "upload") {
+      setExpandedPanels((prev) => ({
+        ...prev,
+        order: true,
+      }));
+      return;
+    }
+
+    if (panel === "payment") {
+      setExpandedPanels((prev) => ({
+        ...prev,
+        payment: true,
+      }));
+    }
+  }, [panel, isEditMode]);
+
+  useEffect(() => {
+    if (!isEditMode || !orderId) return undefined;
+
+    let active = true;
+
+    async function refreshInvoiceFees() {
+      try {
+        const order = await getOrder(orderId);
+        if (!active || !order) return;
+
+        setFormData((prev) =>
+          syncPaymentDueFields(
+            {
+              ...prev,
+              invoiceFees: order.invoiceFees || prev.invoiceFees,
+            },
+            order.invoiceFees || prev.invoiceFees
+          )
+        );
+      } catch {
+        // Payment charges can still use the last loaded invoice snapshot.
+      }
+    }
+
+    if (panel === "payment") {
+      refreshInvoiceFees();
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && panel === "payment") {
+        refreshInvoiceFees();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [isEditMode, orderId, panel]);
+
+  useEffect(() => {
+    if (!isEditMode || !orderId || !expandedPanels.payment) {
+      return undefined;
+    }
+
+    let active = true;
+
+    async function refreshPaymentDues() {
+      try {
+        const order = await getOrder(orderId);
+        if (!active || !order) return;
+
+        setFormData((prev) =>
+          syncPaymentDueFields(
+            {
+              ...prev,
+              invoiceFees: order.invoiceFees || prev.invoiceFees,
+            },
+            order.invoiceFees || prev.invoiceFees
+          )
+        );
+      } catch {
+        // Keep the last loaded payment snapshot.
+      }
+    }
+
+    refreshPaymentDues();
+
+    return () => {
+      active = false;
+    };
+  }, [isEditMode, orderId, expandedPanels.payment]);
+
+  useEffect(() => {
+    if (!isEditMode || !orderId) {
+      setEditSubpoenaSrc("");
+      return undefined;
+    }
+
+    if (!formData.subpoenaStoragePath || formData.subpoenaFile) {
+      setEditSubpoenaSrc("");
+      return undefined;
+    }
+
+    let active = true;
+    let objectUrl = "";
+
+    (async () => {
+      try {
+        const blob = await fetchOrderSubpoenaPdf(orderId);
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setEditSubpoenaSrc(objectUrl);
+      } catch {
+        if (active) {
+          setEditSubpoenaSrc(formData.subpoenaUrl ? toFileUrl(formData.subpoenaUrl) : "");
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [isEditMode, orderId, formData.subpoenaStoragePath, formData.subpoenaFile, formData.subpoenaUrl]);
+
+  useEffect(() => {
     if (isEditMode || !subpoenaId) {
       return undefined;
     }
@@ -329,6 +418,7 @@ function NewOrderPageContent() {
     (async () => {
       try {
         const facilityList = facilities.length ? facilities : await getFacilities();
+        const providerList = await getProviders();
         if (!active) return;
 
         if (!facilities.length) {
@@ -355,10 +445,17 @@ function NewOrderPageContent() {
           // Prefill can still proceed without the PDF attachment.
         }
 
+        const { formUpdates, meta } = buildFormFromExtract(
+          extract,
+          { facilityList, providerList },
+          subpoenaFile
+        );
+
         setFormData({
           ...initialFormData,
-          ...buildFormFromExtract(extract, facilityList, subpoenaFile),
+          ...formUpdates,
         });
+        setExtractionMeta(meta);
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -382,16 +479,21 @@ function NewOrderPageContent() {
   }, [isEditMode, subpoenaId]);
 
   const facilityOptions = useMemo(
-    () =>
-      facilities.map((facility) => ({
+    () => [
+      { label: "Select facility", value: "", disabled: true, hidden: true },
+      ...facilities.map((facility) => ({
         label: facility.facility || facility.facilityName || facility.name,
         value: String(facility.id),
       })),
+    ],
     [facilities]
   );
 
   const errors = useMemo(
-    () => validateNewOrderForm(formData, fileErrors),
+    () => ({
+      ...validateNewOrderForm(formData, fileErrors),
+      ...validateOrderPaymentAmounts(formData, formData.invoiceFees),
+    }),
     [formData, fileErrors]
   );
 
@@ -399,7 +501,9 @@ function NewOrderPageContent() {
     (field) => errors[field]
   );
 
-  const hasSubpoena = Boolean(formData.subpoenaFile || formData.subpoenaUrl);
+  const hasSubpoena = Boolean(
+    formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath
+  );
 
   const visiblePanelKeys = hasSubpoena
     ? ["subpoena", "order", "serve", "payment"]
@@ -433,6 +537,42 @@ function NewOrderPageContent() {
       ...prev,
       [name]: true,
     }));
+
+    if (PROVIDER_SYNC_FIELDS.has(name)) {
+      setFormData((prev) => {
+        syncProviderFromForm(prev);
+        return prev;
+      });
+    }
+  };
+
+  const syncProviderFromForm = async (data) => {
+    const providerId = Number(data.providerId);
+
+    if (!Number.isFinite(providerId) || providerId <= 0) return;
+    if (!(`${data.serveCompanyName || ""}`.trim())) return;
+
+    try {
+      await updateProvider(providerId, {
+        companyName: data.serveCompanyName,
+        address: data.address,
+        zip: data.zip,
+        city: data.city,
+        state: data.state,
+        phone: data.phone,
+        fax: data.fax,
+        email: data.email,
+      });
+    } catch {
+      // Provider is still synced when the order is saved.
+    }
+  };
+
+  const handleProviderBlur = () => {
+    setFormData((prev) => {
+      syncProviderFromForm(prev);
+      return prev;
+    });
   };
 
   const getError = (name) => {
@@ -445,8 +585,28 @@ function NewOrderPageContent() {
     return "";
   };
 
+  const handlePaymentValuesChange = (updates) => {
+    setFormData((prev) =>
+      syncPaymentDueFields(
+        {
+          ...prev,
+          ...updates,
+        },
+        prev.invoiceFees
+      )
+    );
+  };
+
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+
+    if (name === "recordTypes" && value && typeof value === "object") {
+      setFormData((prev) => ({
+        ...prev,
+        ...value,
+      }));
+      return;
+    }
 
     if (name === "certificateNoRecords") {
       setFormData((prev) => ({
@@ -456,6 +616,11 @@ function NewOrderPageContent() {
         cnrDelivery: checked ? prev.cnrDelivery : "",
         cnrDateSent: checked ? prev.cnrDateSent : "",
         cnrMemo: checked ? prev.cnrMemo : false,
+        custodianCheck: checked ? "" : prev.custodianCheck,
+        custodianDate: checked ? "" : prev.custodianDate,
+        custodianPaid: checked ? "" : prev.custodianPaid,
+        custodianDue: checked ? "0" : "15.00",
+        custodianMemo: checked ? "" : prev.custodianMemo,
       }));
 
       return;
@@ -483,9 +648,14 @@ function NewOrderPageContent() {
       ...prev,
       [name]: nextValue,
     }));
+
+    if (name === "facility") {
+      setExtractionMeta((prev) => ({ ...prev, facilityName: "" }));
+    }
   };
 
   const handleProviderInput = (companyName) => {
+    setExtractionMeta((prev) => ({ ...prev, providerName: "" }));
     setFormData((prev) => ({
       ...prev,
       providerId: "",
@@ -546,6 +716,7 @@ function NewOrderPageContent() {
 
       try {
         const facilityList = facilities.length ? facilities : await getFacilities();
+        const providerList = await getProviders();
         if (!facilities.length) {
           setFacilities(facilityList);
         }
@@ -553,14 +724,17 @@ function NewOrderPageContent() {
         const result = await uploadSingleSubpoena(file);
         const extract = result?.extract || result;
 
+        const { formUpdates, meta } = buildFormFromExtract(
+          { ...extract, extractId: result?.extractId },
+          { facilityList, providerList },
+          file
+        );
+
         setFormData((prev) => ({
           ...prev,
-          ...buildFormFromExtract(
-            { ...extract, extractId: result?.extractId },
-            facilityList,
-            file
-          ),
+          ...formUpdates,
         }));
+        setExtractionMeta(meta);
         setExpandedPanels((prev) => ({
           ...prev,
           subpoena: true,
@@ -587,14 +761,23 @@ function NewOrderPageContent() {
 
     setSaving(true);
 
+    const activeOrderId = orderId || String(formData.id || "");
+
     try {
-      if (isEditMode) {
-        await updateOrder(orderId, formData);
-      } else {
-        await createOrder(formData);
+      if (isEditMode || activeOrderId) {
+        await updateOrder(activeOrderId, formData);
+        router.push("/orders");
+        return;
       }
 
-      router.push("/orders");
+      const order = await createOrder(formData);
+      if (order?.id) {
+        router.push("/orders");
+        return;
+      }
+
+      setSaveError("Order was saved but could not return to the orders list. Please refresh and try again.");
+      setSaving(false);
     } catch (err) {
       setSaveError(err.message || "Failed to save order");
       setSaving(false);
@@ -653,7 +836,7 @@ function NewOrderPageContent() {
               </span>
             )}
 
-            {(formData.subpoenaFile || formData.subpoenaUrl) && (
+            {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#E6F7FA] px-4 py-2 text-[12px] font-semibold text-[#007F96]">
                 <SubpoenaIcon />
                 Subpoena attached
@@ -671,7 +854,7 @@ function NewOrderPageContent() {
         </div>
 
         <div className="flex flex-col gap-4 xl:h-[calc(100vh-170px)] xl:flex-row xl:items-stretch">
-          {(formData.subpoenaFile || formData.subpoenaUrl) && (
+          {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
             <CollapsibleOrderPanel
               title="Subpoena"
               color="subpoena"
@@ -684,7 +867,7 @@ function NewOrderPageContent() {
                 src={
                   formData.subpoenaFile
                     ? undefined
-                    : toFileUrl(formData.subpoenaUrl)
+                    : editSubpoenaSrc || toFileUrl(formData.subpoenaUrl)
                 }
                 name={subpoenaFileName(formData.subpoenaStoragePath)}
               />
@@ -708,6 +891,7 @@ function NewOrderPageContent() {
               facilityOptions={facilityOptions}
               extractingSubpoena={extractingSubpoena}
               extractError={extractError}
+              extractionMeta={extractionMeta}
             />
           </CollapsibleOrderPanel>
 
@@ -735,6 +919,8 @@ function NewOrderPageContent() {
               saveError={saveError}
               onProviderInput={handleProviderInput}
               onProviderSelect={handleProviderSelect}
+              onProviderBlur={handleProviderBlur}
+              extractionMeta={extractionMeta}
             />
           </CollapsibleOrderPanel>
 
@@ -750,6 +936,7 @@ function NewOrderPageContent() {
               onChange={handleChange}
               onBlur={handleBlur}
               getError={getError}
+              onValuesChange={handlePaymentValuesChange}
             />
           </CollapsibleOrderPanel>
         </div>
@@ -768,6 +955,7 @@ function OrderDetailsForm({
   facilityOptions = [],
   extractingSubpoena = false,
   extractError = "",
+  extractionMeta = {},
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -793,21 +981,18 @@ function OrderDetailsForm({
           error={getError("facility")}
           options={facilityOptions}
         />
+        {extractionMeta.facilityName && formData.facility && (
+          <p className="-mt-2 text-[10px] font-medium text-[#059669]">
+            Matched from subpoena: {extractionMeta.facilityName}
+          </p>
+        )}
 
-        <NewOrderField
-          label="Type"
-          name="type"
-          value={formData.type}
+        <RecordTypeMultiSelect
+          formData={formData}
           onChange={onChange}
           onBlur={onBlur}
           required
           error={getError("type")}
-          options={[
-            { label: "Medical Records", value: "medical" },
-            { label: "Billing Records", value: "billing" },
-            { label: "Employment Records", value: "employment" },
-            { label: "X-Rays", value: "xrays" },
-          ]}
         />
 
         <NewOrderField
@@ -825,7 +1010,7 @@ function OrderDetailsForm({
           value={formData.ssn}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="XXX-XX-XXXX"
+          placeholder="XXX-XX-1234"
           inputMode="numeric"
           maxLength={11}
           hint="SSN required if you have one"
@@ -907,29 +1092,87 @@ function OrderDetailsForm({
 
       <div>
         <h3 className="text-[13px] font-semibold text-[#111827]">
-          Date Injury
+          Date of Injury (Complete all relevant information):
         </h3>
 
-        <p className="mt-[2px] text-[11px] italic text-[#64748B]">
-          Complete all relevant information
-        </p>
+        <div className="mt-3 space-y-3">
+          <div>
+            <label className="flex flex-wrap items-center gap-2 text-[12px] text-[#475569]">
+              <input
+                type="radio"
+                name="injuryType"
+                value="specific"
+                checked={formData.injuryType === "specific"}
+                onChange={onChange}
+                className="h-[13px] w-[13px] border-[#CBD5E1] accent-[#0097B2]"
+              />
+              <span>specific injury on this date:</span>
+              <input
+                type="date"
+                name="injuryDate"
+                value={formData.injuryDate}
+                onChange={onChange}
+                onBlur={onBlur}
+                disabled={formData.injuryType !== "specific"}
+                className={`h-[34px] rounded-[6px] border bg-white px-2 text-[12px] text-[#111827] outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] ${
+                  getError("injuryDate")
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+            </label>
+            {getError("injuryDate") ? (
+              <p className="mt-1 text-[11px] font-medium text-red-500">
+                {getError("injuryDate")}
+              </p>
+            ) : null}
+          </div>
 
-        <div className="mt-3 space-y-2">
-          <RadioOption
-            label="Specific injury on this date"
-            name="injuryType"
-            value="specific"
-            checked={formData.injuryType === "specific"}
-            onChange={onChange}
-          />
-
-          <RadioOption
-            label="Cumulative injury which began on"
-            name="injuryType"
-            value="cumulative"
-            checked={formData.injuryType === "cumulative"}
-            onChange={onChange}
-          />
+          <div>
+            <label className="flex flex-wrap items-center gap-2 text-[12px] text-[#475569]">
+              <input
+                type="radio"
+                name="injuryType"
+                value="cumulative"
+                checked={formData.injuryType === "cumulative"}
+                onChange={onChange}
+                className="h-[13px] w-[13px] border-[#CBD5E1] accent-[#0097B2]"
+              />
+              <span>cumulative injury which began on</span>
+              <input
+                type="date"
+                name="injuryDateBegin"
+                value={formData.injuryDateBegin}
+                onChange={onChange}
+                onBlur={onBlur}
+                disabled={formData.injuryType !== "cumulative"}
+                className={`h-[34px] rounded-[6px] border bg-white px-2 text-[12px] text-[#111827] outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] ${
+                  getError("injuryDateBegin")
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+              <span>through</span>
+              <input
+                type="date"
+                name="injuryDateEnd"
+                value={formData.injuryDateEnd}
+                onChange={onChange}
+                onBlur={onBlur}
+                disabled={formData.injuryType !== "cumulative"}
+                className={`h-[34px] rounded-[6px] border bg-white px-2 text-[12px] text-[#111827] outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] ${
+                  getError("injuryDateEnd")
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
+              />
+            </label>
+            {getError("injuryDateBegin") || getError("injuryDateEnd") ? (
+              <p className="mt-1 text-[11px] font-medium text-red-500">
+                {getError("injuryDateEnd") || getError("injuryDateBegin")}
+              </p>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -1040,6 +1283,8 @@ function ServeInfoForm({
   saveError = "",
   onProviderInput,
   onProviderSelect,
+  onProviderBlur,
+  extractionMeta = {},
 }) {
   return (
     <div className="space-y-5">
@@ -1054,6 +1299,15 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Order number"
+      />
+
+      <NewOrderField
+        label="REC Number"
+        name="recNumber"
+        value={formData.recNumber}
+        onChange={onChange}
+        onBlur={onBlur}
+        placeholder="Enter REC number"
       />
 
       <Divider />
@@ -1075,10 +1329,18 @@ function ServeInfoForm({
         providerId={formData.providerId}
         onInputChange={onProviderInput}
         onSelect={onProviderSelect}
+        onBlur={onProviderBlur}
         required
         error={getError("serveCompanyName")}
         hint="Search existing providers or type a new company name"
       />
+      {extractionMeta.providerName && formData.providerId && (
+        <p className="-mt-3 text-[10px] font-medium text-[#059669]">
+          {extractionMeta.providerCreated
+            ? `New provider added: ${extractionMeta.providerName}`
+            : `Matched existing provider: ${extractionMeta.providerName}`}
+        </p>
+      )}
 
       <NewOrderField
         label="Address"
@@ -1227,58 +1489,30 @@ function ServeInfoForm({
             type="date"
           />
 
-          <NewOrderField label="Ready Date" disabled placeholder="-" />
-          <NewOrderField label="Invoice Date" disabled placeholder="-" />
-          <NewOrderField label="Xray Invoice Date" disabled placeholder="-" />
-        </div>
-
-        <div>
-          <p className="mb-[6px] text-[11px] font-semibold text-[#475569]">
-            Records
-          </p>
-
-          <p className="mb-2 text-[10px] italic text-[#94A3B8]">
-            Ctrl+Click for multiple selections
-          </p>
-
-          <div className="rounded-[8px] border border-[#E2E8F0] bg-white">
-            <RecordCheckbox
-              label="Medical Records"
-              name="medicalRecords"
-              checked={formData.medicalRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="Billing Records"
-              name="billingRecords"
-              checked={formData.billingRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="Employment Records"
-              name="employmentRecords"
-              checked={formData.employmentRecords}
-              onChange={onChange}
-            />
-
-            <RecordCheckbox
-              label="X-Rays"
-              name="xrays"
-              checked={formData.xrays}
-              onChange={onChange}
-            />
-
-            <div className="px-3 py-2">
-              <CheckboxOption
-                label="Other"
-                name="otherRecord"
-                checked={formData.otherRecord}
-                onChange={onChange}
-              />
-            </div>
-          </div>
+          <NewOrderField
+            label="Ready Date"
+            name="readyDate"
+            value={formData.readyDate}
+            type="date"
+            disabled
+            placeholder="-"
+          />
+          <NewOrderField
+            label="Invoice Date"
+            name="invoiceDate"
+            value={formData.invoiceDate}
+            type="date"
+            disabled
+            placeholder="-"
+          />
+          <NewOrderField
+            label="Xray Invoice Date"
+            name="xrayInvoiceDate"
+            value={formData.xrayInvoiceDate}
+            type="date"
+            disabled
+            placeholder="-"
+          />
         </div>
       </div>
 
@@ -1293,23 +1527,24 @@ function ServeInfoForm({
         placeholder="Specific record details"
       />
 
-      <NewOrderField
+      <DoctorSearchField
         label="Specific Doctor"
         name="specificDoctor"
         value={formData.specificDoctor}
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Doctor name"
+        error={getError("specificDoctor")}
       />
 
-      <NewOrderField
+      <DoctorAddressSearchField
         label="Full Address"
         name="fullAddress"
         value={formData.fullAddress}
         onChange={onChange}
         onBlur={onBlur}
-        textarea
         placeholder="Full address"
+        error={getError("fullAddress")}
       />
 
       <Divider />
@@ -1353,7 +1588,22 @@ function ServeInfoForm({
   );
 }
 
-function PaymentForm({ formData, onChange, onBlur, getError }) {
+import {
+  getPaymentChargeForType,
+  dueAmountFromFee,
+  parsePaymentAmount,
+} from "@/lib/orders/paymentUtils";
+
+function PaymentForm({
+  formData,
+  onChange,
+  onBlur,
+  getError,
+  onValuesChange,
+}) {
+  const invoiceFees = formData.invoiceFees;
+  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+
   return (
     <div className="space-y-5">
       <h3 className="text-[14px] font-semibold text-[#111827]">
@@ -1362,38 +1612,54 @@ function PaymentForm({ formData, onChange, onBlur, getError }) {
 
       <PaymentChargeCard
         title="Prepayment Fee"
-        amount="$15.00"
-        due="$15.00"
+        chargeAmount={prepaymentCharge}
+        paidAmount={formData.prepaymentPaid}
+        showPaidField
+        autoDueOnPaidChange
         theme="green"
         prefix="prepayment"
         formData={formData}
         onChange={onChange}
         onBlur={onBlur}
         getError={getError}
+        onValuesChange={onValuesChange}
       />
 
-      <PaymentChargeCard
-        title="Custodian Charge"
-        amount="$15.00"
-        due="$15.00"
-        theme="purple"
-        prefix="custodian"
-        formData={formData}
-        onChange={onChange}
-        onBlur={onBlur}
-        getError={getError}
-      />
+      {!formData.certificateNoRecords && (
+        <PaymentChargeCard
+          title="Custodian Charge"
+          chargeAmount={getPaymentChargeForType("custodian", invoiceFees)}
+          paidAmount={formData.custodianPaid}
+          showPaidField
+          autoDueOnPaidChange
+          capPaidToDue
+          theme="purple"
+          prefix="custodian"
+          formData={formData}
+          onChange={onChange}
+          onBlur={onBlur}
+          getError={getError}
+          onValuesChange={onValuesChange}
+        />
+      )}
 
       <PaymentChargeCard
         title="Xray Charge"
-        amount="$0.00"
-        due="$-15.00"
+        paidAmount={formData.xrayPaid}
+        showPaidField
+        paidReadOnly={false}
+        fieldsReadOnly={false}
+        autoDueOnPaidChange
+        capPaidToDue
+        paymentType="xray"
+        invoiceFees={invoiceFees}
         theme="blue"
         prefix="xray"
         formData={formData}
         onChange={onChange}
         onBlur={onBlur}
         getError={getError}
+        onValuesChange={onValuesChange}
       />
     </div>
   );
@@ -1513,19 +1779,6 @@ function ExistingFileLink({ label, name, href }) {
         View
       </span>
     </a>
-  );
-}
-
-function RecordCheckbox({ label, name, checked, onChange }) {
-  return (
-    <div className="border-b border-[#F1F5F9] px-3 py-2 last:border-b-0">
-      <CheckboxOption
-        label={label}
-        name={name}
-        checked={checked}
-        onChange={onChange}
-      />
-    </div>
   );
 }
 

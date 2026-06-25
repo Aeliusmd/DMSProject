@@ -3,46 +3,61 @@
  */
 
 const { getPool } = require("../config/database");
+const { RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 
+const REQUIRED_WORKFLOW_COMPLETION = {
+  "Review Records": "complete",
+  Serve: "complete",
+  Custodian: "complete",
+  SENT: "sent",
+};
+
+const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
+  "Cancelled",
+  "Deleted",
+  "Completed",
+  "Ready to Pickup",
+  "Write Offs",
+]);
+
+const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
+const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
+const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
 const ORDER_COLUMNS = `
-  order_number, facility_id, provider_id, order_type, status, court,
+  order_number, rec_number, facility_id, provider_id, status, court,
   case_number, order_ref, ssn_last_four, dob,
   applicant_first_name, applicant_middle_name, applicant_last_name,
-  applicant_aka, defendant, injury_type,
+  applicant_aka, defendant, injury_type, injury_date, injury_date_begin, injury_date_end,
   serve_company_name, serve_address, serve_zip, serve_city, serve_state,
   serve_phone, serve_fax, serve_email,
   contact1_name, contact1_title, contact1_phone, contact1_fax, contact1_email,
   contact2_name, contact2_title, contact2_phone, contact2_fax, contact2_email,
   date_served, depo_due_date, delivery_date, subpoena_date,
   ready_date, invoice_date, xray_invoice_date,
-  flag_medical_records, flag_billing_records, flag_employment_records,
-  flag_xrays, flag_other_record,
   specific_record, specific_doctor, full_address,
   certificate_no_records, cnr_reason, cnr_delivery, cnr_date_sent, cnr_memo,
   subpoena_storage_path, has_note, has_subpoena, created_by`;
 
 const ORDER_VALUES = `
-  :orderNumber, :facilityId, :providerId, :orderType, :status, :court,
+  :orderNumber, :recNumber, :facilityId, :providerId, :status, :court,
   :caseNumber, :orderRef, :ssnLastFour, :dob,
   :applicantFirstName, :applicantMiddleName, :applicantLastName,
-  :applicantAka, :defendant, :injuryType,
+  :applicantAka, :defendant, :injuryType, :injuryDate, :injuryDateBegin, :injuryDateEnd,
   :serveCompanyName, :serveAddress, :serveZip, :serveCity, :serveState,
   :servePhone, :serveFax, :serveEmail,
   :contact1Name, :contact1Title, :contact1Phone, :contact1Fax, :contact1Email,
   :contact2Name, :contact2Title, :contact2Phone, :contact2Fax, :contact2Email,
   :dateServed, :depoDueDate, :deliveryDate, :subpoenaDate,
   :readyDate, :invoiceDate, :xrayInvoiceDate,
-  :flagMedicalRecords, :flagBillingRecords, :flagEmploymentRecords,
-  :flagXrays, :flagOtherRecord,
   :specificRecord, :specificDoctor, :fullAddress,
   :certificateNoRecords, :cnrReason, :cnrDelivery, :cnrDateSent, :cnrMemo,
   :subpoenaStoragePath, :hasNote, :hasSubpoena, :createdBy`;
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
+  rec_number = :recNumber,
   facility_id = :facilityId,
   provider_id = :providerId,
-  order_type = :orderType,
   court = :court,
   case_number = :caseNumber,
   order_ref = :orderRef,
@@ -54,6 +69,9 @@ const ORDER_UPDATE_SET = `
   applicant_aka = :applicantAka,
   defendant = :defendant,
   injury_type = :injuryType,
+  injury_date = :injuryDate,
+  injury_date_begin = :injuryDateBegin,
+  injury_date_end = :injuryDateEnd,
   serve_company_name = :serveCompanyName,
   serve_address = :serveAddress,
   serve_zip = :serveZip,
@@ -79,11 +97,6 @@ const ORDER_UPDATE_SET = `
   ready_date = :readyDate,
   invoice_date = :invoiceDate,
   xray_invoice_date = :xrayInvoiceDate,
-  flag_medical_records = :flagMedicalRecords,
-  flag_billing_records = :flagBillingRecords,
-  flag_employment_records = :flagEmploymentRecords,
-  flag_xrays = :flagXrays,
-  flag_other_record = :flagOtherRecord,
   specific_record = :specificRecord,
   specific_doctor = :specificDoctor,
   full_address = :fullAddress,
@@ -98,7 +111,10 @@ const ORDER_UPDATE_SET = `
 
 const ORDER_DETAIL_SELECT = `
   SELECT o.*, f.facility_name, f.slug AS facility_slug,
-         p.company_name AS provider_name
+         f.address AS facility_address, f.city AS facility_city,
+         f.state AS facility_state, f.zip_code AS facility_zip,
+         p.company_name AS provider_name,
+         p.email AS provider_email
   FROM orders o
   LEFT JOIN facilities f ON f.id = o.facility_id
   LEFT JOIN providers p ON p.id = o.provider_id`;
@@ -110,19 +126,37 @@ class Order {
     const conditions = [];
     const params = {};
 
+    if (filters.readyFilter) {
+      conditions.push(`(
+        o.status IN ('Ready', 'Ready to Pickup')
+        OR (
+          o.status = 'Active'
+          AND DATEDIFF(CURDATE(), DATE(o.created_at)) >= :rushReadyMinDays
+        )
+      )`);
+      params.rushReadyMinDays = RUSH_READY_MIN_DAYS;
+    } else if (filters.status) {
+      conditions.push("o.status = :status");
+      params.status = filters.status;
+    } else {
+      conditions.push(ACTIVE_ORDER_ALIAS);
+    }
+
     if (filters.facilityId) {
       conditions.push("o.facility_id = :facilityId");
       params.facilityId = filters.facilityId;
     }
 
-    if (filters.status) {
-      conditions.push("o.status = :status");
-      params.status = filters.status;
+    if (filters.year) {
+      conditions.push(
+        "YEAR(COALESCE(o.subpoena_date, o.created_at)) = :year"
+      );
+      params.year = Number(filters.year);
     }
 
-    if (filters.year) {
-      conditions.push("YEAR(o.subpoena_date) = :year");
-      params.year = filters.year;
+    if (filters.periodFrom) {
+      conditions.push("DATE(o.created_at) >= :periodFrom");
+      params.periodFrom = filters.periodFrom;
     }
 
     if (filters.search) {
@@ -140,17 +174,165 @@ class Order {
       ? `WHERE ${conditions.join(" AND ")}`
       : "";
 
+    const limit =
+      filters.limit && Number(filters.limit) > 0
+        ? Math.min(Number(filters.limit), 500)
+        : null;
+
     const [rows] = await pool.execute(
       `${ORDER_DETAIL_SELECT}
        ${whereClause}
-       ORDER BY o.id DESC`,
+       ORDER BY o.id DESC
+       ${limit ? `LIMIT ${limit}` : ""}`,
       params
     );
 
     return rows;
   }
 
-  static async findById(id) {
+  static async searchDoctors(query, limit = 10) {
+    const pool = getPool();
+    const trimmed = `${query || ""}`.trim();
+
+    if (!trimmed) return [];
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
+
+    const [rows] = await pool.execute(
+      `SELECT DISTINCT TRIM(specific_doctor) AS name
+       FROM orders
+       WHERE specific_doctor IS NOT NULL
+         AND TRIM(specific_doctor) <> ''
+         AND specific_doctor LIKE :query
+       ORDER BY name ASC
+       LIMIT ${safeLimit}`,
+      { query: `%${trimmed}%` }
+    );
+
+    return rows.map((row) => row.name).filter(Boolean);
+  }
+
+  static async searchDoctorAddresses(query, limit = 10) {
+    const pool = getPool();
+    const trimmed = `${query || ""}`.trim();
+
+    if (!trimmed) return [];
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
+
+    const [rows] = await pool.execute(
+      `SELECT DISTINCT TRIM(full_address) AS address
+       FROM orders
+       WHERE full_address IS NOT NULL
+         AND TRIM(full_address) <> ''
+         AND full_address LIKE :query
+       ORDER BY address ASC
+       LIMIT ${safeLimit}`,
+      { query: `%${trimmed}%` }
+    );
+
+    return rows.map((row) => row.address).filter(Boolean);
+  }
+
+  static async findForReport(filters = {}) {
+    const pool = getPool();
+    const conditions = [ACTIVE_ORDER_ALIAS];
+    const params = {};
+
+    if (filters.orderNo) {
+      conditions.push("o.order_number LIKE :orderNo");
+      params.orderNo = `%${filters.orderNo}%`;
+    }
+
+    if (filters.caseNumber) {
+      conditions.push("o.case_number LIKE :caseNumber");
+      params.caseNumber = `%${filters.caseNumber}%`;
+    }
+
+    if (filters.doctor) {
+      conditions.push("o.specific_doctor LIKE :doctor");
+      params.doctor = `%${filters.doctor}%`;
+    }
+
+    if (filters.dateFrom) {
+      conditions.push("DATE(o.subpoena_date) >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("DATE(o.subpoena_date) <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    if (filters.unpaidOnly) {
+      conditions.push("(i.id IS NULL OR COALESCE(i.total_amount, 0) <= 0)");
+    }
+
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+
+    const [rows] = await pool.execute(
+      `SELECT o.*, f.facility_name, f.slug AS facility_slug,
+              p.company_name AS provider_name,
+              i.id AS invoice_id,
+              i.total_amount,
+              i.amount_paid,
+              i.amount_due,
+              i.status AS invoice_status
+       FROM orders o
+       LEFT JOIN facilities f ON f.id = o.facility_id
+       LEFT JOIN providers p ON p.id = o.provider_id
+       LEFT JOIN invoices i ON i.id = (
+         SELECT i2.id
+         FROM invoices i2
+         WHERE i2.order_id = o.id
+         ORDER BY i2.id DESC
+         LIMIT 1
+       )
+       ${whereClause}
+       ORDER BY o.subpoena_date DESC, o.id DESC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async countStats() {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(`
+      SELECT
+        COUNT(*) AS total_orders,
+        SUM(CASE WHEN status = 'Active' THEN 1 ELSE 0 END) AS active_cases,
+        SUM(
+          CASE
+            WHEN status IN ('Ready', 'Ready to Pickup') THEN 1
+            ELSE 0
+          END
+        ) AS ready_to_pickup,
+        SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
+      FROM orders
+      WHERE ${ACTIVE_ORDER}
+    `);
+
+    return rows[0] || {};
+  }
+
+  static async findById(id, connection = null) {
+    const db = connection || getPool();
+
+    const [rows] = await db.execute(
+      `${ORDER_DETAIL_SELECT}
+       WHERE o.id = :id AND ${ACTIVE_ORDER_ALIAS}
+       LIMIT 1`,
+      { id }
+    );
+
+    return rows[0] || null;
+  }
+
+  static async findByIdRaw(id) {
     const pool = getPool();
 
     const [rows] = await pool.execute(
@@ -177,14 +359,35 @@ class Order {
     return rows[0] || null;
   }
 
-  static async findPaymentsByOrderId(orderId) {
-    const pool = getPool();
+  static async findPaymentsByOrderId(orderId, connection = null) {
+    const db = connection || getPool();
 
-    const [rows] = await pool.execute(
-      `SELECT id, order_id, payment_type, check_number, payment_date, amount, is_paid, memo
+    const [rows] = await db.execute(
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo
        FROM order_payments
        WHERE order_id = :orderId`,
       { orderId }
+    );
+
+    return rows;
+  }
+
+  static async findPaymentsByOrderIds(orderIds = []) {
+    if (!orderIds.length) return [];
+
+    const pool = getPool();
+
+    const placeholders = orderIds.map((_, index) => `:id${index}`).join(", ");
+    const params = orderIds.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await pool.execute(
+      `SELECT id, order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo
+       FROM order_payments
+       WHERE order_id IN (${placeholders})`,
+      params
     );
 
     return rows;
@@ -210,17 +413,36 @@ class Order {
   static async upsertPayment(connection, payment) {
     await connection.execute(
       `INSERT INTO order_payments
-        (order_id, payment_type, check_number, payment_date, amount, is_paid, memo, created_at, updated_at)
+        (order_id, payment_type, check_number, payment_date, amount, due_amount, is_paid, memo, created_at, updated_at)
        VALUES
-        (:orderId, :paymentType, :checkNumber, :paymentDate, :amount, :isPaid, :memo, NOW(), NOW())
+        (:orderId, :paymentType, :checkNumber, :paymentDate, :amount, :dueAmount, :isPaid, :memo, NOW(), NOW())
        ON DUPLICATE KEY UPDATE
         check_number = VALUES(check_number),
         payment_date = VALUES(payment_date),
         amount = VALUES(amount),
+        due_amount = VALUES(due_amount),
         is_paid = VALUES(is_paid),
         memo = VALUES(memo),
         updated_at = NOW()`,
-      payment
+      {
+        orderId: payment.orderId,
+        paymentType: payment.paymentType,
+        checkNumber: payment.checkNumber ?? null,
+        paymentDate: payment.paymentDate ?? null,
+        amount: payment.amount ?? null,
+        dueAmount: payment.dueAmount ?? null,
+        isPaid: payment.isPaid ?? 0,
+        memo: payment.memo ?? null,
+      }
+    );
+  }
+
+  static async deletePaymentByType(connection, orderId, paymentType) {
+    await connection.execute(
+      `DELETE FROM order_payments
+       WHERE order_id = :orderId
+         AND payment_type = :paymentType`,
+      { orderId, paymentType }
     );
   }
 
@@ -303,10 +525,68 @@ class Order {
     return rows;
   }
 
-  static async upsertWorkflowStage(orderId, stageName, stageStatus, completedAt) {
-    const pool = getPool();
+  static isWorkflowFullyComplete(stages = []) {
+    const statusByName = new Map(
+      stages.map((stage) => [stage.stage_name, stage.stage_status])
+    );
 
-    await pool.execute(
+    return Object.entries(REQUIRED_WORKFLOW_COMPLETION).every(
+      ([stageName, requiredStatus]) =>
+        statusByName.get(stageName) === requiredStatus
+    );
+  }
+
+  static async syncOrderStatusFromWorkflow(orderId, connection = null) {
+    const db = connection || getPool();
+
+    const [orders] = await db.execute(
+      `SELECT id, status
+       FROM orders
+       WHERE id = :orderId AND ${ACTIVE_ORDER}
+       LIMIT 1`,
+      { orderId }
+    );
+    const order = orders[0];
+
+    if (!order || WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES.has(order.status)) {
+      return false;
+    }
+
+    if (order.status !== "Active") {
+      return false;
+    }
+
+    const [stageRows] = await db.execute(
+      `SELECT stage_name, stage_status
+       FROM order_workflow_stages
+       WHERE order_id = :orderId`,
+      { orderId }
+    );
+
+    if (!Order.isWorkflowFullyComplete(stageRows)) {
+      return false;
+    }
+
+    await db.execute(
+      `UPDATE orders
+       SET status = 'Ready to Pickup', updated_at = NOW()
+       WHERE id = :orderId`,
+      { orderId }
+    );
+
+    return true;
+  }
+
+  static async upsertWorkflowStage(
+    orderId,
+    stageName,
+    stageStatus,
+    completedAt,
+    connection = null
+  ) {
+    const db = connection || getPool();
+
+    await db.execute(
       `INSERT INTO order_workflow_stages
         (order_id, stage_name, stage_status, completed_at, created_at, updated_at)
        VALUES (:orderId, :stageName, :stageStatus, :completedAt, NOW(), NOW())
@@ -316,6 +596,8 @@ class Order {
         updated_at = NOW()`,
       { orderId, stageName, stageStatus, completedAt }
     );
+
+    await Order.syncOrderStatusFromWorkflow(orderId, connection);
   }
 
   static async findNotesByOrderId(orderId, pendingOnly = false) {
@@ -333,6 +615,64 @@ class Order {
        WHERE ${conditions.join(" AND ")}
        ORDER BY note_date DESC, id DESC`,
       { orderId }
+    );
+
+    return rows;
+  }
+
+  static async findReminders({ createdBy = null, limit = 500 } = {}) {
+    const pool = getPool();
+    const conditions = [];
+    const params = {};
+
+    if (createdBy) {
+      conditions.push("(r.created_by = :createdBy OR r.assigned_to = :createdBy)");
+      params.createdBy = createdBy;
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const [rows] = await pool.execute(
+      `SELECT r.id AS note_id, r.order_id, r.created_at AS note_date, r.created_by,
+              r.author_name, r.note, r.callback_date, r.attachment_path,
+              r.is_completed AS is_called,
+              o.order_number, o.case_number,
+              o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
+       FROM reminders r
+       INNER JOIN orders o ON o.id = r.order_id AND ${ACTIVE_ORDER_ALIAS}
+       ${whereClause}
+       ORDER BY r.callback_date ASC, r.created_at DESC
+       LIMIT ${Number(limit)}`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findDueRemindersOnDate({ createdBy = null, date }) {
+    const pool = getPool();
+    const conditions = [
+      "r.is_completed = 0",
+      "DATE(r.callback_date) = :dueDate",
+    ];
+    const params = { dueDate: date };
+
+    if (createdBy) {
+      conditions.push("(r.created_by = :createdBy OR r.assigned_to = :createdBy)");
+      params.createdBy = createdBy;
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT r.id AS note_id, r.order_id, r.created_at AS note_date, r.created_by,
+              r.author_name, r.note, r.callback_date, r.attachment_path,
+              r.is_completed AS is_called,
+              o.order_number, o.case_number,
+              o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
+       FROM reminders r
+       INNER JOIN orders o ON o.id = r.order_id AND ${ACTIVE_ORDER_ALIAS}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY r.callback_date ASC, o.order_number ASC`,
+      params
     );
 
     return rows;
@@ -373,8 +713,10 @@ class Order {
     );
   }
 
-  static async createActivityLog(connection, data) {
-    const [result] = await connection.execute(
+  static async createActivityLog(data, connection = null) {
+    const db = connection || getPool();
+
+    const [result] = await db.execute(
       `INSERT INTO order_activity_logs
         (order_id, activity_date, performed_by, author_name,
          callback_date, note, attachment_path, created_at)
@@ -417,12 +759,34 @@ class Order {
     return rows[0] || null;
   }
 
-  static async deleteById(id) {
+  static async deleteById(id, { deletedBy } = {}) {
     const pool = getPool();
 
     const [result] = await pool.execute(
-      `DELETE FROM orders WHERE id = :id`,
-      { id }
+      `UPDATE orders
+       SET status = 'Deleted',
+           deleted_at = NOW(),
+           deleted_by = :deletedBy,
+           updated_at = NOW()
+       WHERE id = :id AND ${ACTIVE_ORDER}`,
+      { id, deletedBy: deletedBy || null }
+    );
+
+    return result.affectedRows > 0;
+  }
+
+  static async cancelById(id, { reason, actorId }) {
+    const pool = getPool();
+
+    const [result] = await pool.execute(
+      `UPDATE orders
+       SET status = 'Cancelled',
+           cancel_reason = :reason,
+           cancelled_at = NOW(),
+           cancelled_by = :actorId,
+           updated_at = NOW()
+       WHERE id = :id AND ${ACTIVE_ORDER}`,
+      { id, reason, actorId: actorId || null }
     );
 
     return result.affectedRows > 0;

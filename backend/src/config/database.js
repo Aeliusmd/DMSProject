@@ -14,6 +14,7 @@ function createPool() {
     waitForConnections: true,
     connectionLimit: 10,
     namedPlaceholders: true,
+    dateStrings: ["DATE"],
   });
 }
 

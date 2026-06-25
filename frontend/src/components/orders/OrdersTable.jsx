@@ -8,15 +8,69 @@ import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import CoverSheetModal from "@/components/orders/CoverSheetModal";
 import XrayCoverSheetModal from "@/components/orders/XrayCoverSheetModal";
 import CertificateNoRecordsModal from "@/components/orders/CertificateNoRecordsModal";
+import CnrNoteModal from "@/components/orders/CnrNoteModal";
+import CertificateOfRecordsModal from "@/components/orders/CertificateOfRecordsModal";
+import SendCopyLetterModal from "@/components/orders/SendCopyLetterModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
-import { getOrders } from "@/lib/orders/orderApi";
+import OrderMailModal from "@/components/orders/OrderMailModal";
+import OrderPickupModal from "@/components/orders/OrderPickupModal";
+import OrderFaxModal from "@/components/orders/OrderFaxModal";
+import OrderCancelModal from "@/components/orders/OrderCancelModal";
+import ConfirmModal from "@/components/ui/ConfirmModal";
+import OrderStatusBadge from "@/components/orders/OrderStatusBadge";
+import CompletedDeliveryLink from "@/components/orders/CompletedDeliveryLink";
+import {
+  cancelOrder,
+  deleteOrder,
+  getOrders,
+  fetchOrderMedicalRecordsPdf,
+  fetchOrderPrintInvoicePdf,
+  fetchOrderPrintXrayInvoicePdf,
+  fetchOrderSubpoenaPdf,
+  mailCompletedOrder,
+  sendCopyServiceLetter,
+  recordOrderPickup,
+  recordOrderFax,
+  removeMedicalRecords,
+} from "@/lib/orders/orderApi";
+import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import {
+  getCompletedDeliveryActions,
+  getDeliveryStatus,
+  resolveProviderEmail,
+} from "@/lib/orders/deliveryActions";
+import { getOrderPeriodStartDate } from "@/lib/orders/orderFilterConstants";
+import {
+  emailInvoiceByOrderId,
+  emailXrayInvoiceByOrderId,
+  resendInvoices,
+  sendInvoices,
+} from "@/lib/invoices/invoiceApi";
+import {
+  handleMissingProviderEmail,
+  isNoProviderEmailError,
+  NO_PROVIDER_EMAIL_MESSAGE,
+} from "@/lib/invoices/invoiceUtils";
+import {
+  formatMoneyAmount,
+  parsePaymentAmount,
+} from "@/lib/orders/paymentUtils";
+import {
+  deriveDisplayOrderStatus,
+  getOrderAgeDate,
+  resolveRushLabel,
+  RUSH_LEVEL_STYLES,
+} from "@/lib/orders/rushUtils";
+import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
+import { getOrderTypeLabel } from "@/lib/orders/recordTypeUtils";
 
 const ORDERS_PER_PAGE = 6;
 
 const defaultOrderFilters = {
   facility: "",
   year: "",
+  period: "",
   status: "",
   search: "",
 };
@@ -24,14 +78,39 @@ const defaultOrderFilters = {
 const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
   "Copy Center",
-  "Certification",
-  "Records",
+  "Certification of Records",
   "CNR",
-  "Called",
-  "Edit Order",
 ];
 
-const WORKFLOW_STAGES = ["Review Records", "Serve", "Custodian", "SENT"];
+const CNR_DELIVERY_LABELS = {
+  email: "Email",
+  fax: "Fax",
+  pickup: "Pickup",
+};
+
+function formatCnrDisplayDate(dateValue) {
+  if (!dateValue) return "";
+
+  const value = String(dateValue).slice(0, 10);
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    return `${isoMatch[2]}/${isoMatch[3]}/${isoMatch[1].slice(-2)}`;
+  }
+
+  return value;
+}
+
+function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "") {
+  setModal({ title, note });
+}
+
+const WORKFLOW_STAGES = [
+  "Review Records",
+  "Serve",
+  "Custodian",
+  "SENT",
+];
 
 const WORKFLOW_STATUS_STYLES = {
   complete: { text: "text-[#059669]", dot: "bg-[#10B981]" },
@@ -39,6 +118,10 @@ const WORKFLOW_STATUS_STYLES = {
   pending: { text: "text-[#CA8A04]", dot: "bg-[#EAB308]" },
   sent: { text: "text-[#2563EB]", dot: "bg-[#3B82F6]" },
 };
+
+function isWorkflowStageComplete(status) {
+  return status === "complete" || status === "sent";
+}
 
 function mapWorkflowStages(stages = []) {
   const byName = new Map(
@@ -49,9 +132,115 @@ function mapWorkflowStages(stages = []) {
     const status = byName.get(stageName) || "pending";
 
     return {
+      key: stageName,
       label: stageName,
       status,
     };
+  });
+}
+
+function buildWorkflowStagesForOrder(order) {
+  const prepaymentPaid = parsePaymentAmount(order.invoice?.prepaymentPaid);
+  const custodianPaid = parsePaymentAmount(order.invoice?.custodianPaid);
+  const hasAllRecordsUploaded = Boolean(order.records?.allRecordsUploaded);
+  const hasAnyRecordsUploaded = Boolean(
+    order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
+  );
+  const isCnrOrder = Boolean(order.certificateNoRecords);
+
+  return mapWorkflowStages(order.workflowStages)
+    .filter((stage) => !(isCnrOrder && stage.key === "Custodian"))
+    .map((stage) => {
+    if (stage.key === "Review Records") {
+      const isComplete =
+        isWorkflowStageComplete(stage.status) || hasAllRecordsUploaded;
+
+      return {
+        ...stage,
+        status: isComplete ? "complete" : "pending",
+        label: "Review Records",
+        showScanRecordsLink: !isComplete,
+        showPreviewRecords: hasAnyRecordsUploaded,
+        showRemoveRecords: isComplete && hasAnyRecordsUploaded,
+      };
+    }
+
+    if (stage.key === "Serve") {
+      const isComplete = isWorkflowStageComplete(stage.status);
+
+      return {
+        ...stage,
+        label: isComplete ? "Serve" : "Serve Payment",
+        paidAmount:
+          isComplete && prepaymentPaid > 0
+            ? formatMoneyAmount(prepaymentPaid)
+            : null,
+      };
+    }
+
+    if (stage.key === "Custodian") {
+      const isComplete = isWorkflowStageComplete(stage.status);
+
+      return {
+        ...stage,
+        label: isComplete ? "Custodian" : "Custodian Payment",
+        paidAmount:
+          isComplete && custodianPaid > 0
+            ? formatMoneyAmount(custodianPaid)
+            : null,
+      };
+    }
+
+    if (stage.key === "SENT" && stage.status === "sent") {
+      return {
+        ...stage,
+        showResend: Boolean(order.invoice?.invoiceId),
+        invoiceId: order.invoice?.invoiceId || null,
+      };
+    }
+
+    return stage;
+  });
+}
+
+function isInactiveOrderStatus(status) {
+  return status === "Cancelled" || status === "Deleted";
+}
+
+function getOrderFilterDate(order) {
+  const raw = order.createdAt || order.created_at || order.subpoenaDate || "";
+  if (!raw) return "";
+
+  if (raw instanceof Date) {
+    const year = raw.getFullYear();
+    const month = String(raw.getMonth() + 1).padStart(2, "0");
+    const day = String(raw.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const value = String(raw);
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) {
+    return value.slice(0, 10);
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function filterOrdersByPeriod(orders, period) {
+  if (!period) return orders;
+
+  const periodStart = getOrderPeriodStartDate(period);
+  if (!periodStart) return orders;
+
+  return orders.filter((order) => {
+    const orderDate = getOrderFilterDate(order);
+    return orderDate && orderDate >= periodStart;
   });
 }
 
@@ -59,16 +248,55 @@ function toRenderOrder(order) {
   return {
     id: order.id,
     dbId: order.dbId,
+    orderStatus: order.status || "",
+    displayOrderStatus:
+      order.displayStatus ||
+      deriveDisplayOrderStatus(order.status, getOrderAgeDate(order)),
+    rushLabel: resolveRushLabel(order) || "",
+    isSubpoena: Boolean(order.isSubpoena),
+    isRecords: Boolean(order.isRecords),
+    isWriteOffs: Boolean(order.isWriteOffs),
+    hasMedicalRecords: Boolean(order.records?.allRecordsUploaded),
+    hasAnyRecordsUploaded: Boolean(
+      order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
+    ),
     note: order.note,
     subpoena: order.subpoena,
+    hasSubpoenaFile: Boolean(order.hasSubpoenaFile),
     court: order.court || "",
+    recNumber: order.recNumber || "",
     applicant: order.applicant || "",
     orderRef: order.orderRef || "",
-    status: mapWorkflowStages(order.workflowStages),
-    invoice: { createOnly: true },
+    providerName: order.providerName || "",
+    providerEmail: order.providerEmail || order.invoice?.providerEmail || "",
+    status: buildWorkflowStagesForOrder(order),
+    invoice: order.invoice || { createOnly: true },
     records: order.records || { title: "Records", lines: [], links: [] },
     company: order.company || { name: "—", address: "", phone: "", email: "" },
+    facilityInfo: order.facilityInfo || {
+      name: order.facilityName || "",
+      address: "",
+      addressLines: [],
+    },
+    facilityName:
+      order.facilityName || order.facilityInfo?.name || "",
+    certificateNoRecords: Boolean(order.certificateNoRecords),
+    cnrReason: order.cnrReason || "",
+    cnrMemo: Boolean(order.cnrMemo),
+    cnrDelivery: order.cnrDelivery || "",
+    mailSentDate: order.readyDate || order.mailSentDate || "",
+    readyDate: order.readyDate || "",
+    deliveryDate: order.deliveryDate || "",
+    pickupPersonName: order.pickupPersonName || "",
+    cnrDateSent: order.cnrDateSent || "",
+    year: order.year || "",
+    dob: order.dob || "",
+    ssn: order.ssn || "",
     dobSsn: order.dobSsn || [],
+    doiDisplay: order.doiDisplay || "",
+    hasDoi: Boolean(order.hasDoi),
+    createdAt: order.createdAt || order.created_at || "",
+    subpoenaDate: order.subpoenaDate || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
   };
 }
@@ -77,17 +305,48 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [invoiceModalMode, setInvoiceModalMode] = useState("create");
   const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
   const [selectedCoverSheetOrder, setSelectedCoverSheetOrder] = useState(null);
   const [selectedXrayCoverSheetOrder, setSelectedXrayCoverSheetOrder] =
     useState(null);
   const [selectedCnrOrder, setSelectedCnrOrder] = useState(null);
+  const [cnrTextModal, setCnrTextModal] = useState(null);
+  const [selectedCertificationOrder, setSelectedCertificationOrder] = useState(null);
+  const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
+  const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
+    useState(null);
+  const [selectedPrintInvoiceOrder, setSelectedPrintInvoiceOrder] =
+    useState(null);
+  const [selectedPrintXrayInvoiceOrder, setSelectedPrintXrayInvoiceOrder] =
+    useState(null);
+  const [selectedSubpoenaOrder, setSelectedSubpoenaOrder] = useState(null);
+  const [selectedMailOrder, setSelectedMailOrder] = useState(null);
+  const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
+  const [selectedFaxOrder, setSelectedFaxOrder] = useState(null);
+  const [emailingOrderId, setEmailingOrderId] = useState(null);
+  const [sendingInvoiceOrderId, setSendingInvoiceOrderId] = useState(null);
+  const [emailingXrayOrderId, setEmailingXrayOrderId] = useState(null);
+  const [resendingOrderId, setResendingOrderId] = useState(null);
+  const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [deliveryError, setDeliveryError] = useState("");
+  const [deleteModal, setDeleteModal] = useState({ open: false, order: null });
+  const [cancelModal, setCancelModal] = useState({ open: false, order: null });
+  const [removeRecordsModal, setRemoveRecordsModal] = useState({
+    open: false,
+    order: null,
+  });
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+  const [, setRelativeTimeTick] = useState(0);
 
   // Guards a silent refetch from running too often, and discards responses
   // from stale requests so a late silent fetch never overwrites fresh data.
@@ -97,11 +356,12 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const normalizedFilters = {
     facility: filters.facility || "",
     year: filters.year || "",
+    period: filters.period || "",
     status: filters.status || "",
     search: filters.search || "",
   };
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.year}|${normalizedFilters.status}|${normalizedFilters.search}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
 
   if (filterKey !== prevFilterKey) {
@@ -110,10 +370,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   }
 
   const fetchOrders = useCallback(
-    async ({ silent = false } = {}) => {
-      // A silent (focus-triggered) refetch is skipped if we just fetched,
-      // so returning to the tab repeatedly never spams the API.
-      if (silent && Date.now() - lastFetchAtRef.current < 5000) return;
+    async ({ silent = false, force = false } = {}) => {
+      if (silent && !force && Date.now() - lastFetchAtRef.current < 5000) return;
 
       const requestId = (requestIdRef.current += 1);
 
@@ -126,12 +384,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         const data = await getOrders({
           facility: normalizedFilters.facility,
           year: normalizedFilters.year,
+          period: normalizedFilters.period,
           status: normalizedFilters.status,
           search: normalizedFilters.search,
         });
 
         if (requestId !== requestIdRef.current) return;
         setOrders(data.map(toRenderOrder));
+        setLastUpdatedAt(new Date());
         setError("");
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
@@ -145,16 +405,317 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       }
     },
     [
-      normalizedFilters.facility,
-      normalizedFilters.year,
-      normalizedFilters.status,
-      normalizedFilters.search,
+    normalizedFilters.facility,
+    normalizedFilters.year,
+      normalizedFilters.period,
+    normalizedFilters.status,
+    normalizedFilters.search,
     ]
   );
+
+  function openDeleteModal(order) {
+    setActionError("");
+    setDeleteModal({ open: true, order });
+  }
+
+  function closeDeleteModal() {
+    if (actionLoading) return;
+    setDeleteModal({ open: false, order: null });
+  }
+
+  function openCancelModal(order) {
+    setActionError("");
+    setCancelModal({ open: true, order });
+  }
+
+  function closeCancelModal() {
+    if (actionLoading) return;
+    setCancelModal({ open: false, order: null });
+  }
+
+  function openRemoveRecordsModal(order) {
+    setActionError("");
+    setRemoveRecordsModal({ open: true, order });
+  }
+
+  function closeRemoveRecordsModal() {
+    if (actionLoading) return;
+    setRemoveRecordsModal({ open: false, order: null });
+  }
+
+  async function handleConfirmRemoveRecords() {
+    if (!removeRecordsModal.order?.dbId || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await removeMedicalRecords(removeRecordsModal.order.dbId);
+      setRemoveRecordsModal({ open: false, order: null });
+      await fetchOrders();
+    } catch (err) {
+      setActionError(err.message || "Failed to remove uploaded records");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deleteModal.order?.dbId) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await deleteOrder(deleteModal.order.dbId);
+      setDeleteModal({ open: false, order: null });
+      await fetchOrders();
+    } catch (err) {
+      setActionError(err.message || "Failed to delete order");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleConfirmCancel(reason) {
+    if (!cancelModal.order?.dbId || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await cancelOrder(cancelModal.order.dbId, { reason });
+      setCancelModal({ open: false, order: null });
+      await fetchOrders();
+    } catch (err) {
+      setActionError(err.message || "Failed to cancel order");
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    if (!lastUpdatedAt) return undefined;
+
+    const intervalId = window.setInterval(() => {
+      setRelativeTimeTick((tick) => tick + 1);
+    }, 30000);
+
+    return () => window.clearInterval(intervalId);
+  }, [lastUpdatedAt]);
+
+  const applyInvoiceEmailState = useCallback((orderDbId, updates = {}) => {
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.dbId === orderDbId
+          ? {
+              ...item,
+              invoice: {
+                ...item.invoice,
+                ...updates,
+              },
+            }
+          : item
+      )
+    );
+  }, []);
+
+  const handleSendInvoice = useCallback(
+    async (order) => {
+      const invoiceId = Number(order.invoice?.invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(invoiceId) || sendingInvoiceOrderId) {
+        return;
+      }
+
+      const providerEmail =
+        order.providerEmail || order.invoice?.providerEmail || "";
+
+      if (!providerEmail.trim()) {
+        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+        handleMissingProviderEmail(order.dbId, router);
+        return;
+      }
+
+      setEmailError("");
+      setSendingInvoiceOrderId(order.dbId);
+
+      try {
+        await sendInvoices([invoiceId]);
+        await fetchOrders({ silent: true, force: true });
+      } catch (err) {
+        if (isNoProviderEmailError(err)) {
+          setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+          handleMissingProviderEmail(order.dbId, router);
+          return;
+        }
+
+        setEmailError(err.message || "Failed to send invoice");
+      } finally {
+        setSendingInvoiceOrderId(null);
+      }
+    },
+    [fetchOrders, router, sendingInvoiceOrderId]
+  );
+
+  const handleResendInvoiceEmail = useCallback(
+    async (order) => {
+      const invoiceId = Number(order.invoice?.invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(invoiceId) || emailingOrderId) {
+        return;
+      }
+
+      const providerEmail =
+        order.providerEmail || order.invoice?.providerEmail || "";
+
+      if (!providerEmail.trim()) {
+        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+        window.alert(NO_PROVIDER_EMAIL_MESSAGE);
+        return;
+      }
+
+      setEmailError("");
+      setEmailingOrderId(order.dbId);
+
+      try {
+        await resendInvoices([invoiceId]);
+        await fetchOrders({ silent: true, force: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to email invoice");
+      } finally {
+        setEmailingOrderId(null);
+      }
+    },
+    [emailingOrderId, fetchOrders]
+  );
+
+  const handleEmailXrayInvoice = useCallback(
+    async (order) => {
+      if (!order?.dbId || emailingXrayOrderId) return;
+
+      const providerEmail =
+        order.providerEmail || order.invoice?.providerEmail || "";
+
+      if (!providerEmail.trim()) {
+        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
+        window.alert(NO_PROVIDER_EMAIL_MESSAGE);
+        return;
+      }
+
+      setEmailError("");
+      setEmailingXrayOrderId(order.dbId);
+
+      try {
+        const result = await emailXrayInvoiceByOrderId(order.dbId);
+        applyInvoiceEmailState(order.dbId, {
+          xraySentDate: result.xraySentDate,
+          xraySentDateCompact: result.xraySentDateCompact,
+          recipientEmail: result.recipientEmail || result.recipient || "",
+        });
+        await fetchOrders({ silent: true, force: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to email X-Ray invoice");
+      } finally {
+        setEmailingXrayOrderId(null);
+      }
+    },
+    [emailingXrayOrderId, fetchOrders, applyInvoiceEmailState]
+  );
+
+  const handleResendInvoice = useCallback(
+    async (order, invoiceId) => {
+      const normalizedInvoiceId = Number(invoiceId);
+
+      if (!order?.dbId || !Number.isFinite(normalizedInvoiceId) || resendingOrderId) {
+        return;
+      }
+
+      setEmailError("");
+      setResendingOrderId(order.dbId);
+
+      try {
+        await resendInvoices([normalizedInvoiceId]);
+        await fetchOrders({ silent: true });
+      } catch (err) {
+        setEmailError(err.message || "Failed to resend invoice");
+      } finally {
+        setResendingOrderId(null);
+      }
+    },
+    [resendingOrderId, fetchOrders]
+  );
+
+  const handleMailDelivery = useCallback(
+    async (order) => {
+      if (!order?.dbId || getDeliveryStatus(order, "mail").completed) return;
+
+      if (!order.hasAnyRecordsUploaded) {
+        setDeliveryError("Scan records before sending mail");
+        return;
+      }
+
+      const email = resolveProviderEmail(order);
+      const mailSentDate = getTodayInputDate();
+
+      if (!email) {
+        setSelectedMailOrder(order);
+        return;
+      }
+
+      const key = `${order.dbId}-mail`;
+      setProcessingDeliveryKey(key);
+      setDeliveryError("");
+
+      try {
+        const result = await mailCompletedOrder(order.dbId, {
+          email,
+          deliveryDate: mailSentDate,
+        });
+        const sentDate = result.readyDate || result.sentDate || mailSentDate;
+        setOrders((prev) =>
+          prev.map((item) =>
+            item.dbId === order.dbId
+              ? {
+                  ...item,
+                  orderStatus: "Completed",
+                  readyDate: sentDate,
+                  mailSentDate: sentDate,
+                  deliveryDate: sentDate,
+                }
+              : item
+          )
+        );
+        await fetchOrders();
+      } catch (err) {
+        setDeliveryError(err.message || "Failed to send mail");
+      } finally {
+        setProcessingDeliveryKey("");
+      }
+    },
+    [fetchOrders]
+  );
+
+  const applyMailSentState = useCallback((order, sentDate, deliveryDate) => {
+    const resolvedDate = sentDate || deliveryDate;
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.dbId === order.dbId
+          ? {
+              ...item,
+              orderStatus: "Completed",
+              readyDate: resolvedDate,
+              mailSentDate: resolvedDate,
+              deliveryDate: resolvedDate,
+            }
+          : item
+      )
+    );
+  }, []);
 
   // Refresh workflow/status changes made elsewhere when the user comes back
   // to the tab or window. No polling, so there is no idle network cost.
@@ -174,7 +735,10 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     };
   }, [fetchOrders]);
 
-  const filteredOrders = orders;
+  const filteredOrders = useMemo(
+    () => filterOrdersByPeriod(orders, normalizedFilters.period),
+    [orders, normalizedFilters.period]
+  );
 
   const totalPages = Math.max(
     1,
@@ -218,21 +782,57 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
             All Orders
           </h2>
 
-          <p className="text-[11px] text-[#94A3B8]">Last updated: 6/2/2026</p>
+          <p
+            className="text-[11px] text-[#94A3B8]"
+            title={
+              lastUpdatedAt
+                ? lastUpdatedAt.toLocaleString(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })
+                : undefined
+            }
+          >
+            {loading && !lastUpdatedAt
+              ? "Updating..."
+              : lastUpdatedAt
+                ? `Last updated: ${formatLastUpdatedLabel(lastUpdatedAt)}`
+                : ""}
+          </p>
         </div>
 
+        {emailError && (
+          <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
+            {emailError}
+          </p>
+        )}
+
+        {deliveryError && (
+          <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
+            {deliveryError}
+          </p>
+        )}
+
+        {actionError && (
+          <p className="border-b border-red-100 bg-red-50 px-4 py-2 text-[11px] text-red-600">
+            {actionError}
+          </p>
+        )}
+
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[1280px] border-collapse">
+          <table className="w-full min-w-[1420px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th className="w-[90px] px-4 py-3">ID</th>
                 <th className="w-[150px] px-4 py-3">Case</th>
+                <th className="w-[160px] px-4 py-3">Facility</th>
                 <th className="w-[125px] px-4 py-3">Status</th>
                 <th className="w-[170px] px-4 py-3">Invoice</th>
                 <th className="w-[170px] px-4 py-3">Records</th>
                 <th className="w-[280px] px-4 py-3">Company</th>
-                <th className="w-[95px] px-4 py-3">DOB/SSN</th>
+                <th className="w-[110px] px-4 py-3">DOB/SSN/DOI</th>
                 <th className="w-[130px] px-4 py-3">Forms</th>
+                <th className="w-[120px] px-4 py-3" />
               </tr>
             </thead>
 
@@ -240,7 +840,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     Loading orders...
@@ -249,7 +849,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : error ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-[12px] font-semibold text-red-500"
                   >
                     {error}
@@ -258,7 +858,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
               ) : currentOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     No orders match the selected filters.
@@ -280,13 +880,19 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         {order.id}
                       </Link>
 
-                      <button
-                        type="button"
-                        onClick={() => setSelectedNoteOrder(order)}
-                        className="mt-1 block text-[10px] text-[#007F96] underline"
-                      >
+                      {order.year && (
+                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                          {order.year}
+                        </p>
+                      )}
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedNoteOrder(order)}
+                          className="mt-1 block text-[10px] text-[#007F96] underline"
+                        >
                         {order.note ? "Note ●" : "Note"}
-                      </button>
+                        </button>
 
                       <button
                         type="button"
@@ -295,18 +901,6 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       >
                         Order Log
                       </button>
-
-                      {order.subpoena && (
-                        <p className="mt-1 text-[10px] font-semibold text-[#059669]">
-                          ✓ Subpoena
-                        </p>
-                      )}
-
-                      {order.court && (
-                        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
-                          {order.court}
-                        </p>
-                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -317,30 +911,216 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <p className="mt-1 text-[10px] text-[#64748B]">
                         {order.orderRef}
                       </p>
+
+                      {order.hasSubpoenaFile && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSubpoenaOrder(order)}
+                          className="mt-2 block text-left text-[10px] font-semibold text-[#059669] hover:underline"
+                        >
+                          ✓ Subpoena
+                        </button>
+                      )}
+
+                      {order.court && (
+                        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
+                          {order.court}
+                        </p>
+                      )}
+
+                      {order.recNumber && (
+                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                          REC {order.recNumber}
+                        </p>
+                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">
+                      <p className="font-semibold text-[#111827]">
+                        {order.facilityName || "—"}
+                      </p>
+
+                      {order.facilityInfo?.address ? (
+                        <p className="mt-1 text-[10px] leading-[15px] text-[#64748B]">
+                          {order.facilityInfo.address}
+                      </p>
+                      ) : null}
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        <OrderStatusBadge status={order.displayOrderStatus} />
+                        {order.rushLabel ? (
+                          <RushBadge rush={order.rushLabel} />
+                        ) : null}
+                      </div>
+
                       <div className="space-y-1">
                         {order.status.map((stage) => (
-                          <WorkflowStageItem key={stage.label} stage={stage} />
+                          <WorkflowStageItem
+                            key={stage.key || stage.label}
+                            stage={stage}
+                            href={getWorkflowStageHref(stage, order)}
+                            onResend={
+                              stage.showResend
+                                ? () =>
+                                    handleResendInvoice(order, stage.invoiceId)
+                                : undefined
+                            }
+                            onPreviewRecords={
+                              stage.showPreviewRecords
+                                ? () => setSelectedMedicalRecordsOrder(order)
+                                : undefined
+                            }
+                            onRemoveRecords={
+                              stage.showRemoveRecords
+                                ? () => openRemoveRecordsModal(order)
+                                : undefined
+                            }
+                            removingRecords={
+                              actionLoading &&
+                              removeRecordsModal.order?.dbId === order.dbId
+                            }
+                            resending={resendingOrderId === order.dbId}
+                          />
                         ))}
                       </div>
+
+                      {(order.orderStatus === "Ready to Pickup" ||
+                        order.orderStatus === "Completed") &&
+                        (() => {
+                        const deliveryActions = getCompletedDeliveryActions(order);
+                        const mailStatus = getDeliveryStatus(order, "mail");
+                        const faxStatus = getDeliveryStatus(order, "fax");
+                        const pickupStatus = getDeliveryStatus(order, "pickup");
+
+                        if (
+                          !deliveryActions.mail &&
+                          !deliveryActions.fax &&
+                          !deliveryActions.pickup
+                        ) {
+                          return null;
+                        }
+
+                        return (
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {deliveryActions.mail && (
+                              <CompletedDeliveryLink
+                                label="Mail"
+                                completed={mailStatus.completed}
+                                hoverText={mailStatus.hoverText}
+                                loading={
+                                  processingDeliveryKey === `${order.dbId}-mail`
+                                }
+                                onClick={() => handleMailDelivery(order)}
+                              />
+                            )}
+                            {deliveryActions.fax && (
+                              <CompletedDeliveryLink
+                                label="Fax"
+                                completed={faxStatus.completed}
+                                hoverText={faxStatus.hoverText}
+                                onClick={() => setSelectedFaxOrder(order)}
+                              />
+                            )}
+                            {deliveryActions.pickup && (
+                              <CompletedDeliveryLink
+                                label="Pickup"
+                                completed={pickupStatus.completed}
+                                hoverText={pickupStatus.hoverText}
+                                onClick={() => setSelectedPickupOrder(order)}
+                              />
+                            )}
+                          </div>
+                        );
+                      })()}
+
                     </td>
 
                     <td className="px-4 py-5 align-top">
                       <InvoiceBlock
                         invoice={order.invoice}
-                        onCreateInvoice={() => setSelectedInvoiceOrder(order)}
+                        orderDbId={order.dbId}
+                        isCnr={order.certificateNoRecords}
+                        cnrDelivery={order.cnrDelivery}
+                        cnrDateSent={order.cnrDateSent}
+                        onCnrReasonClick={() =>
+                          openCnrTextModal(setCnrTextModal, order, "Reason")
+                        }
+                        allowStandardInvoice={!order.certificateNoRecords}
+                        providerEmail={
+                          order.providerEmail ||
+                          order.invoice?.providerEmail ||
+                          ""
+                        }
+                        onCreateInvoice={() => {
+                          setInvoiceModalMode("create");
+                          setSelectedInvoiceOrder(order);
+                        }}
+                        onReviewInvoice={() => {
+                          setInvoiceModalMode("edit");
+                          setSelectedInvoiceOrder({
+                            ...order,
+                            invoiceId: order.invoice?.invoiceId,
+                            invoice: {
+                              ...order.invoice,
+                              invoiceId: order.invoice?.invoiceId,
+                            },
+                          });
+                        }}
                         onCreateXrayInvoice={() => setSelectedXrayOrder(order)}
+                        onReviewXrayInvoice={() => setSelectedXrayOrder(order)}
                         onCoverSheet={() => setSelectedCoverSheetOrder(order)}
                         onXrayCoverSheet={() =>
                           setSelectedXrayCoverSheetOrder(order)
                         }
+                        onSendInvoice={() => handleSendInvoice(order)}
+                        onResendInvoice={() => handleResendInvoiceEmail(order)}
+                        onEmailXrayInvoice={() => handleEmailXrayInvoice(order)}
+                        onPrintInvoice={() => setSelectedPrintInvoiceOrder(order)}
+                        onPrintXrayInvoice={() =>
+                          setSelectedPrintXrayInvoiceOrder(order)
+                        }
+                        sending={sendingInvoiceOrderId === order.dbId}
+                        emailing={emailingOrderId === order.dbId}
+                        emailingXray={emailingXrayOrderId === order.dbId}
                       />
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <RecordsBlock records={order.records} />
+                      <RecordsBlock
+                        records={order.records}
+                        isCnr={order.certificateNoRecords}
+                        cnrMemo={order.cnrMemo}
+                        cnrDelivery={order.cnrDelivery}
+                        cnrDateSent={order.cnrDateSent}
+                        onPrintedSentOutClick={() =>
+                          openCnrTextModal(
+                            setCnrTextModal,
+                            order,
+                            "Printed/Sent Out Note",
+                            [
+                              CNR_DELIVERY_LABELS[order.cnrDelivery] ||
+                                order.cnrDelivery,
+                              order.cnrDateSent
+                                ? `Date: ${formatCnrDisplayDate(order.cnrDateSent)}`
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join("\n")
+                          )
+                        }
+                        onCnrNoteClick={
+                          !order.cnrMemo
+                            ? () =>
+                                openCnrTextModal(
+                                  setCnrTextModal,
+                                  order,
+                                  "CNR Note"
+                                )
+                            : undefined
+                        }
+                      />
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -349,9 +1129,20 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
                     <td className="px-4 py-5 align-top">
                       <div className="space-y-1 text-[11px] text-[#334155]">
-                        {order.dobSsn.map((item) => (
-                          <p key={item}>{item}</p>
-                        ))}
+                        {order.dob ? <p>{order.dob}</p> : null}
+                        {order.ssn ? <p>{order.ssn}</p> : null}
+                        {order.hasDoi ? (
+                          <p>{order.doiDisplay}</p>
+                        ) : (
+                          <Link
+                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                              order.dbId
+                            )}`}
+                            className="font-semibold text-red-500 hover:underline"
+                          >
+                            No DOI
+                          </Link>
+                        )}
                       </div>
                     </td>
 
@@ -359,14 +1150,40 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                       <FormsList
                         forms={order.forms}
                         onCnrClick={() => setSelectedCnrOrder(order)}
-                        onEditClick={() =>
-                          router.push(
-                            `/orders/new?mode=edit&orderId=${encodeURIComponent(
-                              order.dbId
-                            )}`
-                          )
-                        }
+                        onCertificationClick={() => setSelectedCertificationOrder(order)}
+                        onCopyLetterClick={() => setSelectedCopyLetterOrder(order)}
                       />
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <div className="flex flex-col items-start gap-2">
+                        {!isInactiveOrderStatus(order.orderStatus) ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openDeleteModal(order)}
+                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                            >
+                              <TrashIcon />
+                              Delete
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => openCancelModal(order)}
+                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                              style={{
+                                border: "1px solid #FCD34D",
+                                backgroundColor: "#FFFBEB",
+                                color: "#B45309",
+                              }}
+                            >
+                              <SmallCircleIcon />
+                              Cancel
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -423,14 +1240,17 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
       <CreateInvoiceModal
         isOpen={Boolean(selectedInvoiceOrder)}
+        mode={invoiceModalMode}
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
+        onSaved={fetchOrders}
       />
 
       <CreateXrayInvoiceModal
         isOpen={Boolean(selectedXrayOrder)}
         order={selectedXrayOrder}
         onClose={() => setSelectedXrayOrder(null)}
+        onSaved={fetchOrders}
       />
 
       <CoverSheetModal
@@ -451,6 +1271,32 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         onClose={() => setSelectedCnrOrder(null)}
       />
 
+      <CnrNoteModal
+        isOpen={Boolean(cnrTextModal)}
+        title={cnrTextModal?.title || "CNR Note"}
+        note={cnrTextModal?.note || ""}
+        onClose={() => setCnrTextModal(null)}
+      />
+
+      <CertificateOfRecordsModal
+        isOpen={Boolean(selectedCertificationOrder)}
+        order={selectedCertificationOrder}
+        onClose={() => setSelectedCertificationOrder(null)}
+      />
+
+      <SendCopyLetterModal
+        isOpen={Boolean(selectedCopyLetterOrder)}
+        order={selectedCopyLetterOrder}
+        onClose={() => setSelectedCopyLetterOrder(null)}
+        onSent={async (payload) => {
+          const result = await sendCopyServiceLetter(
+            selectedCopyLetterOrder.dbId,
+            payload
+          );
+          return result;
+        }}
+      />
+
       <OrderActivityLogModal
         isOpen={Boolean(selectedLogOrder)}
         order={selectedLogOrder}
@@ -462,148 +1308,896 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         order={selectedNoteOrder}
         onClose={() => setSelectedNoteOrder(null)}
       />
+
+      <UploadedRecordsPreviewModal
+        isOpen={Boolean(selectedMedicalRecordsOrder)}
+        order={selectedMedicalRecordsOrder}
+        onClose={() => setSelectedMedicalRecordsOrder(null)}
+      />
+
+      <OrderPdfPreviewModal
+        isOpen={Boolean(selectedPrintInvoiceOrder)}
+        order={selectedPrintInvoiceOrder}
+        onClose={() => setSelectedPrintInvoiceOrder(null)}
+        title="Print Invoice"
+        fileName="Invoice.pdf"
+        fetchPdf={fetchOrderPrintInvoicePdf}
+        loadingLabel="Generating invoice PDF..."
+      />
+
+      <OrderPdfPreviewModal
+        isOpen={Boolean(selectedPrintXrayInvoiceOrder)}
+        order={selectedPrintXrayInvoiceOrder}
+        onClose={() => setSelectedPrintXrayInvoiceOrder(null)}
+        title="Print X-Ray Invoice"
+        fileName="XRay-Invoice.pdf"
+        fetchPdf={fetchOrderPrintXrayInvoicePdf}
+        loadingLabel="Generating X-Ray invoice PDF..."
+      />
+
+      <OrderPdfPreviewModal
+        isOpen={Boolean(selectedSubpoenaOrder)}
+        order={selectedSubpoenaOrder}
+        onClose={() => setSelectedSubpoenaOrder(null)}
+        title="Subpoena"
+        fileName="Subpoena.pdf"
+        fetchPdf={fetchOrderSubpoenaPdf}
+        loadingLabel="Loading subpoena..."
+      />
+
+      <OrderMailModal
+        isOpen={Boolean(selectedMailOrder)}
+        order={selectedMailOrder}
+        onClose={() => setSelectedMailOrder(null)}
+        onSent={async ({ email, deliveryDate, message }) => {
+          setDeliveryError("");
+          const result = await mailCompletedOrder(selectedMailOrder.dbId, {
+            email,
+            deliveryDate,
+            message,
+          });
+          applyMailSentState(
+            selectedMailOrder,
+            result.readyDate || result.sentDate,
+            result.readyDate || result.sentDate
+          );
+          await fetchOrders();
+        }}
+      />
+
+      <OrderPickupModal
+        isOpen={Boolean(selectedPickupOrder)}
+        order={selectedPickupOrder}
+        onClose={() => setSelectedPickupOrder(null)}
+        onConfirm={async ({ pickupPersonName, pickupDate, notes }) => {
+          await recordOrderPickup(selectedPickupOrder.dbId, {
+            pickupPersonName,
+            pickupDate,
+            notes,
+          });
+          setOrders((prev) =>
+            prev.map((item) =>
+              item.dbId === selectedPickupOrder.dbId
+                ? {
+                    ...item,
+                    orderStatus: "Completed",
+                    deliveryDate: pickupDate,
+                    readyDate: pickupDate,
+                    pickupPersonName,
+                  }
+                : item
+            )
+          );
+          await fetchOrders();
+        }}
+      />
+
+      <OrderFaxModal
+        isOpen={Boolean(selectedFaxOrder)}
+        order={selectedFaxOrder}
+        onClose={() => setSelectedFaxOrder(null)}
+        onConfirm={async ({ faxNumber, sentDate, notes }) => {
+          await recordOrderFax(selectedFaxOrder.dbId, {
+            faxNumber,
+            sentDate,
+            notes,
+          });
+          await fetchOrders({ silent: true });
+        }}
+      />
+
+      <ConfirmModal
+        open={deleteModal.open}
+        title="Delete Order"
+        message="Are you sure you want to delete this order?"
+        variant="danger"
+        confirmLabel={actionLoading ? "Deleting..." : "Confirm"}
+        cancelLabel="Cancel"
+        confirmDisabled={actionLoading}
+        onCancel={closeDeleteModal}
+        onConfirm={handleConfirmDelete}
+      />
+
+      <ConfirmModal
+        open={removeRecordsModal.open}
+        title="Remove Uploaded Records"
+        message="Remove all uploaded record files for this order? Review Records will return to pending."
+        variant="danger"
+        confirmLabel={actionLoading ? "Removing..." : "Remove All"}
+        cancelLabel="Cancel"
+        confirmDisabled={actionLoading}
+        onCancel={closeRemoveRecordsModal}
+        onConfirm={handleConfirmRemoveRecords}
+      />
+
+      <OrderCancelModal
+        open={cancelModal.open}
+        order={cancelModal.order}
+        loading={actionLoading}
+        onClose={closeCancelModal}
+        onConfirm={handleConfirmCancel}
+      />
     </>
   );
 }
 
-function WorkflowStageItem({ stage }) {
-  const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+function OrderPdfPreviewModal({
+  isOpen,
+  order,
+  onClose,
+  title,
+  fileName,
+  fetchPdf,
+  loadingLabel = "Loading...",
+  headerExtra = null,
+  previewKey = "",
+}) {
+  const [src, setSrc] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isOpen || !order?.dbId) {
+      setSrc("");
+      setError("");
+      setLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let objectUrl = "";
+
+    setLoading(true);
+    setError("");
+
+    fetchPdf(order.dbId)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message || "Failed to load PDF.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [isOpen, order?.dbId, fetchPdf, previewKey]);
+
+  if (!isOpen) return null;
 
   return (
-    <div
-      className={`flex items-center gap-1.5 text-left text-[10px] font-semibold ${style.text}`}
-    >
-      <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="flex max-h-[92vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[10px] bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
+          <div>
+            <h2 className="text-[14px] font-semibold text-[#111827]">{title}</h2>
+            <p className="text-[11px] text-[#64748B]">
+              Order #{order?.id || order?.dbId}
+            </p>
+            {headerExtra}
+          </div>
+    <button
+      type="button"
+            onClick={onClose}
+            className="rounded-[6px] px-3 py-1.5 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
+          >
+            Close
+          </button>
+        </div>
 
-      {stage.label}
+        <div className="min-h-0 flex-1 overflow-auto p-4">
+          {loading ? (
+            <p className="text-[12px] text-[#64748B]">{loadingLabel}</p>
+          ) : error ? (
+            <p className="text-[12px] font-medium text-red-500">{error}</p>
+          ) : (
+            <SubpoenaPreviewContent src={src} name={fileName} />
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
+  const uploadedRecords = (order?.records?.orderRecords || []).filter(
+    (record) => record.hasFile
+  );
+  const [activeType, setActiveType] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) {
+      setActiveType("");
+      return;
+    }
+
+    const firstType = uploadedRecords[0]?.recordType || "medical";
+    setActiveType(firstType);
+  }, [isOpen, order?.dbId]);
+
+  const activeRecord =
+    uploadedRecords.find((record) => record.recordType === activeType) ||
+    uploadedRecords[0];
+  const recordType = activeRecord?.recordType || "medical";
+  const title = getOrderTypeLabel(recordType) || "Uploaded Records";
+  const fileName = `${title}.pdf`;
+
+  return (
+    <OrderPdfPreviewModal
+      isOpen={isOpen}
+      order={order}
+      onClose={onClose}
+      title={uploadedRecords.length > 1 ? "Uploaded Records" : title}
+      fileName={fileName}
+      fetchPdf={(orderId) =>
+        fetchOrderMedicalRecordsPdf(orderId, { recordType })
+      }
+      loadingLabel="Loading records..."
+      headerExtra={
+        uploadedRecords.length > 1 ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {uploadedRecords.map((record) => (
+              <button
+                key={record.recordType}
+                type="button"
+                onClick={() => setActiveType(record.recordType)}
+                className={`rounded-[5px] px-2 py-1 text-[10px] font-semibold ${
+                  activeType === record.recordType
+                    ? "bg-[#0097B2] text-white"
+                    : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
+                }`}
+              >
+                {getOrderTypeLabel(record.recordType)}
+              </button>
+            ))}
+          </div>
+        ) : null
+      }
+      previewKey={recordType}
+    />
+  );
+}
+
+function getWorkflowStageHref(stage, order) {
+  if (stage.key === "Review Records") {
+    const allUploaded = Boolean(order.hasMedicalRecords);
+    const isComplete =
+      isWorkflowStageComplete(stage.status) || allUploaded;
+
+    if (!isComplete) {
+      return `/orders/scan-medical-records?orderId=${encodeURIComponent(
+        order.dbId
+      )}`;
+    }
+  }
+
+  if (
+    stage.key === "Serve" &&
+    !isWorkflowStageComplete(stage.status)
+  ) {
+    return `/orders/new?mode=edit&orderId=${encodeURIComponent(
+      order.dbId
+    )}&panel=payment`;
+  }
+
+  if (
+    stage.key === "Custodian" &&
+    !isWorkflowStageComplete(stage.status)
+  ) {
+    return `/orders/new?mode=edit&orderId=${encodeURIComponent(
+      order.dbId
+    )}&panel=payment`;
+  }
+
+  return null;
+}
+
+function WorkflowStageItem({
+  stage,
+  href,
+  onPreviewRecords,
+  onResend,
+  onRemoveRecords,
+  resending = false,
+  removingRecords = false,
+}) {
+  if (stage.showScanRecordsLink && href) {
+    const pendingStyle = WORKFLOW_STATUS_STYLES.pending;
+
+    return (
+      <div className="space-y-1">
+        <Link
+          href={href}
+          className="block text-[10px] font-semibold text-[#007F96] underline"
+        >
+          Scan Records
+        </Link>
+        <div
+          className={`flex w-full items-center gap-1.5 text-[10px] font-semibold ${pendingStyle.text}`}
+        >
+          <WorkflowStageIcon status="pending" />
+          {stage.showPreviewRecords ? (
+            <button
+              type="button"
+              onClick={onPreviewRecords}
+              disabled={!onPreviewRecords}
+              className="min-w-0 truncate text-left hover:underline disabled:cursor-default"
+            >
+              Review Records
+            </button>
+          ) : (
+            <span>Review Records</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const style = WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+
+  if (stage.showRemoveRecords) {
+    return (
+      <div
+        className={`flex w-full flex-nowrap items-center gap-1.5 text-[10px] font-semibold ${style.text}`}
+      >
+        <WorkflowStageIcon status={stage.status} />
+        <button
+          type="button"
+          onClick={onPreviewRecords}
+          disabled={!onPreviewRecords}
+          className="min-w-0 flex-1 truncate text-left hover:underline disabled:cursor-default"
+        >
+          {stage.label}
+        </button>
+        <button
+          type="button"
+          onClick={onRemoveRecords}
+          disabled={removingRecords || !onRemoveRecords}
+          className="flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded text-red-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Remove all uploaded records"
+        >
+          <CloseIcon />
+    </button>
+      </div>
+    );
+  }
+
+  const className = `flex w-full items-center justify-between gap-2 text-left text-[10px] font-semibold ${style.text} ${
+    href ? "hover:underline" : ""
+  }`;
+
+  const content = (
+    <>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <WorkflowStageIcon status={stage.status} />
+        <span>{stage.label}</span>
+      </span>
+      {stage.paidAmount ? (
+        <span className="shrink-0 font-semibold text-[#059669]">
+          {stage.paidAmount}
+        </span>
+      ) : null}
+    </>
+  );
+
+  const stageRow = href ? (
+    <Link href={href} className={className}>
+      {content}
+    </Link>
+  ) : (
+    <div className={className}>{content}</div>
+  );
+
+  if (!stage.showResend) {
+    return stageRow;
+  }
+
+  return (
+    <div className="space-y-0.5">
+      {stageRow}
+      <button
+        type="button"
+        onClick={onResend}
+        disabled={resending || !onResend}
+        className="ml-4 block text-[9px] italic text-[#2563EB] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {resending ? "sending..." : "resend"}
+      </button>
+    </div>
+  );
+}
+
+function WorkflowStageIcon({ status }) {
+  if (status === "complete" || status === "sent") {
+    const color = status === "sent" ? "text-[#2563EB]" : "text-[#059669]";
+
+    return (
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        className={`shrink-0 ${color}`}
+      >
+        <path
+          d="M5 12l4 4L19 6"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  const style = WORKFLOW_STATUS_STYLES[status] || WORKFLOW_STATUS_STYLES.pending;
+
+  return (
+    <span className={`h-[6px] w-[6px] shrink-0 rounded-full ${style.dot}`} />
   );
 }
 
 function InvoiceBlock({
   invoice,
+  orderDbId,
+  isCnr = false,
+  cnrDelivery = "",
+  cnrDateSent = "",
+  onCnrReasonClick,
+  allowStandardInvoice = true,
+  providerEmail = "",
   onCreateInvoice,
+  onReviewInvoice,
   onCreateXrayInvoice,
+  onReviewXrayInvoice,
   onCoverSheet,
   onXrayCoverSheet,
+  onSendInvoice,
+  onResendInvoice,
+  onEmailXrayInvoice,
+  onPrintInvoice,
+  onPrintXrayInvoice,
+  sending = false,
+  emailing = false,
+  emailingXray = false,
 }) {
-  if (invoice.createOnly) {
-    return (
-      <div className="space-y-1 text-[10px]">
-        <button
-          type="button"
-          onClick={onCreateInvoice}
-          className="block text-[#007F96] underline"
-        >
-          Create Invoice
-        </button>
+  const hasProviderEmail = Boolean(providerEmail?.trim());
+  const invoiceSentDate =
+    invoice.sentDateCompact || invoice.sentDate || null;
+  const xraySentDate =
+    invoice.xraySentDateCompact || invoice.xraySentDate || null;
 
+  const sendInvoiceButton = !invoice.sentDate ? (
+    <div className="space-y-0.5">
+      {hasProviderEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+      ) : (
+        <MissingProviderEmailNotice orderDbId={orderDbId} />
+      )}
         <button
           type="button"
-          onClick={onCoverSheet}
-          className="block text-[#007F96] underline"
+        onClick={onSendInvoice}
+        disabled={sending}
+        className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Cover Sheet
+        {sending ? "Sending..." : "Send Invoice"}
         </button>
+    </div>
+  ) : null;
+
+  const resendInvoiceButton = invoice.sentDate ? (
+    <div className="space-y-0.5">
+      <p className="font-semibold text-[#2563EB]">Invoice Sent</p>
+      {invoiceSentDate ? (
+        <p className="text-[#94A3B8]">Sent: {invoiceSentDate}</p>
+      ) : null}
+      {hasProviderEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+      ) : (
+        <MissingProviderEmailNotice orderDbId={orderDbId} />
+      )}
+        <button
+          type="button"
+        onClick={onResendInvoice}
+        disabled={emailing}
+        className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+        {emailing ? "Emailing..." : "Email Invoice"}
+        </button>
+    </div>
+  ) : null;
+
+  const xrayCreateLink = invoice.hasXray ? (
+    <>
+      <InvoiceReviewRows
+        label={
+          <button
+            type="button"
+            onClick={onReviewXrayInvoice}
+            className="text-[#007F96] underline"
+          >
+            Review Xray Invoice
+          </button>
+        }
+        dateCompact={invoice.xrayReviewDateCompact || invoice.xrayReviewDate}
+        dueAmount={invoice.xrayReviewAmount}
+      />
+
+      <button
+        type="button"
+        onClick={onPrintXrayInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Print Xray Invoice
+      </button>
 
         <button
           type="button"
           onClick={onXrayCoverSheet}
-          className="block text-[#007F96] underline"
+        className="block text-left text-[#007F96] underline"
         >
           X-ray Cover Sheet
+      </button>
+
+      {!invoice.xraySentDate ? (
+        <div className="space-y-0.5">
+          {hasProviderEmail ? (
+            <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+          ) : (
+            <MissingProviderEmailNotice orderDbId={orderDbId} />
+          )}
+          <button
+            type="button"
+            onClick={onEmailXrayInvoice}
+            disabled={emailingXray}
+            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {emailingXray ? "Sending..." : "Email Xray Invoice"}
         </button>
       </div>
-    );
-  }
+      ) : null}
 
-  return (
-    <div className="space-y-1 text-[10px]">
-      <p className="text-[#334155]">
-        <button type="button" className="text-[#007F96] underline">
-          Review Invoice
-        </button>{" "}
-        <span className="text-[#94A3B8]">{invoice.reviewDate}</span>{" "}
-        <span className="text-[#111827]">{invoice.reviewAmount}</span>
-      </p>
+      {invoice.xraySentDate ? (
+        <InvoiceEmailedStatus
+          label="Xray Invoice Emailed"
+          sentDate={xraySentDate}
+          recipientEmail={providerEmail || invoice.recipientEmail}
+        />
+      ) : null}
+    </>
+  ) : (
+    <button
+      type="button"
+      onClick={onCreateXrayInvoice}
+      className="block text-left text-[#007F96] underline"
+    >
+      Create Xray Invoice
+    </button>
+  );
 
-      <p className="text-[#334155]">
-        <button type="button" className="text-[#007F96] underline">
-          Print Invoice
-        </button>{" "}
-        <span>{invoice.printAmount}</span>
-      </p>
+  const cnrSection = isCnr ? (
+    <>
+      {xrayCreateLink}
 
-      {invoice.custodianAmount && (
+      <span className="mt-1 inline-flex rounded-[4px] bg-[#111827] px-2 py-[2px] text-[10px] font-bold uppercase tracking-wide text-white">
+        CNR
+      </span>
+
+      {cnrDelivery ? (
         <p className="text-[#334155]">
-          Custodian{" "}
-          <span className="font-semibold">{invoice.custodianAmount}</span>
+          {CNR_DELIVERY_LABELS[cnrDelivery] || cnrDelivery}
         </p>
-      )}
+      ) : null}
 
-      {invoice.sentDate && (
-        <p className="font-semibold text-[#059669]">
-          ✓ SENT {invoice.sentDate}
-        </p>
-      )}
+      {cnrDateSent ? (
+        <p className="text-[#334155]">Date:{formatCnrDisplayDate(cnrDateSent)}</p>
+      ) : null}
 
       <button
         type="button"
-        onClick={onCoverSheet}
-        className="block text-[#007F96] underline"
+        onClick={onCnrReasonClick}
+        className="block text-left text-[#007F96] underline"
       >
-        Cover Sheet
+        Reason
+      </button>
+    </>
+  ) : null;
+
+  const xraySection = !isCnr && invoice.hasXray ? (
+    <>
+      <InvoiceReviewRows
+        label={
+          <button
+            type="button"
+            onClick={onReviewXrayInvoice}
+            className="text-[#007F96] underline"
+          >
+            Review Xray Invoice
+          </button>
+        }
+        dateCompact={invoice.xrayReviewDateCompact || invoice.xrayReviewDate}
+        dueAmount={invoice.xrayReviewAmount}
+      />
+
+      <button
+        type="button"
+        onClick={onPrintXrayInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Print Xray Invoice
       </button>
 
       <button
         type="button"
         onClick={onXrayCoverSheet}
-        className="block text-[#007F96] underline"
+        className="block text-left text-[#007F96] underline"
       >
         X-ray Cover Sheet
       </button>
 
-      {invoice.showXray && (
+      {!invoice.xraySentDate ? (
+        <div className="space-y-0.5">
+          {hasProviderEmail ? (
+            <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
+          ) : (
+            <MissingProviderEmailNotice orderDbId={orderDbId} />
+          )}
+          <button
+            type="button"
+            onClick={onEmailXrayInvoice}
+            disabled={emailingXray}
+            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {emailingXray ? "Sending..." : "Email Xray Invoice"}
+          </button>
+        </div>
+      ) : null}
+
+      {invoice.xraySentDate ? (
+        <InvoiceEmailedStatus
+          label="Xray Invoice Emailed"
+          sentDate={xraySentDate}
+          recipientEmail={providerEmail || invoice.recipientEmail}
+        />
+      ) : null}
+    </>
+  ) : !isCnr ? (
         <button
           type="button"
           onClick={onCreateXrayInvoice}
-          className="block text-[#007F96] underline"
+      className="block text-left text-[#007F96] underline"
         >
           Create Xray Invoice
         </button>
-      )}
+  ) : null;
 
-      {invoice.showEmail && (
-        <button type="button" className="block text-[#007F96] underline">
-          Email Invoice
+  if (isCnr) {
+    return <div className="space-y-1 text-[10px]">{cnrSection}</div>;
+  }
+
+  if (invoice.createOnly) {
+    return (
+      <div className="space-y-1 text-[10px]">
+        {allowStandardInvoice ? (
+          <>
+            <button
+              type="button"
+              onClick={onCreateInvoice}
+              className="block text-left text-[#007F96] underline"
+            >
+              Create Invoice
         </button>
-      )}
 
-      {invoice.paid && <p className="font-semibold text-[#059669]">Paid ✓</p>}
+            <button
+              type="button"
+              onClick={onCoverSheet}
+              className="block text-left text-[#007F96] underline"
+            >
+              Cover Sheet
+            </button>
+
+            {sendInvoiceButton}
+            {resendInvoiceButton}
+          </>
+        ) : null}
+        {!isCnr ? xraySection : null}
     </div>
   );
 }
 
-function RecordsBlock({ records }) {
+  if (!allowStandardInvoice) {
+    return <div className="space-y-1 text-[10px]">{xraySection}</div>;
+  }
+
+  return (
+    <div className="space-y-1 text-[10px]">
+      <InvoiceReviewRows
+        label={
+          <button
+            type="button"
+            onClick={onReviewInvoice}
+            className="text-[#007F96] underline"
+          >
+            Review Invoice
+          </button>
+        }
+        dateCompact={invoice.invoiceDateCompact || invoice.reviewDate}
+        dueAmount={invoice.due}
+      />
+
+      <button
+        type="button"
+        onClick={onPrintInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Print Invoice
+      </button>
+
+      <button
+        type="button"
+        onClick={onCoverSheet}
+        className="block text-left text-[#007F96] underline"
+      >
+        Cover Sheet
+      </button>
+
+      {sendInvoiceButton}
+      {resendInvoiceButton}
+      {xraySection}
+    </div>
+  );
+}
+
+function MissingProviderEmailNotice({ orderDbId }) {
+  if (!orderDbId) {
+    return (
+      <p className="text-[10px] font-semibold text-amber-600">
+        No provider email. Edit order to add email.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-[10px] font-semibold text-amber-600">
+      No provider email.{" "}
+      <Link
+        href={`/orders/new?mode=edit&orderId=${encodeURIComponent(orderDbId)}`}
+        className="text-[#007F96] underline"
+      >
+        Edit order
+      </Link>{" "}
+      to add email.
+    </p>
+  );
+}
+
+function InvoiceEmailedStatus({ label, sentDate, recipientEmail }) {
+  return (
+    <div className="space-y-0.5 text-[#334155]">
+      <p className="font-semibold text-[#059669]">✓ {label}</p>
+      {recipientEmail ? (
+        <p className="truncate text-[#94A3B8]">To: {recipientEmail}</p>
+      ) : null}
+      {sentDate ? (
+        <p className="text-[#94A3B8]">Sent: {sentDate}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function InvoiceReviewRows({ label, dateCompact, dueAmount }) {
+  const dueLabel = dateCompact ? `${dateCompact} - Due:` : null;
+
+  return (
+    <div className="space-y-0.5">
+      <div className="text-[#334155]">{label}</div>
+      {dueLabel && dueAmount ? (
+        <div className="flex w-full items-center justify-between gap-2 text-[#334155]">
+          <span className="min-w-0 text-left">{dueLabel}</span>
+          <span className="shrink-0 text-right">{dueAmount}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function InvoiceMoneyRow({ label, date, amount, amountClassName = "" }) {
+  return (
+    <div className="flex w-full items-center justify-between gap-2 text-[#334155]">
+      <span className="min-w-0">{label}</span>
+      {amount ? (
+        <span
+          className={`shrink-0 text-right ${
+            amountClassName || "font-semibold text-[#111827]"
+          }`}
+        >
+          {date ? (
+            <>
+              <span className="font-normal text-[#94A3B8]">{date}</span>{" "}
+            </>
+          ) : null}
+          {amount}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function RecordsBlock({
+  records,
+  isCnr = false,
+  cnrMemo = false,
+  cnrDelivery = "",
+  cnrDateSent = "",
+  onCnrNoteClick,
+  onPrintedSentOutClick,
+}) {
+  const showPrintedSentOutNote = isCnr && cnrDelivery && cnrDateSent;
+  const showCnrNote = isCnr && !cnrMemo && records.cnrNote;
+
   return (
     <div className="space-y-1 text-[10px]">
       <p className="font-semibold text-[#111827]">{records.title}</p>
 
-      {records.lines.map((line) => (
+      {!isCnr &&
+        records.lines.map((line) => (
         <p key={line} className="text-[#334155]">
           {line}
         </p>
       ))}
 
-      {records.links.map((link) => (
+      {showPrintedSentOutNote ? (
         <button
-          key={link}
           type="button"
-          className="block text-left text-[#007F96] underline"
+          onClick={onPrintedSentOutClick}
+          className="block text-left font-medium text-[#007F96] underline"
         >
-          {link}
+          Printed/Sent Out Note
         </button>
-      ))}
+      ) : null}
+
+      {showCnrNote && onCnrNoteClick ? (
+        <button
+          type="button"
+          onClick={onCnrNoteClick}
+          className="block text-left font-medium text-[#007F96] underline"
+        >
+          {records.cnrNote?.label || "CNR Note"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -619,24 +2213,99 @@ function CompanyBlock({ company }) {
   );
 }
 
-function FormsList({ forms, onCnrClick, onEditClick }) {
+function FormsList({ forms, onCnrClick, onCertificationClick, onCopyLetterClick }) {
   const handlers = {
     CNR: onCnrClick,
-    "Edit Order": onEditClick,
+    "Certification of Records": onCertificationClick,
+    "Send Copy/Letter": onCopyLetterClick,
   };
 
-  return (
+        return (
     <div className="space-y-1">
       {forms.map((form) => (
-        <button
-          key={form}
-          type="button"
+          <button
+            key={form}
+            type="button"
           onClick={handlers[form]}
-          className="block text-left text-[10px] font-medium text-[#007F96] underline"
-        >
-          {form}
-        </button>
+          disabled={!handlers[form]}
+          className={`block text-left text-[10px] font-medium underline ${
+            handlers[form]
+              ? "text-[#007F96] hover:opacity-80"
+              : "cursor-default text-[#94A3B8] no-underline"
+          }`}
+          >
+            {form}
+          </button>
       ))}
     </div>
+  );
+}
+
+function formatLastUpdatedLabel(date) {
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+
+  if (diffSeconds < 15) return "just now";
+  if (diffSeconds < 60) return `${diffSeconds}s ago`;
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) {
+    return `${diffMinutes} min${diffMinutes === 1 ? "" : "s"} ago`;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function RushBadge({ rush }) {
+  if (!rush) return null;
+
+  return (
+    <span
+      className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
+        RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
+      }`}
+    >
+      {rush}
+    </span>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SmallCircleIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }

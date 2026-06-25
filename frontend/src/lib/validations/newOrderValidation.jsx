@@ -1,3 +1,7 @@
+import {
+  hasFormRecordTypesSelected,
+} from "@/lib/orders/recordTypeUtils";
+
 export const immediateRequiredFields = [
   "facility",
   "type",
@@ -26,7 +30,9 @@ export const numericOnlyFields = [
 export const moneyFields = [
   "prepaymentPaid",
   "custodianPaid",
+  "custodianDue",
   "xrayPaid",
+  "xrayDue",
 ];
 
 export const paymentPrefixes = ["prepayment", "custodian", "xray"];
@@ -35,7 +41,9 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
 
   if (!data.facility) errors.facility = "Facility is required";
-  if (!data.type) errors.type = "Type is required";
+  if (!hasFormRecordTypesSelected(data)) {
+    errors.type = "Select at least one record type";
+  }
   if (!data.firstName.trim()) errors.firstName = "First name is required";
   if (!data.lastName.trim()) errors.lastName = "Last name is required";
 
@@ -44,7 +52,7 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   }
 
   if (data.ssn && !isValidSSN(data.ssn)) {
-    errors.ssn = "Enter SSN as XXX-XX-XXXX";
+    errors.ssn = "Enter SSN as XXX-XX-1234";
   }
 
   if (data.dob && isFutureDate(data.dob)) {
@@ -96,6 +104,37 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     errors.additionalDocumentFile = fileErrors.additionalDocumentFile;
   }
 
+  if (data.injuryType === "cumulative") {
+    if (!data.injuryDateBegin) {
+      errors.injuryDateBegin = "Start date is required";
+    }
+
+    if (!data.injuryDateEnd) {
+      errors.injuryDateEnd = "End date is required";
+    }
+
+    if (
+      data.injuryDateBegin &&
+      data.injuryDateEnd &&
+      data.injuryDateEnd < data.injuryDateBegin
+    ) {
+      errors.injuryDateEnd = "End date must be on or after start date";
+    }
+  }
+
+  if (data.injuryType === "specific" && !data.injuryDate) {
+    errors.injuryDate = "Injury date is required";
+  }
+
+  if (
+    data.certificateNoRecords &&
+    data.cnrDelivery &&
+    ["email", "fax", "pickup"].includes(data.cnrDelivery) &&
+    !data.cnrDateSent
+  ) {
+    errors.cnrDateSent = "Date is required for the selected delivery method";
+  }
+
   return errors;
 }
 
@@ -128,7 +167,9 @@ export function isValidEmail(email) {
 }
 
 export function isValidSSN(ssn) {
-  return /^\d{3}-\d{2}-\d{4}$/.test(ssn);
+  const trimmed = String(ssn || "").trim();
+  if (/^XXX-XX-\d{4}$/i.test(trimmed)) return true;
+  return /^\d{3}-\d{2}-\d{4}$/.test(trimmed);
 }
 
 export function isValidMoney(value) {
@@ -165,6 +206,13 @@ export function formatSSN(value) {
   if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
 
   return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
+}
+
+export function formatMaskedSSN(value) {
+  const digits = getDigits(value);
+  if (digits.length < 4) return "";
+
+  return `XXX-XX-${digits.slice(-4)}`;
 }
 
 export function formatMoneyInput(value) {

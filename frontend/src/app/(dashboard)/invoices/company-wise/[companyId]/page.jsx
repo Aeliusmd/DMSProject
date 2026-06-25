@@ -1,75 +1,29 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
+import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
+import { getCompanyInvoices, resendInvoiceSelection, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
+import { canResendInvoice, canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
 
-const companyDetails = {
-  1: {
-    name: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-  },
-  2: {
-    name: "Martinez Legal Group",
-    email: "invoices@martinezlegal.com",
-  },
-  3: {
-    name: "Pacific Law Partners",
-    email: "billing@pacificlaw.com, ar@pacificlaw.com",
-  },
+const EMPTY_SUMMARY = {
+  totalCases: 0,
+  needsResend: 0,
+  totalInvoiced: "$0.00",
+  totalPaid: "$0.00",
+  totalDue: "$0.00",
 };
-
-const invoiceSeed = [
-  {
-    id: 1,
-    invoiceId: "71956-4",
-    invoiceDate: "03/18/2026",
-    days: 74,
-    status: "Partial",
-    invoiced: "$1,250.00",
-    paid: "$400.00",
-    due: "$850.00",
-  },
-  {
-    id: 2,
-    invoiceId: "71956-5",
-    invoiceDate: "04/01/2026",
-    days: 60,
-    status: "Needs Resend",
-    invoiced: "$850.00",
-    paid: "$0.00",
-    due: "$850.00",
-  },
-  {
-    id: 3,
-    invoiceId: "71956-6",
-    invoiceDate: "04/15/2026",
-    days: 46,
-    status: "Partial",
-    invoiced: "$2,100.00",
-    paid: "$1,200.00",
-    due: "$900.00",
-  },
-  {
-    id: 4,
-    invoiceId: "71956-7",
-    invoiceDate: "05/02/2026",
-    days: 29,
-    status: "Unpaid",
-    invoiced: "$975.00",
-    paid: "$0.00",
-    due: "$975.00",
-  },
-];
 
 function buildWriteOffInvoice(company, invoice) {
   return {
     id: invoice.id,
+    invoiceId: invoice.invoiceDbId || invoice.id,
+    orderId: invoice.orderId,
     caseNo: invoice.invoiceId,
-    invoiceId: invoice.invoiceId,
     company: company.name,
     email: company.email,
     sentDate: invoice.invoiceDate,
@@ -85,21 +39,66 @@ export default function CompanyInvoiceDetailsPage() {
   const params = useParams();
   const companyId = String(params.companyId);
 
-  const company = companyDetails[companyId] || {
-    name: "Smith & Associates",
-    email: "billing@smithassociates.com, accounts@smithassociates.com",
-  };
-
-  const [invoices] = useState(invoiceSeed);
+  const [company, setCompany] = useState({
+    id: companyId,
+    name: "Company",
+    email: "",
+  });
+  const [invoices, setInvoices] = useState([]);
+  const [summary, setSummary] = useState(EMPTY_SUMMARY);
+  const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState([]);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
+  const [selectedXrayOrder, setSelectedXrayOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
+  const [writeOffError, setWriteOffError] = useState("");
+  const [resending, setResending] = useState(false);
+  const [resendingId, setResendingId] = useState(null);
+  const [resendError, setResendError] = useState("");
 
   const [filters, setFilters] = useState({
     search: "",
     fromDate: "",
     toDate: "",
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCompanyInvoices() {
+      setLoading(true);
+
+      try {
+        const data = await getCompanyInvoices(companyId, {
+          dateFrom: filters.fromDate || undefined,
+          dateTo: filters.toDate || undefined,
+        });
+
+        if (cancelled) return;
+
+        setCompany(data.company);
+        setInvoices(data.invoices);
+        setSummary(data.summary);
+        setSelectedIds([]);
+      } catch {
+        if (!cancelled) {
+          setCompany({ id: companyId, name: "Company", email: "" });
+          setInvoices([]);
+          setSummary(EMPTY_SUMMARY);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadCompanyInvoices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [companyId, filters.fromDate, filters.toDate]);
 
   const filteredInvoices = useMemo(() => {
     const searchValue = filters.search.trim().toLowerCase();
@@ -124,6 +123,14 @@ export default function CompanyInvoiceDetailsPage() {
     return invoices.filter((invoice) => selectedIds.includes(invoice.id));
   }, [invoices, selectedIds]);
 
+  const writableSelectedInvoices = useMemo(() => {
+    return selectedInvoices.filter((invoice) => canWriteOffInvoice(invoice));
+  }, [selectedInvoices]);
+
+  const resendableSelectedInvoices = useMemo(() => {
+    return selectedInvoices.filter((invoice) => canResendInvoice(invoice));
+  }, [selectedInvoices]);
+
   const filteredInvoiceIds = filteredInvoices.map((invoice) => invoice.id);
 
   const allSelected =
@@ -131,7 +138,10 @@ export default function CompanyInvoiceDetailsPage() {
     filteredInvoiceIds.every((id) => selectedIds.includes(id));
 
   const selectedCount = selectedIds.length;
-  const hasSelectedInvoices = selectedCount > 0;
+  const writableSelectedCount = writableSelectedInvoices.length;
+  const hasWritableSelected = writableSelectedCount > 0;
+  const resendableSelectedCount = resendableSelectedInvoices.length;
+  const hasResendableSelected = resendableSelectedCount > 0;
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -177,16 +187,45 @@ export default function CompanyInvoiceDetailsPage() {
     );
   };
 
-  const handleResendSelected = () => {
-    if (selectedInvoices.length === 0) return;
+  const handleResendSelected = async () => {
+    if (!resendableSelectedInvoices.length || resending) return;
 
-    console.log("Resend selected invoices:", selectedInvoices);
+    setResending(true);
+    setResendError("");
+
+    try {
+      await resendInvoiceSelection(resendableSelectedInvoices);
+      setSelectedIds([]);
+      await reloadCompanyInvoices();
+    } catch (error) {
+      setResendError(error?.message || "Failed to resend invoices");
+      console.error("Failed to resend invoices:", error);
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleResendSingle = async (invoice) => {
+    if (!canResendInvoice(invoice) || resendingId || resending) return;
+
+    setResendingId(invoice.id);
+    setResendError("");
+
+    try {
+      await resendInvoiceSelection([invoice]);
+      await reloadCompanyInvoices();
+    } catch (error) {
+      setResendError(error?.message || "Failed to resend invoice");
+      console.error("Failed to resend invoice:", error);
+    } finally {
+      setResendingId(null);
+    }
   };
 
   const handleWriteOffSelected = () => {
-    if (selectedInvoices.length === 0) return;
+    if (writableSelectedInvoices.length === 0) return;
 
-    const selectedWriteOffInvoices = selectedInvoices.map((invoice) =>
+    const selectedWriteOffInvoices = writableSelectedInvoices.map((invoice) =>
       buildWriteOffInvoice(company, invoice)
     );
 
@@ -194,35 +233,76 @@ export default function CompanyInvoiceDetailsPage() {
   };
 
   const handleWriteOffSingle = (invoice) => {
+    if (!canWriteOffInvoice(invoice)) return;
+
     setWriteOffInvoices([buildWriteOffInvoice(company, invoice)]);
   };
 
-  const handleSubmitWriteOff = (payload) => {
-    console.log("Company wise write off payload:", payload);
+  const reloadCompanyInvoices = async () => {
+    const data = await getCompanyInvoices(companyId, {
+      dateFrom: filters.fromDate || undefined,
+      dateTo: filters.toDate || undefined,
+    });
 
-    setSelectedIds((prev) =>
-      prev.filter(
-        (selectedId) =>
-          !payload.invoices.some((invoice) => invoice.id === selectedId)
-      )
-    );
+    setCompany(data.company);
+    setInvoices(data.invoices);
+    setSummary(data.summary);
+  };
 
-    setWriteOffInvoices([]);
+  const handleSubmitWriteOff = async (payload) => {
+    setWriteOffError("");
 
-    // Replace the console.log above with your backend API call.
-    // Example:
-    // await writeOffInvoicesApi(payload);
+    try {
+      await submitWriteOffInvoices(payload);
+
+      setSelectedIds((prev) =>
+        prev.filter(
+          (selectedId) =>
+            !payload.invoices.some((invoice) => invoice.id === selectedId)
+        )
+      );
+
+      setWriteOffInvoices([]);
+
+      await reloadCompanyInvoices();
+    } catch (error) {
+      setWriteOffError(error?.message || "Failed to write off invoices");
+      console.error("Failed to write off invoices:", error);
+    }
   };
 
   const handleOpenEditInvoice = (invoice) => {
+    if (invoice.invoiceType === "xray") {
+      setSelectedXrayOrder({
+        id: invoice.invoiceId,
+        dbId: invoice.orderId,
+        applicant: invoice.invoiceId,
+        court: "N/A",
+        company: {
+          name: company.name,
+        },
+        invoice: {
+          date: invoice.invoiceDate,
+          sentDate: invoice.invoiceDate,
+          invoiced: invoice.invoiced,
+          paid: invoice.paid,
+          due: invoice.due,
+        },
+      });
+      return;
+    }
+
     setSelectedInvoiceOrder({
       id: invoice.invoiceId,
+      dbId: invoice.orderId,
+      invoiceId: invoice.invoiceDbId || invoice.id,
       applicant: invoice.invoiceId,
       court: "N/A",
       company: {
         name: company.name,
       },
       invoice: {
+        invoiceId: invoice.invoiceDbId || invoice.id,
         date: invoice.invoiceDate,
         sentDate: invoice.invoiceDate,
         invoiced: invoice.invoiced,
@@ -260,34 +340,48 @@ export default function CompanyInvoiceDetailsPage() {
             <button
               type="button"
               onClick={handleResendSelected}
-              disabled={!hasSelectedInvoices}
+              disabled={!hasResendableSelected || resending}
               className={`inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border px-4 text-[12px] font-semibold transition disabled:cursor-not-allowed ${
-                hasSelectedInvoices
+                hasResendableSelected && !resending
                   ? "border-[#0097B2] bg-[#0097B2] text-white shadow-sm hover:bg-[#0086A0]"
                   : "border-[#E2E8F0] bg-white text-[#94A3B8] opacity-70"
               }`}
             >
               <SendIcon />
-              Resend Selected ({selectedCount})
+              {resending
+                ? "Sending..."
+                : `Resend Selected (${resendableSelectedCount})`}
             </button>
 
             <button
               type="button"
               onClick={handleWriteOffSelected}
-              disabled={!hasSelectedInvoices}
+              disabled={!hasWritableSelected}
               className={`inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border px-4 text-[12px] font-semibold transition disabled:cursor-not-allowed ${
-                hasSelectedInvoices
+                hasWritableSelected
                   ? "border-red-500 bg-red-500 text-white shadow-sm hover:bg-red-600"
                   : "border-[#E2E8F0] bg-white text-[#94A3B8] opacity-70"
               }`}
             >
               <CircleIcon />
-              Write Off Selected ({selectedCount})
+              Write Off Selected ({writableSelectedCount})
             </button>
           </div>
         </div>
 
-        <SummaryCards selectedCount={selectedCount} />
+        <SummaryCards summary={summary} selectedCount={selectedCount} loading={loading} />
+
+        {writeOffError && (
+          <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+            {writeOffError}
+          </p>
+        )}
+
+        {resendError && (
+          <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
+            {resendError}
+          </p>
+        )}
 
         <InvoiceFilters
           filters={filters}
@@ -300,8 +394,12 @@ export default function CompanyInvoiceDetailsPage() {
           invoices={filteredInvoices}
           selectedIds={selectedIds}
           allSelected={allSelected}
+          loading={loading}
+          resendingId={resendingId}
+          resending={resending}
           onToggleAll={handleToggleAll}
           onToggleInvoice={handleToggleInvoice}
+          onResendSingle={handleResendSingle}
           onWriteOffSingle={handleWriteOffSingle}
           onOpenEditInvoice={handleOpenEditInvoice}
         />
@@ -312,6 +410,14 @@ export default function CompanyInvoiceDetailsPage() {
         mode="edit"
         order={selectedInvoiceOrder}
         onClose={() => setSelectedInvoiceOrder(null)}
+        onSaved={reloadCompanyInvoices}
+      />
+
+      <CreateXrayInvoiceModal
+        isOpen={Boolean(selectedXrayOrder)}
+        order={selectedXrayOrder}
+        onClose={() => setSelectedXrayOrder(null)}
+        onSaved={reloadCompanyInvoices}
       />
 
       <WriteOffInvoiceModal
@@ -397,14 +503,32 @@ function DateField({ label, name, value, onChange }) {
   );
 }
 
-function SummaryCards({ selectedCount }) {
+function SummaryCards({ summary, selectedCount, loading }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-      <SummaryCard label="Total Cases" value="4" />
-      <SummaryCard label="Needs Resend" value="1" orange />
-      <SummaryCard label="Total Invoiced" value="$5,175.00" />
-      <SummaryCard label="Total Paid" value="$1,600.00" green />
-      <SummaryCard label="Total Due" value="$3,575.00" red />
+      <SummaryCard
+        label="Total Cases"
+        value={loading ? "..." : String(summary.totalCases)}
+      />
+      <SummaryCard
+        label="Needs Resend"
+        value={loading ? "..." : String(summary.needsResend)}
+        orange
+      />
+      <SummaryCard
+        label="Total Invoiced"
+        value={loading ? "..." : summary.totalInvoiced}
+      />
+      <SummaryCard
+        label="Total Paid"
+        value={loading ? "..." : summary.totalPaid}
+        green
+      />
+      <SummaryCard
+        label="Total Due"
+        value={loading ? "..." : summary.totalDue}
+        red
+      />
       <SummaryCard label="Selected" value={selectedCount} muted />
     </div>
   );
@@ -445,8 +569,12 @@ function CompanyInvoiceTable({
   invoices,
   selectedIds,
   allSelected,
+  loading,
+  resendingId,
+  resending,
   onToggleAll,
   onToggleInvoice,
+  onResendSingle,
   onWriteOffSingle,
   onOpenEditInvoice,
 }) {
@@ -475,14 +603,26 @@ function CompanyInvoiceTable({
           </thead>
 
           <tbody>
-            {invoices.map((invoice) => {
+            {loading && (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
+                >
+                  Loading invoices...
+                </td>
+              </tr>
+            )}
+
+            {!loading &&
+              invoices.map((invoice) => {
               const selected = selectedIds.includes(invoice.id);
+              const rowClassName = invoice.isWrittenOff
+                ? "border-b border-[#F1F5F9] last:border-b-0 bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
+                : "border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]";
 
               return (
-                <tr
-                  key={invoice.id}
-                  className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-                >
+                <tr key={invoice.id} className={rowClassName}>
                   <td className="px-4 py-4 align-middle">
                     <input
                       type="checkbox"
@@ -495,12 +635,18 @@ function CompanyInvoiceTable({
                   <td className="px-4 py-4 align-middle">
                     <Link
                       href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                        invoice.invoiceId
+                        invoice.orderId || invoice.invoiceId
                       )}`}
                       className="text-[12px] font-semibold text-[#007F96] hover:underline"
                     >
                       {invoice.invoiceId}
                     </Link>
+
+                    {invoice.invoiceType === "xray" && (
+                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-[#7C3AED]">
+                        X-Ray Invoice
+                      </p>
+                    )}
                   </td>
 
                   <td className="px-4 py-4 align-middle">
@@ -534,19 +680,39 @@ function CompanyInvoiceTable({
                   </td>
 
                   <td className="px-4 py-4 text-center align-middle">
-                    <button
-                      type="button"
-                      onClick={() => onWriteOffSingle(invoice)}
-                      className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
-                    >
-                      Write Off
-                    </button>
+                    {!invoice.isWrittenOff && (
+                      <div className="flex flex-col items-center gap-2">
+                        {canResendInvoice(invoice) && (
+                          <button
+                            type="button"
+                            onClick={() => onResendSingle(invoice)}
+                            disabled={
+                              resending ||
+                              resendingId === invoice.id ||
+                              !canResendInvoice(invoice)
+                            }
+                            className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#BAE6FD] bg-[#EFF6FF] px-3 text-[11px] font-semibold text-[#0097B2] hover:bg-[#DBEAFE] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {resendingId === invoice.id ? "Sending..." : "Resend"}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => onWriteOffSingle(invoice)}
+                          disabled={!canWriteOffInvoice(invoice)}
+                          className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Write Off
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
             })}
 
-            {invoices.length === 0 && (
+            {!loading && invoices.length === 0 && (
               <tr>
                 <td
                   colSpan={8}
@@ -568,6 +734,8 @@ function StatusBadge({ status }) {
     Partial: "bg-[#DBEAFE] text-[#2563EB]",
     "Needs Resend": "bg-[#FEF3C7] text-[#D97706]",
     Unpaid: "bg-[#FEE2E2] text-red-500",
+    Paid: "bg-[#ECFDF5] text-[#059669]",
+    "Written Off": "bg-[#F3E8FF] text-[#7C3AED]",
   };
 
   return (

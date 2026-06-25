@@ -1,207 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ReportsOrdersTable from "@/components/reports/ReportsOrdersTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
-
-const baseOrders = [
-  {
-    orderNo: "75228-1",
-    subNo: "189990",
-    status: "Active",
-    invoiced: false,
-    invoiceAmount: "$0.00",
-    subpoenaDate: "2026-04-15",
-    dateServed: "2026-04-20",
-    applicant: "Astrid Ramirez",
-    caseNumber: "ADJ 0821858",
-    dob: "10/08/1988",
-    ssn: "XXX-XX-1752",
-    provider: "Gemini Legal Support, Inc.",
-    recordsRequested: "Medical Records 05/28/16-present",
-    doctor: "Gabriel Rubanenko, MD",
-    address: "4521 Medical Center Dr, Suite 300, Los Angeles, CA",
-    rushLevel: "Rush 1",
-  },
-  {
-    orderNo: "75229-1",
-    subNo: "REC-187697",
-    status: "Active",
-    invoiced: true,
-    invoiceAmount: "$17.00",
-    subpoenaDate: "2026-05-18",
-    dateServed: "2026-05-25",
-    applicant: "Marco Delgado",
-    caseNumber: "ADJ 0821901",
-    dob: "03/22/1975",
-    ssn: "XXX-XX-3481",
-    provider: "Pacific Diagnostic Center",
-    recordsRequested: "Radiology Records 01/15/20-present",
-    doctor: "Sarah Chen, MD",
-    address: "8900 Sunset Blvd West Hollywood, CA 90069",
-    rushLevel: "Rush 2",
-  },
-  {
-    orderNo: "75230-1",
-    subNo: "189903",
-    status: "Ready",
-    invoiced: true,
-    invoiceAmount: "$15.00",
-    subpoenaDate: "2026-04-10",
-    dateServed: "2026-04-15",
-    applicant: "Jennifer Walsh",
-    caseNumber: "ADJ 0822044",
-    dob: "07/14/1992",
-    ssn: "XXX-XX-9823",
-    provider: "Valley Medical Group",
-    recordsRequested: "Complete Medical Records 06/01/18-present",
-    doctor: "David Park, DO",
-    address: "12044 Ventura Blvd, Studio City, CA 91604",
-    rushLevel: "Rush 3",
-  },
-  {
-    orderNo: "75231-1",
-    subNo: "189910",
-    status: "Active",
-    invoiced: false,
-    invoiceAmount: "$0.00",
-    subpoenaDate: "2026-05-01",
-    dateServed: "2026-05-10",
-    applicant: "Robert Kim",
-    caseNumber: "ADJ 0822112",
-    dob: "11/30/1980",
-    ssn: "XXX-XX-4456",
-    provider: "Kaiser Permanente",
-    recordsRequested: "Surgical Records 03/10/19-present",
-    doctor: "Amanda Foster, MD",
-    address: "4900 W Sunset Blvd, Los Angeles, CA 90027",
-    rushLevel: "Rush 1",
-  },
-  {
-    orderNo: "75231-2",
-    subNo: "189911",
-    status: "Active",
-    invoiced: false,
-    invoiceAmount: "$0.00",
-    subpoenaDate: "2026-05-01",
-    dateServed: "2026-05-10",
-    applicant: "Robert Kim",
-    caseNumber: "ADJ 0822112",
-    dob: "11/30/1980",
-    ssn: "XXX-XX-4456",
-    provider: "Kaiser Permanente",
-    recordsRequested: "Surgical Records 03/10/19-present",
-    doctor: "Amanda Foster, MD",
-    address: "4900 W Sunset Blvd, Los Angeles, CA 90027",
-    rushLevel: "Rush 2",
-  },
-  {
-    orderNo: "75232-1",
-    subNo: "1899301",
-    status: "Ready",
-    invoiced: true,
-    invoiceAmount: "$220.00",
-    subpoenaDate: "2026-03-01",
-    dateServed: "2026-03-08",
-    applicant: "Michael Brooks",
-    caseNumber: "ADJ 0822315",
-    dob: "05/17/1978",
-    ssn: "XXX-XX-1123",
-    provider: "UCLA Health",
-    recordsRequested: "Oncology Records 02/10/17-present",
-    doctor: "Elena Vasquez, MD",
-    address: "200 Medical Plaza, Los Angeles, CA 90095",
-    rushLevel: "Rush 3",
-  },
-  {
-    orderNo: "75234-1",
-    subNo: "189940",
-    status: "Active",
-    invoiced: false,
-    invoiceAmount: "$0.00",
-    subpoenaDate: "2026-05-20",
-    dateServed: "2026-05-28",
-    applicant: "Angela Foster",
-    caseNumber: "ADJ 0822388",
-    dob: "12/03/1990",
-    ssn: "XXX-XX-3344",
-    provider: "Children's Hospital LA",
-    recordsRequested: "Pediatric Records 04/05/20-present",
-    doctor: "Thomas Reed, MD",
-    address: "4650 Sunset Blvd, Los Angeles, CA 90027",
-    rushLevel: "Rush 2",
-  },
-  {
-    orderNo: "75235-1",
-    subNo: "189951",
-    status: "Active",
-    invoiced: true,
-    invoiceAmount: "$175.00",
-    subpoenaDate: "2026-04-22",
-    dateServed: "2026-04-28",
-    applicant: "Daniel Henderson",
-    caseNumber: "ADJ 0822450",
-    dob: "08/19/1983",
-    ssn: "XXX-XX-5567",
-    provider: "St. Joseph Hospital",
-    recordsRequested: "Cardiology Records 01/10/19-present",
-    doctor: "Patricia O'Brien, MD",
-    address: "1100 W Stewart Dr, Orange, CA 92868",
-    rushLevel: "Rush 1",
-  },
-  {
-    orderNo: "75236-1",
-    subNo: "189963",
-    status: "Active",
-    invoiced: false,
-    invoiceAmount: "$0.00",
-    subpoenaDate: "2026-04-01",
-    dateServed: "2026-04-08",
-    applicant: "Sandra Lee",
-    caseNumber: "ADJ 0822501",
-    dob: "02/28/1995",
-    ssn: "XXX-XX-8989",
-    provider: "Hoag Hospital",
-    recordsRequested: "OB/GYN Records 07/15/20-present",
-    doctor: "Michelle Nguyen, MD",
-    address: "1 Hoag Dr, Newport Beach, CA 92663",
-    rushLevel: "Rush 3",
-  },
-  {
-    orderNo: "75237-1",
-    subNo: "189970",
-    status: "Active",
-    invoiced: false,
-    invoiceAmount: "$0.00",
-    subpoenaDate: "2026-02-15",
-    dateServed: "2026-02-22",
-    applicant: "Carlos Rivera",
-    caseNumber: "ADJ 0822567",
-    dob: "06/11/1972",
-    ssn: "XXX-XX-2234",
-    provider: "MemorialCare Medical Group",
-    recordsRequested: "Orthopedic Records 09/01/18-present",
-    doctor: "Steven Kim, MD",
-    address: "18111 Brookhurst St, Fountain Valley, CA 92708",
-    rushLevel: "Rush 1",
-  },
-];
-
-const ordersSeed = Array.from({ length: 75 }, (_, index) => {
-  const item = baseOrders[index % baseOrders.length];
-
-  return {
-    ...item,
-    id: index + 1,
-    orderNo:
-      index < baseOrders.length
-        ? item.orderNo
-        : `${75238 + index}-${(index % 3) + 1}`,
-    subNo: `${189990 + index}`,
-  };
-});
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canAccessActivityReport } from "@/lib/auth/roles";
+import { getOrdersReport } from "@/lib/reports/reportApi";
+import { RUSH_LEVEL_LEGEND } from "@/lib/orders/rushUtils";
 
 const initialFilters = {
   orderNo: "",
@@ -213,59 +20,43 @@ const initialFilters = {
 };
 
 export default function ReportsPage() {
+  const user = getStoredUser();
+  const showActivityReportLink = canAccessActivityReport(user);
   const [filters, setFilters] = useState(initialFilters);
   const [showUnpaidOrders, setShowUnpaidOrders] = useState(false);
   const [minimumColumns, setMinimumColumns] = useState(false);
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const filteredOrders = useMemo(() => {
-    let result = ordersSeed.filter((order) => {
-      const matchesOrderNo = order.orderNo
-        .toLowerCase()
-        .includes(filters.orderNo.trim().toLowerCase());
+  const loadReport = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-      const matchesCaseNumber = order.caseNumber
-        .toLowerCase()
-        .includes(filters.caseNumber.trim().toLowerCase());
-
-      const matchesDoctor = order.doctor
-        .toLowerCase()
-        .includes(filters.doctor.trim().toLowerCase());
-
-      const orderDate = parseDate(order.subpoenaDate);
-      const fromDate = filters.fromDate ? parseDate(filters.fromDate) : null;
-      const toDate = filters.toDate ? parseDate(filters.toDate) : null;
-
-      const matchesFromDate = fromDate ? orderDate >= fromDate : true;
-      const matchesToDate = toDate ? orderDate <= toDate : true;
-
-      const rushLevel = calculateRushLevel(order.subpoenaDate);
-      const matchesRush = filters.rushLevel
-        ? rushLevel === filters.rushLevel
-        : true;
-
-      return (
-        matchesOrderNo &&
-        matchesCaseNumber &&
-        matchesDoctor &&
-        matchesFromDate &&
-        matchesToDate &&
-        matchesRush
-      );
-    });
-
-    if (showUnpaidOrders) {
-      result = result.filter((order) => !order.invoiced);
-    }
-
-    if (!showDuplicates) {
-      result = result.filter((order, index, array) => {
-        return array.findIndex((item) => item.orderNo === order.orderNo) === index;
+    try {
+      const data = await getOrdersReport({
+        ...filters,
+        unpaidOnly: showUnpaidOrders,
+        showDuplicates,
       });
-    }
 
-    return result;
+      setOrders(data.orders || []);
+    } catch (err) {
+      setOrders([]);
+      setError(err.message || "Failed to load orders report");
+    } finally {
+      setLoading(false);
+    }
   }, [filters, showUnpaidOrders, showDuplicates]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      loadReport();
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [loadReport]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -329,19 +120,31 @@ export default function ReportsPage() {
                   Show Duplicates
                 </button>
 
-                <Link
-                  href="/reports/activity-report"
-                  className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[5px] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
-                >
-                  <ReportIcon />
-                  Activity Report
-                </Link>
+                {showActivityReportLink && (
+                  <Link
+                    href="/reports/activity-report"
+                    className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[5px] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0]"
+                  >
+                    <ReportIcon />
+                    Activity Report
+                  </Link>
+                )}
+
+                <div className="hidden h-[22px] w-px bg-[#E2E8F0] md:block" />
+
+                <div className="flex flex-wrap items-center gap-3 text-[10px]">
+                  {RUSH_LEVEL_LEGEND.map(({ color, label }) => (
+                    <RushLegendDot key={label} color={color} label={label} />
+                  ))}
+                </div>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1 text-[11px] text-[#111827]">
               <span>Found</span>
-              <span className="font-semibold">{filteredOrders.length}</span>
+              <span className="font-semibold">
+                {loading ? "..." : orders.length}
+              </span>
               <span>records as of</span>
               <CurrentDateTime />
             </div>
@@ -352,13 +155,25 @@ export default function ReportsPage() {
             onChange={handleFilterChange}
             onReset={handleResetFilters}
           />
+
+          {error && (
+            <div className="rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[11px] font-medium text-red-600">
+              {error}
+            </div>
+          )}
         </div>
 
-        <ReportsOrdersTable
-          orders={filteredOrders}
-          minimumColumns={minimumColumns}
-          recordsPerPage={25}
-        />
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center px-4 py-16 text-[13px] text-[#94A3B8]">
+            Loading orders report...
+          </div>
+        ) : (
+          <ReportsOrdersTable
+            orders={orders}
+            minimumColumns={minimumColumns}
+            recordsPerPage={25}
+          />
+        )}
       </div>
     </DashboardShell>
   );
@@ -477,27 +292,16 @@ function RushFilter({ value, onChange }) {
   );
 }
 
-function parseDate(dateValue) {
-  return new Date(`${dateValue}T00:00:00`);
-}
-
-function calculateRushLevel(dateValue) {
-  if (!dateValue) return null;
-
-  const orderDate = new Date(`${dateValue}T00:00:00`);
-  if (Number.isNaN(orderDate.getTime())) return null;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const diffInMs = today.getTime() - orderDate.getTime();
-  const daysOld = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-  if (daysOld < 0) return null;
-  if (daysOld <= 7) return "Rush 3";
-  if (daysOld <= 21) return "Rush 2";
-
-  return "Rush 1";
+function RushLegendDot({ color, label }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[#64748B]">
+      <span
+        className="h-[6px] w-[6px] rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      {label}
+    </span>
+  );
 }
 
 function ReportIcon() {

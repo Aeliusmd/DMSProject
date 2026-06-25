@@ -7,12 +7,13 @@ import { useState } from "react";
 import { logout } from "@/lib/auth/authApi";
 
 import { getStoredUser } from "@/lib/auth/authStorage";
-import { canAccessEmployeesPage } from "@/lib/auth/roles";
+import { canAccessNavItem } from "@/lib/auth/roles";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
   { label: "Orders", href: "/orders", icon: <OrdersIcon /> },
   { label: "Invoices", href: "/invoices", icon: <InvoicesIcon /> },
+  { label: "Payments", href: "/payments", icon: <PaymentsIcon /> },
   { label: "Employees", href: "/employees", icon: <EmployeesIcon /> },
   { label: "Facilities", href: "/facilities", icon: <FacilitiesIcon /> },
   { label: "Activity Log", href: "/activity-log", icon: <ActivityIcon /> },
@@ -26,8 +27,8 @@ export default function Sidebar({ isCollapsed }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const user = getStoredUser();
-  const visibleNavItems = navItems.filter(
-    (item) => item.href !== "/employees" || canAccessEmployeesPage(user)
+  const visibleNavItems = navItems.filter((item) =>
+    canAccessNavItem(user, item.href)
   );
 
   const handleLogout = async () => {
@@ -56,7 +57,8 @@ export default function Sidebar({ isCollapsed }) {
           width={54}
           height={34}
           priority
-          className={`h-auto transition-all ${
+          style={{ height: "auto" }}
+          className={`transition-all ${
             isCollapsed ? "w-[36px]" : "w-[54px]"
           } max-md:w-[36px]`}
         />
@@ -142,6 +144,24 @@ function InvoicesIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path d="M6 3h12v18H6V3Z" stroke="currentColor" strokeWidth="1.7" />
       <path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function PaymentsIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <rect
+        x="3"
+        y="6"
+        width="18"
+        height="12"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path d="M3 10h18" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7 15h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }

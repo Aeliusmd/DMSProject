@@ -65,7 +65,9 @@ function formatActionLabel(action, context) {
         ? "Employee Added"
         : context === "facilities"
           ? "Facility Created"
-          : "Record Created",
+          : context === "orders"
+            ? "Order Created"
+            : "Record Created",
     terminate: "Employee Terminated",
     activate: "Employee Activated",
     delete:
@@ -75,17 +77,49 @@ function formatActionLabel(action, context) {
           ? "Document Deleted"
           : context === "facilities"
             ? "Facility Deleted"
-            : "Record Deleted",
-    update: context === "facilities" ? "Facility Updated" : "Record Updated",
+            : context === "orders"
+              ? "Order Deleted"
+              : "Record Deleted",
+    update:
+      context === "facilities"
+        ? "Facility Updated"
+        : context === "orders"
+          ? "Order Updated"
+          : "Record Updated",
     update_profile: "Profile Updated",
     update_notifications: "Notifications Updated",
     change_password: "Password Changed",
     upload: "Document Uploaded",
+    upload_document: "Document Uploaded",
+    delete_document: "Document Deleted",
     create_doctors: "Doctor Added",
     deactivate_doctor: "Doctor Deactivated",
     reactivate_doctor: "Doctor Reactivated",
     set_default_doctor: "Default Doctor Updated",
-    create_note: "Note Added",
+    add_office_manager: "Office Manager Added",
+    remove_office_manager: "Office Manager Removed",
+    create_note:
+      context === "orders"
+        ? "Order Note Added"
+        : context === "facilities" || context === "notes"
+          ? "Facility Note Added"
+          : "Note Added",
+    update_note: "Order Note Callback",
+    workflow_update: "Order Workflow Updated",
+    order_mail: "Records Ready Email Sent",
+    copy_service_letter: "Copy Service Letter Sent",
+    print_invoice: "Print Invoice",
+    print_xray_invoice: "Print X-Ray Invoice",
+    create_invoice: "Invoice Created",
+    update_invoice: "Invoice Updated",
+    send_invoices: "Invoice Sent",
+    resend_invoices: "Invoice Resent",
+    email_invoice: "Invoice Emailed",
+    email_xray_invoice: "X-Ray Invoice Emailed",
+    save_xray_invoice: "X-Ray Invoice Saved",
+    write_off: "Invoice Written Off",
+    record_payment: "Payment Recorded",
+    sync_payment: "Invoice Payment Updated",
   };
 
   return labels[action] || String(action || "Activity");
@@ -107,12 +141,77 @@ function appendTargetEmployee(details, targetEmployeeId) {
   return `${base} | target_employee_id:${targetEmployeeId}`;
 }
 
-function formatDisplayDate(logDate, logTime) {
-  if (!logDate) return "";
+function stripOrderIdTag(details) {
+  return String(details || "")
+    .replace(/\s*\|\s*order_id:\d+\s*$/i, "")
+    .trim();
+}
 
-  const datePart = String(logDate).slice(0, 10);
-  const timePart = logTime ? String(logTime).slice(0, 5) : "00:00";
-  const date = new Date(`${datePart}T${timePart}:00`);
+function appendOrderId(details, orderId) {
+  const base = stripOrderIdTag(details);
+
+  if (!orderId) {
+    return base;
+  }
+
+  return `${base} | order_id:${orderId}`;
+}
+
+function normalizeDateValue(value) {
+  if (!value) return "";
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const str = String(value).trim();
+  const isoMatch = str.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  if (isoMatch) {
+    return isoMatch[1];
+  }
+
+  const parsed = new Date(str);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeTimeValue(value) {
+  if (!value) return "";
+
+  const str = String(value).trim();
+  const timeMatch = str.match(/(\d{2}:\d{2})/);
+
+  if (timeMatch) {
+    return timeMatch[1];
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toTimeString().slice(0, 5);
+  }
+
+  return "";
+}
+
+function formatDisplayDate(logDate, logTime) {
+  const datePart = normalizeDateValue(logDate);
+  const timePart = normalizeTimeValue(logTime);
+
+  if (!datePart) return "";
+
+  const date = new Date(`${datePart}T${timePart || "00:00"}:00`);
 
   if (Number.isNaN(date.getTime())) {
     return `${datePart} ${timePart}`;
@@ -129,9 +228,9 @@ function formatDisplayDate(logDate, logTime) {
 }
 
 function mapLogRow(row) {
-  const details = stripTargetTag(row.details);
-  const logDate = row.log_date ? String(row.log_date).slice(0, 10) : "";
-  const logTime = row.log_time ? String(row.log_time).slice(0, 5) : "";
+  const details = stripOrderIdTag(stripTargetTag(row.details));
+  const logDate = normalizeDateValue(row.log_date);
+  const logTime = normalizeTimeValue(row.log_time);
 
   return {
     id: row.id,
@@ -255,6 +354,11 @@ async function recordSafe(payload) {
   }
 }
 
+async function getMyLogs(employeeId) {
+  const logs = await ActivityLog.findByPerformerId(employeeId);
+  return logs.map(mapLogRow);
+}
+
 async function getEmployeeLogs(employeeId) {
   const employee = await Employee.findByIdPublic(employeeId);
 
@@ -286,8 +390,11 @@ module.exports = {
   recordActivity,
   recordFromRequest,
   recordSafe,
+  getMyLogs,
   getEmployeeLogs,
   getAllLogs,
   getLogById,
   mapLogRow,
+  appendOrderId,
+  stripOrderIdTag,
 };

@@ -7,6 +7,7 @@ export default function ConfirmModal({
   variant = "warning",
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  confirmDisabled = false,
   onCancel,
   onConfirm,
 }) {
@@ -54,8 +55,12 @@ export default function ConfirmModal({
 
               <button
                 type="button"
-                onClick={onConfirm}
-                className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold text-white"
+                disabled={confirmDisabled}
+                onClick={() => {
+                  if (confirmDisabled) return;
+                  onConfirm();
+                }}
+                className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 style={{
                   backgroundColor: isDanger ? "#EF4444" : "#F59E0B",
                 }}

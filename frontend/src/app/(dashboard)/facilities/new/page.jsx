@@ -152,7 +152,7 @@ export default function NewFacilityPage() {
     setSaving(true);
 
     try {
-      const facility = await createFacility({
+      await createFacility({
         facilityName: formData.facilityName,
         userName: formData.userName,
         password: formData.password,
@@ -170,7 +170,7 @@ export default function NewFacilityPage() {
         officeManagers: managers,
       });
 
-      router.push(`/facilities/${facility.id}/info`);
+      router.push("/facilities");
     } catch (err) {
       if (err instanceof ApiRequestError && err.errors) {
         setErrors(mapApiErrors(err.errors));

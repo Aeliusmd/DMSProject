@@ -1,12 +1,43 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import StatCard from "@/components/dashboard/StatCard";
+import { getOrderStats } from "@/lib/orders/orderApi";
+
+function formatCount(value) {
+  if (value === null || value === undefined) return "—";
+  return String(value);
+}
 
 export default function OrderStatsGrid() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    getOrderStats()
+      .then((data) => {
+        if (active) setStats(data);
+      })
+      .catch(() => {
+        if (active) setStats(null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         layout="horizontal"
         icon={<TotalIcon />}
-        value="12"
+        value={loading ? "…" : formatCount(stats?.totalOrders)}
         label="Total Orders"
         iconBg="#111827"
         iconColor="#FFFFFF"
@@ -15,7 +46,7 @@ export default function OrderStatsGrid() {
       <StatCard
         layout="horizontal"
         icon={<ActiveIcon />}
-        value="3"
+        value={loading ? "…" : formatCount(stats?.activeCases)}
         label="Active Cases"
         iconBg="#10B981"
         iconColor="#FFFFFF"
@@ -24,7 +55,7 @@ export default function OrderStatsGrid() {
       <StatCard
         layout="horizontal"
         icon={<ReadyIcon />}
-        value="2"
+        value={loading ? "…" : formatCount(stats?.readyToPickup)}
         label="Ready to Pickup"
         iconBg="#0097B2"
         iconColor="#FFFFFF"
@@ -33,7 +64,7 @@ export default function OrderStatsGrid() {
       <StatCard
         layout="horizontal"
         icon={<CompletedIcon />}
-        value="1"
+        value={loading ? "…" : formatCount(stats?.completed)}
         label="Completed"
         iconBg="#475569"
         iconColor="#FFFFFF"
