@@ -1,9 +1,9 @@
 "use client";
 
-export default function ActivityLogTable({ logs }) {
+export default function ActivityLogTable({ logs, footer = null }) {
   return (
-    <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-      <div className="h-full max-h-[calc(100vh-245px)] overflow-auto">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
+      <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full min-w-[1200px] border-collapse">
           <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
@@ -80,6 +80,8 @@ export default function ActivityLogTable({ logs }) {
           </tbody>
         </table>
       </div>
+
+      {footer}
     </section>
   );
 }

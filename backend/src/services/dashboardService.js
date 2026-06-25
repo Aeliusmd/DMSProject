@@ -3,10 +3,10 @@
  */
 
 const { getPool } = require("../config/database");
-const { RUSH_3_MIN_DAYS } = require("../utils/rushUtils");
+const { RUSH_1_MAX_DAYS, ORDER_AGE_SQL } = require("../utils/rushUtils");
 
-/** Matches rushUtils Rush 3 threshold: 4+ weeks since created_at */
-const RUSH_LEVEL_3_MIN_DAYS = RUSH_3_MIN_DAYS;
+/** Dashboard rush count = orders past Rush 1 (Rush 2 and Rush 3). */
+const RUSH_ESCALATED_MIN_DAYS = RUSH_1_MAX_DAYS;
 
 /** Outstanding invoices older than this are counted as overdue */
 const OVERDUE_INVOICE_DAYS = 30;
@@ -136,8 +136,8 @@ async function getDashboardStats() {
       `SELECT COUNT(*) AS rush_orders
        FROM orders
        WHERE status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
-         AND DATEDIFF(CURDATE(), DATE(created_at)) >= :minDays`,
-      { minDays: RUSH_LEVEL_3_MIN_DAYS }
+         AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL}) > :minDays`,
+      { minDays: RUSH_ESCALATED_MIN_DAYS }
     ),
     Promise.all([getStandardInvoiceFinancials(pool), getXrayInvoiceFinancials(pool)]),
     pool.execute(`
@@ -155,8 +155,9 @@ async function getDashboardStats() {
     `),
     pool.execute(`
       SELECT COUNT(*) AS pending_reminders
-      FROM reminders
-      WHERE is_completed = 0
+      FROM order_notes
+      WHERE callback_date IS NOT NULL
+        AND is_called = 0
     `),
   ]);
 

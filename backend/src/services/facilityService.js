@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const ApiError = require("../utils/ApiError");
 const { slugify } = require("../utils/slugify");
 const {
@@ -58,8 +59,6 @@ function mapFacilityDetail(row, managers = [], doctors = []) {
   return {
     id: row.id,
     facilityName: row.facility_name,
-    userName: row.user_name,
-    password: "",
     firstName: row.contact_first_name || "",
     middleName: row.contact_middle_name || "",
     lastName: row.contact_last_name || "",
@@ -77,11 +76,10 @@ function mapFacilityDetail(row, managers = [], doctors = []) {
   };
 }
 
-function buildFacilityDbPayload(data, passwordHash = null) {
+function buildFacilityDbPayload(data, credentials = null) {
   const payload = {
     facilityName: data.facilityName?.trim(),
     slug: slugify(data.facilityName),
-    userName: data.userName?.trim(),
     contactFirstName: data.firstName?.trim() || null,
     contactMiddleName: data.middleName?.trim() || null,
     contactLastName: data.lastName?.trim() || null,
@@ -95,11 +93,32 @@ function buildFacilityDbPayload(data, passwordHash = null) {
     ipAddresses: data.ipAddresses?.trim() || null,
   };
 
-  if (passwordHash) {
-    payload.passwordHash = passwordHash;
+  if (credentials?.userName) {
+    payload.userName = credentials.userName;
+  }
+
+  if (credentials?.passwordHash) {
+    payload.passwordHash = credentials.passwordHash;
   }
 
   return payload;
+}
+
+async function generateUniqueFacilityUserName(facilityName) {
+  const base = slugify(facilityName).slice(0, 50) || "facility";
+  let candidate = base;
+  let suffix = 0;
+
+  while (await Facility.findByUserName(candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`.slice(0, 100);
+  }
+
+  return candidate;
+}
+
+async function generateInternalPasswordHash() {
+  return bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
 }
 
 function normalizeManagers(managers = []) {
@@ -167,20 +186,15 @@ async function getFacilityById(id) {
 }
 
 async function createFacility(data) {
-  const validation = validateFacilityPayload(data, { requirePassword: true });
+  const validation = validateFacilityPayload(data);
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
-  const existingUserName = await Facility.findByUserName(data.userName.trim());
-
-  if (existingUserName) {
-    throw new ApiError(409, "A facility with this username already exists");
-  }
-
-  const passwordHash = await bcrypt.hash(data.password, 10);
-  const facilityPayload = buildFacilityDbPayload(data, passwordHash);
+  const userName = await generateUniqueFacilityUserName(data.facilityName);
+  const passwordHash = await generateInternalPasswordHash();
+  const facilityPayload = buildFacilityDbPayload(data, { userName, passwordHash });
   const managers = normalizeManagers(data.officeManagers || data.managers || []);
 
   const pool = getPool();
@@ -216,28 +230,13 @@ async function updateFacility(id, data, actorId) {
     throw new ApiError(404, "Facility not found");
   }
 
-  const validation = validateFacilityPayload(data, {
-    requirePassword: false,
-  });
+  const validation = validateFacilityPayload(data);
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
-  const existingUserName = await Facility.findByUserName(
-    data.userName.trim(),
-    id
-  );
-
-  if (existingUserName) {
-    throw new ApiError(409, "A facility with this username already exists");
-  }
-
   const facilityPayload = buildFacilityDbPayload(data);
-
-  if (data.password?.trim()) {
-    facilityPayload.passwordHash = await bcrypt.hash(data.password, 10);
-  }
 
   await Facility.update(id, facilityPayload);
 

@@ -282,6 +282,15 @@ async function notifyActivityEvent({ title, description, referenceType, referenc
   });
 }
 
+async function notifyFacilityEvent({ title, description, facilityId }) {
+  await notifyActivityEvent({
+    title,
+    description,
+    referenceType: "Facility",
+    referenceId: facilityId,
+  });
+}
+
 async function notifyReminder({
   employeeId,
   title,
@@ -456,6 +465,7 @@ module.exports = {
   notifyOrderStatusChange,
   notifyInvoiceEvent,
   notifyActivityEvent,
+  notifyFacilityEvent,
   notifyReminder,
   syncDueReminderNotifications,
   getDueRemindersForUser,

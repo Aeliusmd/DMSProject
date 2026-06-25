@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
+import PaginationBar, {
+  DEFAULT_PAGE_SIZE,
+  paginateItems,
+} from "@/components/ui/PaginationBar";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { usesOwnActivityLogsOnly } from "@/lib/auth/roles";
@@ -41,6 +45,7 @@ export default function ActivityLogPage() {
     fromDate: "",
     toDate: "",
   });
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +110,15 @@ export default function ActivityLogPage() {
     });
   }, [activityLogs, activeFilter, dateFilters]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter, dateFilters.fromDate, dateFilters.toDate]);
+
+  const pagination = useMemo(
+    () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
+    [filteredLogs, currentPage]
+  );
+
   const handleDateFilterChange = (e) => {
     const { name, value } = e.target;
 
@@ -123,7 +137,7 @@ export default function ActivityLogPage() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
+      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5">
         <div className="flex w-full flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h1 className="text-[18px] font-semibold text-[#111827]">
@@ -197,11 +211,28 @@ export default function ActivityLogPage() {
           <p className="justify-self-start text-[11px] text-[#64748B] 2xl:justify-self-end">
             {logsLoading
               ? "Loading activity logs..."
-              : `Showing ${filteredLogs.length} of ${activityLogs.length} entries`}
+              : `Showing ${pagination.startRecord}-${pagination.endRecord} of ${filteredLogs.length} entries`}
           </p>
         </div>
 
-        <ActivityLogTable logs={logsLoading ? [] : filteredLogs} />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <ActivityLogTable
+            logs={logsLoading ? [] : pagination.items}
+            footer={
+              !logsLoading ? (
+                <PaginationBar
+                  currentPage={pagination.currentPage}
+                  totalPages={pagination.totalPages}
+                  totalItems={pagination.totalItems}
+                  startRecord={pagination.startRecord}
+                  endRecord={pagination.endRecord}
+                  itemLabel="entries"
+                  onPageChange={setCurrentPage}
+                />
+              ) : null
+            }
+          />
+        </div>
       </div>
     </DashboardShell>
   );

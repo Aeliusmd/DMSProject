@@ -1531,6 +1531,7 @@ function ServeInfoForm({
         label="Specific Doctor"
         name="specificDoctor"
         value={formData.specificDoctor}
+        facilityId={formData.facility}
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Doctor name"

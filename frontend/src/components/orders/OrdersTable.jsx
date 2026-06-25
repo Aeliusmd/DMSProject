@@ -58,7 +58,6 @@ import {
 } from "@/lib/orders/paymentUtils";
 import {
   deriveDisplayOrderStatus,
-  getOrderAgeDate,
   resolveRushLabel,
   RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
@@ -69,6 +68,7 @@ const ORDERS_PER_PAGE = 6;
 
 const defaultOrderFilters = {
   facility: "",
+  company: "",
   year: "",
   period: "",
   status: "",
@@ -251,7 +251,10 @@ function toRenderOrder(order) {
     orderStatus: order.status || "",
     displayOrderStatus:
       order.displayStatus ||
-      deriveDisplayOrderStatus(order.status, getOrderAgeDate(order)),
+      deriveDisplayOrderStatus(
+        order.status,
+        order.createdAt || order.created_at
+      ),
     rushLabel: resolveRushLabel(order) || "",
     isSubpoena: Boolean(order.isSubpoena),
     isRecords: Boolean(order.isRecords),
@@ -355,13 +358,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
 
   const normalizedFilters = {
     facility: filters.facility || "",
+    company: filters.company || "",
     year: filters.year || "",
     period: filters.period || "",
     status: filters.status || "",
     search: filters.search || "",
   };
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
 
   if (filterKey !== prevFilterKey) {
@@ -383,6 +387,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       try {
         const data = await getOrders({
           facility: normalizedFilters.facility,
+          company: normalizedFilters.company,
           year: normalizedFilters.year,
           period: normalizedFilters.period,
           status: normalizedFilters.status,
@@ -406,6 +411,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     },
     [
     normalizedFilters.facility,
+    normalizedFilters.company,
     normalizedFilters.year,
       normalizedFilters.period,
     normalizedFilters.status,

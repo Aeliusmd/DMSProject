@@ -2,6 +2,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
+const notificationService = require("../services/notificationService");
 
 function formatManagerName(manager) {
   return (
@@ -27,22 +28,38 @@ async function logOfficeManagerChanges(req, before, after) {
 
   for (const manager of after.officeManagers || []) {
     if (!beforeIds.has(manager.id)) {
+      const managerName = formatManagerName(manager);
+
       await activityLogService.recordFromRequest(req, {
         ...base,
         context: "facilities",
         action: "add_office_manager",
-        details: `Added office manager ${formatManagerName(manager)} to ${after.facilityName}`,
+        details: `Added office manager ${managerName} to ${after.facilityName}`,
+      });
+
+      await notificationService.notifyFacilityEvent({
+        title: "Office Manager Added",
+        description: `${managerName} added to ${after.facilityName}`,
+        facilityId: after.id,
       });
     }
   }
 
   for (const manager of before?.officeManagers || []) {
     if (!afterIds.has(manager.id)) {
+      const managerName = formatManagerName(manager);
+
       await activityLogService.recordFromRequest(req, {
         ...base,
         context: "facilities",
         action: "remove_office_manager",
-        details: `Removed office manager ${formatManagerName(manager)} from ${after.facilityName}`,
+        details: `Removed office manager ${managerName} from ${after.facilityName}`,
+      });
+
+      await notificationService.notifyFacilityEvent({
+        title: "Office Manager Removed",
+        description: `${managerName} removed from ${after.facilityName}`,
+        facilityId: after.id,
       });
     }
   }
@@ -69,6 +86,12 @@ exports.create = asyncHandler(async (req, res) => {
     details: `Created facility ${facility.facilityName}`,
   });
 
+  await notificationService.notifyFacilityEvent({
+    title: "Facility Created",
+    description: `New facility ${facility.facilityName} was added`,
+    facilityId: facility.id,
+  });
+
   await logOfficeManagerChanges(req, { officeManagers: [] }, facility);
 
   return ApiResponse.created(res, { facility }, "Facility created successfully");
@@ -90,6 +113,12 @@ exports.update = asyncHandler(async (req, res) => {
     details: `Updated facility ${facility.facilityName}`,
   });
 
+  await notificationService.notifyFacilityEvent({
+    title: "Facility Updated",
+    description: `${facility.facilityName} was updated`,
+    facilityId: facility.id,
+  });
+
   await logOfficeManagerChanges(req, before, facility);
 
   return ApiResponse.success(res, { facility }, "Facility updated successfully");
@@ -104,6 +133,12 @@ exports.remove = asyncHandler(async (req, res) => {
     context: "facilities",
     action: "delete",
     details: `Deleted facility ${facility?.facilityName || req.params.id}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Facility Deleted",
+    description: `${facility?.facilityName || "Facility"} was removed`,
+    facilityId: facility?.id || Number(req.params.id),
   });
 
   return ApiResponse.success(res, result, result.message);
@@ -123,6 +158,12 @@ exports.createDoctors = asyncHandler(async (req, res) => {
     details: `Added ${doctors.length} doctor(s) to ${facility.facilityName}`,
   });
 
+  await notificationService.notifyFacilityEvent({
+    title: "Doctors Added",
+    description: `${doctors.length} doctor(s) added to ${facility.facilityName}`,
+    facilityId: facility.id,
+  });
+
   return ApiResponse.created(res, { doctors }, "Doctors created successfully");
 });
 
@@ -138,6 +179,12 @@ exports.deactivateDoctor = asyncHandler(async (req, res) => {
     context: "facilities",
     action: "deactivate_doctor",
     details: `Deactivated doctor ${doctor.doctor} at ${facility.facilityName}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Doctor Deactivated",
+    description: `${doctor.doctor} deactivated at ${facility.facilityName}`,
+    facilityId: facility.id,
   });
 
   return ApiResponse.success(res, { doctor }, "Doctor deactivated successfully");
@@ -157,6 +204,12 @@ exports.reactivateDoctor = asyncHandler(async (req, res) => {
     details: `Re-activated doctor ${doctor.doctor} at ${facility.facilityName}`,
   });
 
+  await notificationService.notifyFacilityEvent({
+    title: "Doctor Reactivated",
+    description: `${doctor.doctor} reactivated at ${facility.facilityName}`,
+    facilityId: facility.id,
+  });
+
   return ApiResponse.success(res, { doctor }, "Doctor reactivated successfully");
 });
 
@@ -172,6 +225,12 @@ exports.setDefaultDoctor = asyncHandler(async (req, res) => {
     context: "facilities",
     action: "set_default_doctor",
     details: `Set ${doctor.doctor} as default doctor at ${facility.facilityName}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Default Doctor Updated",
+    description: `${doctor.doctor} set as default at ${facility.facilityName}`,
+    facilityId: facility.id,
   });
 
   return ApiResponse.success(res, { doctor }, "Default doctor updated");

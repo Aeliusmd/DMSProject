@@ -6,13 +6,11 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || "").trim());
 }
 
-function validateFacilityPayload(data, { requirePassword = true } = {}) {
+function validateFacilityPayload(data) {
   const errors = [];
 
   const facilityName = data.facilityName?.trim();
-  const userName = data.userName?.trim();
   const email = data.email?.trim();
-  const password = data.password;
   const zipCode = data.zipCode ?? data.zip;
   const state = data.state;
   const phone = data.phone;
@@ -20,19 +18,6 @@ function validateFacilityPayload(data, { requirePassword = true } = {}) {
 
   if (!facilityName) {
     errors.push({ field: "facilityName", message: "Facility name is required" });
-  }
-
-  if (!userName) {
-    errors.push({ field: "userName", message: "User name is required" });
-  }
-
-  if (requirePassword && !password) {
-    errors.push({ field: "password", message: "Password is required" });
-  } else if (password && password.length < 8) {
-    errors.push({
-      field: "password",
-      message: "Password must be at least 8 characters",
-    });
   }
 
   if (!email) {

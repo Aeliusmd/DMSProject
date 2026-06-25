@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import PaginationBar, {
+  DEFAULT_PAGE_SIZE,
+  paginateItems,
+} from "@/components/ui/PaginationBar";
 
 export default function ActivityLogModal({
   isOpen,
@@ -16,6 +20,7 @@ export default function ActivityLogModal({
 }) {
   const mounted = useIsClient();
   const [searchValue, setSearchValue] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const openSession = isOpen ? "open" : null;
   const [prevOpenSession, setPrevOpenSession] = useState(null);
 
@@ -24,6 +29,7 @@ export default function ActivityLogModal({
 
     if (openSession) {
       setSearchValue("");
+      setCurrentPage(1);
     }
   }
 
@@ -53,6 +59,15 @@ export default function ActivityLogModal({
       );
     });
   }, [logs, searchValue]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchValue, logs]);
+
+  const pagination = useMemo(
+    () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
+    [filteredLogs, currentPage]
+  );
 
   if (!mounted || !isOpen) return null;
 
@@ -144,7 +159,7 @@ export default function ActivityLogModal({
 
               {!loading &&
                 !error &&
-                filteredLogs.map((log) => (
+                pagination.items.map((log) => (
                 <tr
                   key={log.id || `${log.date}-${log.callback}-${log.note}`}
                   className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
@@ -181,11 +196,15 @@ export default function ActivityLogModal({
           </table>
         </div>
 
-        <div className="shrink-0 border-t border-[#F1F5F9] bg-white px-5 py-3">
-          <p className="text-[11px] text-[#94A3B8]">
-            Showing {filteredLogs.length} of {logs.length} entries
-          </p>
-        </div>
+        <PaginationBar
+          currentPage={pagination.currentPage}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.totalItems}
+          startRecord={pagination.startRecord}
+          endRecord={pagination.endRecord}
+          itemLabel="entries"
+          onPageChange={setCurrentPage}
+        />
       </section>
     </div>,
     document.body

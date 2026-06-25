@@ -127,8 +127,16 @@ exports.getAll = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { orders });
 });
 
+exports.getFilterCompanies = asyncHandler(async (req, res) => {
+  const companies = await orderService.getOrderFilterCompanies();
+  return ApiResponse.success(res, { companies });
+});
+
 exports.searchDoctors = asyncHandler(async (req, res) => {
-  const doctors = await orderService.searchOrderDoctors(req.query.q);
+  const doctors = await orderService.searchOrderDoctors(
+    req.query.q,
+    req.query.facility
+  );
   return ApiResponse.success(res, { doctors });
 });
 

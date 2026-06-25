@@ -1,4 +1,6 @@
-import { request } from "@/lib/auth/authApi";
+import { request, ApiRequestError } from "@/lib/auth/authApi";
+import { getAccessToken } from "@/lib/auth/authStorage";
+import { API_BASE_URL } from "@/config/api";
 
 function buildOrdersReportQuery(filters = {}) {
   const params = new URLSearchParams();
@@ -59,4 +61,52 @@ export async function getActivityReport(filters = {}) {
     companies: data?.data?.companies || [],
     summary: data?.data?.summary || { facilityCount: 0, totalCases: 0 },
   };
+}
+
+export async function downloadActivityReportPdf(filters = {}) {
+  const params = new URLSearchParams();
+
+  if (filters.reportDate) params.set("dateFrom", filters.reportDate);
+  if (filters.throughDate) params.set("dateTo", filters.throughDate);
+  if (filters.facilityId && filters.facilityId !== "all") {
+    params.set("facilityId", String(filters.facilityId));
+  }
+  if (filters.facilityLabel) {
+    params.set("facilityLabel", filters.facilityLabel);
+  }
+  if (filters.activity && filters.activity !== "All") {
+    params.set("activity", filters.activity);
+  }
+  if (filters.search?.trim()) {
+    params.set("search", filters.search.trim());
+  }
+
+  const query = params.toString();
+  const token = getAccessToken();
+  const response = await fetch(
+    `${API_BASE_URL}/reports/activity/export${query ? `?${query}` : ""}`,
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }
+  );
+
+  if (!response.ok) {
+    let message = "Failed to export activity report PDF";
+    try {
+      const body = await response.json();
+      message = body?.message || message;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new ApiRequestError(message, response.status);
+  }
+
+  const blob = await response.blob();
+  const fileName =
+    response.headers
+      .get("Content-Disposition")
+      ?.match(/filename="?([^"]+)"?/)?.[1] ||
+    `activity-report-${filters.reportDate || "all"}-${filters.throughDate || "all"}.pdf`;
+
+  return { blob, fileName };
 }

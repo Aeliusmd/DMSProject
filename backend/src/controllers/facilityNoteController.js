@@ -3,6 +3,7 @@ const ApiResponse = require("../utils/ApiResponse");
 const facilityNoteService = require("../services/facilityNoteService");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
+const notificationService = require("../services/notificationService");
 
 exports.listNotes = asyncHandler(async (req, res) => {
   const notes = await facilityNoteService.getNotes(req.params.id);
@@ -21,9 +22,15 @@ exports.createNote = asyncHandler(async (req, res) => {
     facilityId: Number(req.params.id),
     companyName: facility.facilityName,
     targetEmployeeId: req.user?.id,
-    context: "facilities",
+    context: "notes",
     action: "create_note",
     details: `Added note to facility ${facility.facilityName}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Facility Note Added",
+    description: `New note on ${facility.facilityName}`,
+    facilityId: facility.id,
   });
 
   return ApiResponse.created(res, { note }, "Note created successfully");

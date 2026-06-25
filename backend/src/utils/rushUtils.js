@@ -1,10 +1,17 @@
-/** Rush 1 = 2 weeks, Rush 2 = 3 weeks, Rush 3 = 4+ weeks since order created. */
-const RUSH_1_MIN_DAYS = 14;
-const RUSH_2_MIN_DAYS = 21;
-const RUSH_3_MIN_DAYS = 28;
+/**
+ * Rush levels are based on order created_at (calendar days, local date).
+ * Rush 1: creation through 14 days (inclusive)
+ * Rush 2: more than 14 days and up to 21 days (inclusive)
+ * Rush 3: more than 21 days
+ */
+const RUSH_1_MAX_DAYS = 14;
+const RUSH_2_MAX_DAYS = 21;
 
-/** Active orders at Rush 2+ are treated as Ready (matches deriveDisplayOrderStatus). */
-const RUSH_READY_MIN_DAYS = RUSH_2_MIN_DAYS;
+/** Active orders past Rush 1 are treated as Ready (matches deriveDisplayOrderStatus). */
+const RUSH_READY_MIN_DAYS = RUSH_1_MAX_DAYS + 1;
+
+const ORDER_AGE_SQL = "DATE(created_at)";
+const ORDER_AGE_SQL_ALIAS = "DATE(o.created_at)";
 
 function parseDateOnly(value) {
   if (!value) return null;
@@ -37,51 +44,47 @@ function toLocalOrderDate(value) {
 }
 
 function getOrderAgeDays(createdAt) {
-  const created = toLocalOrderDate(createdAt);
-  if (!created) return null;
+  const reference = toLocalOrderDate(createdAt);
+  if (!reference) return null;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   const diffDays = Math.floor(
-    (today.getTime() - created.getTime()) / (1000 * 60 * 60 * 24)
+    (today.getTime() - reference.getTime()) / (1000 * 60 * 60 * 24)
   );
 
   return diffDays < 0 ? null : diffDays;
 }
 
-/** Rush based on order age (created_at) — matches orders list / dashboard. */
 function calculateOrderRushLevel(createdAt) {
   const diffDays = getOrderAgeDays(createdAt);
   if (diffDays == null) {
     return { level: null, label: null };
   }
 
-  if (diffDays >= RUSH_3_MIN_DAYS) {
+  if (diffDays > RUSH_2_MAX_DAYS) {
     return { level: 3, label: "Rush 3" };
   }
 
-  if (diffDays >= RUSH_2_MIN_DAYS) {
+  if (diffDays > RUSH_1_MAX_DAYS) {
     return { level: 2, label: "Rush 2" };
   }
 
-  if (diffDays >= RUSH_1_MIN_DAYS) {
-    return { level: 1, label: "Rush 1" };
-  }
-
-  return { level: null, label: null };
+  return { level: 1, label: "Rush 1" };
 }
 
-/** @deprecated Use calculateOrderRushLevel — rush is based on order created date. */
+/** @deprecated Use calculateOrderRushLevel */
 function calculateRushLevel(createdAt) {
   return calculateOrderRushLevel(createdAt).label;
 }
 
 module.exports = {
-  RUSH_1_MIN_DAYS,
-  RUSH_2_MIN_DAYS,
-  RUSH_3_MIN_DAYS,
+  RUSH_1_MAX_DAYS,
+  RUSH_2_MAX_DAYS,
   RUSH_READY_MIN_DAYS,
+  ORDER_AGE_SQL,
+  ORDER_AGE_SQL_ALIAS,
   calculateOrderRushLevel,
   calculateRushLevel,
   parseDateOnly,

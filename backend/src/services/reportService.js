@@ -382,7 +382,37 @@ async function getActivityReport({
   };
 }
 
+async function getActivityReportPdf(options = {}) {
+  const report = await getActivityReport(options);
+  const { generateActivityReportPdf } = require("../utils/activityReportPdf");
+
+  const pdfBuffer = await generateActivityReportPdf(report, {
+    dateFrom: options.dateFrom || null,
+    dateTo: options.dateTo || null,
+    facilityLabel: options.facilityLabel || "All Facilities",
+    activity: options.activity || "All",
+    search: options.search || "",
+    generatedAt: new Date(),
+  });
+
+  return {
+    pdfBuffer,
+    fileName: buildActivityReportFileName(options),
+    report,
+  };
+}
+
+function buildActivityReportFileName({
+  dateFrom = null,
+  dateTo = null,
+} = {}) {
+  const fromPart = dateFrom || "all";
+  const toPart = dateTo || "all";
+  return `activity-report-${fromPart}-${toPart}.pdf`;
+}
+
 module.exports = {
   getOrdersReport,
   getActivityReport,
+  getActivityReportPdf,
 };

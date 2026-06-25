@@ -13,6 +13,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", orderController.getAll);
+router.get("/companies", orderController.getFilterCompanies);
 router.get("/stats", orderController.getStats);
 router.get("/reminders/due-today", orderController.getDueRemindersToday);
 router.get("/reminders", orderController.getReminders);

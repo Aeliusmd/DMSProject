@@ -10,8 +10,6 @@ import { ApiRequestError } from "@/lib/auth/authApi";
 const initialFormData = {
   facilityName: "",
   parentCompany: "Smith & Associates",
-  userName: "",
-  password: "",
   firstName: "",
   middleName: "",
   lastName: "",
@@ -154,8 +152,6 @@ export default function NewFacilityPage() {
     try {
       await createFacility({
         facilityName: formData.facilityName,
-        userName: formData.userName,
-        password: formData.password,
         firstName: formData.firstName,
         middleName: formData.middleName,
         lastName: formData.lastName,
@@ -239,27 +235,6 @@ export default function NewFacilityPage() {
                     "Brown Family Trust",
                   ]}
                 /> */}
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <FacilityField
-                  label="User Name"
-                  name="userName"
-                  value={formData.userName}
-                  onChange={handleChange}
-                  error={getError("userName")}
-                  required
-                />
-
-                <FacilityField
-                  label="Password"
-                  name="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  type="password"
-                  error={getError("password")}
-                  required
-                />
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -594,16 +569,6 @@ function validateFacilityForm(data, managers) {
     errors.facilityName = "Facility name is required";
   }
 
-  if (!data.userName.trim()) {
-    errors.userName = "User name is required";
-  }
-
-  if (!data.password.trim()) {
-    errors.password = "Password is required";
-  } else if (data.password.length < 8) {
-    errors.password = "Password must be at least 8 characters";
-  }
-
   if (!data.email.trim()) {
     errors.email = "Email is required";
   } else if (!isValidEmail(data.email)) {
@@ -642,13 +607,7 @@ function validateFacilityForm(data, managers) {
 function validateFacilityField(field, value) {
   if (!value.trim()) {
     if (field === "facilityName") return "Facility name is required";
-    if (field === "userName") return "User name is required";
-    if (field === "password") return "Password is required";
     if (field === "email") return "Email is required";
-  }
-
-  if (field === "password" && value && value.length < 8) {
-    return "Password must be at least 8 characters";
   }
 
   if (field === "email" && value && !isValidEmail(value)) {
