@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 import {
@@ -10,7 +11,12 @@ import {
   writeOffInvoices as submitWriteOffInvoices,
 } from "@/lib/invoices/invoiceApi";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
-import { canSendInvoice, canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
+import {
+  canSendInvoice,
+  canWriteOffInvoice,
+  handleMissingProviderEmail,
+  isNoProviderEmailError,
+} from "@/lib/invoices/invoiceUtils";
 
 function buildWriteOffInvoice(group, row) {
   return {
@@ -35,6 +41,7 @@ export default function InvoiceReportTable({
   invoiceType = "invoice",
   enableWriteOff = true,
 }) {
+  const router = useRouter();
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
@@ -100,6 +107,13 @@ export default function InvoiceReportTable({
 
     if (invoiceType === "xray" ? !orderIds.length : !invoiceIds.length) return;
 
+    const redirectOrderId = orderIds[0] || selectedInvoiceRows[0]?.orderId;
+
+    if (!group.emails?.trim()) {
+      handleMissingProviderEmail(redirectOrderId, router);
+      return;
+    }
+
     setSending(true);
     setSendError("");
 
@@ -116,6 +130,11 @@ export default function InvoiceReportTable({
       onRefresh?.();
       onSent?.();
     } catch (error) {
+      if (isNoProviderEmailError(error)) {
+        handleMissingProviderEmail(redirectOrderId, router);
+        return;
+      }
+
       setSendError(error?.message || "Failed to send invoices");
       console.error("Failed to send invoices:", error);
     } finally {
