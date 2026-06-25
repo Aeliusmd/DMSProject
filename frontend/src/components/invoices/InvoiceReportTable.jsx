@@ -50,7 +50,7 @@ export default function InvoiceReportTable({
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
-  const [sending, setSending] = useState(false);
+  const [sendingCompany, setSendingCompany] = useState(null);
   const [resendingId, setResendingId] = useState(null);
   const [sendError, setSendError] = useState("");
   const [writeOffError, setWriteOffError] = useState("");
@@ -89,7 +89,7 @@ export default function InvoiceReportTable({
       (row) => selectedIds.includes(row.id) && canProcessRow(row)
     );
 
-    if (!selectedInvoiceRows.length || sending || resendingId) {
+    if (!selectedInvoiceRows.length || sendingCompany || resendingId) {
       if (selectedIds.length && !selectedInvoiceRows.length) {
         setSendError(
           isResendMode
@@ -122,7 +122,7 @@ export default function InvoiceReportTable({
       return;
     }
 
-    setSending(true);
+    setSendingCompany(group.company);
     setSendError("");
 
     try {
@@ -159,12 +159,12 @@ export default function InvoiceReportTable({
         error
       );
     } finally {
-      setSending(false);
+      setSendingCompany(null);
     }
   };
 
   const handleResendSingleInvoice = async (group, row) => {
-    if (!canResendInvoice(row) || sending || resendingId) return;
+    if (!canResendInvoice(row) || sendingCompany || resendingId) return;
 
     const invoiceId = Number(row.invoiceId);
     const orderId = Number(row.orderId);
@@ -329,7 +329,7 @@ export default function InvoiceReportTable({
                     group={group}
                     selectedIds={selectedIds}
                     allSelected={allSelected}
-                    sending={sending}
+                    sendingCompany={sendingCompany}
                     resendingId={resendingId}
                     mode={mode}
                     onToggleRow={handleToggleRow}
@@ -392,7 +392,7 @@ function InvoiceGroup({
   group,
   selectedIds,
   allSelected,
-  sending,
+  sendingCompany = null,
   resendingId = null,
   mode = "send",
   onToggleRow,
@@ -405,6 +405,8 @@ function InvoiceGroup({
   enableWriteOff = true,
 }) {
   const isResendMode = mode === "resend";
+  const isGroupSending = sendingCompany === group.company;
+  const isBlocked = Boolean(sendingCompany) || Boolean(resendingId);
   const canProcessRow = isResendMode ? canResendInvoice : canSendInvoice;
   const hasProcessableSelected = group.rows.some(
     (row) => selectedIds.includes(row.id) && canProcessRow(row)
@@ -441,7 +443,7 @@ function InvoiceGroup({
           checked={selectedIds.includes(row.id)}
           mode={mode}
           resendingId={resendingId}
-          sending={sending}
+          sendingCompany={sendingCompany}
           onToggleRow={onToggleRow}
           onOpenInvoiceModal={onOpenInvoiceModal}
           onOpenSingleWriteOffModal={onOpenSingleWriteOffModal}
@@ -464,15 +466,17 @@ function InvoiceGroup({
 
             <button
               type="button"
-              disabled={!hasProcessableSelected || sending || Boolean(resendingId)}
+              disabled={!hasProcessableSelected || isBlocked}
               onClick={() => onBulkAction(group)}
               className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
-                hasProcessableSelected && !sending
+                isGroupSending
+                  ? "bg-[#0097B2] text-white"
+                  : hasProcessableSelected && !isBlocked
                   ? "bg-[#0097B2] text-white hover:bg-[#0086A0]"
                   : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
               }`}
             >
-              {sending
+              {isGroupSending
                 ? isResendMode
                   ? "Resending..."
                   : "Sending..."
@@ -522,7 +526,7 @@ function InvoiceRow({
   checked,
   mode = "send",
   resendingId = null,
-  sending = false,
+  sendingCompany = null,
   onToggleRow,
   onOpenInvoiceModal,
   onOpenSingleWriteOffModal,
@@ -531,6 +535,7 @@ function InvoiceRow({
 }) {
   const isResendMode = mode === "resend";
   const isResending = resendingId === row.id;
+  const isBlocked = Boolean(sendingCompany) || (Boolean(resendingId) && !isResending);
   const rowClassName = row.isWrittenOff
     ? "border-b border-[#F1F5F9] bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
     : "border-b border-[#F1F5F9] bg-white hover:bg-[#F8FAFC]";
@@ -606,7 +611,7 @@ function InvoiceRow({
         {isResendMode && (
           <button
             type="button"
-            disabled={isResending || sending || !canResendInvoice(row)}
+            disabled={isResending || isBlocked || !canResendInvoice(row)}
             onClick={() => onResendSingle(group, row)}
             className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
           >
