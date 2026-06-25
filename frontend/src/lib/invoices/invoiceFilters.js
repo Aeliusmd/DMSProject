@@ -67,6 +67,52 @@ export function filterResendInvoices(invoices = [], orderIdQuery = "") {
   return invoices.filter((invoice) => matchesOrderIdFilter(invoice, orderIdQuery));
 }
 
+export function groupResendInvoices(invoices = []) {
+  const groups = new Map();
+
+  invoices.forEach((invoice) => {
+    const company = invoice.company || "Unknown Company";
+    const row = {
+      id: String(invoice.id),
+      invoiceId: invoice.invoiceId || invoice.id,
+      orderId: invoice.orderId,
+      caseNo: invoice.caseNo,
+      applicant: invoice.applicant,
+      isSent: invoice.isSent,
+      sentDate: invoice.sentDate,
+      days: invoice.days,
+      invDate: invoice.invoiceDate,
+      invoiced: invoice.invoiced,
+      paid: invoice.paid,
+      due: invoice.due,
+    };
+
+    if (!groups.has(company)) {
+      groups.set(company, {
+        company,
+        emails: invoice.email || "",
+        rows: [],
+        total: { invoiced: 0, paid: 0, due: 0 },
+      });
+    }
+
+    const group = groups.get(company);
+    group.rows.push(row);
+    group.total.invoiced += parseMoney(row.invoiced);
+    group.total.paid += parseMoney(row.paid);
+    group.total.due += parseMoney(row.due);
+  });
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    total: {
+      invoiced: formatMoney(group.total.invoiced),
+      paid: formatMoney(group.total.paid),
+      due: formatMoney(group.total.due),
+    },
+  }));
+}
+
 export function buildSummaryFromRows(rows = []) {
   const companies = new Set();
   let invoiced = 0;

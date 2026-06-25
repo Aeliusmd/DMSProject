@@ -36,9 +36,8 @@ class InvoiceXray {
     const db = connection || getPool();
 
     const [rows] = await db.execute(
-      `SELECT *
-       FROM invoice_xray_details
-       WHERE order_id = :orderId
+      `${XRAY_INVOICE_SELECT}
+       WHERE x.order_id = :orderId AND ${ORDER_VISIBLE}
        LIMIT 1`,
       { orderId }
     );

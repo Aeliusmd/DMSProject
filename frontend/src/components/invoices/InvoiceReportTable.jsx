@@ -6,12 +6,15 @@ import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 import {
+  resendInvoices,
+  resendXrayInvoices,
   sendInvoices,
   sendXrayInvoices,
   writeOffInvoices as submitWriteOffInvoices,
 } from "@/lib/invoices/invoiceApi";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import {
+  canResendInvoice,
   canSendInvoice,
   canWriteOffInvoice,
   handleMissingProviderEmail,
@@ -40,12 +43,15 @@ export default function InvoiceReportTable({
   onSent,
   invoiceType = "invoice",
   enableWriteOff = true,
+  mode = "send",
 }) {
+  const isResendMode = mode === "resend";
   const router = useRouter();
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
   const [sending, setSending] = useState(false);
+  const [resendingId, setResendingId] = useState(null);
   const [sendError, setSendError] = useState("");
   const [writeOffError, setWriteOffError] = useState("");
 
@@ -76,23 +82,25 @@ export default function InvoiceReportTable({
     });
   };
 
-  const handleSendInvoice = async (group) => {
+  const handleBulkInvoiceAction = async (group) => {
     const selectedIds = selectedRows[group.company] || [];
+    const canProcessRow = isResendMode ? canResendInvoice : canSendInvoice;
     const selectedInvoiceRows = group.rows.filter(
-      (row) => selectedIds.includes(row.id) && canSendInvoice(row)
+      (row) => selectedIds.includes(row.id) && canProcessRow(row)
     );
 
-    if (!selectedInvoiceRows.length || sending) {
+    if (!selectedInvoiceRows.length || sending || resendingId) {
       if (selectedIds.length && !selectedInvoiceRows.length) {
-        const selectedRows = group.rows.filter((row) =>
-          selectedIds.includes(row.id)
+        setSendError(
+          isResendMode
+            ? "Selected invoices cannot be resent."
+            : selectedIds.length &&
+                group.rows
+                  .filter((row) => selectedIds.includes(row.id))
+                  .every((row) => row.isSent)
+              ? "Selected invoices are already sent."
+              : "Selected invoices cannot be sent."
         );
-
-        if (selectedRows.every((row) => row.isSent)) {
-          setSendError("Selected invoices are already sent.");
-        } else {
-          setSendError("Selected invoices cannot be sent.");
-        }
       }
       return;
     }
@@ -118,11 +126,18 @@ export default function InvoiceReportTable({
     setSendError("");
 
     try {
-      if (invoiceType === "xray") {
+      if (isResendMode) {
+        if (invoiceType === "xray") {
+          await resendXrayInvoices(orderIds);
+        } else {
+          await resendInvoices(invoiceIds);
+        }
+      } else if (invoiceType === "xray") {
         await sendXrayInvoices(orderIds);
       } else {
         await sendInvoices(invoiceIds);
       }
+
       setSelectedRows((prev) => ({
         ...prev,
         [group.company]: [],
@@ -135,10 +150,57 @@ export default function InvoiceReportTable({
         return;
       }
 
-      setSendError(error?.message || "Failed to send invoices");
-      console.error("Failed to send invoices:", error);
+      setSendError(
+        error?.message ||
+          (isResendMode ? "Failed to resend invoices" : "Failed to send invoices")
+      );
+      console.error(
+        isResendMode ? "Failed to resend invoices:" : "Failed to send invoices:",
+        error
+      );
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleResendSingleInvoice = async (group, row) => {
+    if (!canResendInvoice(row) || sending || resendingId) return;
+
+    const invoiceId = Number(row.invoiceId);
+    const orderId = Number(row.orderId);
+    const hasTarget =
+      invoiceType === "xray"
+        ? Number.isFinite(orderId) && orderId > 0
+        : Number.isFinite(invoiceId) && invoiceId > 0;
+
+    if (!hasTarget) return;
+
+    if (!group.emails?.trim()) {
+      handleMissingProviderEmail(orderId || row.orderId, router);
+      return;
+    }
+
+    setResendingId(row.id);
+    setSendError("");
+
+    try {
+      if (invoiceType === "xray") {
+        await resendXrayInvoices([orderId]);
+      } else {
+        await resendInvoices([invoiceId]);
+      }
+
+      onRefresh?.();
+    } catch (error) {
+      if (isNoProviderEmailError(error)) {
+        handleMissingProviderEmail(orderId || row.orderId, router);
+        return;
+      }
+
+      setSendError(error?.message || "Failed to resend invoice");
+      console.error("Failed to resend invoice:", error);
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -236,7 +298,9 @@ export default function InvoiceReportTable({
                 <th className="w-[130px] px-4 py-3 text-right">Invoiced</th>
                 <th className="w-[130px] px-4 py-3 text-right">Paid</th>
                 <th className="w-[130px] px-4 py-3 text-right">Due</th>
-                <th className="w-[110px] px-4 py-3 text-right"></th>
+                <th className="w-[110px] px-4 py-3 text-right">
+                  {isResendMode ? "Action" : ""}
+                </th>
               </tr>
             </thead>
 
@@ -247,7 +311,7 @@ export default function InvoiceReportTable({
                     colSpan={9}
                     className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
                   >
-                    Loading invoices...
+                    Loading {isResendMode ? "resend" : ""} invoices...
                   </td>
                 </tr>
               )}
@@ -266,9 +330,12 @@ export default function InvoiceReportTable({
                     selectedIds={selectedIds}
                     allSelected={allSelected}
                     sending={sending}
+                    resendingId={resendingId}
+                    mode={mode}
                     onToggleRow={handleToggleRow}
                     onToggleGroup={handleToggleGroup}
-                    onSendInvoice={handleSendInvoice}
+                    onBulkAction={handleBulkInvoiceAction}
+                    onResendSingle={handleResendSingleInvoice}
                     onWriteoffInvoice={handleWriteoffInvoice}
                     onOpenInvoiceModal={handleOpenInvoiceModal}
                     onOpenSingleWriteOffModal={handleOpenSingleWriteOffModal}
@@ -283,7 +350,7 @@ export default function InvoiceReportTable({
                     colSpan={9}
                     className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
                   >
-                    No outstanding invoices found.
+                    No {isResendMode ? "resend" : "outstanding"} invoices found.
                   </td>
                 </tr>
               )}
@@ -326,16 +393,21 @@ function InvoiceGroup({
   selectedIds,
   allSelected,
   sending,
+  resendingId = null,
+  mode = "send",
   onToggleRow,
   onToggleGroup,
-  onSendInvoice,
+  onBulkAction,
+  onResendSingle,
   onWriteoffInvoice,
   onOpenInvoiceModal,
   onOpenSingleWriteOffModal,
   enableWriteOff = true,
 }) {
-  const hasSendableSelected = group.rows.some(
-    (row) => selectedIds.includes(row.id) && canSendInvoice(row)
+  const isResendMode = mode === "resend";
+  const canProcessRow = isResendMode ? canResendInvoice : canSendInvoice;
+  const hasProcessableSelected = group.rows.some(
+    (row) => selectedIds.includes(row.id) && canProcessRow(row)
   );
   const hasWritableSelected = group.rows.some(
     (row) => selectedIds.includes(row.id) && canWriteOffInvoice(row)
@@ -367,9 +439,13 @@ function InvoiceGroup({
           group={group}
           row={row}
           checked={selectedIds.includes(row.id)}
+          mode={mode}
+          resendingId={resendingId}
+          sending={sending}
           onToggleRow={onToggleRow}
           onOpenInvoiceModal={onOpenInvoiceModal}
           onOpenSingleWriteOffModal={onOpenSingleWriteOffModal}
+          onResendSingle={onResendSingle}
           enableWriteOff={enableWriteOff}
         />
       ))}
@@ -388,15 +464,21 @@ function InvoiceGroup({
 
             <button
               type="button"
-              disabled={!hasSendableSelected || sending}
-              onClick={() => onSendInvoice(group)}
+              disabled={!hasProcessableSelected || sending || Boolean(resendingId)}
+              onClick={() => onBulkAction(group)}
               className={`h-[30px] whitespace-nowrap rounded-[6px] px-4 text-[11px] font-semibold transition ${
-                hasSendableSelected && !sending
+                hasProcessableSelected && !sending
                   ? "bg-[#0097B2] text-white hover:bg-[#0086A0]"
                   : "cursor-not-allowed bg-[#EFF6FF] text-[#94A3B8]"
               }`}
             >
-              {sending ? "Sending..." : "Send Invoice"}
+              {sending
+                ? isResendMode
+                  ? "Resending..."
+                  : "Sending..."
+                : isResendMode
+                  ? "Resend Invoice"
+                  : "Send Invoice"}
             </button>
 
             {enableWriteOff && (
@@ -438,11 +520,17 @@ function InvoiceRow({
   group,
   row,
   checked,
+  mode = "send",
+  resendingId = null,
+  sending = false,
   onToggleRow,
   onOpenInvoiceModal,
   onOpenSingleWriteOffModal,
+  onResendSingle,
   enableWriteOff = true,
 }) {
+  const isResendMode = mode === "resend";
+  const isResending = resendingId === row.id;
   const rowClassName = row.isWrittenOff
     ? "border-b border-[#F1F5F9] bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
     : "border-b border-[#F1F5F9] bg-white hover:bg-[#F8FAFC]";
@@ -515,6 +603,17 @@ function InvoiceRow({
       </td>
 
       <td className="px-4 py-4 align-top text-right">
+        {isResendMode && (
+          <button
+            type="button"
+            disabled={isResending || sending || !canResendInvoice(row)}
+            onClick={() => onResendSingle(group, row)}
+            className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isResending ? "Sending..." : "Resend"}
+          </button>
+        )}
+
         {enableWriteOff && !row.isWrittenOff && (
           <button
             type="button"
