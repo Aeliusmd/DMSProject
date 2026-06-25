@@ -29,6 +29,7 @@ const INVOICE_SELECT = `
          o.applicant_first_name,
          o.applicant_middle_name,
          o.applicant_last_name,
+         o.provider_id,
          f.facility_name,
          f.email AS facility_email,
          p.email AS provider_email,
@@ -206,6 +207,87 @@ class Invoice {
       )`,
     ];
     const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("i.invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("i.invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY i.invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findByProviderId(providerId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      "i.status <> 'Needs Resend'",
+      "i.sent_date IS NULL",
+    ];
+    const params = {};
+
+    if (providerId) {
+      conditions.push("o.provider_id = :providerId");
+      params.providerId = providerId;
+    } else {
+      conditions.push("o.provider_id IS NULL");
+    }
+
+    if (filters.dateFrom) {
+      conditions.push("i.invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("i.invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY i.invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findResendByProviderId(providerId, filters = {}) {
+    const pool = getPool();
+    const conditions = [
+      ORDER_VISIBLE,
+      `(
+        i.status = 'Needs Resend'
+        OR (
+          i.sent_date IS NOT NULL
+          AND i.status <> 'Written Off'
+        )
+      )`,
+    ];
+    const params = {};
+
+    if (providerId) {
+      conditions.push("o.provider_id = :providerId");
+      params.providerId = providerId;
+    } else {
+      conditions.push("o.provider_id IS NULL");
+    }
 
     if (filters.dateFrom) {
       conditions.push("i.invoice_date >= :dateFrom");

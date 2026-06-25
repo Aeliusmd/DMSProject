@@ -252,6 +252,20 @@ function buildApplicantName(row) {
     .trim();
 }
 
+function getInvoiceCompanyId(row) {
+  const providerId = Number(row?.provider_id);
+  return Number.isFinite(providerId) && providerId > 0 ? providerId : 0;
+}
+
+function getInvoiceCompanyName(row) {
+  return (
+    trimOrNull(row?.provider_name) ||
+    trimOrNull(row?.serve_company_name) ||
+    trimOrNull(row?.facility_name) ||
+    "Unknown Company"
+  );
+}
+
 function formatOrderRecordTypesLabel(orderRow) {
   const raw = orderRow?.order_record_types || orderRow?.order_type || "";
   const types = `${raw}`
@@ -1152,7 +1166,7 @@ function mapXrayResendRow(row, orderPayments = []) {
     id: orderId || row.order_id,
     invoiceId: orderId,
     orderId,
-    company: row.facility_name || "",
+    company: getInvoiceCompanyName(row),
     email: getXrayRecipientEmail(row) || "",
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
@@ -1177,7 +1191,7 @@ function buildXraySummary(rows = [], paymentsByOrderId = {}) {
     const orderPayments = paymentsByOrderId[row.order_id] || [];
     const financials = resolveXrayRowFinancials(row, orderPayments);
 
-    if (row.facility_id) companies.add(row.facility_id);
+    companies.add(getInvoiceCompanyId(row));
     invoiced += financials.totalAmount;
     paid += financials.amountPaid;
     due += financials.amountDue;
@@ -1196,7 +1210,7 @@ function groupXrayOutstandingRows(rows = [], paymentsByOrderId = {}) {
   const groups = new Map();
 
   rows.forEach((row) => {
-    const company = row.facility_name || "Unknown Company";
+    const company = getInvoiceCompanyName(row);
     const orderPayments = paymentsByOrderId[row.order_id] || [];
     const mappedRow = mapXrayOutstandingRow(row, orderPayments);
     const financials = resolveXrayRowFinancials(row, orderPayments);
@@ -1262,7 +1276,7 @@ function mapResendRow(row, orderPayments = []) {
     id: invoiceDbId || row.id,
     invoiceId: invoiceDbId,
     orderId: row.order_id,
-    company: row.facility_name || "",
+    company: getInvoiceCompanyName(row),
     email: getInvoiceDisplayEmail(row),
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
@@ -1287,7 +1301,7 @@ function buildSummary(rows = [], paymentsByOrderId = {}) {
     const orderPayments = paymentsByOrderId[row.order_id] || [];
     const financials = resolveRowFinancials(row, orderPayments);
 
-    if (row.facility_id) companies.add(row.facility_id);
+    companies.add(getInvoiceCompanyId(row));
     invoiced += financials.totalAmount;
     paid += financials.amountPaid;
     due += financials.amountDue;
@@ -1306,7 +1320,7 @@ function groupOutstandingRows(rows = [], paymentsByOrderId = {}) {
   const groups = new Map();
 
   rows.forEach((row) => {
-    const company = row.facility_name || "Unknown Company";
+    const company = getInvoiceCompanyName(row);
     const orderPayments = paymentsByOrderId[row.order_id] || [];
     const mappedRow = mapOutstandingRow(row, orderPayments);
     const financials = resolveRowFinancials(row, orderPayments);
@@ -1740,12 +1754,12 @@ async function updateInvoice(id, body) {
 }
 
 function ensureCompanyEntry(companiesMap, row) {
-  const facilityId = row.facility_id;
+  const companyId = getInvoiceCompanyId(row);
 
-  if (!companiesMap.has(facilityId)) {
-    companiesMap.set(facilityId, {
-      id: facilityId,
-      company: row.facility_name || "Unknown Company",
+  if (!companiesMap.has(companyId)) {
+    companiesMap.set(companyId, {
+      id: companyId,
+      company: getInvoiceCompanyName(row),
       email: getInvoiceDisplayEmail(row),
       cases: 0,
       needsResend: 0,
@@ -1755,7 +1769,7 @@ function ensureCompanyEntry(companiesMap, row) {
     });
   }
 
-  return companiesMap.get(facilityId);
+  return companiesMap.get(companyId);
 }
 
 function accumulateCompanyFinancials(
@@ -1998,8 +2012,8 @@ function buildCompanyInvoiceList(standardRows = [], xrayRows = [], paymentsByOrd
     .map((entry) => entry.invoice);
 }
 
-async function getByCompany(facilityId, query = {}) {
-  const companyId = Number(facilityId);
+async function getByCompany(providerId, query = {}) {
+  const companyId = Number(providerId);
 
   if (!Number.isFinite(companyId)) {
     throw new ApiError(400, "Invalid company id");
@@ -2016,10 +2030,10 @@ async function getByCompany(facilityId, query = {}) {
     xrayOutstanding,
     xrayResend,
   ] = await Promise.all([
-    Invoice.findByFacilityId(companyId, dateFilters),
-    Invoice.findResendByFacilityId(companyId, dateFilters),
-    InvoiceXray.findByFacilityId(companyId, dateFilters),
-    InvoiceXray.findResendByFacilityId(companyId, dateFilters),
+    Invoice.findByProviderId(companyId, dateFilters),
+    Invoice.findResendByProviderId(companyId, dateFilters),
+    InvoiceXray.findByProviderId(companyId, dateFilters),
+    InvoiceXray.findResendByProviderId(companyId, dateFilters),
   ]);
 
   const standardRows = [...standardOutstanding, ...standardResend];
@@ -2071,7 +2085,7 @@ async function getByCompany(facilityId, query = {}) {
   return {
     company: {
       id: companyId,
-      name: referenceRow.facility_name || "Company",
+      name: getInvoiceCompanyName(referenceRow),
       email:
         getInvoiceDisplayEmail(referenceRow) ||
         getXrayRecipientEmail(referenceRow) ||

@@ -22,6 +22,7 @@ const XRAY_INVOICE_SELECT = `
          o.applicant_middle_name,
          o.applicant_last_name,
          o.facility_id,
+         o.provider_id,
          f.facility_name,
          f.email AS facility_email,
          p.email AS provider_email,
@@ -134,6 +135,74 @@ class InvoiceXray {
       "x.sent_date IS NOT NULL",
     ];
     const params = { facilityId };
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findByProviderId(providerId, filters = {}) {
+    const pool = getPool();
+    const conditions = [ORDER_VISIBLE, "x.sent_date IS NULL"];
+    const params = {};
+
+    if (providerId) {
+      conditions.push("o.provider_id = :providerId");
+      params.providerId = providerId;
+    } else {
+      conditions.push("o.provider_id IS NULL");
+    }
+
+    if (filters.dateFrom) {
+      conditions.push("x.xray_invoice_date >= :dateFrom");
+      params.dateFrom = filters.dateFrom;
+    }
+
+    if (filters.dateTo) {
+      conditions.push("x.xray_invoice_date <= :dateTo");
+      params.dateTo = filters.dateTo;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const [rows] = await pool.execute(
+      `${XRAY_INVOICE_SELECT}
+       ${whereClause}
+       ORDER BY x.xray_invoice_date DESC, o.order_number ASC`,
+      params
+    );
+
+    return rows;
+  }
+
+  static async findResendByProviderId(providerId, filters = {}) {
+    const pool = getPool();
+    const conditions = [ORDER_VISIBLE, "x.sent_date IS NOT NULL"];
+    const params = {};
+
+    if (providerId) {
+      conditions.push("o.provider_id = :providerId");
+      params.providerId = providerId;
+    } else {
+      conditions.push("o.provider_id IS NULL");
+    }
 
     if (filters.dateFrom) {
       conditions.push("x.xray_invoice_date >= :dateFrom");
