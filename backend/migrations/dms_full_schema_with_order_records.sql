@@ -351,6 +351,7 @@ CREATE TABLE order_notes (
   note            VARCHAR(1000)   NOT NULL,
   callback_date   DATE            NULL,
   attachment_path VARCHAR(500)    NULL,
+  is_called       TINYINT(1)      NOT NULL DEFAULT 0,
   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

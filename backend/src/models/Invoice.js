@@ -235,9 +235,7 @@ class Invoice {
     const [result] = await db.execute(
       `INSERT INTO invoices (
          invoice_number, order_id, facility_id, status,
-         invoice_date, service_date, sent_date,
-         served_amount, service_fee, custodian_fee, xray_fee,
-         mileage, parking, other_fee,
+         invoice_date, sent_date,
          page_count, per_page_amount,
          clerical_time_hours, clerical_hourly_rate, shipping_handling, storage_fee,
          total_amount, amount_paid, amount_due,
@@ -245,9 +243,7 @@ class Invoice {
          created_at, updated_at
        ) VALUES (
          :invoiceNumber, :orderId, :facilityId, :status,
-         :invoiceDate, :serviceDate, :sentDate,
-         :servedAmount, :serviceFee, :custodianFee, :xrayFee,
-         :mileage, :parking, :otherFee,
+         :invoiceDate, :sentDate,
          :pageCount, :perPageAmount,
          :clericalTimeHours, :clericalHourlyRate, :shippingHandling, :storageFee,
          :totalAmount, :amountPaid, :amountDue,
@@ -267,15 +263,7 @@ class Invoice {
       `UPDATE invoices SET
          status = :status,
          invoice_date = :invoiceDate,
-         service_date = :serviceDate,
          sent_date = :sentDate,
-         served_amount = :servedAmount,
-         service_fee = :serviceFee,
-         custodian_fee = :custodianFee,
-         xray_fee = :xrayFee,
-         mileage = :mileage,
-         parking = :parking,
-         other_fee = :otherFee,
          page_count = :pageCount,
          per_page_amount = :perPageAmount,
          clerical_time_hours = :clericalTimeHours,
