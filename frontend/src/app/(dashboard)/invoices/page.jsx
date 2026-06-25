@@ -5,20 +5,15 @@ import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
-import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
-import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import {
   buildSummaryFromOutstandingGroups,
   buildSummaryFromRows,
   countOutstandingRows,
   filterInvoiceGroups,
   filterResendInvoices,
+  groupResendInvoices,
 } from "@/lib/invoices/invoiceFilters";
-import {
-  getInvoices,
-  resendInvoices,
-  resendXrayInvoices,
-} from "@/lib/invoices/invoiceApi";
+import { getInvoices } from "@/lib/invoices/invoiceApi";
 
 const EMPTY_SUMMARY = {
   companies: 0,
@@ -139,11 +134,22 @@ export default function InvoicesPage() {
     () => filterResendInvoices(xrayResend.invoices, appliedOrderId),
     [xrayResend.invoices, appliedOrderId]
   );
+  const filteredResendGroups = useMemo(
+    () => groupResendInvoices(filteredResend),
+    [filteredResend]
+  );
+  const filteredXrayResendGroups = useMemo(
+    () => groupResendInvoices(filteredXrayResend),
+    [filteredXrayResend]
+  );
 
   const isXray = invoiceCategory === "xray";
   const currentOutstandingGroups = isXray
     ? filteredXrayOutstanding
     : filteredOutstanding;
+  const currentResendGroups = isXray
+    ? filteredXrayResendGroups
+    : filteredResendGroups;
   const currentResendInvoices = isXray ? filteredXrayResend : filteredResend;
 
   const currentOutstandingCount = isXray
@@ -257,11 +263,13 @@ export default function InvoicesPage() {
             enableWriteOff={!isXray}
           />
         ) : (
-          <ResendInvoicesPanel
-            invoices={currentResendInvoices}
+          <InvoiceReportTable
+            invoiceGroups={currentResendGroups}
             loading={loading}
             onRefresh={loadInvoices}
             invoiceType={isXray ? "xray" : "invoice"}
+            enableWriteOff={false}
+            mode="resend"
           />
         )}
       </div>
@@ -484,264 +492,6 @@ function SummaryItem({ label, value, green = false, red = false }) {
         {value}
       </p>
     </div>
-  );
-}
-
-function ResendInvoicesPanel({
-  invoices,
-  loading,
-  onRefresh,
-  invoiceType = "invoice",
-}) {
-  const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
-  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState([]);
-  const [resendingId, setResendingId] = useState(null);
-  const [resendError, setResendError] = useState("");
-
-  const allSelected =
-    invoices.length > 0 && selectedInvoiceIds.length === invoices.length;
-
-  const handleToggleAll = () => {
-    if (allSelected) {
-      setSelectedInvoiceIds([]);
-      return;
-    }
-
-    setSelectedInvoiceIds(invoices.map((invoice) => invoice.id));
-  };
-
-  const handleToggleInvoice = (invoiceId) => {
-    setSelectedInvoiceIds((prev) => {
-      if (prev.includes(invoiceId)) {
-        return prev.filter((id) => id !== invoiceId);
-      }
-
-      return [...prev, invoiceId];
-    });
-  };
-
-  const handleResendInvoice = async (invoice) => {
-    const targetId = Number(
-      invoiceType === "xray"
-        ? invoice.orderId || invoice.invoiceId || invoice.id
-        : invoice.invoiceId || invoice.id
-    );
-
-    if (!Number.isFinite(targetId) || resendingId) return;
-
-    setResendingId(invoice.id);
-    setResendError("");
-
-    try {
-      if (invoiceType === "xray") {
-        await resendXrayInvoices([targetId]);
-      } else {
-        await resendInvoices([targetId]);
-      }
-      onRefresh?.();
-    } catch (error) {
-      setResendError(error?.message || "Failed to resend invoice");
-    } finally {
-      setResendingId(null);
-    }
-  };
-
-  const handleOpenInvoiceModal = (invoice) => {
-    setSelectedInvoiceOrder({
-      id: invoice.caseNo,
-      dbId: invoice.orderId,
-      invoiceId: invoice.invoiceId || invoice.id,
-      applicant: invoice.applicant || invoice.caseNo,
-      court: "N/A",
-      company: {
-        name: invoice.company,
-      },
-      invoice: {
-        invoiceId: invoice.invoiceId || invoice.id,
-        date: invoice.invoiceDate,
-        sentDate: invoice.sentDate,
-        invoiced: invoice.invoiced,
-        paid: invoice.paid,
-        due: invoice.due,
-      },
-    });
-  };
-
-  return (
-    <>
-      {resendError && (
-        <p className="rounded-[6px] border border-red-200 bg-red-50 px-4 py-2 text-[12px] text-red-600">
-          {resendError}
-        </p>
-      )}
-
-      <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-        <div className="h-full max-h-[calc(100vh-330px)] overflow-auto">
-          <table className="w-full min-w-[1150px] border-collapse">
-            <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
-              <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
-                <th className="w-[48px] px-4 py-3">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={handleToggleAll}
-                    className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
-                  />
-                </th>
-                <th className="w-[230px] px-4 py-3">All Company</th>
-                <th className="w-[310px] px-4 py-3">Email</th>
-                <th className="w-[170px] px-4 py-3">Case</th>
-                <th className="w-[130px] px-4 py-3">Inv Date</th>
-                <th className="w-[130px] px-4 py-3">Invoiced</th>
-                <th className="w-[130px] px-4 py-3">Paid</th>
-                <th className="w-[130px] px-4 py-3">Due</th>
-                <th className="w-[120px] px-4 py-3 text-center">Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {loading && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
-                  >
-                    Loading resend invoices...
-                  </td>
-                </tr>
-              )}
-
-              {!loading &&
-                invoices.map((invoice) => {
-                  const isSelected = selectedInvoiceIds.includes(invoice.id);
-
-                  return (
-                    <tr
-                      key={invoice.id}
-                      className="border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-                    >
-                      <td className="px-4 py-4 align-middle">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleToggleInvoice(invoice.id)}
-                          className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
-                        />
-                      </td>
-
-                      <td className="px-4 py-4 align-middle">
-                        <p className="text-[12px] font-semibold text-[#111827]">
-                          {invoice.company}
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4 align-middle">
-                        <p className="max-w-[270px] truncate text-[12px] text-[#475569]">
-                          {invoice.email}
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4 align-middle">
-                        <div className="flex flex-wrap items-center gap-1 text-[12px]">
-                          <Link
-                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                              invoice.orderId
-                            )}`}
-                            className="font-semibold text-[#007F96] hover:underline"
-                          >
-                            {invoice.caseNo}
-                          </Link>
-
-                          {invoice.isSent ? (
-                            <span className="text-[#94A3B8]">(invoice sent)</span>
-                          ) : (
-                            <span className="text-[#94A3B8]">(not sent)</span>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenInvoiceModal(invoice)}
-                            className={`font-semibold hover:underline ${
-                              invoice.isSent ? "text-red-500" : "text-[#475569]"
-                            }`}
-                          >
-                            {invoice.sentDate}
-                          </button>
-
-                          <span className="text-[#64748B]">
-                            ({invoice.days} days)
-                          </span>
-                        </div>
-                      </td>
-
-                      <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenInvoiceModal(invoice)}
-                          className="text-[#475569] hover:text-[#007F96] hover:underline"
-                        >
-                          {invoice.invoiceDate}
-                        </button>
-                      </td>
-
-                      <td className="px-4 py-4 align-middle text-[12px] text-[#475569]">
-                        {invoice.invoiced}
-                      </td>
-
-                      <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#059669]">
-                        {invoice.paid}
-                      </td>
-
-                      <td className="px-4 py-4 align-middle text-[12px] font-semibold text-[#111827]">
-                        {invoice.due}
-                      </td>
-
-                      <td className="px-4 py-4 text-center align-middle">
-                        <button
-                          type="button"
-                          disabled={resendingId === invoice.id}
-                          onClick={() => handleResendInvoice(invoice)}
-                          className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {resendingId === invoice.id ? "Sending..." : "Resend"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-              {!loading && invoices.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-5 py-14 text-center text-[13px] text-[#94A3B8]"
-                  >
-                    No resend invoices found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {invoiceType === "xray" ? (
-        <CreateXrayInvoiceModal
-          isOpen={Boolean(selectedInvoiceOrder)}
-          order={selectedInvoiceOrder}
-          onClose={() => setSelectedInvoiceOrder(null)}
-          onSaved={onRefresh}
-        />
-      ) : (
-        <CreateInvoiceModal
-          isOpen={Boolean(selectedInvoiceOrder)}
-          mode="edit"
-          order={selectedInvoiceOrder}
-          onClose={() => setSelectedInvoiceOrder(null)}
-          onSaved={onRefresh}
-        />
-      )}
-    </>
   );
 }
 

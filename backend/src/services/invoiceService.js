@@ -268,6 +268,24 @@ function formatOrderRecordTypesLabel(orderRow) {
     .join(", ");
 }
 
+function withOrderRecordTypes(orderRow, sourceRow) {
+  if (!orderRow) {
+    return sourceRow || null;
+  }
+
+  const orderRecordTypes =
+    sourceRow?.order_record_types || orderRow?.order_record_types || "";
+
+  if (!orderRecordTypes) {
+    return orderRow;
+  }
+
+  return {
+    ...orderRow,
+    order_record_types: orderRecordTypes,
+  };
+}
+
 function resolveYourFileNumber(orderRow) {
   if (!orderRow) return "";
 
@@ -738,7 +756,9 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   return {
     customer: orderRow.serve_company_name || orderRow.provider_name || "",
     requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
-    yourFileNumber: resolveYourFileNumber(orderRow),
+    yourFileNumber: resolveYourFileNumber(
+      withOrderRecordTypes(orderRow, invoiceRow)
+    ),
     ourCaseNumber: orderRow.order_number || "",
     applicant: buildApplicantName(orderRow),
     feeLines,
@@ -797,7 +817,9 @@ function buildPrintXrayInvoicePdfData(xrayRow, orderRow, orderPayments = []) {
     customer: orderRow.provider_name || orderRow.serve_company_name || "",
     requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
     specificDoctor: orderRow.specific_doctor || "",
-    yourFileNumber: resolveYourFileNumber(orderRow),
+    yourFileNumber: resolveYourFileNumber(
+      withOrderRecordTypes(orderRow, xrayRow)
+    ),
     ourCaseNumber: orderRow.order_number || "",
     applicant: buildApplicantName(orderRow),
     dob: formatDobDisplay(orderRow.dob) || "",
