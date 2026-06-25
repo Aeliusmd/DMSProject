@@ -127,9 +127,9 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   const db = connection || getPool();
 
   const [invoiceRows] = await db.execute(
-    `SELECT id, custodian_fee, xray_fee, page_count, per_page_amount,
+    `SELECT id, page_count, per_page_amount,
             clerical_time_hours, clerical_hourly_rate, shipping_handling, storage_fee,
-            other_fee, total_amount, status, writeoff_amount
+            total_amount, status, writeoff_amount, amount_paid
      FROM invoices
      WHERE order_id = :orderId
      LIMIT 1`,
@@ -192,13 +192,6 @@ function getStorageFee(rowOrPayload = {}) {
   return toNumber(rowOrPayload.other_fee ?? rowOrPayload.other);
 }
 
-const LEGACY_INVOICE_AMOUNTS = {
-  servedAmount: 0,
-  serviceFee: 0,
-  mileage: 0,
-  parking: 0,
-  otherFee: 0,
-};
 
 function boolToInt(value) {
   if (typeof value === "string") {
@@ -505,10 +498,9 @@ function mapInvoiceDetail(row) {
     facilityName: row.facility_name || "",
     status: row.status,
     invoiceDate: toInputDate(row.invoice_date),
-    serviceDate: toInputDate(row.service_date),
     sentDate: toInputDate(row.sent_date),
-    custodianFee: toNumber(row.custodian_fee).toFixed(2),
-    xrayFee: toNumber(row.xray_fee).toFixed(2),
+    custodianFee: "0.00",
+    xrayFee: "0.00",
     storageFee: getStorageFee(row).toFixed(2),
     pages: String(row.page_count ?? 0),
     perPageAmount: toNumber(row.per_page_amount).toFixed(2),
@@ -1061,7 +1053,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
     paidAmount: formatMoney(financials.amountPaid),
     ...paymentsSummary,
     custodianFee: "0.00",
-    xrayFee: toNumber(row.xray_fee).toFixed(2),
+    xrayFee: xrayRow ? toNumber(xrayRow.payment).toFixed(2) : "0.00",
     storageFee: getStorageFee(row).toFixed(2),
     pages: String(row.page_count ?? 0),
     perPageAmount: toNumber(row.per_page_amount).toFixed(2),
@@ -1337,11 +1329,7 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
   return {
     status,
     invoiceDate: trimOrNull(body.invoiceDate),
-    serviceDate: trimOrNull(body.serviceDate),
     sentDate: existing?.sent_date || null,
-    ...LEGACY_INVOICE_AMOUNTS,
-    custodianFee: 0,
-    xrayFee: totals.xrayFee,
     pageCount: totals.pageCount,
     perPageAmount: totals.perPageAmount,
     clericalTimeHours: totals.clericalTimeHours,
@@ -1621,11 +1609,7 @@ async function createInvoice(body, userId) {
       facilityId: order.facility_id,
       status: invoicePayload.status,
       invoiceDate: invoicePayload.invoiceDate,
-      serviceDate: invoicePayload.serviceDate,
       sentDate: invoicePayload.sentDate,
-      ...LEGACY_INVOICE_AMOUNTS,
-      custodianFee: invoicePayload.custodianFee,
-      xrayFee: invoicePayload.xrayFee,
       pageCount: invoicePayload.pageCount,
       perPageAmount: invoicePayload.perPageAmount,
       clericalTimeHours: invoicePayload.clericalTimeHours,
@@ -1699,11 +1683,7 @@ async function updateInvoice(id, body) {
     await Invoice.update(connection, id, {
       status: invoicePayload.status,
       invoiceDate: invoicePayload.invoiceDate,
-      serviceDate: invoicePayload.serviceDate,
       sentDate: invoicePayload.sentDate,
-      ...LEGACY_INVOICE_AMOUNTS,
-      custodianFee: invoicePayload.custodianFee,
-      xrayFee: invoicePayload.xrayFee,
       pageCount: invoicePayload.pageCount,
       perPageAmount: invoicePayload.perPageAmount,
       clericalTimeHours: invoicePayload.clericalTimeHours,
