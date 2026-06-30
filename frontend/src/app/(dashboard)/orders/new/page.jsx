@@ -13,6 +13,7 @@ import ProviderSearchField from "@/components/orders/new-order/ProviderSearchFie
 import DoctorSearchField from "@/components/orders/new-order/DoctorSearchField";
 import DoctorAddressSearchField from "@/components/orders/new-order/DoctorAddressSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
+import SubpoenaExtractionOverlay from "@/components/orders/new-order/SubpoenaExtractionOverlay";
 import CertificateNoRecordsPanel from "@/components/orders/new-order/CertificateNoRecordsPanel";
 import RecordTypeMultiSelect from "@/components/orders/new-order/RecordTypeMultiSelect";
 
@@ -941,6 +942,8 @@ function NewOrderPageContent() {
           </CollapsibleOrderPanel>
         </div>
       </div>
+
+      <SubpoenaExtractionOverlay open={extractingSubpoena} />
     </DashboardShell>
   );
 }
@@ -1183,12 +1186,6 @@ function OrderDetailsForm({
         onChange={(e) => onFileChange(e, "subpoenaFile")}
         error={getError("subpoenaFile")}
       />
-
-      {extractingSubpoena && (
-        <p className="text-[12px] font-medium text-[#007F96]">
-          Extracting subpoena fields — please wait...
-        </p>
-      )}
 
       {extractError && (
         <p className="text-[12px] font-medium text-amber-600">{extractError}</p>
