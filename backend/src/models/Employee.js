@@ -6,7 +6,8 @@ class Employee {
 
     const [rows] = await pool.execute(
       `SELECT id, name, logon, email, password_hash, role, last_login_at,
-              is_terminated, deleted_at, created_at, updated_at
+              is_terminated, is_suspended, suspended_by, reactivated_date,
+              deleted_at, created_at, updated_at
        FROM matrix_employees
        WHERE email = :identifier OR logon = :identifier
        LIMIT 1`,
@@ -21,11 +22,13 @@ class Employee {
 
     const [rows] = await pool.execute(
       `SELECT id, name, logon, email, password_hash, role, last_login_at,
-              is_terminated, deleted_at, created_at, updated_at
+              is_terminated, is_suspended, suspended_by, reactivated_date,
+              deleted_at, created_at, updated_at
        FROM matrix_employees
        WHERE (email = :identifier OR logon = :identifier)
          AND deleted_at IS NULL
          AND (is_terminated = 0 OR is_terminated IS NULL)
+         AND (is_suspended = 0 OR is_suspended IS NULL)
        LIMIT 1`,
       { identifier }
     );
@@ -40,7 +43,8 @@ class Employee {
 
     const [rows] = await pool.execute(
       `SELECT id, name, logon, email, password_hash, role, last_login_at,
-              is_terminated, deleted_at, deleted_by, created_at, updated_at
+              is_terminated, is_suspended, suspended_by, reactivated_date,
+              deleted_at, deleted_by, created_at, updated_at
        FROM matrix_employees
        WHERE id = :id
          ${deletedClause}
@@ -65,7 +69,8 @@ class Employee {
 
     const [rows] = await pool.execute(
       `SELECT id, name, logon, email, role, last_login_at,
-              is_terminated, deleted_at, created_at, updated_at
+              is_terminated, is_suspended, suspended_by, reactivated_date,
+              deleted_at, created_at, updated_at
        FROM matrix_employees
        WHERE deleted_at IS NULL
        ORDER BY id DESC`
@@ -140,12 +145,64 @@ class Employee {
 
     await pool.execute(
       `UPDATE matrix_employees
-       SET is_terminated = 0, updated_at = NOW()
+       SET is_terminated = 0,
+           is_suspended = 0,
+           suspended_by = NULL,
+           reactivated_date = NULL,
+           updated_at = NOW()
        WHERE id = :id AND deleted_at IS NULL`,
       { id }
     );
 
     return this.findById(id, { includeDeleted: true });
+  }
+
+  static async suspend(id, { suspendedBy, reactivatedDate }) {
+    const pool = getPool();
+
+    await pool.execute(
+      `UPDATE matrix_employees
+       SET is_suspended = 1,
+           suspended_by = :suspendedBy,
+           reactivated_date = :reactivatedDate,
+           updated_at = NOW()
+       WHERE id = :id AND deleted_at IS NULL`,
+      { id, suspendedBy, reactivatedDate }
+    );
+
+    return this.findById(id, { includeDeleted: true });
+  }
+
+  static async unsuspend(id) {
+    const pool = getPool();
+
+    await pool.execute(
+      `UPDATE matrix_employees
+       SET is_suspended = 0,
+           suspended_by = NULL,
+           reactivated_date = NULL,
+           updated_at = NOW()
+       WHERE id = :id AND deleted_at IS NULL`,
+      { id }
+    );
+
+    return this.findById(id, { includeDeleted: true });
+  }
+
+  static async findSuspendedDueForReactivation() {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(
+      `SELECT id, name
+       FROM matrix_employees
+       WHERE is_suspended = 1
+         AND deleted_at IS NULL
+         AND (is_terminated = 0 OR is_terminated IS NULL)
+         AND reactivated_date IS NOT NULL
+         AND reactivated_date <= NOW()`
+    );
+
+    return rows;
   }
 
   static async softDelete(id, deletedBy) {

@@ -11,6 +11,25 @@ function isAdminRole(role) {
   return String(role || "").trim().toLowerCase() === "admin";
 }
 
+function parseReactivationDateTime(value) {
+  if (!value) return null;
+
+  const normalized = String(value).trim().replace(" ", "T");
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function toMySqlDateTime(date) {
+  const pad = (part) => String(part).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 function formatLastLogin(value) {
   if (!value) {
     return "Never";
@@ -32,6 +51,27 @@ function formatLastLogin(value) {
   });
 }
 
+function formatScheduledDateTime(value) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 function mapEmployeeRow(row) {
   return formatEmployee({
     id: row.id,
@@ -41,6 +81,8 @@ function mapEmployeeRow(row) {
     role: row.role,
     lastLogin: formatLastLogin(row.last_login_at),
     terminated: Boolean(row.is_terminated),
+    suspended: Boolean(row.is_suspended),
+    reactivatedDate: formatScheduledDateTime(row.reactivated_date),
   });
 }
 
@@ -111,13 +153,65 @@ async function activateEmployee(id) {
     throw new ApiError(404, "Employee not found");
   }
 
-  if (!employee.is_terminated) {
+  if (!employee.is_terminated && !employee.is_suspended) {
     throw new ApiError(400, "Employee is already active");
   }
 
   await Employee.activate(id);
 
   return mapEmployeeRow(await Employee.findById(id, { includeDeleted: true }));
+}
+
+async function suspendEmployee(id, actorId, reactivatedDate) {
+  if (Number(id) === Number(actorId)) {
+    throw new ApiError(400, "You cannot suspend your own account");
+  }
+
+  const employee = await Employee.findById(id);
+
+  if (!employee) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  if (employee.is_terminated) {
+    throw new ApiError(400, "Terminated employees cannot be suspended");
+  }
+
+  if (employee.is_suspended) {
+    throw new ApiError(400, "Employee is already suspended");
+  }
+
+  if (isAdminRole(employee.role)) {
+    throw new ApiError(400, "Admin accounts cannot be suspended");
+  }
+
+  const scheduledAt = parseReactivationDateTime(reactivatedDate);
+
+  if (!scheduledAt) {
+    throw new ApiError(400, "Invalid reactivation date and time");
+  }
+
+  if (scheduledAt.getTime() <= Date.now()) {
+    throw new ApiError(400, "Reactivation date and time must be in the future");
+  }
+
+  await Employee.suspend(id, {
+    suspendedBy: actorId,
+    reactivatedDate: toMySqlDateTime(scheduledAt),
+  });
+  await AuthSession.deleteAllByEmployeeId(id);
+
+  return mapEmployeeRow(await Employee.findById(id, { includeDeleted: true }));
+}
+
+async function processScheduledReactivations() {
+  const dueEmployees = await Employee.findSuspendedDueForReactivation();
+
+  for (const employee of dueEmployees) {
+    await Employee.unsuspend(employee.id);
+  }
+
+  return dueEmployees.length;
 }
 
 async function deleteEmployee(id, actorId) {
@@ -142,5 +236,7 @@ module.exports = {
   createEmployee,
   terminateEmployee,
   activateEmployee,
+  suspendEmployee,
   deleteEmployee,
+  processScheduledReactivations,
 };

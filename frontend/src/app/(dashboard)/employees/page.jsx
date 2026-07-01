@@ -13,6 +13,7 @@ import {
   createEmployee,
   deleteEmployee,
   getEmployees,
+  suspendEmployee,
   terminateEmployee,
 } from "@/lib/employees/employeeApi";
 
@@ -77,6 +78,14 @@ export default function EmployeesPage() {
     return updatedEmployee;
   };
 
+  const handleSuspendEmployee = async (employee, reactivatedDate) => {
+    const updatedEmployee = await suspendEmployee(employee.id, reactivatedDate);
+    setEmployees((prev) =>
+      prev.map((item) => (item.id === updatedEmployee.id ? updatedEmployee : item))
+    );
+    return updatedEmployee;
+  };
+
   const handleDeleteEmployee = async (employee) => {
     await deleteEmployee(employee.id);
     setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
@@ -129,6 +138,7 @@ export default function EmployeesPage() {
             onTerminateEmployee={handleTerminateEmployee}
             onDeleteEmployee={handleDeleteEmployee}
             onActivateEmployee={handleActivateEmployee}
+            onSuspendEmployee={handleSuspendEmployee}
           />
         )}
 

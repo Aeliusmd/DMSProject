@@ -35,6 +35,21 @@ async function login({ identifier, password, ipAddress, userAgent }) {
     );
   }
 
+  if (employee.is_suspended) {
+    const dueForReactivation =
+      employee.reactivated_date &&
+      new Date(employee.reactivated_date).getTime() <= Date.now();
+
+    if (dueForReactivation) {
+      await Employee.unsuspend(employee.id);
+    } else {
+      throw new ApiError(
+        403,
+        "Your account has been suspended. Please contact the administrator."
+      );
+    }
+  }
+
   const sessionToken = tokenService.generateSessionToken();
   const expiresAt = tokenService.getSessionExpiryDate(false);
 

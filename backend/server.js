@@ -6,6 +6,7 @@ const { connectDatabase } = require("./src/config/database");
 const { ensureUploadDirs } = require("./src/config/uploads");
 const { ensureFileServerReady } = require("./src/utils/fileStorage");
 const logger = require("./src/utils/logger");
+const { startEmployeeReactivationJob } = require("./src/jobs/employeeReactivationJob");
 
 const PORT = config.port;
 
@@ -29,6 +30,7 @@ async function startServer() {
 
     app.listen(PORT, () => {
       logger.info(`DMS API running in ${config.nodeEnv} mode on port ${PORT}`);
+      startEmployeeReactivationJob();
     });
   } catch (error) {
     logger.error("Failed to start server", { error: error.message });

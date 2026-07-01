@@ -30,6 +30,16 @@ export async function terminateEmployee(id) {
   return data?.data?.employee;
 }
 
+export async function suspendEmployee(id, reactivatedDate) {
+  const data = await request(`/employees/${id}/suspend`, {
+    method: "PATCH",
+    auth: true,
+    body: { reactivatedDate },
+  });
+
+  return data?.data?.employee;
+}
+
 export async function activateEmployee(id) {
   const data = await request(`/employees/${id}/activate`, {
     method: "PATCH",
