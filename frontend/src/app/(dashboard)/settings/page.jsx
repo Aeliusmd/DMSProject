@@ -261,12 +261,21 @@ export default function SettingsPage() {
         "Your password was changed successfully."
       );
     } catch (err) {
+      const mapped = {};
+
       if (err instanceof ApiRequestError && err.errors) {
-        const mapped = {};
         err.errors.forEach(({ field, message }) => {
           mapped[field] = message;
         });
-        setErrors(mapped);
+      } else if (
+        err instanceof ApiRequestError &&
+        /current password/i.test(err.message || "")
+      ) {
+        mapped.currentPassword = err.message;
+      }
+
+      if (Object.keys(mapped).length > 0) {
+        setErrors((prev) => ({ ...prev, ...mapped }));
       }
 
       showAlert(
@@ -379,6 +388,15 @@ export default function SettingsPage() {
                 value={passwordData.currentPassword}
                 onChange={handlePasswordChange}
                 error={errors.currentPassword}
+                inputProps={{
+                  autoComplete: "off",
+                  readOnly: true,
+                  onFocus: (event) => {
+                    event.target.removeAttribute("readonly");
+                  },
+                  "data-lpignore": "true",
+                  "data-1p-ignore": "true",
+                }}
               />
 
               <SettingsField
@@ -388,6 +406,7 @@ export default function SettingsPage() {
                 value={passwordData.newPassword}
                 onChange={handlePasswordChange}
                 error={errors.newPassword}
+                inputProps={{ autoComplete: "new-password" }}
               />
 
               <SettingsField
@@ -397,6 +416,7 @@ export default function SettingsPage() {
                 value={passwordData.confirmPassword}
                 onChange={handlePasswordChange}
                 error={errors.confirmPassword}
+                inputProps={{ autoComplete: "new-password" }}
               />
 
               <button
@@ -456,6 +476,7 @@ function SettingsField({
   onChange,
   type = "text",
   error = "",
+  inputProps = {},
 }) {
   return (
     <div>
@@ -468,6 +489,7 @@ function SettingsField({
         name={name}
         value={value}
         onChange={onChange}
+        {...inputProps}
         className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:bg-white focus:ring-2 ${
           error
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
