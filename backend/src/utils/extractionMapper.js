@@ -209,6 +209,7 @@ function mapSchemaToOrderHints(schema) {
     recordType: row.record_type,
     requestedRecord: row.requested_record,
     subpoenaDate: row.subpoena_date,
+    dateRequested: row.date_requested ? toInputDate(row.date_requested) : "",
     depoDueDate: row.depo_due_date,
     amount: row.amount,
     chequeDate: row.cheque_date,
@@ -226,6 +227,10 @@ function enrichOrderHintsFromRow(orderHints, row = {}) {
 
   if (persistedDoi && !hints.dateOfInjuryText) {
     hints.dateOfInjuryText = persistedDoi;
+  }
+
+  if (row.date_requested && !hints.dateRequested) {
+    hints.dateRequested = toInputDate(row.date_requested);
   }
 
   return hints;

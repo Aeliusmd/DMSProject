@@ -342,6 +342,10 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
   if (hints.doctorAddress) updates.fullAddress = hints.doctorAddress;
   if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
+  if (hints.dateRequested) {
+    updates.dateRequested =
+      parseSingleDateToInput(hints.dateRequested) || hints.dateRequested;
+  }
   if (hints.depoDueDate) updates.depoDueDate = hints.depoDueDate;
   if (hints.requestedRecord) updates.specificRecord = hints.requestedRecord;
   if (hints.amount) {
