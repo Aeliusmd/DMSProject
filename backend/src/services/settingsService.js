@@ -177,7 +177,12 @@ async function changePassword(employeeId, { currentPassword, newPassword }) {
   );
 
   if (!passwordMatches) {
-    throw new ApiError(400, "Current password is incorrect");
+    throw new ApiError(400, "Current password is incorrect", [
+      {
+        field: "currentPassword",
+        message: "Current password does not match",
+      },
+    ]);
   }
 
   if (currentPassword === newPassword) {

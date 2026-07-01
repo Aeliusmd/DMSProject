@@ -241,7 +241,7 @@ export default function MatrixEmployeesTable({
                 <th className="w-[260px] px-5 py-3">Email</th>
                 <th className="w-[150px] px-5 py-3">Role</th>
                 <th className="w-[170px] px-5 py-3">Last Login</th>
-                <th className="w-[170px] px-5 py-3 text-center">Status</th>
+                <th className="w-[130px] px-5 py-3 text-center">Status</th>
                 {!readOnly && (
                   <>
                     <th className="w-[140px] px-5 py-3 text-center">Action</th>
@@ -294,7 +294,7 @@ export default function MatrixEmployeesTable({
                   </td>
 
                   <td className="px-5 py-4 text-center">
-                    <div className="flex flex-col items-center gap-2">
+                    <div className="flex flex-col items-center gap-1">
                       {employee.terminated ? (
                         <span className="inline-flex h-[24px] items-center justify-center rounded-full bg-red-50 px-3 text-[11px] font-semibold text-red-500">
                           Terminated
@@ -314,11 +314,24 @@ export default function MatrixEmployeesTable({
                           Until {employee.reactivatedDate}
                         </span>
                       )}
+                    </div>
+                  </td>
 
-                      {!readOnly &&
-                        !employee.terminated &&
-                        !employee.suspended &&
-                        !isAdminRole(employee.role) && (
+                  {!readOnly && (
+                    <>
+                      <td className="px-5 py-4 text-center">
+                        {employee.terminated || employee.suspended ? (
+                          <button
+                            type="button"
+                            onClick={() => handleActivateEmployee(employee)}
+                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#86EFAC] bg-[#ECFDF5] px-3 text-[11px] font-semibold text-[#059669] hover:bg-[#DCFCE7]"
+                          >
+                            <ActivateIcon />
+                            Activate User
+                          </button>
+                        ) : isAdminRole(employee.role) ? (
+                          <span className="text-[11px] text-[#94A3B8]">—</span>
+                        ) : (
                           <div className="flex flex-col items-center gap-2">
                             <button
                               type="button"
@@ -348,24 +361,6 @@ export default function MatrixEmployeesTable({
                               Suspend
                             </button>
                           </div>
-                        )}
-                    </div>
-                  </td>
-
-                  {!readOnly && (
-                    <>
-                      <td className="px-5 py-4 text-center">
-                        {employee.terminated || employee.suspended ? (
-                          <button
-                            type="button"
-                            onClick={() => handleActivateEmployee(employee)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#86EFAC] bg-[#ECFDF5] px-3 text-[11px] font-semibold text-[#059669] hover:bg-[#DCFCE7]"
-                          >
-                            <ActivateIcon />
-                            Activate User
-                          </button>
-                        ) : (
-                          <span className="text-[11px] text-[#94A3B8]">—</span>
                         )}
                       </td>
 
