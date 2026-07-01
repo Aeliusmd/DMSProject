@@ -1,7 +1,7 @@
 /**
- * Completed-order delivery actions (Mail / Fax / Pickup).
+ * Completed-order delivery actions (Email / Fax / Pickup).
  * Shown when order status is Ready to Pickup (pending) or Completed (done).
- * ready_date stores the mail sent date or pickup date after completion.
+ * ready_date stores the email sent date or pickup date after completion.
  */
 export function getCompletedDeliveryActions(order) {
   const isDeliveryPhase =

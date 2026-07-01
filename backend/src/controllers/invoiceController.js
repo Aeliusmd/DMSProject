@@ -110,7 +110,9 @@ exports.update = asyncHandler(async (req, res) => {
 });
 
 exports.send = asyncHandler(async (req, res) => {
-  const result = await invoiceService.sendInvoices(req.body.invoiceIds);
+  const result = await invoiceService.sendInvoices(req.body.invoiceIds, {
+    emails: req.body.emails,
+  });
 
   await logBillingActivity(req, {
     action: "send_invoices",
@@ -126,7 +128,9 @@ exports.send = asyncHandler(async (req, res) => {
 });
 
 exports.resend = asyncHandler(async (req, res) => {
-  const result = await invoiceService.resendInvoices(req.body.invoiceIds);
+  const result = await invoiceService.resendInvoices(req.body.invoiceIds, {
+    emails: req.body.emails,
+  });
 
   await logBillingActivity(req, {
     action: "resend_invoices",
@@ -142,7 +146,9 @@ exports.resend = asyncHandler(async (req, res) => {
 });
 
 exports.sendXray = asyncHandler(async (req, res) => {
-  const result = await invoiceService.sendXrayInvoices(req.body.orderIds);
+  const result = await invoiceService.sendXrayInvoices(req.body.orderIds, {
+    emails: req.body.emails,
+  });
 
   await logBillingActivity(req, {
     action: "send_xray_invoices",
@@ -153,7 +159,9 @@ exports.sendXray = asyncHandler(async (req, res) => {
 });
 
 exports.resendXray = asyncHandler(async (req, res) => {
-  const result = await invoiceService.resendXrayInvoices(req.body.orderIds);
+  const result = await invoiceService.resendXrayInvoices(req.body.orderIds, {
+    emails: req.body.emails,
+  });
 
   await logBillingActivity(req, {
     action: "resend_xray_invoices",
@@ -187,7 +195,10 @@ exports.emailByOrder = asyncHandler(async (req, res) => {
 });
 
 exports.emailXrayByOrder = asyncHandler(async (req, res) => {
-  const result = await invoiceService.emailXrayInvoiceByOrderId(req.params.orderId);
+  const result = await invoiceService.emailXrayInvoiceByOrderId(
+    req.params.orderId,
+    { emails: req.body.emails }
+  );
   const context = await resolveOrderBillingContext(result.orderId);
 
   await logBillingActivity(req, {

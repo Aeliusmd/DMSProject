@@ -11,6 +11,7 @@ const notificationRoutes = require("./notificationRoutes");
 const activityLogRoutes = require("./activityLogRoutes");
 const settingsRoutes = require("./settingsRoutes");
 const dashboardRoutes = require("./dashboardRoutes");
+const publicRoutes = require("./publicRoutes");
 
 const router = express.Router();
 
@@ -25,5 +26,6 @@ router.use("/notifications", notificationRoutes);
 router.use("/activity-log", activityLogRoutes);
 router.use("/settings", settingsRoutes);
 router.use("/dashboard", dashboardRoutes);
+router.use("/public", publicRoutes);
 
 module.exports = router;

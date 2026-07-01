@@ -59,6 +59,45 @@ async function resolveInvoiceRecipientEmail(invoice, connection = null) {
 const NO_PROVIDER_EMAIL_MESSAGE =
   "No provider email on file. Edit the order to add the provider email.";
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
+
+function normalizeRecipientEmails(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : `${value || ""}`.split(/[,;]+/);
+
+  const seen = new Set();
+  const emails = [];
+
+  raw.forEach((item) => {
+    const trimmed = `${item || ""}`.trim();
+    if (!trimmed) return;
+
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    emails.push(trimmed);
+  });
+
+  return emails;
+}
+
+function assertValidRecipientEmails(emails = []) {
+  const normalized = normalizeRecipientEmails(emails);
+
+  if (!normalized.length) {
+    throw new ApiError(400, "At least one recipient email is required");
+  }
+
+  const invalidEmail = normalized.find((email) => !EMAIL_PATTERN.test(email));
+  if (invalidEmail) {
+    throw new ApiError(400, `Invalid email address: ${invalidEmail}`);
+  }
+
+  return normalized;
+}
+
 function getXrayPayment(xrayRow) {
   return xrayRow ? toNumber(xrayRow.payment) : 0;
 }
@@ -1024,6 +1063,7 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
             xraySentDateCompact: xrayRow.sent_date
               ? toCompactDate(xrayRow.sent_date)
               : null,
+            xrayRecipientEmail: trimOrNull(xrayRow.recipient_emails) || "",
             xrayDueMeta: `${toCompactDate(xrayRow.xray_invoice_date)} - Due:${mapXrayReviewAmount(xrayRow, orderPayments)}`,
           }
         : {}),
@@ -1068,6 +1108,10 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
       hasXray && xrayRow?.sent_date ? toShortDate(xrayRow.sent_date) : null,
     xraySentDateCompact:
       hasXray && xrayRow?.sent_date ? toCompactDate(xrayRow.sent_date) : null,
+    xrayRecipientEmail:
+      hasXray && xrayRow?.recipient_emails
+        ? trimOrNull(xrayRow.recipient_emails) || ""
+        : "",
     xrayDueMeta: hasXray
       ? `${toCompactDate(xrayRow.xray_invoice_date)} - Due:${mapXrayReviewAmount(xrayRow, orderPayments)}`
       : "",
@@ -2102,18 +2146,22 @@ async function getByCompany(providerId, query = {}) {
   };
 }
 
-async function deliverInvoiceEmail(invoice, { isResend = false, orderPayments = [] } = {}) {
+async function deliverInvoiceEmail(
+  invoice,
+  { isResend = false, orderPayments = [], recipientEmails = null } = {}
+) {
   if (!invoice) {
     throw new ApiError(404, "Invoice not found");
   }
 
-  const recipient = await resolveInvoiceRecipientEmail(invoice);
+  const recipients = recipientEmails
+    ? assertValidRecipientEmails(recipientEmails)
+    : normalizeRecipientEmails(await resolveInvoiceRecipientEmail(invoice));
 
-  if (!recipient) {
+  if (!recipients.length) {
     throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
   }
 
-  const primaryEmail = recipient.split(",")[0].trim();
   const payments =
     orderPayments.length > 0
       ? orderPayments
@@ -2145,40 +2193,46 @@ async function deliverInvoiceEmail(invoice, { isResend = false, orderPayments = 
   }
 
   const { sendInvoiceEmail } = require("./emailService");
+  const deliveredTo = [];
 
-  const result = await sendInvoiceEmail({
-    to: primaryEmail,
-    companyName: invoice.provider_name || invoice.facility_name || "Company",
-    caseNo: invoice.order_number || "",
-    applicant: buildApplicantName(invoice),
-    invoiceDate: toShortDate(invoice.invoice_date),
-    sentDate: toShortDate(isResend ? invoice.sent_date || new Date() : new Date()),
-    invoiced: formatMoney(financials.totalAmount),
-    paid: formatMoney(financials.amountPaid),
-    due: formatMoney(financials.amountDue),
-    isResend,
-    sendOrderDetails: Boolean(invoice.send_order_details),
-    isRushOrder: Boolean(invoice.is_rush_order),
-    rushLevel: calculateOrderRushLevel(invoice.order_created_at).label,
-    orderDetailsText: Boolean(invoice.send_order_details)
-      ? buildOrderDetailsText(invoice, payments)
-      : "",
-    attachments,
-  });
+  for (const email of recipients) {
+    const result = await sendInvoiceEmail({
+      to: email,
+      companyName: invoice.provider_name || invoice.facility_name || "Company",
+      caseNo: invoice.order_number || "",
+      applicant: buildApplicantName(invoice),
+      invoiceDate: toShortDate(invoice.invoice_date),
+      sentDate: toShortDate(isResend ? invoice.sent_date || new Date() : new Date()),
+      invoiced: formatMoney(financials.totalAmount),
+      paid: formatMoney(financials.amountPaid),
+      due: formatMoney(financials.amountDue),
+      isResend,
+      sendOrderDetails: Boolean(invoice.send_order_details),
+      isRushOrder: Boolean(invoice.is_rush_order),
+      rushLevel: calculateOrderRushLevel(invoice.order_created_at).label,
+      orderDetailsText: Boolean(invoice.send_order_details)
+        ? buildOrderDetailsText(invoice, payments)
+        : "",
+      attachments,
+    });
 
-  if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
-    const hint =
-      config.nodeEnv === "development" && result.devLogged
-        ? "SMTP is not configured or delivery failed (check backend logs)."
-        : "Failed to deliver invoice email.";
+    if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
+      const hint =
+        config.nodeEnv === "development" && result.devLogged
+          ? "SMTP is not configured or delivery failed (check backend logs)."
+          : "Failed to deliver invoice email.";
 
-    throw new ApiError(500, hint);
+      throw new ApiError(500, hint);
+    }
+
+    deliveredTo.push(email);
   }
 
   return {
-    recipient: primaryEmail,
-    delivered: Boolean(result.delivered),
-    devLogged: Boolean(result.devLogged),
+    recipient: deliveredTo.join(", "),
+    recipients: deliveredTo,
+    delivered: deliveredTo.length > 0,
+    devLogged: false,
   };
 }
 
@@ -2186,22 +2240,25 @@ async function deliverXrayInvoiceEmail(
   xrayRow,
   order,
   orderPayments = [],
-  { isResend = false } = {}
+  { isResend = false, recipientEmails = null } = {}
 ) {
   if (!xrayRow || !order) {
     throw new ApiError(404, "X-Ray invoice not found");
   }
 
   const invoice = await Invoice.findByOrderId(order.id);
-  const recipient = invoice
-    ? await resolveInvoiceRecipientEmail(invoice)
-    : await resolveInvoiceRecipientFromOrder(order);
+  const recipients = recipientEmails
+    ? assertValidRecipientEmails(recipientEmails)
+    : normalizeRecipientEmails(
+        invoice
+          ? await resolveInvoiceRecipientEmail(invoice)
+          : await resolveInvoiceRecipientFromOrder(order)
+      );
 
-  if (!recipient) {
+  if (!recipients.length) {
     throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
   }
 
-  const primaryEmail = recipient.split(",")[0].trim();
   const payments =
     orderPayments.length > 0
       ? orderPayments
@@ -2226,43 +2283,49 @@ async function deliverXrayInvoiceEmail(
 
   const financials = resolveXrayRowFinancials(xrayRow, payments);
   const { sendInvoiceEmail } = require("./emailService");
+  const deliveredTo = [];
 
-  const result = await sendInvoiceEmail({
-    to: primaryEmail,
-    companyName: order.provider_name || order.serve_company_name || "Company",
-    caseNo: order.order_number || "",
-    applicant: buildApplicantName(order),
-    invoiceDate: toShortDate(xrayRow.xray_invoice_date),
-    sentDate: toShortDate(
-      isResend ? xrayRow.sent_date || new Date() : new Date()
-    ),
-    invoiced: formatMoney(financials.totalAmount),
-    paid: formatMoney(financials.amountPaid),
-    due: formatMoney(financials.amountDue),
-    isResend,
-    subjectOverride: isResend
-      ? `Resent X-Ray Invoice - Case ${order.order_number || ""}`
-      : `X-Ray Invoice - Case ${order.order_number || ""}`,
-    attachments,
-  });
+  for (const email of recipients) {
+    const result = await sendInvoiceEmail({
+      to: email,
+      companyName: order.provider_name || order.serve_company_name || "Company",
+      caseNo: order.order_number || "",
+      applicant: buildApplicantName(order),
+      invoiceDate: toShortDate(xrayRow.xray_invoice_date),
+      sentDate: toShortDate(
+        isResend ? xrayRow.sent_date || new Date() : new Date()
+      ),
+      invoiced: formatMoney(financials.totalAmount),
+      paid: formatMoney(financials.amountPaid),
+      due: formatMoney(financials.amountDue),
+      isResend,
+      subjectOverride: isResend
+        ? `Resent X-Ray Invoice - Case ${order.order_number || ""}`
+        : `X-Ray Invoice - Case ${order.order_number || ""}`,
+      attachments,
+    });
 
-  if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
-    const hint =
-      config.nodeEnv === "development" && result.devLogged
-        ? "SMTP is not configured or delivery failed (check backend logs)."
-        : "Failed to deliver X-Ray invoice email.";
+    if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
+      const hint =
+        config.nodeEnv === "development" && result.devLogged
+          ? "SMTP is not configured or delivery failed (check backend logs)."
+          : "Failed to deliver X-Ray invoice email.";
 
-    throw new ApiError(500, hint);
+      throw new ApiError(500, hint);
+    }
+
+    deliveredTo.push(email);
   }
 
   return {
-    recipient: primaryEmail,
-    delivered: Boolean(result.delivered),
-    devLogged: Boolean(result.devLogged),
+    recipient: deliveredTo.join(", "),
+    recipients: deliveredTo,
+    delivered: deliveredTo.length > 0,
+    devLogged: false,
   };
 }
 
-async function sendInvoices(invoiceIds = []) {
+async function sendInvoices(invoiceIds = [], options = {}) {
   const ids = [
     ...new Set(
       (Array.isArray(invoiceIds) ? invoiceIds : [])
@@ -2274,6 +2337,10 @@ async function sendInvoices(invoiceIds = []) {
   if (!ids.length) {
     throw new ApiError(400, "At least one invoice id is required");
   }
+
+  const customEmails = options.emails
+    ? assertValidRecipientEmails(options.emails)
+    : null;
 
   const existing = await Invoice.findByIds(ids);
   const unsentIds = existing
@@ -2298,9 +2365,10 @@ async function sendInvoices(invoiceIds = []) {
       continue;
     }
 
-    const recipientEmail = await resolveInvoiceRecipientEmail(invoice);
+    const recipientEmails =
+      customEmails || normalizeRecipientEmails(await resolveInvoiceRecipientEmail(invoice));
 
-    if (!recipientEmail) {
+    if (!recipientEmails.length) {
       throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
     }
 
@@ -2308,6 +2376,7 @@ async function sendInvoices(invoiceIds = []) {
     const { recipient: deliveredTo } = await deliverInvoiceEmail(invoice, {
       isResend: false,
       orderPayments,
+      recipientEmails,
     });
 
     const markedCount = await Invoice.markAsSent([invoiceId]);
@@ -2321,7 +2390,7 @@ async function sendInvoices(invoiceIds = []) {
        SET recipient_emails = :recipientEmails,
            updated_at = NOW()
        WHERE id = :invoiceId`,
-      { recipientEmails: recipientEmail, invoiceId }
+      { recipientEmails: deliveredTo, invoiceId }
     );
 
     if (invoice.order_id) {
@@ -2353,7 +2422,7 @@ function canDeliverInvoiceEmail(invoice) {
   return Boolean(invoice.sent_date);
 }
 
-async function resendInvoices(invoiceIds = []) {
+async function resendInvoices(invoiceIds = [], options = {}) {
   const ids = [
     ...new Set(
       (Array.isArray(invoiceIds) ? invoiceIds : [])
@@ -2365,6 +2434,10 @@ async function resendInvoices(invoiceIds = []) {
   if (!ids.length) {
     throw new ApiError(400, "At least one invoice id is required");
   }
+
+  const customEmails = options.emails
+    ? assertValidRecipientEmails(options.emails)
+    : null;
 
   const resent = [];
 
@@ -2382,14 +2455,16 @@ async function resendInvoices(invoiceIds = []) {
       );
     }
 
-    const recipientEmail = await resolveInvoiceRecipientEmail(invoice);
+    const recipientEmails =
+      customEmails || normalizeRecipientEmails(await resolveInvoiceRecipientEmail(invoice));
 
-    if (!recipientEmail) {
+    if (!recipientEmails.length) {
       throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
     }
 
     const { recipient: deliveredTo } = await deliverInvoiceEmail(invoice, {
       isResend: true,
+      recipientEmails,
     });
 
     await getPool().execute(
@@ -2402,7 +2477,7 @@ async function resendInvoices(invoiceIds = []) {
            END,
            updated_at = NOW()
        WHERE id = :invoiceId`,
-      { recipientEmails: recipientEmail, invoiceId }
+      { recipientEmails: deliveredTo, invoiceId }
     );
 
     if (invoice.order_id) {
@@ -2476,7 +2551,7 @@ async function emailInvoiceByOrderId(orderId) {
   };
 }
 
-async function sendXrayInvoices(orderIds = []) {
+async function sendXrayInvoices(orderIds = [], options = {}) {
   const ids = [
     ...new Set(
       (Array.isArray(orderIds) ? orderIds : [])
@@ -2488,6 +2563,10 @@ async function sendXrayInvoices(orderIds = []) {
   if (!ids.length) {
     throw new ApiError(400, "At least one order id is required");
   }
+
+  const customEmails = options.emails
+    ? assertValidRecipientEmails(options.emails)
+    : null;
 
   const sent = [];
 
@@ -2509,11 +2588,21 @@ async function sendXrayInvoices(orderIds = []) {
     }
 
     const orderPayments = await Order.findPaymentsByOrderId(orderId);
+    const recipientEmails =
+      customEmails ||
+      normalizeRecipientEmails(
+        await resolveInvoiceRecipientFromOrder(order)
+      );
+
+    if (!recipientEmails.length) {
+      throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+    }
+
     const { recipient: deliveredTo } = await deliverXrayInvoiceEmail(
       xrayRow,
       order,
       orderPayments,
-      { isResend: false }
+      { isResend: false, recipientEmails }
     );
 
     const markedCount = await InvoiceXray.markAsSent(orderId);
@@ -2521,6 +2610,14 @@ async function sendXrayInvoices(orderIds = []) {
     if (!markedCount) {
       continue;
     }
+
+    await getPool().execute(
+      `UPDATE invoice_xray_details
+       SET recipient_emails = :recipientEmails,
+           updated_at = NOW()
+       WHERE order_id = :orderId`,
+      { recipientEmails: deliveredTo, orderId }
+    );
 
     sent.push({ orderId, recipient: deliveredTo });
   }
@@ -2532,7 +2629,7 @@ async function sendXrayInvoices(orderIds = []) {
   return { sentCount: sent.length, sent };
 }
 
-async function resendXrayInvoices(orderIds = []) {
+async function resendXrayInvoices(orderIds = [], options = {}) {
   const ids = [
     ...new Set(
       (Array.isArray(orderIds) ? orderIds : [])
@@ -2544,6 +2641,10 @@ async function resendXrayInvoices(orderIds = []) {
   if (!ids.length) {
     throw new ApiError(400, "At least one order id is required");
   }
+
+  const customEmails = options.emails
+    ? assertValidRecipientEmails(options.emails)
+    : null;
 
   const resent = [];
 
@@ -2568,18 +2669,30 @@ async function resendXrayInvoices(orderIds = []) {
     }
 
     const orderPayments = await Order.findPaymentsByOrderId(orderId);
+    const recipientEmails =
+      customEmails ||
+      normalizeRecipientEmails(
+        await resolveInvoiceRecipientFromOrder(order)
+      );
+
+    if (!recipientEmails.length) {
+      throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+    }
+
     const { recipient: deliveredTo } = await deliverXrayInvoiceEmail(
       xrayRow,
       order,
       orderPayments,
-      { isResend: true }
+      { isResend: true, recipientEmails }
     );
 
     await getPool().execute(
       `UPDATE invoice_xray_details
-       SET sent_date = CURDATE(), updated_at = NOW()
+       SET sent_date = CURDATE(),
+           recipient_emails = :recipientEmails,
+           updated_at = NOW()
        WHERE order_id = :orderId`,
-      { orderId }
+      { recipientEmails: deliveredTo, orderId }
     );
 
     resent.push({ orderId, recipient: deliveredTo });
@@ -2588,14 +2701,14 @@ async function resendXrayInvoices(orderIds = []) {
   return { resentCount: resent.length, resent };
 }
 
-async function emailXrayInvoiceByOrderId(orderId) {
+async function emailXrayInvoiceByOrderId(orderId, options = {}) {
   const normalizedOrderId = normalizeOrderId(orderId);
 
   if (!normalizedOrderId) {
     throw new ApiError(400, "Invalid order id");
   }
 
-  const result = await sendXrayInvoices([normalizedOrderId]);
+  const result = await sendXrayInvoices([normalizedOrderId], options);
   const sentEntry = result.sent?.[0];
 
   if (!sentEntry) {
