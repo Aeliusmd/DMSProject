@@ -64,6 +64,8 @@ function formatEmployee(employee) {
     role: employee.role,
     lastLogin: employee.lastLogin || "Never",
     terminated: Boolean(employee.terminated ?? employee.is_terminated),
+    suspended: Boolean(employee.suspended ?? employee.is_suspended),
+    reactivatedDate: employee.reactivatedDate || null,
   };
 }
 

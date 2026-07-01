@@ -29,6 +29,9 @@ CREATE TABLE matrix_employees (
   role            ENUM('Manager', 'Employee', 'Admin') NOT NULL DEFAULT 'Employee',
   last_login_at   DATETIME        NULL,
   is_terminated   TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'Soft delete — never hard-delete row',
+  is_suspended    TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1 = suspended; cannot log in until reactivated',
+  suspended_by    BIGINT UNSIGNED NULL COMMENT 'matrix_employees.id (admin) who suspended the account',
+  reactivated_date DATETIME       NULL COMMENT 'Scheduled date/time to auto-reactivate a suspended account',
   deleted_at      DATETIME        NULL COMMENT 'Set when employee is terminated/removed',
   deleted_by      BIGINT UNSIGNED NULL COMMENT 'matrix_employees.id who performed soft delete',
   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -38,7 +41,12 @@ CREATE TABLE matrix_employees (
   UNIQUE KEY uq_matrix_employees_email (email),
   KEY idx_matrix_employees_role (role),
   KEY idx_matrix_employees_terminated (is_terminated),
-  KEY idx_matrix_employees_deleted_at (deleted_at)
+  KEY idx_matrix_employees_suspended (is_suspended),
+  KEY idx_matrix_employees_reactivated_date (reactivated_date),
+  KEY idx_matrix_employees_deleted_at (deleted_at),
+  CONSTRAINT fk_matrix_employees_suspended_by
+    FOREIGN KEY (suspended_by) REFERENCES matrix_employees (id)
+    ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------------------------------

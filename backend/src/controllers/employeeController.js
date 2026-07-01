@@ -84,6 +84,37 @@ exports.activate = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { employee }, "Employee activated successfully");
 });
 
+exports.suspend = asyncHandler(async (req, res) => {
+  const reactivatedDate = req.body?.reactivatedDate || req.body?.reactivated_date;
+
+  if (!reactivatedDate) {
+    throw new ApiError(400, "Reactivation date and time is required");
+  }
+
+  const employee = await employeeService.suspendEmployee(
+    req.params.id,
+    req.user.id,
+    reactivatedDate
+  );
+
+  await activityLogService.recordFromRequest(req, {
+    context: "employees",
+    action: "suspend",
+    details: `Suspended employee ${employee.name} until ${employee.reactivatedDate}`,
+    targetEmployeeId: employee.id,
+    companyName: "System",
+  });
+
+  await notificationService.notifyActivityEvent({
+    title: "Employee Suspended",
+    description: `${employee.name} was suspended until ${employee.reactivatedDate}`,
+    referenceType: "Employee",
+    referenceId: employee.id,
+  });
+
+  return ApiResponse.success(res, { employee }, "Employee suspended successfully");
+});
+
 exports.remove = asyncHandler(async (req, res) => {
   const employee = await Employee.findById(req.params.id, {
     includeDeleted: true,

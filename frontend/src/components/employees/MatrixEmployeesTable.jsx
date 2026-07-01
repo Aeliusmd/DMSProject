@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
+import SuspendEmployeeModal from "@/components/employees/SuspendEmployeeModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import { getEmployeeActivityLogs } from "@/lib/activityLog/activityLogApi";
 
@@ -16,6 +17,7 @@ export default function MatrixEmployeesTable({
   onTerminateEmployee,
   onDeleteEmployee,
   onActivateEmployee,
+  onSuspendEmployee,
 }) {
   const [prevEmployees, setPrevEmployees] = useState(employees);
   const [tableEmployees, setTableEmployees] = useState(employees || []);
@@ -27,6 +29,11 @@ export default function MatrixEmployeesTable({
   });
 
   const [activateSuccessModal, setActivateSuccessModal] = useState({
+    open: false,
+    employee: null,
+  });
+
+  const [suspendModal, setSuspendModal] = useState({
     open: false,
     employee: null,
   });
@@ -59,6 +66,43 @@ export default function MatrixEmployeesTable({
       action: "delete",
       employee,
     });
+  };
+
+  const openSuspendModal = (employee) => {
+    setActionError("");
+    setSuspendModal({
+      open: true,
+      employee,
+    });
+  };
+
+  const closeSuspendModal = () => {
+    setSuspendModal({
+      open: false,
+      employee: null,
+    });
+  };
+
+  const handleSuspendEmployee = async ({ reactivatedDate }) => {
+    const { employee } = suspendModal;
+
+    if (!employee || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await onSuspendEmployee?.(employee, reactivatedDate);
+      closeSuspendModal();
+    } catch (error) {
+      setActionError(
+        error instanceof ApiRequestError
+          ? error.message
+          : "Unable to suspend employee"
+      );
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const closeConfirmModal = () => {
@@ -197,7 +241,7 @@ export default function MatrixEmployeesTable({
                 <th className="w-[260px] px-5 py-3">Email</th>
                 <th className="w-[150px] px-5 py-3">Role</th>
                 <th className="w-[170px] px-5 py-3">Last Login</th>
-                <th className="w-[130px] px-5 py-3 text-center">Status</th>
+                <th className="w-[170px] px-5 py-3 text-center">Status</th>
                 {!readOnly && (
                   <>
                     <th className="w-[140px] px-5 py-3 text-center">Action</th>
@@ -224,7 +268,9 @@ export default function MatrixEmployeesTable({
                       className={`text-left text-[12px] font-semibold ${
                         employee.terminated
                           ? "text-red-500 line-through hover:underline"
-                          : "text-[#007F96] hover:underline"
+                          : employee.suspended
+                            ? "text-[#B45309] hover:underline"
+                            : "text-[#007F96] hover:underline"
                       }`}
                     >
                       {employee.name}
@@ -248,21 +294,68 @@ export default function MatrixEmployeesTable({
                   </td>
 
                   <td className="px-5 py-4 text-center">
-                    {employee.terminated ? (
-                      <span className="inline-flex h-[24px] items-center justify-center rounded-full bg-red-50 px-3 text-[11px] font-semibold text-red-500">
-                        Terminated
-                      </span>
-                    ) : (
-                      <span className="inline-flex h-[24px] items-center justify-center rounded-full bg-[#ECFDF5] px-3 text-[11px] font-semibold text-[#059669]">
-                        Active
-                      </span>
-                    )}
+                    <div className="flex flex-col items-center gap-2">
+                      {employee.terminated ? (
+                        <span className="inline-flex h-[24px] items-center justify-center rounded-full bg-red-50 px-3 text-[11px] font-semibold text-red-500">
+                          Terminated
+                        </span>
+                      ) : employee.suspended ? (
+                        <span className="inline-flex h-[24px] items-center justify-center rounded-full bg-[#FFFBEB] px-3 text-[11px] font-semibold text-[#B45309]">
+                          Suspended
+                        </span>
+                      ) : (
+                        <span className="inline-flex h-[24px] items-center justify-center rounded-full bg-[#ECFDF5] px-3 text-[11px] font-semibold text-[#059669]">
+                          Active
+                        </span>
+                      )}
+
+                      {employee.suspended && employee.reactivatedDate && (
+                        <span className="text-[10px] leading-[14px] text-[#94A3B8]">
+                          Until {employee.reactivatedDate}
+                        </span>
+                      )}
+
+                      {!readOnly &&
+                        !employee.terminated &&
+                        !employee.suspended &&
+                        !isAdminRole(employee.role) && (
+                          <div className="flex flex-col items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openTerminateModal(employee)}
+                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                              style={{
+                                border: "1px solid #FCD34D",
+                                backgroundColor: "#FFFBEB",
+                                color: "#B45309",
+                              }}
+                            >
+                              <SmallCircleIcon />
+                              Terminate
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => openSuspendModal(employee)}
+                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                              style={{
+                                border: "1px solid #FCD34D",
+                                backgroundColor: "#FFFBEB",
+                                color: "#B45309",
+                              }}
+                            >
+                              <SmallCircleIcon />
+                              Suspend
+                            </button>
+                          </div>
+                        )}
+                    </div>
                   </td>
 
                   {!readOnly && (
                     <>
                       <td className="px-5 py-4 text-center">
-                        {employee.terminated ? (
+                        {employee.terminated || employee.suspended ? (
                           <button
                             type="button"
                             onClick={() => handleActivateEmployee(employee)}
@@ -271,22 +364,8 @@ export default function MatrixEmployeesTable({
                             <ActivateIcon />
                             Activate User
                           </button>
-                        ) : isAdminRole(employee.role) ? (
-                          <span className="text-[11px] text-[#94A3B8]">—</span>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => openTerminateModal(employee)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
-                            style={{
-                              border: "1px solid #FCD34D",
-                              backgroundColor: "#FFFBEB",
-                              color: "#B45309",
-                            }}
-                          >
-                            <SmallCircleIcon />
-                            Terminate
-                          </button>
+                          <span className="text-[11px] text-[#94A3B8]">—</span>
                         )}
                       </td>
 
@@ -342,6 +421,14 @@ export default function MatrixEmployeesTable({
         cancelLabel="Close"
         onCancel={closeActivateSuccessModal}
         onConfirm={closeActivateSuccessModal}
+      />
+
+      <SuspendEmployeeModal
+        open={suspendModal.open}
+        employee={suspendModal.employee}
+        loading={actionLoading}
+        onClose={closeSuspendModal}
+        onConfirm={handleSuspendEmployee}
       />
 
       <ActivityLogModal
