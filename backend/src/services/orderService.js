@@ -2342,56 +2342,103 @@ async function maybeSendCnrMemoEmail(orderId, data, existingOrder = null, actorI
   };
 }
 
-async function mailCompletedOrder(orderId, { email, deliveryDate, message } = {}) {
+function resolveMailRecipients({ emails, email, additionalEmails = [] } = {}) {
+  if (Array.isArray(emails) && emails.length) {
+    const seen = new Set();
+    const recipients = [];
+
+    emails.forEach((value) => {
+      const trimmed = trimOrNull(value);
+      if (!trimmed) return;
+
+      if (!EMAIL_PATTERN.test(trimmed)) {
+        throw new ApiError(400, `Invalid email address: ${trimmed}`);
+      }
+
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) return;
+
+      seen.add(key);
+      recipients.push(trimmed);
+    });
+
+    if (!recipients.length) {
+      throw new ApiError(400, "At least one recipient email is required");
+    }
+
+    return recipients;
+  }
+
+  return normalizeRecipientEmails(email, additionalEmails);
+}
+
+function buildRecordsDownloadUrl(token) {
+  const config = require("../config");
+  const baseUrl = `${config.clientUrl || "http://localhost:3000"}`.replace(
+    /\/$/,
+    ""
+  );
+  return `${baseUrl}/download/records/${token}`;
+}
+
+async function mailCompletedOrder(
+  orderId,
+  { emails, email, additionalEmails, deliveryDate } = {}
+) {
   const normalizedId = Number(orderId);
-  const recipient = trimOrNull(email);
+  const recipients = resolveMailRecipients({ emails, email, additionalEmails });
 
   if (!Number.isFinite(normalizedId)) {
     throw new ApiError(400, "Invalid order id");
   }
 
-  if (!recipient) {
-    throw new ApiError(400, "Email is required");
-  }
-
-  if (!EMAIL_PATTERN.test(recipient)) {
-    throw new ApiError(400, "Enter a valid email address");
-  }
-
   const order = await Order.findById(normalizedId);
   assertReadyForDelivery(order);
 
-  const { attachments, recordLabels } = await resolveOrderRecordsAttachments(order);
-  if (!attachments.length) {
+  const {
+    createDownloadLinkForOrder,
+    resolveOrderRecordFiles,
+  } = require("./recordDownloadService");
+
+  const { token, expiresAt, files } = await createDownloadLinkForOrder(
+    normalizedId
+  );
+  const { recordLabels } = await resolveOrderRecordFiles(order);
+
+  if (!files.length) {
     throw new ApiError(
       400,
-      "Records files not found. Scan records before sending mail."
+      "Records files not found. Scan records before sending email."
     );
   }
 
-  const mailSentDate = dateOrNull(deliveryDate);
-  if (!mailSentDate) {
-    throw new ApiError(400, "Mail sent date is required");
-  }
+  const mailSentDate = dateOrNull(deliveryDate) || new Date().toISOString().slice(0, 10);
 
   const pool = getPool();
 
   const setCnrDate =
     Number(order.certificate_no_records) && order.cnr_delivery === "email";
 
+  const downloadUrl = buildRecordsDownloadUrl(token);
   const { sendOrderCompletedMail } = require("./emailService");
-  const result = await sendOrderCompletedMail({
-    to: recipient,
-    orderNumber: order.order_number,
-    applicant: buildApplicantName(order),
-    providerName: order.serve_company_name || order.provider_name || "",
-    attachments,
-    recordLabels,
-    message: trimOrNull(message),
-  });
+  const deliveredTo = [];
 
-  if (!result.delivered && !result.devLogged) {
-    throw new ApiError(500, "Failed to send email");
+  for (const recipient of recipients) {
+    const result = await sendOrderCompletedMail({
+      to: recipient,
+      orderNumber: order.order_number,
+      applicant: buildApplicantName(order),
+      providerName: order.serve_company_name || order.provider_name || "",
+      recordLabels,
+      downloadUrl,
+      expiresAt,
+    });
+
+    if (!result.delivered && !result.devLogged) {
+      throw new ApiError(500, "Failed to send email");
+    }
+
+    deliveredTo.push(recipient);
   }
 
   await pool.execute(
@@ -2406,11 +2453,14 @@ async function mailCompletedOrder(orderId, { email, deliveryDate, message } = {}
   );
 
   return {
-    recipient,
-    delivered: result.delivered,
-    devLogged: Boolean(result.devLogged),
+    recipients: deliveredTo,
+    recipient: deliveredTo.join(", "),
+    delivered: deliveredTo.length > 0,
+    devLogged: false,
     sentDate: mailSentDate,
     readyDate: mailSentDate,
+    downloadUrl,
+    expiresAt,
   };
 }
 

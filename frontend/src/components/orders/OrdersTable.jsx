@@ -13,7 +13,7 @@ import CertificateOfRecordsModal from "@/components/orders/CertificateOfRecordsM
 import SendCopyLetterModal from "@/components/orders/SendCopyLetterModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
 import OrderNotesModal from "@/components/orders/OrderNotesModal";
-import OrderMailModal from "@/components/orders/OrderMailModal";
+import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
 import OrderPickupModal from "@/components/orders/OrderPickupModal";
 import OrderFaxModal from "@/components/orders/OrderFaxModal";
 import OrderCancelModal from "@/components/orders/OrderCancelModal";
@@ -38,20 +38,14 @@ import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import {
   getCompletedDeliveryActions,
   getDeliveryStatus,
-  resolveProviderEmail,
 } from "@/lib/orders/deliveryActions";
 import { getOrderPeriodStartDate } from "@/lib/orders/orderFilterConstants";
 import {
-  emailInvoiceByOrderId,
   emailXrayInvoiceByOrderId,
   resendInvoices,
+  resendXrayInvoices,
   sendInvoices,
 } from "@/lib/invoices/invoiceApi";
-import {
-  handleMissingProviderEmail,
-  isNoProviderEmailError,
-  NO_PROVIDER_EMAIL_MESSAGE,
-} from "@/lib/invoices/invoiceUtils";
 import {
   formatMoneyAmount,
   parsePaymentAmount,
@@ -326,13 +320,19 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [selectedPrintXrayInvoiceOrder, setSelectedPrintXrayInvoiceOrder] =
     useState(null);
   const [selectedSubpoenaOrder, setSelectedSubpoenaOrder] = useState(null);
-  const [selectedMailOrder, setSelectedMailOrder] = useState(null);
+  const [sendInvoiceEmailModal, setSendInvoiceEmailModal] = useState({
+    open: false,
+    order: null,
+    mode: "send",
+    invoiceId: null,
+    invoiceKind: "standard",
+  });
   const [selectedPickupOrder, setSelectedPickupOrder] = useState(null);
   const [selectedFaxOrder, setSelectedFaxOrder] = useState(null);
   const [emailingOrderId, setEmailingOrderId] = useState(null);
   const [sendingInvoiceOrderId, setSendingInvoiceOrderId] = useState(null);
   const [emailingXrayOrderId, setEmailingXrayOrderId] = useState(null);
-  const [resendingOrderId, setResendingOrderId] = useState(null);
+  const [emailingRecordsOrderId, setEmailingRecordsOrderId] = useState(null);
   const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
   const [emailError, setEmailError] = useState("");
   const [deliveryError, setDeliveryError] = useState("");
@@ -514,214 +514,156 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     return () => window.clearInterval(intervalId);
   }, [lastUpdatedAt]);
 
-  const applyInvoiceEmailState = useCallback((orderDbId, updates = {}) => {
-    setOrders((prev) =>
-      prev.map((item) =>
-        item.dbId === orderDbId
-          ? {
-              ...item,
-              invoice: {
-                ...item.invoice,
-                ...updates,
-              },
-            }
-          : item
-      )
-    );
+  const openSendInvoiceEmailModal = useCallback(
+    (order, mode = "send", { invoiceId = null, invoiceKind = "standard" } = {}) => {
+      if (!order?.dbId) return;
+
+      setEmailError("");
+      setSendInvoiceEmailModal({
+        open: true,
+        order,
+        mode,
+        invoiceId: invoiceId || order.invoice?.invoiceId || null,
+        invoiceKind,
+      });
+    },
+    []
+  );
+
+  const closeSendInvoiceEmailModal = useCallback(() => {
+    setSendInvoiceEmailModal({
+      open: false,
+      order: null,
+      mode: "send",
+      invoiceId: null,
+      invoiceKind: "standard",
+    });
   }, []);
 
-  const handleSendInvoice = useCallback(
-    async (order) => {
-      const invoiceId = Number(order.invoice?.invoiceId);
+  const handleSubmitSendInvoiceEmail = useCallback(
+    async (emails) => {
+      const { order, mode, invoiceId, invoiceKind } = sendInvoiceEmailModal;
 
-      if (!order?.dbId || !Number.isFinite(invoiceId) || sendingInvoiceOrderId) {
-        return;
-      }
-
-      const providerEmail =
-        order.providerEmail || order.invoice?.providerEmail || "";
-
-      if (!providerEmail.trim()) {
-        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
-        handleMissingProviderEmail(order.dbId, router);
-        return;
+      if (!order?.dbId) {
+        throw new Error("Order not found");
       }
 
       setEmailError("");
-      setSendingInvoiceOrderId(order.dbId);
 
-      try {
-        await sendInvoices([invoiceId]);
-        await fetchOrders({ silent: true, force: true });
-      } catch (err) {
-        if (isNoProviderEmailError(err)) {
-          setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
-          handleMissingProviderEmail(order.dbId, router);
-          return;
+      if (invoiceKind === "records") {
+        setEmailingRecordsOrderId(order.dbId);
+        try {
+          const result = await mailCompletedOrder(order.dbId, {
+            emails,
+            deliveryDate: getTodayInputDate(),
+          });
+          const sentDate = result.readyDate || result.sentDate || getTodayInputDate();
+          setOrders((prev) =>
+            prev.map((item) =>
+              item.dbId === order.dbId
+                ? {
+                    ...item,
+                    orderStatus: "Completed",
+                    readyDate: sentDate,
+                    deliveryDate: sentDate,
+                    mailSentDate: sentDate,
+                  }
+                : item
+            )
+          );
+          await fetchOrders({ silent: true, force: true });
+        } finally {
+          setEmailingRecordsOrderId(null);
         }
+        return;
+      }
 
-        setEmailError(err.message || "Failed to send invoice");
+      if (invoiceKind === "xray") {
+        setEmailingXrayOrderId(order.dbId);
+        try {
+          if (mode === "resend") {
+            await resendXrayInvoices([order.dbId], emails);
+          } else {
+            await emailXrayInvoiceByOrderId(order.dbId, emails);
+          }
+          await fetchOrders({ silent: true, force: true });
+        } finally {
+          setEmailingXrayOrderId(null);
+        }
+        return;
+      }
+
+      const normalizedInvoiceId = Number(invoiceId || order?.invoice?.invoiceId);
+
+      if (!Number.isFinite(normalizedInvoiceId)) {
+        throw new Error("Invoice not found for this order");
+      }
+
+      if (mode === "resend") {
+        setEmailingOrderId(order.dbId);
+        try {
+          await resendInvoices([normalizedInvoiceId], emails);
+          await fetchOrders({ silent: true, force: true });
+        } finally {
+          setEmailingOrderId(null);
+        }
+        return;
+      }
+
+      setSendingInvoiceOrderId(order.dbId);
+      try {
+        await sendInvoices([normalizedInvoiceId], emails);
+        await fetchOrders({ silent: true, force: true });
       } finally {
         setSendingInvoiceOrderId(null);
       }
     },
-    [fetchOrders, router, sendingInvoiceOrderId]
+    [fetchOrders, sendInvoiceEmailModal]
+  );
+
+  const handleSendInvoice = useCallback(
+    (order) => {
+      openSendInvoiceEmailModal(order, "send");
+    },
+    [openSendInvoiceEmailModal]
   );
 
   const handleResendInvoiceEmail = useCallback(
-    async (order) => {
-      const invoiceId = Number(order.invoice?.invoiceId);
-
-      if (!order?.dbId || !Number.isFinite(invoiceId) || emailingOrderId) {
-        return;
-      }
-
-      const providerEmail =
-        order.providerEmail || order.invoice?.providerEmail || "";
-
-      if (!providerEmail.trim()) {
-        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
-        window.alert(NO_PROVIDER_EMAIL_MESSAGE);
-        return;
-      }
-
-      setEmailError("");
-      setEmailingOrderId(order.dbId);
-
-      try {
-        await resendInvoices([invoiceId]);
-        await fetchOrders({ silent: true, force: true });
-      } catch (err) {
-        setEmailError(err.message || "Failed to email invoice");
-      } finally {
-        setEmailingOrderId(null);
-      }
+    (order) => {
+      openSendInvoiceEmailModal(order, "resend");
     },
-    [emailingOrderId, fetchOrders]
+    [openSendInvoiceEmailModal]
   );
 
   const handleEmailXrayInvoice = useCallback(
-    async (order) => {
-      if (!order?.dbId || emailingXrayOrderId) return;
-
-      const providerEmail =
-        order.providerEmail || order.invoice?.providerEmail || "";
-
-      if (!providerEmail.trim()) {
-        setEmailError(NO_PROVIDER_EMAIL_MESSAGE);
-        window.alert(NO_PROVIDER_EMAIL_MESSAGE);
-        return;
-      }
-
-      setEmailError("");
-      setEmailingXrayOrderId(order.dbId);
-
-      try {
-        const result = await emailXrayInvoiceByOrderId(order.dbId);
-        applyInvoiceEmailState(order.dbId, {
-          xraySentDate: result.xraySentDate,
-          xraySentDateCompact: result.xraySentDateCompact,
-          recipientEmail: result.recipientEmail || result.recipient || "",
-        });
-        await fetchOrders({ silent: true, force: true });
-      } catch (err) {
-        setEmailError(err.message || "Failed to email X-Ray invoice");
-      } finally {
-        setEmailingXrayOrderId(null);
-      }
+    (order) => {
+      openSendInvoiceEmailModal(order, "send", { invoiceKind: "xray" });
     },
-    [emailingXrayOrderId, fetchOrders, applyInvoiceEmailState]
+    [openSendInvoiceEmailModal]
   );
 
   const handleResendInvoice = useCallback(
-    async (order, invoiceId) => {
-      const normalizedInvoiceId = Number(invoiceId);
-
-      if (!order?.dbId || !Number.isFinite(normalizedInvoiceId) || resendingOrderId) {
-        return;
-      }
-
-      setEmailError("");
-      setResendingOrderId(order.dbId);
-
-      try {
-        await resendInvoices([normalizedInvoiceId]);
-        await fetchOrders({ silent: true });
-      } catch (err) {
-        setEmailError(err.message || "Failed to resend invoice");
-      } finally {
-        setResendingOrderId(null);
-      }
+    (order, invoiceId) => {
+      openSendInvoiceEmailModal(order, "resend", { invoiceId });
     },
-    [resendingOrderId, fetchOrders]
+    [openSendInvoiceEmailModal]
   );
 
-  const handleMailDelivery = useCallback(
-    async (order) => {
+  const handleEmailDelivery = useCallback(
+    (order) => {
       if (!order?.dbId || getDeliveryStatus(order, "mail").completed) return;
 
       if (!order.hasAnyRecordsUploaded) {
-        setDeliveryError("Scan records before sending mail");
+        setDeliveryError("Scan records before sending email");
         return;
       }
 
-      const email = resolveProviderEmail(order);
-      const mailSentDate = getTodayInputDate();
-
-      if (!email) {
-        setSelectedMailOrder(order);
-        return;
-      }
-
-      const key = `${order.dbId}-mail`;
-      setProcessingDeliveryKey(key);
       setDeliveryError("");
-
-      try {
-        const result = await mailCompletedOrder(order.dbId, {
-          email,
-          deliveryDate: mailSentDate,
-        });
-        const sentDate = result.readyDate || result.sentDate || mailSentDate;
-        setOrders((prev) =>
-          prev.map((item) =>
-            item.dbId === order.dbId
-              ? {
-                  ...item,
-                  orderStatus: "Completed",
-                  readyDate: sentDate,
-                  mailSentDate: sentDate,
-                  deliveryDate: sentDate,
-                }
-              : item
-          )
-        );
-        await fetchOrders();
-      } catch (err) {
-        setDeliveryError(err.message || "Failed to send mail");
-      } finally {
-        setProcessingDeliveryKey("");
-      }
+      openSendInvoiceEmailModal(order, "send", { invoiceKind: "records" });
     },
-    [fetchOrders]
+    [openSendInvoiceEmailModal]
   );
 
-  const applyMailSentState = useCallback((order, sentDate, deliveryDate) => {
-    const resolvedDate = sentDate || deliveryDate;
-    setOrders((prev) =>
-      prev.map((item) =>
-        item.dbId === order.dbId
-          ? {
-              ...item,
-              orderStatus: "Completed",
-              readyDate: resolvedDate,
-              mailSentDate: resolvedDate,
-              deliveryDate: resolvedDate,
-            }
-          : item
-      )
-    );
-  }, []);
 
   // Refresh workflow/status changes made elsewhere when the user comes back
   // to the tab or window. No polling, so there is no idle network cost.
@@ -987,7 +929,10 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                               actionLoading &&
                               removeRecordsModal.order?.dbId === order.dbId
                             }
-                            resending={resendingOrderId === order.dbId}
+                            resending={
+                              emailingOrderId === order.dbId ||
+                              sendingInvoiceOrderId === order.dbId
+                            }
                           />
                         ))}
                       </div>
@@ -1012,13 +957,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                             {deliveryActions.mail && (
                               <CompletedDeliveryLink
-                                label="Mail"
+                                label="Email"
                                 completed={mailStatus.completed}
                                 hoverText={mailStatus.hoverText}
                                 loading={
+                                  emailingRecordsOrderId === order.dbId ||
                                   processingDeliveryKey === `${order.dbId}-mail`
                                 }
-                                onClick={() => handleMailDelivery(order)}
+                                onClick={() => handleEmailDelivery(order)}
                               />
                             )}
                             {deliveryActions.fax && (
@@ -1351,24 +1297,13 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         loadingLabel="Loading subpoena..."
       />
 
-      <OrderMailModal
-        isOpen={Boolean(selectedMailOrder)}
-        order={selectedMailOrder}
-        onClose={() => setSelectedMailOrder(null)}
-        onSent={async ({ email, deliveryDate, message }) => {
-          setDeliveryError("");
-          const result = await mailCompletedOrder(selectedMailOrder.dbId, {
-            email,
-            deliveryDate,
-            message,
-          });
-          applyMailSentState(
-            selectedMailOrder,
-            result.readyDate || result.sentDate,
-            result.readyDate || result.sentDate
-          );
-          await fetchOrders();
-        }}
+      <SendInvoiceEmailModal
+        isOpen={sendInvoiceEmailModal.open}
+        order={sendInvoiceEmailModal.order}
+        mode={sendInvoiceEmailModal.mode}
+        invoiceKind={sendInvoiceEmailModal.invoiceKind}
+        onClose={closeSendInvoiceEmailModal}
+        onSend={handleSubmitSendInvoiceEmail}
       />
 
       <OrderPickupModal
@@ -1800,28 +1735,20 @@ function InvoiceBlock({
   emailing = false,
   emailingXray = false,
 }) {
-  const hasProviderEmail = Boolean(providerEmail?.trim());
   const invoiceSentDate =
     invoice.sentDateCompact || invoice.sentDate || null;
   const xraySentDate =
     invoice.xraySentDateCompact || invoice.xraySentDate || null;
 
   const sendInvoiceButton = !invoice.sentDate ? (
-    <div className="space-y-0.5">
-      {hasProviderEmail ? (
-        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
-      ) : (
-        <MissingProviderEmailNotice orderDbId={orderDbId} />
-      )}
-        <button
-          type="button"
-        onClick={onSendInvoice}
-        disabled={sending}
-        className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-        >
-        {sending ? "Sending..." : "Send Invoice"}
-        </button>
-    </div>
+    <button
+      type="button"
+      onClick={onSendInvoice}
+      disabled={sending}
+      className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {sending ? "Sending..." : "Send Invoice"}
+    </button>
   ) : null;
 
   const resendInvoiceButton = invoice.sentDate ? (
@@ -1830,19 +1757,19 @@ function InvoiceBlock({
       {invoiceSentDate ? (
         <p className="text-[#94A3B8]">Sent: {invoiceSentDate}</p>
       ) : null}
-      {hasProviderEmail ? (
-        <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
-      ) : (
-        <MissingProviderEmailNotice orderDbId={orderDbId} />
+      {(providerEmail || invoice.recipientEmail) && (
+        <p className="truncate text-[#94A3B8]">
+          To: {invoice.recipientEmail || providerEmail}
+        </p>
       )}
-        <button
-          type="button"
+      <button
+        type="button"
         onClick={onResendInvoice}
         disabled={emailing}
         className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-        >
+      >
         {emailing ? "Emailing..." : "Email Invoice"}
-        </button>
+      </button>
     </div>
   ) : null;
 
@@ -1879,28 +1806,23 @@ function InvoiceBlock({
       </button>
 
       {!invoice.xraySentDate ? (
-        <div className="space-y-0.5">
-          {hasProviderEmail ? (
-            <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
-          ) : (
-            <MissingProviderEmailNotice orderDbId={orderDbId} />
-          )}
-          <button
-            type="button"
-            onClick={onEmailXrayInvoice}
-            disabled={emailingXray}
-            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {emailingXray ? "Sending..." : "Email Xray Invoice"}
+        <button
+          type="button"
+          onClick={onEmailXrayInvoice}
+          disabled={emailingXray}
+          className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {emailingXray ? "Sending..." : "Email Xray Invoice"}
         </button>
-      </div>
       ) : null}
 
       {invoice.xraySentDate ? (
         <InvoiceEmailedStatus
           label="Xray Invoice Emailed"
           sentDate={xraySentDate}
-          recipientEmail={providerEmail || invoice.recipientEmail}
+          recipientEmail={
+            invoice.xrayRecipientEmail || providerEmail || invoice.recipientEmail
+          }
         />
       ) : null}
     </>
@@ -1975,28 +1897,23 @@ function InvoiceBlock({
       </button>
 
       {!invoice.xraySentDate ? (
-        <div className="space-y-0.5">
-          {hasProviderEmail ? (
-            <p className="truncate text-[#94A3B8]">To: {providerEmail}</p>
-          ) : (
-            <MissingProviderEmailNotice orderDbId={orderDbId} />
-          )}
-          <button
-            type="button"
-            onClick={onEmailXrayInvoice}
-            disabled={emailingXray}
-            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {emailingXray ? "Sending..." : "Email Xray Invoice"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onEmailXrayInvoice}
+          disabled={emailingXray}
+          className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {emailingXray ? "Sending..." : "Email Xray Invoice"}
+        </button>
       ) : null}
 
       {invoice.xraySentDate ? (
         <InvoiceEmailedStatus
           label="Xray Invoice Emailed"
           sentDate={xraySentDate}
-          recipientEmail={providerEmail || invoice.recipientEmail}
+          recipientEmail={
+            invoice.xrayRecipientEmail || providerEmail || invoice.recipientEmail
+          }
         />
       ) : null}
     </>
@@ -2084,29 +2001,6 @@ function InvoiceBlock({
       {resendInvoiceButton}
       {xraySection}
     </div>
-  );
-}
-
-function MissingProviderEmailNotice({ orderDbId }) {
-  if (!orderDbId) {
-    return (
-      <p className="text-[10px] font-semibold text-amber-600">
-        No provider email. Edit order to add email.
-      </p>
-    );
-  }
-
-  return (
-    <p className="text-[10px] font-semibold text-amber-600">
-      No provider email.{" "}
-      <Link
-        href={`/orders/new?mode=edit&orderId=${encodeURIComponent(orderDbId)}`}
-        className="text-[#007F96] underline"
-      >
-        Edit order
-      </Link>{" "}
-      to add email.
-    </p>
   );
 }
 

@@ -395,10 +395,25 @@ export async function fetchOrderPrintXrayInvoicePdf(orderId) {
 }
 
 export async function mailCompletedOrder(orderId, payload = {}) {
+  const body = {};
+
+  if (Array.isArray(payload.emails) && payload.emails.length) {
+    body.emails = payload.emails;
+  } else if (payload.email) {
+    body.email = payload.email;
+    if (Array.isArray(payload.additionalEmails) && payload.additionalEmails.length) {
+      body.additionalEmails = payload.additionalEmails;
+    }
+  }
+
+  if (payload.deliveryDate) {
+    body.deliveryDate = payload.deliveryDate;
+  }
+
   const data = await request(`/orders/${orderId}/mail`, {
     method: "POST",
     auth: true,
-    body: payload,
+    body,
   });
 
   return data?.data || {};

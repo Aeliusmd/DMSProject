@@ -505,9 +505,10 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
 
 exports.mailCompletedOrder = asyncHandler(async (req, res) => {
   const result = await orderService.mailCompletedOrder(req.params.id, {
+    emails: req.body.emails,
     email: req.body.email,
+    additionalEmails: req.body.additionalEmails,
     deliveryDate: req.body.deliveryDate,
-    message: req.body.message,
   });
 
   const order = await orderService.getOrderById(req.params.id);

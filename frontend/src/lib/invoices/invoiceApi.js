@@ -66,11 +66,17 @@ export async function updateInvoice(id, payload) {
   return data?.data?.invoice;
 }
 
-export async function sendInvoices(invoiceIds = []) {
+export async function sendInvoices(invoiceIds = [], emails = null) {
+  const body = { invoiceIds };
+
+  if (Array.isArray(emails) && emails.length) {
+    body.emails = emails;
+  }
+
   const data = await request("/invoices/send", {
     method: "POST",
     auth: true,
-    body: { invoiceIds },
+    body,
   });
 
   return data?.data || { sentCount: 0 };
@@ -140,31 +146,49 @@ export async function writeOffInvoices(payload) {
   return data?.data || { writtenOffCount: 0, invoices: [] };
 }
 
-export async function sendXrayInvoices(orderIds = []) {
+export async function sendXrayInvoices(orderIds = [], emails = null) {
+  const body = { orderIds };
+
+  if (Array.isArray(emails) && emails.length) {
+    body.emails = emails;
+  }
+
   const data = await request("/invoices/xray/send", {
     method: "POST",
     auth: true,
-    body: { orderIds },
+    body,
   });
 
   return data?.data || { sentCount: 0 };
 }
 
-export async function resendXrayInvoices(orderIds = []) {
+export async function resendXrayInvoices(orderIds = [], emails = null) {
+  const body = { orderIds };
+
+  if (Array.isArray(emails) && emails.length) {
+    body.emails = emails;
+  }
+
   const data = await request("/invoices/xray/resend", {
     method: "POST",
     auth: true,
-    body: { orderIds },
+    body,
   });
 
   return data?.data || { resentCount: 0 };
 }
 
-export async function resendInvoices(invoiceIds = []) {
+export async function resendInvoices(invoiceIds = [], emails = null) {
+  const body = { invoiceIds };
+
+  if (Array.isArray(emails) && emails.length) {
+    body.emails = emails;
+  }
+
   const data = await request("/invoices/resend", {
     method: "POST",
     auth: true,
-    body: { invoiceIds },
+    body,
   });
 
   return data?.data || { resentCount: 0 };
@@ -220,10 +244,17 @@ export async function emailInvoiceByOrderId(orderId) {
   return data?.data || { emailed: false };
 }
 
-export async function emailXrayInvoiceByOrderId(orderId) {
+export async function emailXrayInvoiceByOrderId(orderId, emails = null) {
+  const body = {};
+
+  if (Array.isArray(emails) && emails.length) {
+    body.emails = emails;
+  }
+
   const data = await request(`/invoices/xray/order/${orderId}/email`, {
     method: "POST",
     auth: true,
+    body,
   });
 
   return data?.data || { emailed: false };

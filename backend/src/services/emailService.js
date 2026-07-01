@@ -268,14 +268,12 @@ function buildDefaultOrderCompletedMailText({
   applicant,
   providerName,
   recordLabels = [],
+  downloadUrl = "",
+  expiresLabel = "",
 }) {
   const recordsPhrase = formatRecordTypesPhrase(recordLabels);
   const sentenceStart =
     recordsPhrase.charAt(0).toUpperCase() + recordsPhrase.slice(1);
-  const attachmentPhrase =
-    recordLabels.length > 1
-      ? `The ${recordsPhrase} PDFs are attached to this email.`
-      : `The ${recordsPhrase} PDF is attached to this email.`;
 
   const lines = [
     "Hello,",
@@ -291,8 +289,19 @@ function buildDefaultOrderCompletedMailText({
     lines.push(`Provider: ${providerName}`);
   }
 
+  if (downloadUrl) {
+    lines.push(
+      "",
+      "Use the secure link below to download the records:",
+      downloadUrl
+    );
+
+    if (expiresLabel) {
+      lines.push(`This link expires on ${expiresLabel} (7 days from send date).`);
+    }
+  }
+
   lines.push(
-    attachmentPhrase,
     "",
     "Please contact us if you have any questions.",
     "",
@@ -302,15 +311,28 @@ function buildDefaultOrderCompletedMailText({
   return lines.join("\n");
 }
 
+function formatDownloadExpiryLabel(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 async function sendOrderCompletedMail({
   to,
   orderNumber,
   applicant,
   providerName,
-  attachments = [],
   recordLabels = [],
+  downloadUrl = "",
+  expiresAt = null,
   message = "",
 }) {
+  const expiresLabel = expiresAt ? formatDownloadExpiryLabel(expiresAt) : "";
   const subject = `Records Ready — Order ${orderNumber}`;
   const text =
     message?.trim() ||
@@ -319,8 +341,26 @@ async function sendOrderCompletedMail({
       applicant,
       providerName,
       recordLabels,
+      downloadUrl,
+      expiresLabel,
     });
-  const html = plainTextToHtml(text);
+
+  const downloadHtml = downloadUrl
+    ? `<p style="margin:16px 0;">
+        <a href="${escapeHtml(downloadUrl)}" style="color:#007F96;font-weight:600;">
+          Download Records
+        </a>
+      </p>
+      ${
+        expiresLabel
+          ? `<p style="margin:0 0 16px;color:#64748B;font-size:13px;">
+              This link expires on <strong>${escapeHtml(expiresLabel)}</strong> (7 days from send date).
+            </p>`
+          : ""
+      }`
+    : "";
+
+  const html = `${plainTextToHtml(text)}${downloadHtml}`;
 
   const mailTransporter = getTransporter();
 
@@ -330,7 +370,7 @@ async function sendOrderCompletedMail({
         to,
         subject,
         text,
-        attachments: attachments.map((file) => file.filename || file.path),
+        downloadUrl,
       });
       return { delivered: false, devLogged: true };
     }
@@ -338,14 +378,14 @@ async function sendOrderCompletedMail({
     throw new Error("SMTP is not configured");
   }
 
-  const mailOptions = buildMailOptions({ to, subject, text, html, attachments });
+  const mailOptions = buildMailOptions({ to, subject, text, html });
 
   try {
     await mailTransporter.sendMail(mailOptions);
     logger.info("Order completed mail sent", {
       to,
       orderNumber,
-      attachments: attachments.length,
+      downloadUrl,
     });
     return { delivered: true, devLogged: false };
   } catch (error) {
@@ -359,7 +399,7 @@ async function sendOrderCompletedMail({
         to,
         subject,
         text,
-        attachments: attachments.map((file) => file.filename || file.path),
+        downloadUrl,
       });
       return { delivered: false, devLogged: true };
     }

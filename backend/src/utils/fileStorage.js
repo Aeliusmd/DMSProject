@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
-const { ORDER_UPLOAD_DIRS } = require("../middleware/uploadMiddleware");
+const { ORDER_UPLOAD_DIRS, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 
 function getFileServerRoot() {
   const root = config.fileServer;
@@ -90,6 +90,17 @@ function archiveBatchScanSubpoenaToProcessed(batchScanRelativePath, orderNumber)
   return `processed/${fileName}`.replace(/\\/g, "/");
 }
 
+function resolveOrderStorageAbsolutePath(storagePath) {
+  const normalized = String(storagePath || "").replace(/\\/g, "/");
+  if (!normalized) return null;
+
+  if (isUploadsRelativePath(normalized)) {
+    return path.join(ORDER_UPLOADS_ROOT, normalized);
+  }
+
+  return resolveAbsolutePath(normalized);
+}
+
 module.exports = {
   getFileServerRoot,
   ensureFileServerReady,
@@ -98,5 +109,6 @@ module.exports = {
   saveBatchScanFile,
   resolveAbsolutePath,
   isUploadsRelativePath,
+  resolveOrderStorageAbsolutePath,
   archiveBatchScanSubpoenaToProcessed,
 };
