@@ -116,6 +116,7 @@ const initialFormData = {
   depoDueDate: "",
   deliveryDate: "",
   subpoenaDate: "",
+  dateRequested: "",
   readyDate: "",
   invoiceDate: "",
   xrayInvoiceDate: "",
@@ -1514,6 +1515,15 @@ function ServeInfoForm({
       </div>
 
       <Divider />
+
+      <NewOrderField
+        label="Date Requested"
+        name="dateRequested"
+        value={formData.dateRequested}
+        onChange={onChange}
+        onBlur={onBlur}
+        type="date"
+      />
 
       <NewOrderField
         label="Specific Record"

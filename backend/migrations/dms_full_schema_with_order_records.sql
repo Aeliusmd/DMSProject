@@ -252,6 +252,7 @@ CREATE TABLE orders (
   delivery_date   DATE            NULL,
   pickup_person_name VARCHAR(150) NULL COMMENT 'Person who picked up records',
   subpoena_date   DATE            NULL,
+  date_requested  DATE            NULL,
   ready_date      DATE            NULL COMMENT 'Mail sent or pickup date',
   invoice_date    DATE            NULL,
   xray_invoice_date DATE          NULL,
