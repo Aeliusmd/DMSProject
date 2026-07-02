@@ -500,6 +500,97 @@ function formatCopyLetterDate(date) {
   });
 }
 
+async function sendCnrRecordEmail({
+  to,
+  orderNumber,
+  applicantName,
+  documentDate,
+  cnrReason = "",
+  documentTitle = "Certificate of No Records",
+  pdfBuffer,
+}) {
+  const subject = `${documentTitle} - Order ${orderNumber}`;
+  const sentLabel = formatCopyLetterDate(documentDate);
+  const reasonBlock = cnrReason
+    ? [`Reason: ${cnrReason}`, ""]
+  : [];
+
+  const text = [
+    "Dear Copy Service,",
+    "",
+    `Attached is the ${documentTitle.toLowerCase()} for order ${orderNumber}.`,
+    applicantName ? `Applicant: ${applicantName}` : "",
+    ...reasonBlock,
+    `Document date: ${sentLabel}.`,
+    "",
+    "DMS Custodian",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
+      <p>Dear Copy Service,</p>
+      <p>Attached is the ${documentTitle.toLowerCase()} for order <strong>${orderNumber}</strong>.</p>
+      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
+      ${
+        cnrReason
+          ? `<p><strong>Reason:</strong> ${cnrReason.replace(/\n/g, "<br />")}</p>`
+          : ""
+      }
+      <p>Document date: <strong>${sentLabel}</strong>.</p>
+      <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
+    </div>
+  `;
+
+  const attachmentName = documentTitle.toLowerCase().includes("memo")
+    ? `cnr-memo-${orderNumber}.pdf`
+    : `cnr-letter-${orderNumber}.pdf`;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] CNR record email", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = buildMailOptions({
+    to,
+    subject,
+    text,
+    html,
+    attachments: [
+      {
+        filename: attachmentName,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("CNR record email sent", { to, orderNumber });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send CNR record email", {
+      to,
+      error: error.message,
+    });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] CNR record email fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
 async function sendCnrMemoEmail({
   to,
   orderNumber,
@@ -582,5 +673,6 @@ module.exports = {
   sendInvoiceEmail,
   sendOrderCompletedMail,
   sendCopyServiceLetterEmail,
+  sendCnrRecordEmail,
   sendCnrMemoEmail,
 };

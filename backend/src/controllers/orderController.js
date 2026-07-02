@@ -404,6 +404,26 @@ exports.cancel = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { order }, "Order cancelled successfully");
 });
 
+exports.restore = asyncHandler(async (req, res) => {
+  const order = await orderService.restoreOrder(req.params.id, {
+    actorId: req.user.id,
+    actorName: req.user.name,
+  });
+
+  await logOrderActivity(req, order, {
+    action: "restore",
+    details: `Restored order ${order.orderNumber} to ${order.status} for ${getOrderLogContext(order).companyName}`,
+  });
+
+  await notificationService.notifyOrderStatusChange({
+    orderNumber: order.orderNumber,
+    details: `Order restored for ${getOrderLogContext(order).companyName}`,
+    orderId: order.id,
+  });
+
+  return ApiResponse.success(res, { order }, "Order restored successfully");
+});
+
 exports.getNotes = asyncHandler(async (req, res) => {
   const notes = await orderService.getOrderNotes(req.params.id, {
     includeCalled:
@@ -519,6 +539,24 @@ exports.mailCompletedOrder = asyncHandler(async (req, res) => {
   });
 
   return ApiResponse.success(res, result, "Email sent");
+});
+
+exports.sendCnrRecord = asyncHandler(async (req, res) => {
+  const result = await orderService.sendCnrRecord(req.params.id, {
+    emails: req.body.emails,
+    email: req.body.email,
+    additionalEmails: req.body.additionalEmails,
+    sentDate: req.body.sentDate,
+  });
+
+  const order = await orderService.getOrderById(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "cnr_record_mail",
+    details: `CNR Letter emailed to ${result.recipient} for order ${order.orderNumber}`,
+  });
+
+  return ApiResponse.success(res, result, "CNR record email sent");
 });
 
 exports.sendCopyServiceLetter = asyncHandler(async (req, res) => {

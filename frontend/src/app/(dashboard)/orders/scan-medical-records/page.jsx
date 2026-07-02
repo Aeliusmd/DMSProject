@@ -82,6 +82,8 @@ export default function ScanMedicalRecordsPage() {
     }
   }, [allUploaded, isEditMode, loadingOrder, router]);
 
+  const isCnrOrder = Boolean(order?.certificateNoRecords);
+
   const validateAndSetFile = (recordType, file) => {
     setError("");
     setSuccessMessage("");
@@ -223,6 +225,28 @@ export default function ScanMedicalRecordsPage() {
       <DashboardShell>
         <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
           <p className="text-[13px] text-[#64748B]">Loading...</p>
+        </div>
+      </DashboardShell>
+    );
+  }
+
+  if (isCnrOrder) {
+    return (
+      <DashboardShell>
+        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-3 px-4 text-center">
+          <p className="text-[14px] font-semibold text-[#111827]">
+            Medical records cannot be uploaded
+          </p>
+          <p className="max-w-[420px] text-[13px] text-[#64748B]">
+            This order is marked as Certificate of No Records (CNR). Use Send CNR
+            Record from the orders table to email the CNR letter instead.
+          </p>
+          <Link
+            href="/orders"
+            className="text-[12px] font-semibold text-[#007F96] hover:underline"
+          >
+            Back to Orders
+          </Link>
         </div>
       </DashboardShell>
     );
