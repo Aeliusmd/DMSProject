@@ -42,26 +42,35 @@ export default function SendInvoiceEmailModal({
 
   const isXray = invoiceKind === "xray";
   const isRecords = invoiceKind === "records";
+  const isCnr = invoiceKind === "cnr";
   const isResend = mode === "resend";
-  const title = isRecords
-    ? "Email Records"
-    : isXray
-      ? isResend
-        ? "Email X-Ray Invoice"
-        : "Send X-Ray Invoice"
-      : isResend
-        ? "Email Invoice"
-        : "Send Invoice";
-  const submitLabel = isRecords
-    ? "Send Email"
-    : isXray
-      ? isResend
-        ? "Send Email"
-        : "Send X-Ray Invoice"
-      : isResend
-        ? "Send Email"
-        : "Send Invoice";
-  const helpText = isRecords
+  const title = isCnr
+    ? isResend
+      ? "Email CNR Record"
+      : "Send CNR Record"
+    : isRecords
+      ? "Email Records"
+      : isXray
+        ? isResend
+          ? "Email X-Ray Invoice"
+          : "Send X-Ray Invoice"
+        : isResend
+          ? "Email Invoice"
+          : "Send Invoice";
+  const submitLabel = isCnr
+    ? "Send CNR Record"
+    : isRecords
+      ? "Send Email"
+      : isXray
+        ? isResend
+          ? "Send Email"
+          : "Send X-Ray Invoice"
+        : isResend
+          ? "Send Email"
+          : "Send Invoice";
+  const helpText = isCnr
+    ? "The company email is filled in automatically and can be changed before sending. Use Add another email to send the CNR letter and reason to additional recipients in one step."
+    : isRecords
     ? "The company email is filled in automatically and can be changed before sending. Use Add another email to send the same secure download link to additional recipients. The link expires 7 days after it is sent."
     : isXray
       ? "The company email is filled in automatically and can be changed before sending the X-Ray invoice. Use Add another email to send the same X-Ray invoice to additional recipients in one step."
@@ -130,7 +139,7 @@ export default function SendInvoiceEmailModal({
       await onSend?.(emails);
       onClose();
     } catch (err) {
-      setError(err.message || `Failed to send ${isRecords ? "records" : isXray ? "X-Ray " : ""}email`);
+      setError(err.message || `Failed to send ${isCnr ? "CNR " : isRecords ? "records" : isXray ? "X-Ray " : ""}email`);
     } finally {
       setSubmitting(false);
     }
@@ -150,6 +159,17 @@ export default function SendInvoiceEmailModal({
           <div className="rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-[11px] leading-relaxed text-[#475569]">
             {helpText}
           </div>
+
+          {isCnr && order.cnrReason ? (
+            <div className="rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64748B]">
+                CNR Reason
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-[11px] font-medium text-[#334155]">
+                {order.cnrReason}
+              </p>
+            </div>
+          ) : null}
 
           {isRecords && uploadedRecords.length > 0 && (
             <div className="rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">

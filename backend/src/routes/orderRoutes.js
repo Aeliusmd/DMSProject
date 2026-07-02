@@ -47,6 +47,7 @@ router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);
 router.delete("/:id", orderController.remove);
 router.post("/:id/cancel", orderController.cancel);
+router.post("/:id/restore", orderController.restore);
 
 router.get("/:id/notes", orderController.getNotes);
 router.post("/:id/notes", uploadNoteAttachment, orderController.createNote);
@@ -61,6 +62,7 @@ router.get("/:id/activity-logs", orderController.getActivityLogs);
 router.get("/:id/workflow-stages", orderController.getWorkflowStages);
 router.patch("/:id/workflow-stages", orderController.updateWorkflowStage);
 router.post("/:id/mail", orderController.mailCompletedOrder);
+router.post("/:id/send-cnr-record", orderController.sendCnrRecord);
 router.post("/:id/send-copy-letter", orderController.sendCopyServiceLetter);
 router.post("/:id/pickup", orderController.recordPickup);
 router.post("/:id/fax", orderController.recordFax);

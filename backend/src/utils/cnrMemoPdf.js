@@ -138,7 +138,11 @@ function drawLetterhead(doc) {
   });
 }
 
-function generateCnrMemoPdf(data = {}) {
+function generateCnrDocumentPdf(data = {}) {
+  const documentTitle =
+    data.documentTitle ||
+    (data.isMemo ? "Memo" : "Certificate of No Records");
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "LETTER",
@@ -153,7 +157,7 @@ function generateCnrMemoPdf(data = {}) {
     resetCursor(doc);
     drawLetterhead(doc);
 
-    writeCenteredLine(doc, "Memo", {
+    writeCenteredLine(doc, documentTitle, {
       bold: true,
       fontSize: 14,
       spacingAfter: 1,
@@ -211,7 +215,16 @@ function generateCnrMemoPdf(data = {}) {
   });
 }
 
+function generateCnrMemoPdf(data = {}) {
+  return generateCnrDocumentPdf({
+    ...data,
+    documentTitle: data.documentTitle || "Memo",
+    isMemo: true,
+  });
+}
+
 module.exports = {
+  generateCnrDocumentPdf,
   generateCnrMemoPdf,
   formatDisplayDate,
 };

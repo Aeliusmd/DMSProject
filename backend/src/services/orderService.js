@@ -871,6 +871,7 @@ function mapOrderListRow(
     facilityInfo: buildFacilityBlock(row),
     year: orderYear,
     status: row.status,
+    statusBeforeInactive: row.status_before_inactive || "",
     displayStatus: deriveDisplayOrderStatus(row.status, row.created_at),
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
@@ -1960,6 +1961,54 @@ async function cancelOrder(id, { reason, actorId, actorName }) {
   };
 }
 
+const RESTORABLE_STATUSES = new Set(["Cancelled", "Deleted"]);
+const ALLOWED_RESTORE_TARGET_STATUSES = new Set([
+  "Active",
+  "Ready",
+  "Ready to Pickup",
+  "Completed",
+  "Write Offs",
+]);
+
+function resolveRestoreTargetStatus(order = {}) {
+  const previous = trimOrNull(order.status_before_inactive);
+  if (previous && ALLOWED_RESTORE_TARGET_STATUSES.has(previous)) {
+    return previous;
+  }
+  return "Active";
+}
+
+async function restoreOrder(id, { actorId, actorName } = {}) {
+  const existing = await Order.findByIdRaw(id);
+
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (!RESTORABLE_STATUSES.has(existing.status)) {
+    throw new ApiError(400, "Only cancelled or deleted orders can be restored");
+  }
+
+  const restoreStatus = resolveRestoreTargetStatus(existing);
+  const restored = await Order.restoreById(existing.id);
+
+  if (!restored) {
+    throw new ApiError(400, "Order could not be restored");
+  }
+
+  await Order.createActivityLog({
+    orderId: existing.id,
+    activityDate: new Date(),
+    performedBy: actorId || null,
+    authorName: actorName || "System",
+    callbackDate: null,
+    note: `Order restored to ${restoreStatus}`,
+    attachmentPath: null,
+  });
+
+  return getOrderById(existing.id);
+}
+
 async function getOrderSubpoenaFile(orderId) {
   const order = await Order.findById(orderId);
 
@@ -2009,6 +2058,13 @@ async function scanMedicalRecords(
   const existing = await Order.findById(orderId);
   if (!existing) {
     throw new ApiError(404, "Order not found");
+  }
+
+  if (Number(existing.certificate_no_records)) {
+    throw new ApiError(
+      400,
+      "Medical records cannot be uploaded for Certificate of No Records orders"
+    );
   }
 
   const orderRecords = await OrderRecord.findByOrderId(orderId);
@@ -2075,6 +2131,13 @@ async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {
   const existing = await Order.findById(orderId);
   if (!existing) {
     throw new ApiError(404, "Order not found");
+  }
+
+  if (Number(existing.certificate_no_records)) {
+    throw new ApiError(
+      400,
+      "Medical records cannot be modified for Certificate of No Records orders"
+    );
   }
 
   const orderRecords = await OrderRecord.findByOrderId(orderId);
@@ -2254,8 +2317,12 @@ function resolveCnrRecipientEmail(row = {}, data = {}) {
   );
 }
 
-function buildCnrMemoPdfData(order) {
+function buildCnrDocumentPdfData(order) {
+  const isMemo = Boolean(Number(order.cnr_memo));
+
   return {
+    isMemo,
+    documentTitle: isMemo ? "Memo" : "Certificate of No Records",
     memoDate: order.cnr_date_sent || new Date(),
     recipientCompany: order.serve_company_name || order.provider_name || "",
     applicant: buildApplicantName(order),
@@ -2263,6 +2330,10 @@ function buildCnrMemoPdfData(order) {
     facilityName: order.facility_name || "",
     cnrReason: trimOrNull(order.cnr_reason) || "",
   };
+}
+
+function buildCnrMemoPdfData(order) {
+  return buildCnrDocumentPdfData(order);
 }
 
 function shouldSendCnrMemoEmail(existingOrder, data) {
@@ -2339,6 +2410,75 @@ async function maybeSendCnrMemoEmail(orderId, data, existingOrder = null, actorI
     sentDate: toInputDate(order.cnr_date_sent),
     delivered: Boolean(result.delivered),
     devLogged: Boolean(result.devLogged),
+  };
+}
+
+async function sendCnrRecord(
+  orderId,
+  { emails, email, additionalEmails, sentDate } = {}
+) {
+  const normalizedId = Number(orderId);
+  const recipients = resolveMailRecipients({ emails, email, additionalEmails });
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const order = await Order.findById(normalizedId);
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (!Number(order.certificate_no_records)) {
+    throw new ApiError(400, "This order is not marked as Certificate of No Records");
+  }
+
+  const pdfData = buildCnrDocumentPdfData(order);
+  const { generateCnrDocumentPdf } = require("../utils/cnrMemoPdf");
+  const { sendCnrRecordEmail } = require("./emailService");
+  const pdfBuffer = await generateCnrDocumentPdf(pdfData);
+  const documentDate = dateOrNull(sentDate) || order.cnr_date_sent || new Date();
+  const deliveredTo = [];
+
+  for (const recipient of recipients) {
+    const result = await sendCnrRecordEmail({
+      to: recipient,
+      orderNumber: order.order_number,
+      applicantName: buildApplicantName(order),
+      documentDate,
+      cnrReason: pdfData.cnrReason,
+      documentTitle: pdfData.documentTitle,
+      pdfBuffer,
+    });
+
+    if (!result.delivered && !result.devLogged) {
+      throw new ApiError(500, "Failed to send CNR record email");
+    }
+
+    deliveredTo.push(recipient);
+  }
+
+  const mailSentDate =
+    dateOrNull(sentDate) || new Date().toISOString().slice(0, 10);
+  const pool = getPool();
+
+  await pool.execute(
+    `UPDATE orders
+     SET cnr_date_sent = :mailSentDate,
+         cnr_delivery = 'email',
+         updated_at = NOW()
+     WHERE id = :orderId`,
+    { mailSentDate, orderId: normalizedId }
+  );
+
+  return {
+    recipients: deliveredTo,
+    recipient: deliveredTo.join(", "),
+    delivered: deliveredTo.length > 0,
+    devLogged: false,
+    sentDate: mailSentDate,
+    documentTitle: pdfData.documentTitle,
+    cnrReason: pdfData.cnrReason,
   };
 }
 
@@ -2742,6 +2882,7 @@ module.exports = {
   updateOrder,
   deleteOrder,
   cancelOrder,
+  restoreOrder,
   getOrderNotes,
   addOrderNote,
   updateOrderNote,
@@ -2755,6 +2896,7 @@ module.exports = {
   removeMedicalRecords,
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
+  sendCnrRecord,
   sendCopyServiceLetter,
   getPrintInvoicePdf,
   getPrintXrayInvoicePdf,

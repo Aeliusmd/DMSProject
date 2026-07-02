@@ -23,6 +23,7 @@ import CompletedDeliveryLink from "@/components/orders/CompletedDeliveryLink";
 import {
   cancelOrder,
   deleteOrder,
+  restoreOrder,
   getOrders,
   fetchOrderMedicalRecordsPdf,
   fetchOrderPrintInvoicePdf,
@@ -30,6 +31,7 @@ import {
   fetchOrderSubpoenaPdf,
   mailCompletedOrder,
   sendCopyServiceLetter,
+  sendCnrRecord,
   recordOrderPickup,
   recordOrderFax,
   removeMedicalRecords,
@@ -146,6 +148,17 @@ function buildWorkflowStagesForOrder(order) {
     .filter((stage) => !(isCnrOrder && stage.key === "Custodian"))
     .map((stage) => {
     if (stage.key === "Review Records") {
+      if (isCnrOrder) {
+        return {
+          ...stage,
+          status: "complete",
+          label: "Review Records",
+          showScanRecordsLink: false,
+          showPreviewRecords: false,
+          showRemoveRecords: false,
+        };
+      }
+
       const isComplete =
         isWorkflowStageComplete(stage.status) || hasAllRecordsUploaded;
 
@@ -201,6 +214,11 @@ function isInactiveOrderStatus(status) {
   return status === "Cancelled" || status === "Deleted";
 }
 
+function getRestoreTargetStatus(order) {
+  const previous = `${order?.statusBeforeInactive || ""}`.trim();
+  return previous || "Active";
+}
+
 function getOrderFilterDate(order) {
   const raw = order.createdAt || order.created_at || order.subpoenaDate || "";
   if (!raw) return "";
@@ -243,6 +261,7 @@ function toRenderOrder(order) {
     id: order.id,
     dbId: order.dbId,
     orderStatus: order.status || "",
+    statusBeforeInactive: order.statusBeforeInactive || "",
     displayOrderStatus:
       order.displayStatus ||
       deriveDisplayOrderStatus(
@@ -332,12 +351,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const [emailingOrderId, setEmailingOrderId] = useState(null);
   const [sendingInvoiceOrderId, setSendingInvoiceOrderId] = useState(null);
   const [emailingXrayOrderId, setEmailingXrayOrderId] = useState(null);
+  const [emailingCnrOrderId, setEmailingCnrOrderId] = useState(null);
   const [emailingRecordsOrderId, setEmailingRecordsOrderId] = useState(null);
   const [processingDeliveryKey, setProcessingDeliveryKey] = useState("");
   const [emailError, setEmailError] = useState("");
   const [deliveryError, setDeliveryError] = useState("");
   const [deleteModal, setDeleteModal] = useState({ open: false, order: null });
   const [cancelModal, setCancelModal] = useState({ open: false, order: null });
+  const [restoreModal, setRestoreModal] = useState({ open: false, order: null });
   const [removeRecordsModal, setRemoveRecordsModal] = useState({
     open: false,
     order: null,
@@ -439,6 +460,16 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     setCancelModal({ open: false, order: null });
   }
 
+  function openRestoreModal(order) {
+    setActionError("");
+    setRestoreModal({ open: true, order });
+  }
+
+  function closeRestoreModal() {
+    if (actionLoading) return;
+    setRestoreModal({ open: false, order: null });
+  }
+
   function openRemoveRecordsModal(order) {
     setActionError("");
     setRemoveRecordsModal({ open: true, order });
@@ -495,6 +526,23 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       await fetchOrders();
     } catch (err) {
       setActionError(err.message || "Failed to cancel order");
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleConfirmRestore() {
+    if (!restoreModal.order?.dbId || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await restoreOrder(restoreModal.order.dbId);
+      setRestoreModal({ open: false, order: null });
+      await fetchOrders({ silent: true, force: true });
+    } catch (err) {
+      setActionError(err.message || "Failed to restore order");
     } finally {
       setActionLoading(false);
     }
@@ -578,6 +626,32 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         return;
       }
 
+      if (invoiceKind === "cnr") {
+        setEmailingCnrOrderId(order.dbId);
+        try {
+          const result = await sendCnrRecord(order.dbId, {
+            emails,
+            sentDate: getTodayInputDate(),
+          });
+          const sentDate = result.sentDate || getTodayInputDate();
+          setOrders((prev) =>
+            prev.map((item) =>
+              item.dbId === order.dbId
+                ? {
+                    ...item,
+                    cnrDateSent: sentDate,
+                    cnrDelivery: "email",
+                  }
+                : item
+            )
+          );
+          await fetchOrders({ silent: true, force: true });
+        } finally {
+          setEmailingCnrOrderId(null);
+        }
+        return;
+      }
+
       if (invoiceKind === "xray") {
         setEmailingXrayOrderId(order.dbId);
         try {
@@ -638,6 +712,20 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
   const handleEmailXrayInvoice = useCallback(
     (order) => {
       openSendInvoiceEmailModal(order, "send", { invoiceKind: "xray" });
+    },
+    [openSendInvoiceEmailModal]
+  );
+
+  const handleSendCnrRecord = useCallback(
+    (order) => {
+      openSendInvoiceEmailModal(order, "send", { invoiceKind: "cnr" });
+    },
+    [openSendInvoiceEmailModal]
+  );
+
+  const handleResendCnrRecord = useCallback(
+    (order) => {
+      openSendInvoiceEmailModal(order, "resend", { invoiceKind: "cnr" });
     },
     [openSendInvoiceEmailModal]
   );
@@ -903,6 +991,16 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         ) : null}
                       </div>
 
+                      {isInactiveOrderStatus(order.orderStatus) ? (
+                        <button
+                          type="button"
+                          onClick={() => openRestoreModal(order)}
+                          className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
+                        >
+                          <RestoreIcon />
+                          Restore Order
+                        </button>
+                      ) : (
                       <div className="space-y-1">
                         {order.status.map((stage) => (
                           <WorkflowStageItem
@@ -936,6 +1034,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                           />
                         ))}
                       </div>
+                      )}
 
                       {(order.orderStatus === "Ready to Pickup" ||
                         order.orderStatus === "Completed") &&
@@ -1029,6 +1128,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         onSendInvoice={() => handleSendInvoice(order)}
                         onResendInvoice={() => handleResendInvoiceEmail(order)}
                         onEmailXrayInvoice={() => handleEmailXrayInvoice(order)}
+                        onSendCnrRecord={() => handleSendCnrRecord(order)}
+                        onResendCnrRecord={() => handleResendCnrRecord(order)}
                         onPrintInvoice={() => setSelectedPrintInvoiceOrder(order)}
                         onPrintXrayInvoice={() =>
                           setSelectedPrintXrayInvoiceOrder(order)
@@ -1036,6 +1137,7 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         sending={sendingInvoiceOrderId === order.dbId}
                         emailing={emailingOrderId === order.dbId}
                         emailingXray={emailingXrayOrderId === order.dbId}
+                        emailingCnr={emailingCnrOrderId === order.dbId}
                       />
                     </td>
 
@@ -1378,6 +1480,22 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
         onClose={closeCancelModal}
         onConfirm={handleConfirmCancel}
       />
+
+      <ConfirmModal
+        open={restoreModal.open}
+        title="Restore Order"
+        message={
+          restoreModal.order
+            ? `Restore order ${restoreModal.order.id}? It will return to ${getRestoreTargetStatus(restoreModal.order)} status.`
+            : "Restore this order?"
+        }
+        variant="warning"
+        confirmLabel={actionLoading ? "Restoring..." : "Restore Order"}
+        cancelLabel="Cancel"
+        confirmDisabled={actionLoading}
+        onCancel={closeRestoreModal}
+        onConfirm={handleConfirmRestore}
+      />
     </>
   );
 }
@@ -1533,6 +1651,10 @@ function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
 
 function getWorkflowStageHref(stage, order) {
   if (stage.key === "Review Records") {
+    if (order.certificateNoRecords) {
+      return null;
+    }
+
     const allUploaded = Boolean(order.hasMedicalRecords);
     const isComplete =
       isWorkflowStageComplete(stage.status) || allUploaded;
@@ -1718,6 +1840,8 @@ function InvoiceBlock({
   cnrDelivery = "",
   cnrDateSent = "",
   onCnrReasonClick,
+  onSendCnrRecord,
+  onResendCnrRecord,
   allowStandardInvoice = true,
   providerEmail = "",
   onCreateInvoice,
@@ -1734,11 +1858,13 @@ function InvoiceBlock({
   sending = false,
   emailing = false,
   emailingXray = false,
+  emailingCnr = false,
 }) {
   const invoiceSentDate =
     invoice.sentDateCompact || invoice.sentDate || null;
   const xraySentDate =
     invoice.xraySentDateCompact || invoice.xraySentDate || null;
+  const showCnrEmailSent = isCnr && cnrDelivery === "email" && cnrDateSent;
 
   const sendInvoiceButton = !invoice.sentDate ? (
     <button
@@ -1861,6 +1987,32 @@ function InvoiceBlock({
       >
         Reason
       </button>
+
+      {!showCnrEmailSent ? (
+        <button
+          type="button"
+          onClick={onSendCnrRecord}
+          disabled={emailingCnr}
+          className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {emailingCnr ? "Sending..." : "Send CNR Record"}
+        </button>
+      ) : (
+        <div className="space-y-0.5">
+          <p className="font-semibold text-[#2563EB]">CNR Record Emailed</p>
+          <p className="text-[#94A3B8]">
+            Sent: {formatCnrDisplayDate(cnrDateSent)}
+          </p>
+          <button
+            type="button"
+            onClick={onResendCnrRecord}
+            disabled={emailingCnr}
+            className="block text-left text-[#007F96] underline disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {emailingCnr ? "Sending..." : "Email CNR Record"}
+          </button>
+        </div>
+      )}
     </>
   ) : null;
 
@@ -2180,6 +2332,20 @@ function TrashIcon() {
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
       <path
         d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function RestoreIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5"
         stroke="currentColor"
         strokeWidth="1.9"
         strokeLinecap="round"

@@ -138,6 +138,8 @@ class Order {
     } else if (filters.status) {
       conditions.push("o.status = :status");
       params.status = filters.status;
+    } else if (filters.search) {
+      conditions.push(`o.status <> 'Deleted'`);
     } else {
       conditions.push(ACTIVE_ORDER_ALIAS);
     }
@@ -837,7 +839,8 @@ class Order {
 
     const [result] = await pool.execute(
       `UPDATE orders
-       SET status = 'Deleted',
+       SET status_before_inactive = status,
+           status = 'Deleted',
            deleted_at = NOW(),
            deleted_by = :deletedBy,
            updated_at = NOW()
@@ -853,13 +856,35 @@ class Order {
 
     const [result] = await pool.execute(
       `UPDATE orders
-       SET status = 'Cancelled',
+       SET status_before_inactive = status,
+           status = 'Cancelled',
            cancel_reason = :reason,
            cancelled_at = NOW(),
            cancelled_by = :actorId,
            updated_at = NOW()
        WHERE id = :id AND ${ACTIVE_ORDER}`,
       { id, reason, actorId: actorId || null }
+    );
+
+    return result.affectedRows > 0;
+  }
+
+  static async restoreById(id) {
+    const pool = getPool();
+
+    const [result] = await pool.execute(
+      `UPDATE orders
+       SET status = COALESCE(status_before_inactive, 'Active'),
+           status_before_inactive = NULL,
+           cancel_reason = NULL,
+           cancelled_at = NULL,
+           cancelled_by = NULL,
+           deleted_at = NULL,
+           deleted_by = NULL,
+           updated_at = NOW()
+       WHERE id = :id
+         AND status IN ('Cancelled', 'Deleted')`,
+      { id }
     );
 
     return result.affectedRows > 0;
