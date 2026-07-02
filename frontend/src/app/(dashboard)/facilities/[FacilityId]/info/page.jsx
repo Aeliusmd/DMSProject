@@ -8,6 +8,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import AlertModal from "@/components/ui/AlertModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
 import DocumentPreviewModal from "@/components/facilities/DocumentPreviewModal";
+import FacilityAddNoteModal from "@/components/facilities/FacilityAddNoteModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   createDoctors,
@@ -16,6 +17,7 @@ import {
   getFacility,
   getFacilityDocuments,
   getFacilityNotes,
+  downloadFacilityNoteAttachment,
   reactivateDoctor,
   setDefaultDoctor,
   updateFacility,
@@ -54,6 +56,7 @@ export default function FacilityDetailsPage() {
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [uploadDocError, setUploadDocError] = useState("");
   const [previewDocument, setPreviewDocument] = useState(null);
@@ -915,9 +918,16 @@ export default function FacilityDetailsPage() {
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           <NotesCard
-            facilityId={facilityId}
             notes={notes}
             loading={notesLoading}
+            onNewNote={() => setNoteModalOpen(true)}
+            onDownloadAttachment={(attachment) =>
+              downloadFacilityNoteAttachment(
+                facilityId,
+                attachment.downloadUrl,
+                attachment.fileName
+              )
+            }
           />
           <UploadedDocumentsCard
             documents={documents}
@@ -1003,6 +1013,14 @@ export default function FacilityDetailsPage() {
         facilityId={facilityId}
         selectedDocument={previewDocument}
         onClose={() => setPreviewDocument(null)}
+      />
+
+      <FacilityAddNoteModal
+        isOpen={noteModalOpen}
+        facilityId={facilityId}
+        facilityName={formData?.facilityName || ""}
+        onClose={() => setNoteModalOpen(false)}
+        onSaved={() => loadNotes()}
       />
     </DashboardShell>
   );
@@ -1179,9 +1197,9 @@ function OfficeManagerCard({
 function DoctorsTable({ doctors, onDelete, onReactivate, onSetDefault }) {
   return (
     <section className="overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-      <div className="overflow-auto">
+      <div className="max-h-[360px] overflow-auto">
         <table className="w-full min-w-[1060px] border-collapse">
-          <thead className="bg-[#F8FAFC]">
+          <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
               <th className="w-[60px] px-5 py-3">ID</th>
               <th className="w-[190px] px-5 py-3">Office</th>
@@ -1289,24 +1307,30 @@ function DoctorsTable({ doctors, onDelete, onReactivate, onSetDefault }) {
   );
 }
 
-function NotesCard({ facilityId, notes, loading }) {
+function NotesCard({
+  notes,
+  loading,
+  onNewNote,
+  onDownloadAttachment,
+}) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-[13px] font-semibold text-[#111827]">Notes</h2>
 
-        <Link
-          href={`/facilities/${facilityId}/notes`}
-          className="inline-flex h-[28px] items-center justify-center gap-1 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96]"
+        <button
+          type="button"
+          onClick={onNewNote}
+          className="inline-flex h-[28px] items-center justify-center gap-1 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
         >
           <PlusIcon />
           New Note
-        </Link>
+        </button>
       </div>
 
-      <div className="overflow-auto">
+      <div className="max-h-[360px] overflow-auto">
         <table className="w-full min-w-[460px] border-collapse">
-          <thead className="bg-[#F8FAFC]">
+          <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
               <th className="w-[110px] px-4 py-3">Date</th>
               <th className="w-[120px] px-4 py-3">By</th>
@@ -1341,7 +1365,22 @@ function NotesCard({ facilityId, notes, loading }) {
                   </td>
 
                   <td className="px-4 py-4 text-[12px] leading-[18px] text-[#334155]">
-                    {note.note}
+                    <p>{note.note}</p>
+
+                    {note.attachments?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {note.attachments.map((attachment) => (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            onClick={() => onDownloadAttachment?.(attachment)}
+                            className="rounded-[5px] border border-[#BAE6FD] bg-[#F0F9FF] px-2 py-1 text-[10px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
+                          >
+                            {attachment.fileName}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -1387,9 +1426,9 @@ function UploadedDocumentsCard({
         </button>
       </div>
 
-      <div className="overflow-auto">
+      <div className="max-h-[360px] overflow-auto">
         <table className="w-full min-w-[640px] border-collapse">
-          <thead className="bg-[#F8FAFC]">
+          <thead className="sticky top-0 z-10 bg-[#F8FAFC]">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
               <th className="px-4 py-3">Document</th>
               <th className="w-[120px] px-4 py-3">Date</th>

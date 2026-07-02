@@ -5,6 +5,7 @@ import Link from "next/link";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import AlertModal from "@/components/ui/AlertModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
+import FacilityAddNoteModal from "@/components/facilities/FacilityAddNoteModal";
 import { uploadFacilityDocument } from "@/lib/facilities/facilityApi";
 
 export default function FacilitiesTable({ facilities, onDelete }) {
@@ -14,6 +15,10 @@ export default function FacilitiesTable({ facilities, onDelete }) {
   });
 
   const [uploadModal, setUploadModal] = useState({
+    open: false,
+    facility: null,
+  });
+  const [noteModal, setNoteModal] = useState({
     open: false,
     facility: null,
   });
@@ -63,6 +68,20 @@ export default function FacilitiesTable({ facilities, onDelete }) {
       facility: null,
     });
     setUploadError("");
+  };
+
+  const openNoteModal = (facility) => {
+    setNoteModal({
+      open: true,
+      facility,
+    });
+  };
+
+  const closeNoteModal = () => {
+    setNoteModal({
+      open: false,
+      facility: null,
+    });
   };
 
   const handleUploadDocuments = async ({ documentType, files }) => {
@@ -154,13 +173,14 @@ export default function FacilitiesTable({ facilities, onDelete }) {
                   </td>
 
                   <td className="px-5 py-4 text-center">
-                    <Link
-                      href={`/facilities/${facility.id}/notes`}
+                    <button
+                      type="button"
+                      onClick={() => openNoteModal(facility)}
                       className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
                     >
                       <NotesIcon />
                       Notes
-                    </Link>
+                    </button>
                   </td>
 
                   <td className="px-5 py-4 text-center">
@@ -222,6 +242,13 @@ export default function FacilitiesTable({ facilities, onDelete }) {
         onUpload={handleUploadDocuments}
         uploading={uploading}
         uploadError={uploadError}
+      />
+
+      <FacilityAddNoteModal
+        isOpen={noteModal.open}
+        facilityId={noteModal.facility?.id || ""}
+        facilityName={noteModal.facility?.facility || ""}
+        onClose={closeNoteModal}
       />
 
       <AlertModal
