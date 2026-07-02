@@ -11,6 +11,8 @@ function buildOrdersQuery(filters = {}) {
   if (filters.period) params.set("period", filters.period);
   if (filters.status) params.set("status", filters.status);
   if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.createdFrom) params.set("createdFrom", filters.createdFrom);
+  if (filters.createdTo) params.set("createdTo", filters.createdTo);
   if (filters.limit) params.set("limit", String(filters.limit));
 
   const queryString = params.toString();
