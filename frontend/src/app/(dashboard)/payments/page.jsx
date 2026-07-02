@@ -8,6 +8,7 @@ import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import {
   buildManualSummary,
   buildOnlineSummary,
+  filterPaymentsByInvoiceId,
   filterPaymentsByOrderId,
   getPayments,
 } from "@/lib/payments/paymentApi";
@@ -39,6 +40,8 @@ export default function PaymentsPage() {
     orderId: "",
   });
   const [appliedOrderId, setAppliedOrderId] = useState("");
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [appliedInvoiceSearch, setAppliedInvoiceSearch] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [manualData, setManualData] = useState({
@@ -88,6 +91,14 @@ export default function PaymentsPage() {
     loadPayments();
   }, [loadPayments, refreshKey]);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setAppliedInvoiceSearch(invoiceSearch.trim());
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [invoiceSearch]);
+
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
 
@@ -109,16 +120,28 @@ export default function PaymentsPage() {
       orderId: "",
     });
     setAppliedOrderId("");
+    setInvoiceSearch("");
+    setAppliedInvoiceSearch("");
     setRefreshKey((value) => value + 1);
   };
 
+  const filterByOrderId = useCallback(
+    (rows) => filterPaymentsByOrderId(rows, appliedOrderId),
+    [appliedOrderId]
+  );
+
+  const filterByInvoiceId = useCallback(
+    (rows) => filterPaymentsByInvoiceId(rows, appliedInvoiceSearch),
+    [appliedInvoiceSearch]
+  );
+
   const filteredManualPayments = useMemo(
-    () => filterPaymentsByOrderId(manualData.payments, appliedOrderId),
-    [manualData.payments, appliedOrderId]
+    () => filterByInvoiceId(filterByOrderId(manualData.payments)),
+    [manualData.payments, filterByOrderId, filterByInvoiceId]
   );
   const filteredOnlinePayments = useMemo(
-    () => filterPaymentsByOrderId(onlineData.payments, appliedOrderId),
-    [onlineData.payments, appliedOrderId]
+    () => filterByInvoiceId(filterByOrderId(onlineData.payments)),
+    [onlineData.payments, filterByOrderId, filterByInvoiceId]
   );
 
   const isManual = paymentType === "manual";
@@ -166,6 +189,15 @@ export default function PaymentsPage() {
           />
         </div>
 
+        <GlobalInvoiceSearch
+          value={invoiceSearch}
+          onChange={setInvoiceSearch}
+          onClear={() => {
+            setInvoiceSearch("");
+            setAppliedInvoiceSearch("");
+          }}
+        />
+
         <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0">
           <PaymentTypeTabs
             activeType={paymentType}
@@ -203,6 +235,57 @@ export default function PaymentsPage() {
         />
       </div>
     </DashboardShell>
+  );
+}
+
+function GlobalInvoiceSearch({ value, onChange, onClear }) {
+  return (
+    <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label
+          htmlFor="global-invoice-search"
+          className="shrink-0 text-[12px] font-semibold text-[#334155]"
+        >
+          Search by Invoice ID
+        </label>
+
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3">
+          <SearchIcon />
+          <input
+            id="global-invoice-search"
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Enter invoice number or ID (e.g. INV-24018)"
+            className="h-[38px] min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+          />
+          {value ? (
+            <button
+              type="button"
+              onClick={onClear}
+              className="shrink-0 text-[11px] font-semibold text-[#64748B] hover:text-[#334155]"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      className="shrink-0 text-[#94A3B8]"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
   );
 }
 

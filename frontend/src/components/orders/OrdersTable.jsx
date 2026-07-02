@@ -214,6 +214,16 @@ function isInactiveOrderStatus(status) {
   return status === "Cancelled" || status === "Deleted";
 }
 
+function formatShortDate(dateValue) {
+  if (!dateValue) return "";
+
+  const value = String(dateValue).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return dateValue;
+
+  const [year, month, day] = value.split("-");
+  return `${month}/${day}/${year.slice(2)}`;
+}
+
 function getRestoreTargetStatus(order) {
   const previous = `${order?.statusBeforeInactive || ""}`.trim();
   return previous || "Active";
@@ -296,6 +306,7 @@ function toRenderOrder(order) {
     },
     facilityName:
       order.facilityName || order.facilityInfo?.name || "",
+    doctor: order.doctor || order.specificDoctor || "",
     certificateNoRecords: Boolean(order.certificateNoRecords),
     cnrReason: order.cnrReason || "",
     cnrMemo: Boolean(order.cnrMemo),
@@ -313,11 +324,20 @@ function toRenderOrder(order) {
     hasDoi: Boolean(order.hasDoi),
     createdAt: order.createdAt || order.created_at || "",
     subpoenaDate: order.subpoenaDate || "",
+    dateRequested: order.dateRequested || "",
+    dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
   };
 }
 
-export default function OrdersTable({ filters = defaultOrderFilters }) {
+export default function OrdersTable({
+  filters = defaultOrderFilters,
+  excludeCompleted = false,
+  createdSortDir = null,
+  fitToWindow = false,
+  showDoctorColumn = false,
+  onSummaryChange = null,
+}) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
@@ -384,9 +404,11 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     period: filters.period || "",
     status: filters.status || "",
     search: filters.search || "",
+    createdFrom: filters.createdFrom || "",
+    createdTo: filters.createdTo || "",
   };
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
 
   if (filterKey !== prevFilterKey) {
@@ -413,6 +435,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
           period: normalizedFilters.period,
           status: normalizedFilters.status,
           search: normalizedFilters.search,
+          createdFrom: normalizedFilters.createdFrom,
+          createdTo: normalizedFilters.createdTo,
         });
 
         if (requestId !== requestIdRef.current) return;
@@ -437,6 +461,8 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
       normalizedFilters.period,
     normalizedFilters.status,
     normalizedFilters.search,
+    normalizedFilters.createdFrom,
+    normalizedFilters.createdTo,
     ]
   );
 
@@ -771,10 +797,28 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     };
   }, [fetchOrders]);
 
-  const filteredOrders = useMemo(
-    () => filterOrdersByPeriod(orders, normalizedFilters.period),
-    [orders, normalizedFilters.period]
-  );
+  const filteredOrders = useMemo(() => {
+    let result = filterOrdersByPeriod(orders, normalizedFilters.period);
+
+    if (excludeCompleted) {
+      result = result.filter(
+        (order) => `${order.orderStatus || ""}`.trim() !== "Completed"
+      );
+    }
+
+    if (createdSortDir === "asc" || createdSortDir === "desc") {
+      const factor = createdSortDir === "asc" ? 1 : -1;
+      result = [...result].sort((a, b) => {
+        const aTime = new Date(a.createdAt || a.created_at || 0).getTime();
+        const bTime = new Date(b.createdAt || b.created_at || 0).getTime();
+        const safeA = Number.isNaN(aTime) ? 0 : aTime;
+        const safeB = Number.isNaN(bTime) ? 0 : bTime;
+        return (safeA - safeB) * factor;
+      });
+    }
+
+    return result;
+  }, [orders, normalizedFilters.period, excludeCompleted, createdSortDir]);
 
   const totalPages = Math.max(
     1,
@@ -801,6 +845,27 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
     safeCurrentPage * ORDERS_PER_PAGE,
     filteredOrders.length
   );
+
+  useEffect(() => {
+    if (typeof onSummaryChange !== "function") return;
+
+    onSummaryChange({
+      total: filteredOrders.length,
+      startRecord,
+      endRecord,
+      currentPage: safeCurrentPage,
+      totalPages,
+      loading,
+    });
+  }, [
+    onSummaryChange,
+    filteredOrders.length,
+    startRecord,
+    endRecord,
+    safeCurrentPage,
+    totalPages,
+    loading,
+  ]);
 
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -855,13 +920,65 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
           </p>
         )}
 
-        <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[1420px] border-collapse">
+        {fitToWindow && (
+          <style>{`
+            .orders-table-fit { font-size: 10px; width: 100%; }
+            .orders-table-fit th,
+            .orders-table-fit td {
+              padding-left: 5px !important;
+              padding-right: 5px !important;
+              padding-top: 8px !important;
+              padding-bottom: 8px !important;
+              width: auto !important;
+            }
+            .orders-table-fit td,
+            .orders-table-fit td * {
+              white-space: normal !important;
+              overflow-wrap: anywhere;
+              word-break: break-word;
+            }
+            /* Percentage widths sum to 100% so the table always fits the
+               window (no overflow / clipping) with table-layout: fixed. */
+            .orders-table-fit th:nth-child(1),
+            .orders-table-fit td:nth-child(1) { width: 7% !important; }
+            .orders-table-fit th:nth-child(2),
+            .orders-table-fit td:nth-child(2) { width: 11% !important; }
+            .orders-table-fit th:nth-child(3),
+            .orders-table-fit td:nth-child(3) { width: 10% !important; }
+            .orders-table-fit th:nth-child(4),
+            .orders-table-fit td:nth-child(4) { width: 12% !important; }
+            .orders-table-fit th:nth-child(5),
+            .orders-table-fit td:nth-child(5) { width: 11% !important; }
+            .orders-table-fit th:nth-child(6),
+            .orders-table-fit td:nth-child(6) { width: 11% !important; }
+            .orders-table-fit th:nth-child(7),
+            .orders-table-fit td:nth-child(7) { width: 13% !important; }
+            .orders-table-fit th:nth-child(8),
+            .orders-table-fit td:nth-child(8) { width: 8% !important; }
+            .orders-table-fit th:nth-child(9),
+            .orders-table-fit td:nth-child(9) { width: 9% !important; }
+            .orders-table-fit th:nth-child(10),
+            .orders-table-fit td:nth-child(10) { width: 8% !important; }
+          `}</style>
+        )}
+
+        <div
+          className={`min-h-0 flex-1 ${
+            fitToWindow ? "overflow-y-auto overflow-x-hidden" : "overflow-auto"
+          }`}
+        >
+          <table
+            className={`w-full border-collapse ${
+              fitToWindow ? "table-fixed orders-table-fit" : "min-w-[1420px]"
+            }`}
+          >
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th className="w-[90px] px-4 py-3">ID</th>
                 <th className="w-[150px] px-4 py-3">Case</th>
-                <th className="w-[160px] px-4 py-3">Facility</th>
+                <th className="w-[160px] px-4 py-3">
+                  {showDoctorColumn ? "Doctor" : "Facility"}
+                </th>
                 <th className="w-[125px] px-4 py-3">Status</th>
                 <th className="w-[170px] px-4 py-3">Invoice</th>
                 <th className="w-[170px] px-4 py-3">Records</th>
@@ -922,6 +1039,14 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                         </p>
                       )}
 
+                      {order.dateRequestedDisplay || order.dateRequested ? (
+                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                          Req:{" "}
+                          {order.dateRequestedDisplay ||
+                            formatShortDate(order.dateRequested)}
+                        </p>
+                      ) : null}
+
                         <button
                           type="button"
                           onClick={() => setSelectedNoteOrder(order)}
@@ -972,15 +1097,23 @@ export default function OrdersTable({ filters = defaultOrderFilters }) {
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <p className="font-semibold text-[#111827]">
-                        {order.facilityName || "—"}
-                      </p>
+                      {showDoctorColumn ? (
+                        <p className="font-semibold text-[#111827]">
+                          {order.doctor || "—"}
+                        </p>
+                      ) : (
+                        <>
+                          <p className="font-semibold text-[#111827]">
+                            {order.facilityName || "—"}
+                          </p>
 
-                      {order.facilityInfo?.address ? (
-                        <p className="mt-1 text-[10px] leading-[15px] text-[#64748B]">
-                          {order.facilityInfo.address}
-                      </p>
-                      ) : null}
+                          {order.facilityInfo?.address ? (
+                            <p className="mt-1 text-[10px] leading-[15px] text-[#64748B]">
+                              {order.facilityInfo.address}
+                            </p>
+                          ) : null}
+                        </>
+                      )}
                     </td>
 
                     <td className="px-4 py-5 align-top">

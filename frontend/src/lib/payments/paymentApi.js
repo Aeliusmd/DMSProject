@@ -96,6 +96,12 @@ function enrichOrder(order) {
 }
 
 function buildPaymentListRow(order, payment, channel) {
+  const matchedInvoice = (order.invoices || []).find(
+    (invoice) =>
+      String(invoice.invoiceNo || "").toLowerCase() ===
+      String(payment.invoiceNo || "").toLowerCase()
+  );
+
   return {
     id: payment.id,
     orderId: order.orderId,
@@ -103,6 +109,8 @@ function buildPaymentListRow(order, payment, channel) {
     company: order.company,
     applicant: order.applicant,
     caseNo: order.caseNo,
+    invoiceNo: payment.invoiceNo || matchedInvoice?.invoiceNo || "",
+    invoiceId: matchedInvoice?.id || "",
     paymentType: payment.paymentType,
     paymentTypeLabel:
       PAYMENT_TYPE_LABELS[payment.paymentType] || payment.paymentType,
@@ -127,6 +135,22 @@ function filterPaymentsByOrderId(rows, orderIdQuery) {
         .toLowerCase()
         .includes(query) ||
       String(row.orderId || "")
+        .toLowerCase()
+        .includes(query)
+  );
+}
+
+function filterPaymentsByInvoiceId(rows, invoiceQuery) {
+  if (!invoiceQuery?.trim()) return rows;
+
+  const query = invoiceQuery.trim().toLowerCase();
+
+  return rows.filter(
+    (row) =>
+      String(row.invoiceNo || "")
+        .toLowerCase()
+        .includes(query) ||
+      String(row.invoiceId || "")
         .toLowerCase()
         .includes(query)
   );
@@ -220,4 +244,4 @@ export async function getOrderPaymentDetail(orderId, { channel } = {}) {
   };
 }
 
-export { formatMoney, PAYMENT_TYPE_LABELS, buildManualSummary, buildOnlineSummary, filterPaymentsByOrderId };
+export { formatMoney, PAYMENT_TYPE_LABELS, buildManualSummary, buildOnlineSummary, filterPaymentsByOrderId, filterPaymentsByInvoiceId };
