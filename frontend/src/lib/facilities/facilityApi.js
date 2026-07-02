@@ -186,12 +186,49 @@ export async function getFacilityNotes(facilityId) {
   return data?.data?.notes || [];
 }
 
-export async function createFacilityNote(facilityId, note) {
+export async function createFacilityNote(facilityId, { note, attachments = [] } = {}) {
+  const formData = new FormData();
+  formData.append("note", note ?? "");
+
+  attachments.forEach((file) => {
+    formData.append("attachments", file);
+  });
+
   const data = await request(`/facilities/${facilityId}/notes`, {
     method: "POST",
     auth: true,
-    body: { note },
+    body: formData,
   });
 
   return data?.data?.note;
+}
+
+export async function downloadFacilityNoteAttachment(
+  facilityId,
+  downloadPath,
+  fileName
+) {
+  const accessToken = getAccessToken();
+  const normalizedPath = `${downloadPath || ""}`.replace(/^\/+/, "");
+  const response = await fetch(`${API_BASE_URL}/${normalizedPath}`, {
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiRequestError(
+      data?.message || "Failed to download attachment",
+      response.status
+    );
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fileName || "attachment";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }

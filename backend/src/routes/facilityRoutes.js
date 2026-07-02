@@ -4,7 +4,7 @@ const facilityDocumentController = require("../controllers/facilityDocumentContr
 const facilityNoteController = require("../controllers/facilityNoteController");
 const { authenticate } = require("../middleware/authMiddleware");
 const { denyRoles } = require("../middleware/roleMiddleware");
-const { facilityDocumentUpload } = require("../middleware/uploadMiddleware");
+const { facilityDocumentUpload, facilityNoteAttachmentUpload } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
@@ -37,7 +37,16 @@ router.delete(
 );
 
 router.get("/:id/notes", facilityNoteController.listNotes);
-router.post("/:id/notes", employeeWriteGuard, facilityNoteController.createNote);
+router.post(
+  "/:id/notes",
+  employeeWriteGuard,
+  facilityNoteAttachmentUpload.array("attachments", 10),
+  facilityNoteController.createNote
+);
+router.get(
+  "/:id/notes/:noteId/attachments/:attachmentId/download",
+  facilityNoteController.downloadAttachment
+);
 
 router.get("/:id", facilityController.getById);
 router.put("/:id", employeeWriteGuard, facilityController.update);
