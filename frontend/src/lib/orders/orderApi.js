@@ -1,6 +1,4 @@
-import { request, ApiRequestError } from "@/lib/auth/authApi";
-import { API_BASE_URL } from "@/config/api";
-import { getAccessToken } from "@/lib/auth/authStorage";
+import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
 
 function buildOrdersQuery(filters = {}) {
   const params = new URLSearchParams();
@@ -294,12 +292,8 @@ export async function getUnprocessedSubpoenaById(extractId) {
 }
 
 export async function fetchUnprocessedSubpoenaPdf(extractId) {
-  const token = getAccessToken();
-  const response = await fetch(
-    `${API_BASE_URL}/orders/unprocessed/${extractId}/file`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
+  const response = await authFetch(
+    `/orders/unprocessed/${extractId}/file`
   );
 
   if (!response.ok) {
@@ -317,10 +311,7 @@ export async function fetchUnprocessedSubpoenaPdf(extractId) {
 }
 
 export async function fetchOrderSubpoenaPdf(orderId) {
-  const token = getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/orders/${orderId}/subpoena/file`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const response = await authFetch(`/orders/${orderId}/subpoena/file`);
 
   if (!response.ok) {
     let message = "Failed to load order subpoena PDF";
@@ -337,15 +328,11 @@ export async function fetchOrderSubpoenaPdf(orderId) {
 }
 
 export async function fetchOrderMedicalRecordsPdf(orderId, { recordType = "medical" } = {}) {
-  const token = getAccessToken();
   const params = new URLSearchParams();
   if (recordType) params.set("recordType", recordType);
   const query = params.toString() ? `?${params.toString()}` : "";
-  const response = await fetch(
-    `${API_BASE_URL}/orders/${orderId}/medical-records/file${query}`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
+  const response = await authFetch(
+    `/orders/${orderId}/medical-records/file${query}`
   );
 
   if (!response.ok) {
@@ -363,10 +350,7 @@ export async function fetchOrderMedicalRecordsPdf(orderId, { recordType = "medic
 }
 
 export async function fetchOrderPrintInvoicePdf(orderId) {
-  const token = getAccessToken();
-  const response = await fetch(`${API_BASE_URL}/orders/${orderId}/invoice/print`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const response = await authFetch(`/orders/${orderId}/invoice/print`);
 
   if (!response.ok) {
     let message = "Failed to load print invoice PDF";
@@ -383,12 +367,8 @@ export async function fetchOrderPrintInvoicePdf(orderId) {
 }
 
 export async function fetchOrderPrintXrayInvoicePdf(orderId) {
-  const token = getAccessToken();
-  const response = await fetch(
-    `${API_BASE_URL}/orders/${orderId}/invoice/xray/print`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
+  const response = await authFetch(
+    `/orders/${orderId}/invoice/xray/print`
   );
 
   if (!response.ok) {

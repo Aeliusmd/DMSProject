@@ -1,6 +1,4 @@
-import { API_BASE_URL } from "@/config/api";
-import { request, ApiRequestError } from "@/lib/auth/authApi";
-import { getAccessToken } from "@/lib/auth/authStorage";
+import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
 
 export { ApiRequestError };
 
@@ -100,16 +98,10 @@ export async function uploadFacilityDocument(facilityId, file, documentType) {
   formData.append("file", file);
   formData.append("documentType", documentType);
 
-  const accessToken = getAccessToken();
-
-  const response = await fetch(
-    `${API_BASE_URL}/facilities/${facilityId}/documents`,
-    {
-      method: "POST",
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      body: formData,
-    }
-  );
+  const response = await authFetch(`/facilities/${facilityId}/documents`, {
+    method: "POST",
+    body: formData,
+  });
 
   const data = await response.json().catch(() => null);
 
@@ -129,13 +121,8 @@ async function fetchFacilityDocumentBlob(
   documentId,
   action = "preview"
 ) {
-  const accessToken = getAccessToken();
-
-  const response = await fetch(
-    `${API_BASE_URL}/facilities/${facilityId}/documents/${documentId}/${action}`,
-    {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-    }
+  const response = await authFetch(
+    `/facilities/${facilityId}/documents/${documentId}/${action}`
   );
 
   if (!response.ok) {
@@ -208,11 +195,8 @@ export async function downloadFacilityNoteAttachment(
   downloadPath,
   fileName
 ) {
-  const accessToken = getAccessToken();
   const normalizedPath = `${downloadPath || ""}`.replace(/^\/+/, "");
-  const response = await fetch(`${API_BASE_URL}/${normalizedPath}`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-  });
+  const response = await authFetch(`/${normalizedPath}`);
 
   if (!response.ok) {
     const data = await response.json().catch(() => null);
