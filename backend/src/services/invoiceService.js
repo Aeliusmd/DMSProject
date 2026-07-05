@@ -105,6 +105,7 @@ function getXrayPayment(xrayRow) {
 const ORDER_PAYMENT_TYPES = ["prepayment", "custodian", "xray"];
 const STANDARD_INVOICE_PAYMENT_TYPES = ["prepayment"];
 const DEFAULT_CUSTODIAN_CHARGE = 15;
+const DEFAULT_PREPAYMENT_CHARGE = 15;
 
 const ORDER_PAYMENT_LABELS = {
   prepayment: "Prepayment",
@@ -1632,7 +1633,22 @@ async function syncInvoicePrepayment(connection, orderId, prepaymentAmount) {
     memo: existingPrepayment?.memo || null,
   });
 
+  await syncServeWorkflowFromPrepayment(connection, orderId);
   await syncInvoiceAmountPaidFromOrder(connection, orderId);
+}
+
+async function syncServeWorkflowFromPrepayment(connection, orderId) {
+  const payments = await Order.findPaymentsByOrderId(orderId, connection);
+  const prepaymentPaid = getOrderPaymentAmount(payments, "prepayment");
+  const isServeComplete = prepaymentPaid >= DEFAULT_PREPAYMENT_CHARGE;
+
+  await Order.upsertWorkflowStage(
+    orderId,
+    "Serve",
+    isServeComplete ? "complete" : "pending",
+    isServeComplete ? new Date() : null,
+    connection
+  );
 }
 
 async function createInvoice(body, userId) {

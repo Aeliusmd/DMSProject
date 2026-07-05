@@ -11,7 +11,12 @@ import {
   SHEET_COMPANY_INFO,
 } from "@/lib/sheetTemplateConstants";
 
-export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
+export default function CertificateNoRecordsModal({
+  isOpen,
+  order,
+  onClose,
+  onSendEmail,
+}) {
   const mounted = useIsClient();
 
   useEffect(() => {
@@ -53,8 +58,17 @@ export default function CertificateNoRecordsModal({ isOpen, order, onClose }) {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handlePrint}
+              onClick={onSendEmail}
               className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[5px] bg-[#111827] px-3 text-[11px] font-semibold text-white hover:bg-[#1F2937]"
+            >
+              <EmailIcon />
+              Send Email
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[5px] border border-[#CBD5E1] bg-white px-3 text-[11px] font-semibold text-[#111827] hover:bg-[#F8FAFC]"
             >
               <PrintIcon />
               Print
@@ -145,6 +159,19 @@ function PrintIcon() {
         strokeWidth="1.8"
       />
       <path d="M7 14h10v7H7v-7Z" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function EmailIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 6h16v12H4V6Zm0 0 8 6 8-6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

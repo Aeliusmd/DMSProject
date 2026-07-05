@@ -49,13 +49,6 @@ export default function OrdersPage() {
               New Order
             </OrderActionButton>
 
-            <OrderActionButton
-              href="/orders/unprocessed"
-              icon={<DocumentIcon />}
-            >
-              Unprocessed
-            </OrderActionButton>
-
             <OrderActionButton href="/orders/batch-scan" icon={<BatchIcon />}>
               Batch Scan
             </OrderActionButton>
@@ -86,15 +79,6 @@ function PlusIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
       <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
-
-function DocumentIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-      <path d="M6 3h9l3 3v15H6V3Z" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M15 3v4h4" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

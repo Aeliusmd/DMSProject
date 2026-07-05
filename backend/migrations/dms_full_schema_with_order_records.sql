@@ -209,6 +209,8 @@ CREATE TABLE orders (
     'Active', 'Ready', 'Ready to Pickup', 'Completed', 'Cancelled',
     'Deleted', 'Write Offs'
   ) NOT NULL DEFAULT 'Active',
+  status_before_inactive VARCHAR(50) NULL
+    COMMENT 'Status before cancel or delete; used when restoring',
   cancel_reason   TEXT            NULL COMMENT 'Reason provided when order was cancelled',
   cancelled_at    DATETIME        NULL COMMENT 'When the order was cancelled',
   cancelled_by    BIGINT UNSIGNED NULL COMMENT 'matrix_employees.id who cancelled the order',
@@ -258,6 +260,8 @@ CREATE TABLE orders (
   xray_invoice_date DATE          NULL,
   specific_record VARCHAR(255)    NULL,
   specific_doctor VARCHAR(200)    NULL,
+  specific_doctor_is_default TINYINT(1) NOT NULL DEFAULT 0
+    COMMENT '1 when specific_doctor was set from facility default doctor during auto order creation',
   full_address    TEXT            NULL,
   certificate_no_records TINYINT(1) NOT NULL DEFAULT 0,
   cnr_reason      TEXT            NULL,
@@ -266,6 +270,8 @@ CREATE TABLE orders (
   cnr_memo        TINYINT(1)      NOT NULL DEFAULT 0,
   has_note        TINYINT(1)      NOT NULL DEFAULT 0,
   has_subpoena    TINYINT(1)      NOT NULL DEFAULT 0,
+  creation_source ENUM('manual', 'auto') NOT NULL DEFAULT 'manual'
+    COMMENT 'manual = user-created; auto = batch scan auto-processed',
   created_by      BIGINT UNSIGNED NULL,
   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

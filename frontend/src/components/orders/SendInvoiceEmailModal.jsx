@@ -43,8 +43,11 @@ export default function SendInvoiceEmailModal({
   const isXray = invoiceKind === "xray";
   const isRecords = invoiceKind === "records";
   const isCnr = invoiceKind === "cnr";
+  const isCertification = invoiceKind === "certification";
   const isResend = mode === "resend";
-  const title = isCnr
+  const title = isCertification
+    ? "Send Certificate of Records"
+    : isCnr
     ? isResend
       ? "Email CNR Record"
       : "Send CNR Record"
@@ -57,8 +60,8 @@ export default function SendInvoiceEmailModal({
         : isResend
           ? "Email Invoice"
           : "Send Invoice";
-  const submitLabel = isCnr
-    ? "Send CNR Record"
+  const submitLabel = isCnr || isCertification
+    ? "Send Email"
     : isRecords
       ? "Send Email"
       : isXray
@@ -68,7 +71,9 @@ export default function SendInvoiceEmailModal({
         : isResend
           ? "Send Email"
           : "Send Invoice";
-  const helpText = isCnr
+  const helpText = isCertification
+    ? "The company email is filled in automatically and can be changed before sending. Use Add another email to send the certificate of records to additional recipients in one step."
+    : isCnr
     ? "The company email is filled in automatically and can be changed before sending. Use Add another email to send the CNR letter and reason to additional recipients in one step."
     : isRecords
     ? "The company email is filled in automatically and can be changed before sending. Use Add another email to send the same secure download link to additional recipients. The link expires 7 days after it is sent."
@@ -139,7 +144,7 @@ export default function SendInvoiceEmailModal({
       await onSend?.(emails);
       onClose();
     } catch (err) {
-      setError(err.message || `Failed to send ${isCnr ? "CNR " : isRecords ? "records" : isXray ? "X-Ray " : ""}email`);
+      setError(err.message || `Failed to send ${isCertification ? "certificate of records " : isCnr ? "CNR " : isRecords ? "records" : isXray ? "X-Ray " : ""}email`);
     } finally {
       setSubmitting(false);
     }

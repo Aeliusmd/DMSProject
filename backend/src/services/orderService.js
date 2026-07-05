@@ -10,7 +10,7 @@ const FacilityDoctor = require("../models/FacilityDoctor");
 const OrderRecord = require("../models/OrderRecord");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
-const { buildProviderPayload, findOrCreateProvider } = require("./providerService");
+const { buildProviderPayload, findOrCreateProvider, resolveProviderFromHints } = require("./providerService");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -21,6 +21,14 @@ const { getPool } = require("../config/database");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
+const {
+  buildOrderPayloadFromExtractRow,
+} = require("../utils/extractToOrderPayload");
+const {
+  computeMissingRequiredFields,
+  mapOrderRowToRequiredFieldData,
+} = require("../utils/orderRequiredFields");
+const logger = require("../utils/logger");
 const fileStorage = require("../utils/fileStorage");
 const {
   toInputDate,
@@ -385,6 +393,7 @@ function buildOrderDbPayload(data) {
     xrayInvoiceDate: dateOrNull(data.xrayInvoiceDate),
     specificRecord: trimOrNull(data.specificRecord),
     specificDoctor: trimOrNull(data.specificDoctor),
+    specificDoctorIsDefault: boolToInt(data.specificDoctorIsDefault),
     fullAddress: trimOrNull(data.fullAddress),
     certificateNoRecords: boolToInt(data.certificateNoRecords),
     cnrReason: trimOrNull(data.cnrReason),
@@ -392,6 +401,7 @@ function buildOrderDbPayload(data) {
     cnrDateSent: dateOrNull(data.cnrDateSent),
     cnrMemo: boolToInt(data.cnrMemo),
     subpoenaStoragePath: null,
+    creationSource: data.creationSource === "auto" ? "auto" : "manual",
   };
 }
 
@@ -864,7 +874,7 @@ function mapOrderListRow(
 
   const rush = calculateOrderRushLevel(row.created_at);
 
-  return {
+  const mapped = {
     id: row.order_number,
     dbId: row.id,
     facility: row.facility_id ? String(row.facility_id) : "",
@@ -873,6 +883,9 @@ function mapOrderListRow(
     year: orderYear,
     status: row.status,
     statusBeforeInactive: row.status_before_inactive || "",
+    cancelReason: row.cancel_reason || "",
+    cancelledAt: row.cancelled_at || null,
+    deletedAt: row.deleted_at || null,
     displayStatus: deriveDisplayOrderStatus(row.status, row.created_at),
     filterStatus: deriveFilterStatus(row.status),
     workflowStages: workflowStages.map(mapWorkflowStage),
@@ -923,6 +936,8 @@ function mapOrderListRow(
     pickupPersonName: row.pickup_person_name || "",
     cnrDateSent: toInputDate(row.cnr_date_sent),
   };
+
+  return appendOrderCompletenessFields(mapped, row, orderRecords);
 }
 
 function mapDocument(doc) {
@@ -1085,7 +1100,7 @@ function mapOrderDetail(
   const primaryUploaded = mappedRecords.find((record) => record.hasFile);
   const rush = calculateOrderRushLevel(row.created_at);
 
-  return {
+  const mapped = {
     id: row.id,
     orderNumber: row.order_number || "",
     status: row.status || "",
@@ -1175,6 +1190,7 @@ function mapOrderDetail(
 
     specificRecord: row.specific_record || "",
     specificDoctor: row.specific_doctor || "",
+    specificDoctorIsDefault: Boolean(Number(row.specific_doctor_is_default)),
     fullAddress: row.full_address || "",
 
     certificateNoRecords: Boolean(row.certificate_no_records),
@@ -1188,6 +1204,8 @@ function mapOrderDetail(
     orderAmountPaid: paymentSummary.orderAmountPaid,
     invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow, payments),
   };
+
+  return appendOrderCompletenessFields(mapped, row, orderRecords);
 }
 
 async function getAllOrders(query = {}) {
@@ -1663,21 +1681,44 @@ async function resolveProviderId(connection, data) {
   return provider.id;
 }
 
-async function createOrder(data, actorId, files) {
-  assertValidCnrDeliveryDate(data);
+function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
+  const requiredFieldData = mapOrderRowToRequiredFieldData(row, orderRecords);
+  const missingRequiredFields = computeMissingRequiredFields(
+    requiredFieldData,
+    orderRecords
+  );
 
-  const facility = await Facility.findById(Number(data.facility));
+  return {
+    ...mappedOrder,
+    creationSource: row.creation_source || "manual",
+    missingRequiredFields,
+    hasIncompleteRequiredFields: missingRequiredFields.length > 0,
+  };
+}
+
+async function createOrder(data, actorId, files, options = {}) {
+  const { allowIncomplete = false, creationSource = "manual" } = options;
+  const orderInput = {
+    ...data,
+    creationSource,
+  };
+
+  if (!allowIncomplete) {
+    assertValidCnrDeliveryDate(orderInput);
+  }
+
+  const facility = await Facility.findById(Number(orderInput.facility));
 
   if (!facility) {
     throw new ApiError(400, "Selected facility does not exist");
   }
 
-  const orderNumber = await resolveOrderNumber(data.orderNumber);
-  const payments = collectPayments(data);
+  const orderNumber = await resolveOrderNumber(orderInput.orderNumber);
+  const payments = collectPayments(orderInput);
 
   const subpoenaFile = getUploadedFile(files, "subpoenaFile");
   const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
-  const subpoenaExtractId = Number(data.subpoenaExtractId) || null;
+  const subpoenaExtractId = Number(orderInput.subpoenaExtractId) || null;
 
   let linkedExtract = null;
   let subpoenaStoragePath = null;
@@ -1707,16 +1748,21 @@ async function createOrder(data, actorId, files) {
   try {
     await connection.beginTransaction();
 
-    const providerId = await resolveProviderId(connection, data);
+    const providerId = await resolveProviderId(connection, orderInput);
     const payload = buildOrderDbPayload(
-      applyInjuryFromExtract({ ...data, providerId }, linkedExtract)
+      applyInjuryFromExtract({ ...orderInput, providerId }, linkedExtract)
     );
-    const recordTypes = resolveRecordTypesFromForm(data);
+    let recordTypes = resolveRecordTypesFromForm(orderInput);
+    if (!recordTypes.length && allowIncomplete) {
+      recordTypes = ["other"];
+      orderInput.otherRecord = true;
+      orderInput.type = "other";
+    }
     if (!recordTypes.length) {
       throw new ApiError(400, "At least one record type is required");
     }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
-    const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
+    const orderFlags = resolveOrderFlags(orderInput, hasSubpoenaFile);
 
     const orderId = await Order.create(connection, {
       ...payload,
@@ -1734,12 +1780,12 @@ async function createOrder(data, actorId, files) {
       recordTypes
     );
 
-    await syncOrderPayments(connection, orderId, data);
+    await syncOrderPayments(connection, orderId, orderInput);
 
     await saveOrderDocuments(connection, {
       orderId,
       additionalDocFile,
-      documentName: data.documentName,
+      documentName: orderInput.documentName,
       actorId,
     });
 
@@ -1756,12 +1802,12 @@ async function createOrder(data, actorId, files) {
       payments,
       invoiceServiceFee: 0,
       invoiceCustodianFee: 0,
-      skipCustodian: isCnrOrder(data),
+      skipCustodian: isCnrOrder(orderInput),
     });
 
     await connection.commit();
 
-    await maybeSendCnrMemoEmail(orderId, data, null, actorId);
+    await maybeSendCnrMemoEmail(orderId, orderInput, null, actorId);
 
     return getOrderById(orderId);
   } catch (error) {
@@ -1770,6 +1816,103 @@ async function createOrder(data, actorId, files) {
   } finally {
     connection.release();
   }
+}
+
+async function applyDefaultFacilityDoctorIfMissing(payload) {
+  if (`${payload.specificDoctor || ""}`.trim()) {
+    return false;
+  }
+
+  const facilityId = Number(payload.facility);
+  if (!Number.isFinite(facilityId)) {
+    return false;
+  }
+
+  const defaultDoctor = await FacilityDoctor.findDefaultByFacilityId(facilityId);
+  if (!defaultDoctor) {
+    return false;
+  }
+
+  payload.specificDoctor = FacilityDoctor.formatDoctorName(defaultDoctor);
+  payload.specificDoctorIsDefault = true;
+  return true;
+}
+
+async function createOrderFromExtract(extractId, actorId) {
+  const extract = await batchScanRepository.getExtractById(extractId);
+
+  if (!extract) {
+    throw new ApiError(404, "Subpoena extract not found");
+  }
+
+  if (extract.is_processed) {
+    throw new ApiError(409, "This subpoena extract was already processed into an order");
+  }
+
+  const facilities = await Facility.findAll();
+  const payload = buildOrderPayloadFromExtractRow(extract, facilities);
+
+  const rawExtraction =
+    typeof extract.raw_extraction === "string"
+      ? JSON.parse(extract.raw_extraction || "{}")
+      : extract.raw_extraction || {};
+  const {
+    mapSchemaToOrderHints,
+    enrichOrderHintsFromRow,
+    resolveExtractionSchema,
+  } = require("../utils/extractionMapper");
+
+  let orderHints = enrichOrderHintsFromRow(
+    mapSchemaToOrderHints(resolveExtractionSchema(rawExtraction)),
+    extract
+  );
+  const providerResolution = await resolveProviderFromHints(orderHints);
+  orderHints = providerResolution.orderHints;
+
+  if (providerResolution.provider?.id) {
+    payload.providerId = String(providerResolution.provider.id);
+  }
+
+  if (orderHints.companyName) {
+    payload.serveCompanyName = orderHints.companyName;
+  }
+
+  payload.subpoenaExtractId = String(extractId);
+
+  await applyDefaultFacilityDoctorIfMissing(payload);
+
+  return createOrder(payload, actorId, {}, {
+    allowIncomplete: true,
+    creationSource: "auto",
+  });
+}
+
+async function autoCreateOrdersFromBatch({ childIds = [], actorId }) {
+  const created = [];
+  const failed = [];
+
+  for (const extractId of childIds) {
+    try {
+      const order = await createOrderFromExtract(extractId, actorId);
+      created.push({
+        extractId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        hasIncompleteRequiredFields: order.hasIncompleteRequiredFields,
+      });
+    } catch (error) {
+      failed.push({
+        extractId,
+        message: error.message || "Failed to auto-create order",
+      });
+      logger.error("Auto order creation failed", {
+        extractId,
+        error: error.message,
+      });
+    }
+  }
+
+  return { created, failed };
 }
 
 async function updateOrder(id, data, actorId, files) {
@@ -1807,6 +1950,11 @@ async function updateOrder(id, data, actorId, files) {
 
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
+    const doctorChanged =
+      trimOrNull(data.specificDoctor) !== trimOrNull(existing.specific_doctor);
+    payload.specificDoctorIsDefault = doctorChanged
+      ? 0
+      : boolToInt(existing.specific_doctor_is_default);
     const recordTypes = resolveRecordTypesFromForm(data);
     if (!recordTypes.length) {
       throw new ApiError(400, "At least one record type is required");
@@ -2606,6 +2754,87 @@ async function mailCompletedOrder(
   };
 }
 
+function splitAddressIntoLines(address = "") {
+  const trimmed = String(address).trim();
+  if (!trimmed) return [];
+
+  const parts = trimmed.split(", ").filter(Boolean);
+  if (parts.length <= 2) return parts;
+
+  return [parts.slice(0, -2).join(", "), parts.slice(-2).join(", ")];
+}
+
+function buildCertificateOfRecordsPdfData(order) {
+  const facilityInfo = buildFacilityBlock(order);
+  const company = buildCompanyBlock(order);
+  const reference = trimOrNull(order.order_ref) || order.order_number || "";
+
+  return {
+    documentDate: new Date(),
+    applicant: buildApplicantName(order),
+    reference,
+    facilityName: facilityInfo.name || order.facility_name || "N/A",
+    facilityAddressLines: facilityInfo.addressLines,
+    companyName: company.name,
+    companyAddressLines: splitAddressIntoLines(company.address),
+  };
+}
+
+async function sendCertificateOfRecords(
+  orderId,
+  { emails, email, additionalEmails, sentDate } = {}
+) {
+  const normalizedId = Number(orderId);
+  const recipients = resolveMailRecipients({ emails, email, additionalEmails });
+
+  if (!Number.isFinite(normalizedId)) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const order = await Order.findById(normalizedId);
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (Number(order.certificate_no_records)) {
+    throw new ApiError(
+      400,
+      "Certificate of Records is not available for Certificate of No Records orders"
+    );
+  }
+
+  const pdfData = buildCertificateOfRecordsPdfData(order);
+  const { generateCertificateOfRecordsPdf } = require("../utils/certificateOfRecordsPdf");
+  const { sendCertificateOfRecordsEmail } = require("./emailService");
+  const pdfBuffer = await generateCertificateOfRecordsPdf(pdfData);
+  const documentDate = dateOrNull(sentDate) || new Date();
+  const deliveredTo = [];
+
+  for (const recipient of recipients) {
+    const result = await sendCertificateOfRecordsEmail({
+      to: recipient,
+      orderNumber: order.order_number,
+      applicantName: buildApplicantName(order),
+      documentDate,
+      pdfBuffer,
+    });
+
+    if (!result.delivered && !result.devLogged) {
+      throw new ApiError(500, "Failed to send certificate of records email");
+    }
+
+    deliveredTo.push(recipient);
+  }
+
+  return {
+    recipients: deliveredTo,
+    recipient: deliveredTo.join(", "),
+    delivered: deliveredTo.length > 0,
+    devLogged: false,
+    sentDate: toInputDate(documentDate),
+  };
+}
+
 async function sendCopyServiceLetter(
   orderId,
   { email, additionalEmails = [] } = {}
@@ -2881,6 +3110,8 @@ module.exports = {
   getOrderById,
   getOrderReminders,
   createOrder,
+  createOrderFromExtract,
+  autoCreateOrdersFromBatch,
   updateOrder,
   deleteOrder,
   cancelOrder,
@@ -2899,6 +3130,7 @@ module.exports = {
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
   sendCnrRecord,
+  sendCertificateOfRecords,
   sendCopyServiceLetter,
   getPrintInvoicePdf,
   getPrintXrayInvoicePdf,

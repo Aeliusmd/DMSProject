@@ -438,6 +438,31 @@ export async function sendCopyServiceLetter(orderId, payload = {}) {
   return data?.data || {};
 }
 
+export async function sendCertificateOfRecords(orderId, payload = {}) {
+  const body = {};
+
+  if (Array.isArray(payload.emails) && payload.emails.length) {
+    body.emails = payload.emails;
+  } else if (payload.email) {
+    body.email = payload.email;
+    if (Array.isArray(payload.additionalEmails) && payload.additionalEmails.length) {
+      body.additionalEmails = payload.additionalEmails;
+    }
+  }
+
+  if (payload.sentDate) {
+    body.sentDate = payload.sentDate;
+  }
+
+  const data = await request(`/orders/${orderId}/send-certificate-of-records`, {
+    method: "POST",
+    auth: true,
+    body,
+  });
+
+  return data?.data || {};
+}
+
 export async function sendCnrRecord(orderId, payload = {}) {
   const body = {};
 

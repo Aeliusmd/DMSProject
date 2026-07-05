@@ -63,6 +63,10 @@ router.get("/:id/workflow-stages", orderController.getWorkflowStages);
 router.patch("/:id/workflow-stages", orderController.updateWorkflowStage);
 router.post("/:id/mail", orderController.mailCompletedOrder);
 router.post("/:id/send-cnr-record", orderController.sendCnrRecord);
+router.post(
+  "/:id/send-certificate-of-records",
+  orderController.sendCertificateOfRecords
+);
 router.post("/:id/send-copy-letter", orderController.sendCopyServiceLetter);
 router.post("/:id/pickup", orderController.recordPickup);
 router.post("/:id/fax", orderController.recordFax);

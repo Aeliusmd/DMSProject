@@ -8,6 +8,7 @@ export const immediateRequiredFields = [
   "firstName",
   "lastName",
   "serveCompanyName",
+  "specificDoctor",
 ];
 
 export const emailFields = ["email", "contact1Email", "contact2Email"];
@@ -49,6 +50,10 @@ export function validateNewOrderForm(data, fileErrors = {}) {
 
   if (!data.serveCompanyName.trim()) {
     errors.serveCompanyName = "Company name is required";
+  }
+
+  if (!data.specificDoctor?.trim()) {
+    errors.specificDoctor = "Specific doctor is required";
   }
 
   if (data.ssn && !isValidSSN(data.ssn)) {

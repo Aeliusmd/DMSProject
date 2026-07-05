@@ -107,6 +107,22 @@ class FacilityDoctor {
     return rows[0] || null;
   }
 
+  static async findDefaultByFacilityId(facilityId) {
+    const pool = getPool();
+
+    const [rows] = await pool.execute(
+      `SELECT *
+       FROM facility_doctors
+       WHERE facility_id = :facilityId
+         AND is_active = 1
+         AND is_default = 1
+       LIMIT 1`,
+      { facilityId }
+    );
+
+    return rows[0] || null;
+  }
+
   static formatDoctorName(row) {
     return [row.first_name, row.middle_name, row.last_name]
       .filter(Boolean)

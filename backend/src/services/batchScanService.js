@@ -246,6 +246,15 @@ async function processBatchScan(file, uploadedBy, options = {}) {
     return { parentId, childIds };
   });
 
+  let autoCreate = { created: [], failed: [] };
+  if (!options.singleSubpoena && dbResult.childIds.length) {
+    const orderService = require("./orderService");
+    autoCreate = await orderService.autoCreateOrdersFromBatch({
+      childIds: dbResult.childIds,
+      actorId: userId,
+    });
+  }
+
   const children = preparedChildren.map((child, index) => ({
     id: dbResult.childIds[index],
     parentId: dbResult.parentId,
@@ -277,6 +286,7 @@ async function processBatchScan(file, uploadedBy, options = {}) {
     },
     total: children.length,
     isMulti: Boolean(extraction.is_multi),
+    autoCreate,
     children,
   };
 }
