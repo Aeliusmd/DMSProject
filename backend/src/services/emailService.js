@@ -668,6 +668,83 @@ async function sendCnrMemoEmail({
   }
 }
 
+async function sendCertificateOfRecordsEmail({
+  to,
+  orderNumber,
+  applicantName,
+  documentDate,
+  pdfBuffer,
+}) {
+  const documentTitle = "Certificate of Records";
+  const subject = `${documentTitle} - Order ${orderNumber}`;
+  const sentLabel = formatCopyLetterDate(documentDate);
+
+  const text = [
+    "Dear Copy Service,",
+    "",
+    `Attached is the certificate of records for order ${orderNumber}.`,
+    applicantName ? `Applicant: ${applicantName}` : "",
+    `Document date: ${sentLabel}.`,
+    "",
+    "DMS Custodian",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
+      <p>Dear Copy Service,</p>
+      <p>Attached is the certificate of records for order <strong>${orderNumber}</strong>.</p>
+      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
+      <p>Document date: <strong>${sentLabel}</strong>.</p>
+      <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
+    </div>
+  `;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Certificate of records email", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = buildMailOptions({
+    to,
+    subject,
+    text,
+    html,
+    attachments: [
+      {
+        filename: `certificate-of-records-${orderNumber}.pdf`,
+        content: pdfBuffer,
+        contentType: "application/pdf",
+      },
+    ],
+  });
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("Certificate of records email sent", { to, orderNumber });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send certificate of records email", {
+      to,
+      error: error.message,
+    });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Certificate of records email fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
 module.exports = {
   sendTwoFactorCode,
   sendInvoiceEmail,
@@ -675,4 +752,5 @@ module.exports = {
   sendCopyServiceLetterEmail,
   sendCnrRecordEmail,
   sendCnrMemoEmail,
+  sendCertificateOfRecordsEmail,
 };

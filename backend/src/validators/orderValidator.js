@@ -52,6 +52,10 @@ function validateOrderPayload(body = {}) {
     errors.push({ field: "serveCompanyName", message: "Company name is required" });
   }
 
+  if (!body.specificDoctor?.trim()) {
+    errors.push({ field: "specificDoctor", message: "Specific doctor is required" });
+  }
+
   errors.push(...validateInjuryFields(body));
 
   return { valid: errors.length === 0, errors };

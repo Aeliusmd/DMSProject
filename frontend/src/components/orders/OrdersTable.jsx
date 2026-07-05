@@ -32,6 +32,7 @@ import {
   mailCompletedOrder,
   sendCopyServiceLetter,
   sendCnrRecord,
+  sendCertificateOfRecords,
   recordOrderPickup,
   recordOrderFax,
   removeMedicalRecords,
@@ -95,6 +96,37 @@ function formatCnrDisplayDate(dateValue) {
   }
 
   return value;
+}
+
+function IncompleteOrderIndicator({ missingFields = [] }) {
+  const fields = missingFields.filter(Boolean);
+  const tooltipText =
+    fields.length > 0
+      ? `Required fields are not completed: ${fields.join(", ")}`
+      : "Required fields are not completed";
+
+  return (
+    <span
+      className="group relative shrink-0 cursor-help"
+      title={tooltipText}
+      aria-label={tooltipText}
+    >
+      <span className="text-[12px] font-bold leading-none text-red-500">!</span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-full top-1/2 z-30 ml-1.5 hidden w-max max-w-[240px] -translate-y-1/2 rounded-[6px] border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-2 text-left shadow-md group-hover:block"
+      >
+        <span className="block text-[10px] font-semibold text-[#B91C1C]">
+          Required fields are not completed
+        </span>
+        {fields.length > 0 ? (
+          <span className="mt-1 block text-[10px] leading-snug text-[#7F1D1D]">
+            {fields.join(", ")}
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
 }
 
 function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "") {
@@ -272,6 +304,9 @@ function toRenderOrder(order) {
     dbId: order.dbId,
     orderStatus: order.status || "",
     statusBeforeInactive: order.statusBeforeInactive || "",
+    cancelReason: order.cancelReason || "",
+    cancelledAt: order.cancelledAt || "",
+    deletedAt: order.deletedAt || "",
     displayOrderStatus:
       order.displayStatus ||
       deriveDisplayOrderStatus(
@@ -327,6 +362,11 @@ function toRenderOrder(order) {
     dateRequested: order.dateRequested || "",
     dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
+    hasIncompleteRequiredFields: Boolean(order.hasIncompleteRequiredFields),
+    missingRequiredFields: Array.isArray(order.missingRequiredFields)
+      ? order.missingRequiredFields
+      : [],
+    creationSource: order.creationSource || "manual",
   };
 }
 
@@ -678,6 +718,14 @@ export default function OrdersTable({
         return;
       }
 
+      if (invoiceKind === "certification") {
+        await sendCertificateOfRecords(order.dbId, {
+          emails,
+          sentDate: getTodayInputDate(),
+        });
+        return;
+      }
+
       if (invoiceKind === "xray") {
         setEmailingXrayOrderId(order.dbId);
         try {
@@ -1024,14 +1072,27 @@ export default function OrdersTable({
                     className="border-b border-[#F1F5F9] text-[11px] text-[#334155] last:border-b-0 hover:bg-[#F8FBFC]"
                   >
                     <td className="px-4 py-5 align-top">
-                      <Link
-                        href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                          order.dbId
-                        )}`}
-                        className="font-semibold text-[#007F96] hover:underline"
-                      >
-                        {order.id}
-                      </Link>
+                      <div className="inline-flex items-start gap-1">
+                        {order.hasIncompleteRequiredFields && (
+                          <IncompleteOrderIndicator
+                            missingFields={order.missingRequiredFields}
+                          />
+                        )}
+                        <Link
+                          href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                            order.dbId
+                          )}`}
+                          className="font-semibold text-[#007F96] hover:underline"
+                        >
+                          {order.id}
+                        </Link>
+                      </div>
+
+                      {order.creationSource === "auto" && (
+                        <p className="mt-1 text-[10px] italic text-[#64748B]">
+                          Unprocessed
+                        </p>
+                      )}
 
                       {order.year && (
                         <p className="mt-1 text-[10px] font-medium text-[#64748B]">
@@ -1125,14 +1186,19 @@ export default function OrdersTable({
                       </div>
 
                       {isInactiveOrderStatus(order.orderStatus) ? (
-                        <button
-                          type="button"
-                          onClick={() => openRestoreModal(order)}
-                          className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
-                        >
-                          <RestoreIcon />
-                          Restore Order
-                        </button>
+                        <div className="space-y-2">
+                          {order.orderStatus === "Cancelled" && order.cancelReason ? (
+                            <p className="max-w-[140px] text-[10px] leading-snug text-[#64748B]">
+                              Reason: {order.cancelReason}
+                            </p>
+                          ) : null}
+
+                          {order.statusBeforeInactive ? (
+                            <p className="text-[10px] text-[#94A3B8]">
+                              Previous: {order.statusBeforeInactive}
+                            </p>
+                          ) : null}
+                        </div>
                       ) : (
                       <div className="space-y-1">
                         {order.status.map((stage) => (
@@ -1369,6 +1435,15 @@ export default function OrdersTable({
                               Cancel
                             </button>
                           </>
+                        ) : isInactiveOrderStatus(order.orderStatus) ? (
+                          <button
+                            type="button"
+                            onClick={() => openRestoreModal(order)}
+                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
+                          >
+                            <RestoreIcon />
+                            Recover
+                          </button>
                         ) : null}
                       </div>
                     </td>
@@ -1456,6 +1531,18 @@ export default function OrdersTable({
         isOpen={Boolean(selectedCnrOrder)}
         order={selectedCnrOrder}
         onClose={() => setSelectedCnrOrder(null)}
+        onSendEmail={() => {
+          if (!selectedCnrOrder) return;
+
+          const mode =
+            selectedCnrOrder.cnrDelivery === "email" && selectedCnrOrder.cnrDateSent
+              ? "resend"
+              : "send";
+
+          openSendInvoiceEmailModal(selectedCnrOrder, mode, {
+            invoiceKind: "cnr",
+          });
+        }}
       />
 
       <CnrNoteModal
@@ -1469,6 +1556,13 @@ export default function OrdersTable({
         isOpen={Boolean(selectedCertificationOrder)}
         order={selectedCertificationOrder}
         onClose={() => setSelectedCertificationOrder(null)}
+        onSendEmail={() => {
+          if (!selectedCertificationOrder) return;
+
+          openSendInvoiceEmailModal(selectedCertificationOrder, "send", {
+            invoiceKind: "certification",
+          });
+        }}
       />
 
       <SendCopyLetterModal
@@ -1616,14 +1710,14 @@ export default function OrdersTable({
 
       <ConfirmModal
         open={restoreModal.open}
-        title="Restore Order"
+        title="Recover Order"
         message={
           restoreModal.order
-            ? `Restore order ${restoreModal.order.id}? It will return to ${getRestoreTargetStatus(restoreModal.order)} status.`
-            : "Restore this order?"
+            ? `Recover order ${restoreModal.order.id}? It will return to ${getRestoreTargetStatus(restoreModal.order)} status.`
+            : "Recover this order?"
         }
         variant="warning"
-        confirmLabel={actionLoading ? "Restoring..." : "Restore Order"}
+        confirmLabel={actionLoading ? "Recovering..." : "Recover Order"}
         cancelLabel="Cancel"
         confirmDisabled={actionLoading}
         onCancel={closeRestoreModal}

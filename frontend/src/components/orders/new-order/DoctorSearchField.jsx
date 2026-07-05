@@ -12,6 +12,7 @@ export default function DoctorSearchField({
   onBlur,
   placeholder = "Doctor name",
   error = "",
+  helperText = "",
 }) {
   const listboxId = useId();
   const rootRef = useRef(null);
@@ -110,6 +111,10 @@ export default function DoctorSearchField({
       {error && (
         <p className="mt-[5px] text-[11px] font-medium text-red-500">{error}</p>
       )}
+
+      {!error && helperText ? (
+        <p className="mt-[5px] text-[11px] font-medium text-[#007F96]">{helperText}</p>
+      ) : null}
 
       {showSuggestions && (
         <ul

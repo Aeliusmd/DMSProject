@@ -64,9 +64,16 @@ export default function BatchScanPage() {
 
     try {
       const result = await uploadBatchScan(selectedFile);
-      const count = result?.total ?? result?.children?.length ?? 0;
+      const createdCount = result?.autoCreate?.created?.length ?? 0;
+      const failedCount = result?.autoCreate?.failed?.length ?? 0;
+      const incompleteCount =
+        result?.autoCreate?.created?.filter((item) => item.hasIncompleteRequiredFields)
+          .length ?? 0;
+
       setSuccessMessage(
-        `Batch scan complete. ${count} subpoena(s) extracted.`
+        `Batch scan complete. ${createdCount} order(s) created automatically${
+          failedCount ? `, ${failedCount} need manual review` : ""
+        }${incompleteCount ? ` (${incompleteCount} missing required fields)` : ""}.`
       );
       setSelectedFile(null);
       if (fileInputRef.current) {
@@ -74,8 +81,8 @@ export default function BatchScanPage() {
       }
 
       setTimeout(() => {
-        router.push("/orders/unprocessed");
-      }, 1200);
+        router.push("/orders");
+      }, 1500);
     } catch (err) {
       setError(err.message || "Batch scan upload failed.");
     } finally {

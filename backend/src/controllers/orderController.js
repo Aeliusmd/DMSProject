@@ -559,6 +559,24 @@ exports.sendCnrRecord = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, "CNR record email sent");
 });
 
+exports.sendCertificateOfRecords = asyncHandler(async (req, res) => {
+  const result = await orderService.sendCertificateOfRecords(req.params.id, {
+    emails: req.body.emails,
+    email: req.body.email,
+    additionalEmails: req.body.additionalEmails,
+    sentDate: req.body.sentDate,
+  });
+
+  const order = await orderService.getOrderById(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "certificate_of_records_mail",
+    details: `Certificate of Records emailed to ${result.recipient} for order ${order.orderNumber}`,
+  });
+
+  return ApiResponse.success(res, result, "Certificate of records email sent");
+});
+
 exports.sendCopyServiceLetter = asyncHandler(async (req, res) => {
   const result = await orderService.sendCopyServiceLetter(req.params.id, {
     email: req.body.email,

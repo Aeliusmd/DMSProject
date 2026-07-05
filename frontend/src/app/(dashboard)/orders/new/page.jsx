@@ -129,6 +129,7 @@ const initialFormData = {
 
   specificRecord: "",
   specificDoctor: "",
+  specificDoctorIsDefault: false,
   fullAddress: "",
 
   certificateNoRecords: false,
@@ -649,6 +650,9 @@ function NewOrderPageContent() {
     setFormData((prev) => ({
       ...prev,
       [name]: nextValue,
+      ...(name === "specificDoctor" && nextValue !== prev.specificDoctor
+        ? { specificDoctorIsDefault: false }
+        : {}),
     }));
 
     if (name === "facility") {
@@ -1543,6 +1547,11 @@ function ServeInfoForm({
         onBlur={onBlur}
         placeholder="Doctor name"
         error={getError("specificDoctor")}
+        helperText={
+          formData.specificDoctorIsDefault
+            ? "The facility default doctor was selected automatically because no doctor was identified in the subpoena."
+            : ""
+        }
       />
 
       <DoctorAddressSearchField

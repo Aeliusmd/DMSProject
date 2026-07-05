@@ -34,9 +34,9 @@ const ORDER_COLUMNS = `
   contact2_name, contact2_title, contact2_phone, contact2_fax, contact2_email,
   date_served, depo_due_date, delivery_date, subpoena_date, date_requested,
   ready_date, invoice_date, xray_invoice_date,
-  specific_record, specific_doctor, full_address,
+  specific_record, specific_doctor, specific_doctor_is_default, full_address,
   certificate_no_records, cnr_reason, cnr_delivery, cnr_date_sent, cnr_memo,
-  subpoena_storage_path, has_note, has_subpoena, created_by`;
+  subpoena_storage_path, has_note, has_subpoena, creation_source, created_by`;
 
 const ORDER_VALUES = `
   :orderNumber, :recNumber, :facilityId, :providerId, :status, :court,
@@ -49,9 +49,9 @@ const ORDER_VALUES = `
   :contact2Name, :contact2Title, :contact2Phone, :contact2Fax, :contact2Email,
   :dateServed, :depoDueDate, :deliveryDate, :subpoenaDate, :dateRequested,
   :readyDate, :invoiceDate, :xrayInvoiceDate,
-  :specificRecord, :specificDoctor, :fullAddress,
+  :specificRecord, :specificDoctor, :specificDoctorIsDefault, :fullAddress,
   :certificateNoRecords, :cnrReason, :cnrDelivery, :cnrDateSent, :cnrMemo,
-  :subpoenaStoragePath, :hasNote, :hasSubpoena, :createdBy`;
+  :subpoenaStoragePath, :hasNote, :hasSubpoena, :creationSource, :createdBy`;
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
@@ -100,6 +100,7 @@ const ORDER_UPDATE_SET = `
   xray_invoice_date = :xrayInvoiceDate,
   specific_record = :specificRecord,
   specific_doctor = :specificDoctor,
+  specific_doctor_is_default = :specificDoctorIsDefault,
   full_address = :fullAddress,
   certificate_no_records = :certificateNoRecords,
   cnr_reason = :cnrReason,
@@ -108,6 +109,7 @@ const ORDER_UPDATE_SET = `
   cnr_memo = :cnrMemo,
   subpoena_storage_path = :subpoenaStoragePath,
   has_subpoena = :hasSubpoena,
+  creation_source = :creationSource,
   updated_at = NOW()`;
 
 const ORDER_DETAIL_SELECT = `
@@ -211,6 +213,7 @@ class Order {
         OR o.contact2_fax LIKE :search
         OR o.contact2_email LIKE :search
         OR o.injury_type LIKE :search
+        OR o.cancel_reason LIKE :search
         OR o.specific_doctor LIKE :search
         OR o.specific_record LIKE :search
         OR CAST(o.ssn_last_four AS CHAR) LIKE :search
