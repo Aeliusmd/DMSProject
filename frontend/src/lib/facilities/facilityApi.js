@@ -1,6 +1,4 @@
-import { API_BASE_URL } from "@/config/api";
-import { request, ApiRequestError } from "@/lib/auth/authApi";
-import { getAccessToken } from "@/lib/auth/authStorage";
+import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
 
 export { ApiRequestError };
 
@@ -100,16 +98,10 @@ export async function uploadFacilityDocument(facilityId, file, documentType) {
   formData.append("file", file);
   formData.append("documentType", documentType);
 
-  const accessToken = getAccessToken();
-
-  const response = await fetch(
-    `${API_BASE_URL}/facilities/${facilityId}/documents`,
-    {
-      method: "POST",
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-      body: formData,
-    }
-  );
+  const response = await authFetch(`/facilities/${facilityId}/documents`, {
+    method: "POST",
+    body: formData,
+  });
 
   const data = await response.json().catch(() => null);
 
@@ -129,13 +121,8 @@ async function fetchFacilityDocumentBlob(
   documentId,
   action = "preview"
 ) {
-  const accessToken = getAccessToken();
-
-  const response = await fetch(
-    `${API_BASE_URL}/facilities/${facilityId}/documents/${documentId}/${action}`,
-    {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-    }
+  const response = await authFetch(
+    `/facilities/${facilityId}/documents/${documentId}/${action}`
   );
 
   if (!response.ok) {
@@ -186,12 +173,46 @@ export async function getFacilityNotes(facilityId) {
   return data?.data?.notes || [];
 }
 
-export async function createFacilityNote(facilityId, note) {
+export async function createFacilityNote(facilityId, { note, attachments = [] } = {}) {
+  const formData = new FormData();
+  formData.append("note", note ?? "");
+
+  attachments.forEach((file) => {
+    formData.append("attachments", file);
+  });
+
   const data = await request(`/facilities/${facilityId}/notes`, {
     method: "POST",
     auth: true,
-    body: { note },
+    body: formData,
   });
 
   return data?.data?.note;
+}
+
+export async function downloadFacilityNoteAttachment(
+  facilityId,
+  downloadPath,
+  fileName
+) {
+  const normalizedPath = `${downloadPath || ""}`.replace(/^\/+/, "");
+  const response = await authFetch(`/${normalizedPath}`);
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiRequestError(
+      data?.message || "Failed to download attachment",
+      response.status
+    );
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fileName || "attachment";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }

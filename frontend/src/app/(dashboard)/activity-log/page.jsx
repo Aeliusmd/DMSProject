@@ -45,6 +45,7 @@ export default function ActivityLogPage() {
     fromDate: "",
     toDate: "",
   });
+  const [performerSearch, setPerformerSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -93,6 +94,8 @@ export default function ActivityLogPage() {
   }, [ownLogsOnly, user?.id, user?.role]);
 
   const filteredLogs = useMemo(() => {
+    const performerQuery = performerSearch.trim().toLowerCase();
+
     return activityLogs.filter((log) => {
       const matchesFilter =
         activeFilter === "All Modules" || log.module === activeFilter;
@@ -106,13 +109,21 @@ export default function ActivityLogPage() {
       const matchesFromDate = fromDate ? logDate >= fromDate : true;
       const matchesToDate = toDate ? logDate <= toDate : true;
 
-      return matchesFilter && matchesFromDate && matchesToDate;
+      const matchesPerformer = performerQuery
+        ? String(log.performedBy || "")
+            .toLowerCase()
+            .includes(performerQuery)
+        : true;
+
+      return (
+        matchesFilter && matchesFromDate && matchesToDate && matchesPerformer
+      );
     });
-  }, [activityLogs, activeFilter, dateFilters]);
+  }, [activityLogs, activeFilter, dateFilters, performerSearch]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeFilter, dateFilters.fromDate, dateFilters.toDate]);
+  }, [activeFilter, dateFilters.fromDate, dateFilters.toDate, performerSearch]);
 
   const pagination = useMemo(
     () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
@@ -133,6 +144,7 @@ export default function ActivityLogPage() {
       fromDate: "",
       toDate: "",
     });
+    setPerformerSearch("");
   };
 
   return (
@@ -160,7 +172,7 @@ export default function ActivityLogPage() {
           </Link>
         </div>
 
-        <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[430px_auto_1fr]">
+        <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[430px_minmax(220px,280px)_auto_1fr]">
           <div className="grid w-full max-w-[430px] grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
             <DateFilter
               label="From"
@@ -184,6 +196,13 @@ export default function ActivityLogPage() {
               Reset
             </button>
           </div>
+
+          {!ownLogsOnly && (
+            <PerformerSearch
+              value={performerSearch}
+              onChange={setPerformerSearch}
+            />
+          )}
 
           <div className="flex flex-wrap items-center gap-3">
             <span className="shrink-0 text-[12px] font-medium text-[#64748B]">
@@ -253,6 +272,51 @@ function DateFilter({ label, name, value, onChange }) {
         className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
       />
     </div>
+  );
+}
+
+function PerformerSearch({ value, onChange }) {
+  return (
+    <div className="w-full max-w-[280px]">
+      <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
+        Performed By
+      </label>
+
+      <div className="flex h-[36px] items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-white px-3">
+        <SearchIcon />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Search employee name"
+          className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+        />
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            className="shrink-0 text-[11px] font-semibold text-[#64748B] hover:text-[#334155]"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      className="shrink-0 text-[#94A3B8]"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
   );
 }
 

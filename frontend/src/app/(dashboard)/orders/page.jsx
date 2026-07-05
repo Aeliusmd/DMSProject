@@ -64,7 +64,7 @@ export default function OrdersPage() {
 
         <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
 
-        <OrdersTable filters={filters} />
+        <OrdersTable filters={filters} fitToWindow />
       </div>
 
       <ReminderNotesModal

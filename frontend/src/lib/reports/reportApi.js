@@ -1,6 +1,4 @@
-import { request, ApiRequestError } from "@/lib/auth/authApi";
-import { getAccessToken } from "@/lib/auth/authStorage";
-import { API_BASE_URL } from "@/config/api";
+import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
 
 function buildOrdersReportQuery(filters = {}) {
   const params = new URLSearchParams();
@@ -82,12 +80,8 @@ export async function downloadActivityReportPdf(filters = {}) {
   }
 
   const query = params.toString();
-  const token = getAccessToken();
-  const response = await fetch(
-    `${API_BASE_URL}/reports/activity/export${query ? `?${query}` : ""}`,
-    {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }
+  const response = await authFetch(
+    `/reports/activity/export${query ? `?${query}` : ""}`
   );
 
   if (!response.ok) {

@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth/authApi";
+import {
+  getCurrentUser,
+  startAuthAutoRefresh,
+  stopAuthAutoRefresh,
+} from "@/lib/auth/authApi";
 import { clearAuth, getAccessToken } from "@/lib/auth/authStorage";
 import RoleRouteGuard from "@/components/auth/RoleRouteGuard";
 
@@ -26,6 +30,9 @@ export default function DashboardLayout({ children }) {
 
         if (isMounted) {
           setIsAuthorized(true);
+          // Keep active users signed in by silently refreshing the access
+          // token before it expires (falls back to lazy refresh when idle).
+          startAuthAutoRefresh();
         }
       } catch {
         clearAuth();
@@ -37,6 +44,7 @@ export default function DashboardLayout({ children }) {
 
     return () => {
       isMounted = false;
+      stopAuthAutoRefresh();
     };
   }, [router]);
 

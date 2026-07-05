@@ -12,6 +12,7 @@ module.exports = {
   Order: require("./Order"),
   FacilityDocument: require("./FacilityDocument"),
   FacilityNote: require("./FacilityNote"),
+  FacilityNoteAttachment: require("./FacilityNoteAttachment"),
   EmployeeSettings: require("./EmployeeSettings"),
   ActivityLog: require("./ActivityLog"),
 };

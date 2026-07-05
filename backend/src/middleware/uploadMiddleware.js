@@ -115,6 +115,33 @@ const facilityDocumentUpload = multer({
   },
 });
 
+const facilityNoteAttachmentStorage = multer.diskStorage({
+  destination: (req, _file, cb) => {
+    const facilityDir = path.join(
+      facilityUploadsDir,
+      String(req.params.id || "unknown"),
+      "note-attachments"
+    );
+
+    fs.mkdirSync(facilityDir, { recursive: true });
+    cb(null, facilityDir);
+  },
+
+  filename: (_req, file, cb) => {
+    const extension = path.extname(file.originalname || "").toLowerCase();
+    cb(null, `${randomUUID()}${extension}`);
+  },
+});
+
+const facilityNoteAttachmentUpload = multer({
+  storage: facilityNoteAttachmentStorage,
+  fileFilter: facilityFileFilter,
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 10,
+  },
+});
+
 /**
  * Order / subpoena / note attachment storage
  */
@@ -209,6 +236,7 @@ function uploadSinglePdf(fieldName = "file") {
 
 module.exports = {
   facilityDocumentUpload,
+  facilityNoteAttachmentUpload,
 
   ORDER_UPLOADS_ROOT,
   ORDER_UPLOAD_DIRS,

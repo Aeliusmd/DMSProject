@@ -879,6 +879,7 @@ function mapOrderListRow(
     dbId: row.id,
     facility: row.facility_id ? String(row.facility_id) : "",
     facilityName: row.facility_name || "",
+    doctor: row.specific_doctor || "",
     facilityInfo: buildFacilityBlock(row),
     year: orderYear,
     status: row.status,
@@ -909,6 +910,8 @@ function mapOrderListRow(
     providerEmail: trimOrNull(row.provider_email) || "",
     subpoenaDate: toInputDate(row.subpoena_date),
     subpoenaDateDisplay: toShortDate(row.subpoena_date),
+    dateRequested: toInputDate(row.date_requested),
+    dateRequestedDisplay: toShortDate(row.date_requested),
     createdAt: row.created_at || null,
     rushLevel: rush.level,
     rushLabel: rush.label,
@@ -1239,6 +1242,14 @@ async function getAllOrders(query = {}) {
     if (periodFrom) {
       filters.periodFrom = periodFrom;
     }
+  }
+
+  if (query.createdFrom && `${query.createdFrom}`.trim()) {
+    filters.createdFrom = `${query.createdFrom}`.trim();
+  }
+
+  if (query.createdTo && `${query.createdTo}`.trim()) {
+    filters.createdTo = `${query.createdTo}`.trim();
   }
 
   if (query.search && `${query.search}`.trim()) {

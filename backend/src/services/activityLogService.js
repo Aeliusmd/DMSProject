@@ -19,7 +19,7 @@ const CONTEXT_MODULE_MAP = {
   security: MODULES.SECURITY,
   employees: MODULES.EMPLOYEES,
   facilities: MODULES.FACILITIES,
-  documents: MODULES.PROCESSING,
+  documents: MODULES.FACILITIES,
   notes: MODULES.FACILITIES,
   settings: MODULES.SECURITY,
   billing: MODULES.BILLING,

@@ -172,6 +172,16 @@ class Order {
       params.periodFrom = filters.periodFrom;
     }
 
+    if (filters.createdFrom) {
+      conditions.push("DATE(o.created_at) >= :createdFrom");
+      params.createdFrom = filters.createdFrom;
+    }
+
+    if (filters.createdTo) {
+      conditions.push("DATE(o.created_at) <= :createdTo");
+      params.createdTo = filters.createdTo;
+    }
+
     if (filters.search) {
       conditions.push(`(
         o.order_number LIKE :search
