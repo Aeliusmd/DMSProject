@@ -106,6 +106,8 @@ function formatActionLabel(action, context) {
           : "Note Added",
     update_note: "Order Note Callback",
     workflow_update: "Order Workflow Updated",
+    cancel: "Order Cancelled",
+    order_pickup: "Order Pickup Recorded",
     order_mail: "Records Ready Email Sent",
     copy_service_letter: "Copy Service Letter Sent",
     print_invoice: "Print Invoice",

@@ -142,3 +142,29 @@ exports.remove = asyncHandler(async (req, res) => {
 
   return ApiResponse.success(res, result, result.message);
 });
+
+exports.getMyMilestoneStats = asyncHandler(async (req, res) => {
+  const stats = await employeeService.getEmployeeMilestoneStats(
+    req.user.id,
+    {
+      from: req.query.from,
+      to: req.query.to,
+    },
+    req.user
+  );
+
+  return ApiResponse.success(res, { stats });
+});
+
+exports.getMilestoneStats = asyncHandler(async (req, res) => {
+  const stats = await employeeService.getEmployeeMilestoneStats(
+    req.params.id,
+    {
+      from: req.query.from,
+      to: req.query.to,
+    },
+    req.user
+  );
+
+  return ApiResponse.success(res, { stats });
+});

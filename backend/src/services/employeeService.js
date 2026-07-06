@@ -1,8 +1,10 @@
 const bcrypt = require("bcryptjs");
 const ApiError = require("../utils/ApiError");
 const Employee = require("../models/Employee");
+const ActivityLog = require("../models/ActivityLog");
 const EmployeeSettings = require("../models/EmployeeSettings");
 const AuthSession = require("../models/AuthSession");
+const { isAdminOrManager } = require("../utils/roles");
 const { formatEmployee } = require("../views/responses");
 
 const ALLOWED_CREATE_ROLES = ["Manager", "Employee"];
@@ -231,6 +233,60 @@ async function deleteEmployee(id, actorId) {
   return { message: "Employee deleted successfully" };
 }
 
+async function getEmployeeMilestoneStats(
+  employeeId,
+  { from, to } = {},
+  requester = {}
+) {
+  const targetId = Number(employeeId);
+  const requesterId = Number(requester.id);
+
+  if (!Number.isFinite(targetId)) {
+    throw new ApiError(400, "Invalid employee id");
+  }
+
+  const privileged = isAdminOrManager(requester.role);
+
+  if (!privileged && targetId !== requesterId) {
+    throw new ApiError(403, "You can only view your own milestone statistics");
+  }
+
+  const employee = await Employee.findById(targetId);
+
+  if (!employee) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  const filters = {};
+
+  if (privileged) {
+    if (from && `${from}`.trim()) {
+      filters.from = `${from}`.trim();
+    }
+
+    if (to && `${to}`.trim()) {
+      filters.to = `${to}`.trim();
+    }
+  }
+
+  const row = await ActivityLog.countOrderMilestoneStatsByPerformer(targetId, filters);
+
+  return {
+    employeeId: targetId,
+    employeeName: employee.name || "",
+    created: Number(row.created_orders) || 0,
+    updated: Number(row.updated_orders) || 0,
+    completed: Number(row.completed_orders) || 0,
+    cancelled: Number(row.cancelled_orders) || 0,
+    deleted: Number(row.deleted_orders) || 0,
+    total: Number(row.total_orders) || 0,
+    dateFrom: filters.from || null,
+    dateTo: filters.to || null,
+    canFilterByDate: privileged,
+    attribution: "activity_logs",
+  };
+}
+
 module.exports = {
   getAllEmployees,
   createEmployee,
@@ -239,4 +295,5 @@ module.exports = {
   suspendEmployee,
   deleteEmployee,
   processScheduledReactivations,
+  getEmployeeMilestoneStats,
 };

@@ -6,6 +6,8 @@
 -- orders table does NOT include: order_type, flag_*, medical_records_storage_path
 --
 -- For existing DB: use add_order_records_migration.sql instead.
+-- For employee milestone SP on existing DB: add_employee_milestone_stats.sql
+--   or: node backend/scripts/migrate-employee-milestone-stats.js
 -- =============================================================================
 
 SET NAMES utf8mb4;
@@ -650,6 +652,8 @@ CREATE TABLE activity_logs (
   KEY idx_activity_logs_module (module),
   KEY idx_activity_logs_facility (facility_id),
   KEY idx_activity_logs_performed_by (performed_by),
+  KEY idx_activity_logs_milestone (performed_by, module, action, log_date)
+    COMMENT 'Employee order milestone stats (sp_employee_order_milestone_stats)',
   CONSTRAINT fk_activity_logs_facility
     FOREIGN KEY (facility_id) REFERENCES facilities (id)
     ON DELETE SET NULL ON UPDATE CASCADE,
@@ -741,6 +745,158 @@ CREATE TABLE user_activity_logs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- -----------------------------------------------------------------------------
+-- 7. STORED PROCEDURES
+-- -----------------------------------------------------------------------------
+-- Employee order milestone stats (View Milestone in Employees / Activity Log).
+-- Created = orders created by employee.
+-- Updated / completed / cancelled / deleted = actions performed by employee
+-- (activity_logs.performed_by, with orders.created_by / cancelled_by / deleted_by fallback).
+-- Also available as: backend/migrations/add_employee_milestone_stats.sql
+-- -----------------------------------------------------------------------------
+DROP PROCEDURE IF EXISTS sp_employee_order_milestone_stats;
+
+DELIMITER $$
+
+CREATE PROCEDURE sp_employee_order_milestone_stats(
+  IN p_employee_id BIGINT UNSIGNED,
+  IN p_from_date DATE,
+  IN p_to_date DATE
+)
+BEGIN
+  DECLARE v_created INT DEFAULT 0;
+  DECLARE v_updated INT DEFAULT 0;
+  DECLARE v_completed INT DEFAULT 0;
+  DECLARE v_cancelled INT DEFAULT 0;
+  DECLARE v_deleted INT DEFAULT 0;
+
+  SELECT COUNT(DISTINCT order_id)
+    INTO v_created
+  FROM (
+    SELECT CAST(
+      NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(al.details, 'order_id:', -1), ' |', 1)), '')
+      AS UNSIGNED
+    ) AS order_id
+    FROM activity_logs al
+    WHERE al.performed_by = p_employee_id
+      AND al.module = 'Orders'
+      AND al.action = 'Order Created'
+      AND al.details LIKE '%order_id:%'
+      AND (p_from_date IS NULL OR al.log_date >= p_from_date)
+      AND (p_to_date IS NULL OR al.log_date <= p_to_date)
+    UNION
+    SELECT o.id AS order_id
+    FROM orders o
+    WHERE o.created_by = p_employee_id
+      AND (p_from_date IS NULL OR DATE(o.created_at) >= p_from_date)
+      AND (p_to_date IS NULL OR DATE(o.created_at) <= p_to_date)
+  ) created_src
+  WHERE order_id IS NOT NULL AND order_id > 0;
+
+  SELECT COUNT(DISTINCT order_id)
+    INTO v_updated
+  FROM (
+    SELECT CAST(
+      NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(al.details, 'order_id:', -1), ' |', 1)), '')
+      AS UNSIGNED
+    ) AS order_id
+    FROM activity_logs al
+    WHERE al.performed_by = p_employee_id
+      AND al.module = 'Orders'
+      AND al.action = 'Order Updated'
+      AND al.details LIKE '%order_id:%'
+      AND (p_from_date IS NULL OR al.log_date >= p_from_date)
+      AND (p_to_date IS NULL OR al.log_date <= p_to_date)
+  ) updated_src
+  WHERE order_id IS NOT NULL AND order_id > 0;
+
+  SELECT COUNT(DISTINCT order_id)
+    INTO v_completed
+  FROM (
+    SELECT CAST(
+      NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(al.details, 'order_id:', -1), ' |', 1)), '')
+      AS UNSIGNED
+    ) AS order_id
+    FROM activity_logs al
+    WHERE al.performed_by = p_employee_id
+      AND al.module = 'Orders'
+      AND al.action IN ('Records Ready Email Sent', 'Order Pickup Recorded')
+      AND al.details LIKE '%order_id:%'
+      AND (p_from_date IS NULL OR al.log_date >= p_from_date)
+      AND (p_to_date IS NULL OR al.log_date <= p_to_date)
+    UNION
+    SELECT CAST(
+      NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(al.details, 'order_id:', -1), ' |', 1)), '')
+      AS UNSIGNED
+    ) AS order_id
+    FROM activity_logs al
+    WHERE al.performed_by = p_employee_id
+      AND al.module = 'Billing'
+      AND al.action = 'Invoice Written Off'
+      AND al.details LIKE '%Status: Completed%'
+      AND al.details LIKE '%order_id:%'
+      AND (p_from_date IS NULL OR al.log_date >= p_from_date)
+      AND (p_to_date IS NULL OR al.log_date <= p_to_date)
+  ) completed_src
+  WHERE order_id IS NOT NULL AND order_id > 0;
+
+  SELECT COUNT(DISTINCT order_id)
+    INTO v_cancelled
+  FROM (
+    SELECT CAST(
+      NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(al.details, 'order_id:', -1), ' |', 1)), '')
+      AS UNSIGNED
+    ) AS order_id
+    FROM activity_logs al
+    WHERE al.performed_by = p_employee_id
+      AND al.module = 'Orders'
+      AND al.action = 'Order Cancelled'
+      AND al.details LIKE '%order_id:%'
+      AND (p_from_date IS NULL OR al.log_date >= p_from_date)
+      AND (p_to_date IS NULL OR al.log_date <= p_to_date)
+    UNION
+    SELECT o.id AS order_id
+    FROM orders o
+    WHERE o.cancelled_by = p_employee_id
+      AND (p_from_date IS NULL OR DATE(o.cancelled_at) >= p_from_date)
+      AND (p_to_date IS NULL OR DATE(o.cancelled_at) <= p_to_date)
+  ) cancelled_src
+  WHERE order_id IS NOT NULL AND order_id > 0;
+
+  SELECT COUNT(DISTINCT order_id)
+    INTO v_deleted
+  FROM (
+    SELECT CAST(
+      NULLIF(TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(al.details, 'order_id:', -1), ' |', 1)), '')
+      AS UNSIGNED
+    ) AS order_id
+    FROM activity_logs al
+    WHERE al.performed_by = p_employee_id
+      AND al.module = 'Orders'
+      AND al.action = 'Order Deleted'
+      AND al.details LIKE '%order_id:%'
+      AND (p_from_date IS NULL OR al.log_date >= p_from_date)
+      AND (p_to_date IS NULL OR al.log_date <= p_to_date)
+    UNION
+    SELECT o.id AS order_id
+    FROM orders o
+    WHERE o.deleted_by = p_employee_id
+      AND (p_from_date IS NULL OR DATE(o.deleted_at) >= p_from_date)
+      AND (p_to_date IS NULL OR DATE(o.deleted_at) <= p_to_date)
+  ) deleted_src
+  WHERE order_id IS NOT NULL AND order_id > 0;
+
+  SELECT
+    v_created AS created_orders,
+    v_updated AS updated_orders,
+    v_completed AS completed_orders,
+    v_cancelled AS cancelled_orders,
+    v_deleted AS deleted_orders,
+    (v_created + v_updated + v_completed + v_cancelled + v_deleted) AS total_orders;
+END$$
+
+DELIMITER ;
 
 -- =============================================================================
 -- SOFT DELETE & FK POLICY (application layer)
