@@ -119,6 +119,19 @@ export async function updateOrder(id, payload) {
   return data?.data?.order;
 }
 
+export async function updateOrderFacility(id, { facilityId, facilityName = "" } = {}) {
+  const data = await request(`/orders/${id}/facility`, {
+    method: "PATCH",
+    auth: true,
+    body: {
+      facility: facilityId,
+      facilityName,
+    },
+  });
+
+  return data?.data?.order;
+}
+
 export async function deleteOrder(id) {
   await request(`/orders/${id}`, {
     method: "DELETE",

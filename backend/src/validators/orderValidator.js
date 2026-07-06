@@ -128,6 +128,19 @@ function validateOrderNote(body = {}) {
   return { valid: errors.length === 0, errors };
 }
 
+function validateOrderFacilityUpdate(body = {}) {
+  const errors = [];
+  const facility = body.facility;
+
+  if (facility === undefined || facility === null || `${facility}`.trim() === "") {
+    errors.push({ field: "facility", message: "Facility is required" });
+  } else if (Number.isNaN(Number(facility))) {
+    errors.push({ field: "facility", message: "Facility is invalid" });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 function validateWorkflowStageUpdate(body = {}) {
   const errors = [];
 
@@ -148,6 +161,7 @@ function validateWorkflowStageUpdate(body = {}) {
 module.exports = {
   validateCreateOrder,
   validateUpdateOrder,
+  validateOrderFacilityUpdate,
   validateOrderNote,
   validateWorkflowStageUpdate,
   ALLOWED_ORDER_TYPES,

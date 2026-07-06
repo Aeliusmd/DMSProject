@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getStoredUser } from "@/lib/auth/authStorage";
@@ -97,6 +97,8 @@ export default function EmployeeMilestoneModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const showSkeleton = loading || (!error && stats === null);
+
   useEffect(() => {
     if (!isOpen) return undefined;
 
@@ -108,11 +110,25 @@ export default function EmployeeMilestoneModal({
     };
   }, [isOpen]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isOpen) {
       setStats(null);
       setError("");
       setLoading(true);
+      return;
+    }
+
+    if (!useSelfStats && !employee?.id) {
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setStats(null);
+  }, [isOpen, employee?.id, useSelfStats, canFilterByDate, dateFrom, dateTo]);
+
+  useEffect(() => {
+    if (!isOpen) {
       return undefined;
     }
 
@@ -123,10 +139,6 @@ export default function EmployeeMilestoneModal({
     let cancelled = false;
 
     async function loadStats() {
-      setLoading(true);
-      setError("");
-      setStats(null);
-
       try {
         const filters =
           canFilterByDate && !useSelfStats
@@ -138,7 +150,16 @@ export default function EmployeeMilestoneModal({
           : await getEmployeeMilestoneStats(employee?.id, filters);
 
         if (!cancelled) {
-          setStats(data);
+          setStats(
+            data || {
+              created: 0,
+              updated: 0,
+              completed: 0,
+              cancelled: 0,
+              deleted: 0,
+              total: 0,
+            }
+          );
         }
       } catch (err) {
         if (!cancelled) {
@@ -240,7 +261,7 @@ export default function EmployeeMilestoneModal({
             </p>
           )}
 
-          {loading ? (
+          {showSkeleton ? (
             <MilestoneStatsSkeleton />
           ) : error ? (
             <p className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">

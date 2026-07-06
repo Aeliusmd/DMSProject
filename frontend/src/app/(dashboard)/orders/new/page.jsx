@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CollapsibleOrderPanel from "@/components/orders/new-order/CollapsibleOrderPanel";
@@ -38,10 +38,13 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, updateOrderFacility, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import {
-  refreshFacilityProfileStatus,
+  clearDraftOrderFacility,
+  isSameFacilityLabel,
+  readDraftOrderFacility,
+  rememberDraftOrderFacility,
   resolvePendingFacility,
 } from "@/lib/orders/facilityOrderUtils";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
@@ -186,8 +189,17 @@ function NewOrderPageContent() {
   const orderId = searchParams.get("orderId");
   const subpoenaId = searchParams.get("subpoenaId");
   const panel = searchParams.get("panel");
+  const facilityRefresh = searchParams.get("facilityRefresh");
 
   const isEditMode = Boolean(orderId);
+  const returnToOrderPath = useMemo(() => {
+    const params = new URLSearchParams();
+    if (orderId) params.set("orderId", orderId);
+    if (subpoenaId) params.set("subpoenaId", subpoenaId);
+    if (panel) params.set("panel", panel);
+    const query = params.toString();
+    return `/orders/new${query ? `?${query}` : ""}`;
+  }, [orderId, subpoenaId, panel]);
 
   const [expandedPanels, setExpandedPanels] = useState({
     subpoena: false,
@@ -197,6 +209,23 @@ function NewOrderPageContent() {
   });
 
   const [formData, setFormData] = useState(initialFormData);
+  const formDataRef = useRef(formData);
+  const committedFacilityRef = useRef({ id: "", name: "" });
+
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
+
+  const markCommittedFacility = (id, name) => {
+    committedFacilityRef.current = {
+      id: `${id || ""}`.trim(),
+      name: `${name || ""}`.trim(),
+    };
+  };
+
+  const clearCommittedFacility = () => {
+    committedFacilityRef.current = { id: "", name: "" };
+  };
 
   const [touched, setTouched] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
@@ -260,7 +289,7 @@ function NewOrderPageContent() {
     setLoadError("");
 
     getOrder(orderId)
-      .then((order) => {
+      .then(async (order) => {
         if (!active) return;
 
         if (!order) {
@@ -268,18 +297,62 @@ function NewOrderPageContent() {
           return;
         }
 
-        setFormData(
-          syncPaymentDueFields(
-            { ...initialFormData, ...order },
-            order.invoiceFees
-          )
+        const isReturnFromFacilityEdit = facilityRefresh === "1";
+        const draftFacility = readDraftOrderFacility(orderId);
+
+        let nextForm = syncPaymentDueFields(
+          { ...initialFormData, ...order },
+          order.invoiceFees
         );
-        setFacilityProfileIncomplete(Boolean(order.facilityProfileIncomplete));
-        setFacilityCreated(Boolean(order.facilityIsAutoCreated));
+        let profileIncomplete = Boolean(order.facilityProfileIncomplete);
+        let facilityWasCreated = Boolean(order.facilityIsAutoCreated);
+        let facilityLabel = order.facilityName || "";
+
+        if (isReturnFromFacilityEdit && draftFacility) {
+          try {
+            const resolved = await resolvePendingFacility({
+              facilityId: draftFacility.facilityId,
+              facilityName: draftFacility.facilityName,
+            });
+
+            nextForm = {
+              ...nextForm,
+              facility: resolved.facilityId,
+              facilityName: resolved.facilityName,
+            };
+            profileIncomplete = resolved.facilityProfileIncomplete;
+            facilityWasCreated = resolved.facilityCreated;
+            facilityLabel = resolved.facilityName;
+
+            rememberDraftOrderFacility(orderId, {
+              facilityId: resolved.facilityId,
+              facilityName: resolved.facilityName,
+            });
+          } catch {
+            // Keep the facility already stored on the order.
+          }
+        } else {
+          clearDraftOrderFacility(orderId);
+        }
+
+        if (!active) return;
+
+        if (isReturnFromFacilityEdit) {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete("facilityRefresh");
+          params.delete("applyFacilityId");
+          const query = params.toString();
+          router.replace(`/orders/new${query ? `?${query}` : ""}`, { scroll: false });
+        }
+
+        setFormData(nextForm);
+        markCommittedFacility(nextForm.facility, nextForm.facilityName);
+        setFacilityProfileIncomplete(profileIncomplete);
+        setFacilityCreated(facilityWasCreated);
         setExtractionMeta((prev) => ({
           ...prev,
-          facilityName: order.facilityName || "",
-          facilityCreated: Boolean(order.facilityIsAutoCreated),
+          facilityName: facilityLabel,
+          facilityCreated: facilityWasCreated,
         }));
         setTouched({});
         setSubmitAttempted(false);
@@ -523,6 +596,7 @@ function NewOrderPageContent() {
       };
       setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
       setFacilityCreated(resolved.facilityCreated);
+      markCommittedFacility(resolved.facilityId, resolved.facilityName);
 
       if (resolved.facilityId) {
         setFacilities((prev) => {
@@ -547,34 +621,6 @@ function NewOrderPageContent() {
     }));
     setExtractionMeta((prev) => ({ ...prev, ...nextMeta }));
   };
-
-  useEffect(() => {
-    if (!formData.facility) return undefined;
-
-    const refreshFacilityStatus = async () => {
-      try {
-        const status = await refreshFacilityProfileStatus(formData.facility);
-        setFacilityProfileIncomplete(status.facilityProfileIncomplete);
-        setFacilityCreated(status.facilityCreated);
-      } catch {
-        // Keep the last known facility status.
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        refreshFacilityStatus();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("focus", handleVisibility);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("focus", handleVisibility);
-    };
-  }, [formData.facility]);
 
   const errors = useMemo(
     () => ({
@@ -611,6 +657,7 @@ function NewOrderPageContent() {
         facility: resolved.facilityId,
         facilityName: resolved.facilityName,
       }));
+      markCommittedFacility(resolved.facilityId, resolved.facilityName);
       setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
       setFacilityCreated(resolved.facilityCreated);
       setExtractionMeta((prev) => ({
@@ -618,6 +665,13 @@ function NewOrderPageContent() {
         facilityName: resolved.facilityName,
         facilityCreated: resolved.facilityCreated,
       }));
+
+      if (orderId && isEditMode) {
+        rememberDraftOrderFacility(orderId, {
+          facilityId: resolved.facilityId,
+          facilityName: resolved.facilityName,
+        });
+      }
 
       if (resolved.facilityId) {
         setFacilities((prev) => {
@@ -641,6 +695,10 @@ function NewOrderPageContent() {
   };
 
   const handleFacilityInput = (facilityName) => {
+    clearCommittedFacility();
+    if (orderId && isEditMode) {
+      clearDraftOrderFacility(orderId);
+    }
     setExtractionMeta((prev) => ({
       ...prev,
       facilityName: "",
@@ -656,25 +714,42 @@ function NewOrderPageContent() {
   };
 
   const handleFacilitySelect = (facility) => {
-    setFormData((prev) => ({
-      ...prev,
-      facility: String(facility.id),
-      facilityName: facility.facility || facility.facilityName || "",
-    }));
-    setFacilityProfileIncomplete(Boolean(facility.isProfileIncomplete));
-    setFacilityCreated(Boolean(facility.isAutoCreated));
-    setExtractionMeta((prev) => ({
-      ...prev,
-      facilityName: facility.facility || facility.facilityName || "",
-      facilityCreated: Boolean(facility.isAutoCreated),
-    }));
+    setFormData((prev) => {
+      const next = {
+        ...prev,
+        facility: String(facility.id),
+        facilityName: facility.facility || facility.facilityName || "",
+      };
+      syncFacilityFromForm(next);
+      return next;
+    });
+  };
+
+  const handleFacilityCommit = (typedName = "") => {
+    const trimmedName = `${typedName || formDataRef.current.facilityName || ""}`.trim();
+
+    if (!trimmedName) {
+      return;
+    }
+
+    const committed = committedFacilityRef.current;
+    if (
+      committed.id &&
+      formDataRef.current.facility === committed.id &&
+      isSameFacilityLabel(trimmedName, committed.name)
+    ) {
+      return;
+    }
+
+    syncFacilityFromForm({
+      ...formDataRef.current,
+      facilityName: trimmedName,
+      facility: "",
+    });
   };
 
   const handleFacilityBlur = () => {
-    setFormData((prev) => {
-      syncFacilityFromForm(prev);
-      return prev;
-    });
+    handleFacilityCommit();
   };
 
   const hasSubpoena = Boolean(
@@ -929,7 +1004,7 @@ function NewOrderPageContent() {
     setSubmitAttempted(true);
     setSaveError("");
 
-    const resolvedFacility = await syncFacilityFromForm(formData);
+    const resolvedFacility = await syncFacilityFromForm(formDataRef.current);
 
     if (resolvedFacility?.facilityProfileIncomplete) {
       setSaveError(
@@ -939,9 +1014,9 @@ function NewOrderPageContent() {
     }
 
     const syncedFormData = {
-      ...formData,
-      facility: resolvedFacility?.facilityId || formData.facility,
-      facilityName: resolvedFacility?.facilityName || formData.facilityName,
+      ...formDataRef.current,
+      facility: resolvedFacility?.facilityId || "",
+      facilityName: resolvedFacility?.facilityName || "",
     };
 
     const currentErrors = {
@@ -960,7 +1035,19 @@ function NewOrderPageContent() {
 
     try {
       if (isEditMode || activeOrderId) {
+        if (resolvedFacility?.facilityId) {
+          await updateOrderFacility(activeOrderId, {
+            facilityId: resolvedFacility.facilityId,
+            facilityName: resolvedFacility.facilityName,
+          });
+          markCommittedFacility(
+            resolvedFacility.facilityId,
+            resolvedFacility.facilityName
+          );
+        }
+
         await updateOrder(activeOrderId, syncedFormData);
+        clearDraftOrderFacility(activeOrderId);
         router.push("/orders");
         return;
       }
@@ -1092,6 +1179,8 @@ function NewOrderPageContent() {
               onFacilityInput={handleFacilityInput}
               onFacilitySelect={handleFacilitySelect}
               onFacilityBlur={handleFacilityBlur}
+              onFacilityCommit={handleFacilityCommit}
+              returnToOrderPath={returnToOrderPath}
             />
           </CollapsibleOrderPanel>
 
@@ -1168,6 +1257,8 @@ function OrderDetailsForm({
   onFacilityInput,
   onFacilitySelect,
   onFacilityBlur,
+  onFacilityCommit,
+  returnToOrderPath = "",
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -1198,8 +1289,11 @@ function OrderDetailsForm({
           onInputChange={onFacilityInput}
           onSelect={onFacilitySelect}
           onBlur={onFacilityBlur}
+          onCommit={onFacilityCommit}
+          resolving={resolvingFacility}
           facilityProfileIncomplete={facilityProfileIncomplete}
           facilityCreated={facilityCreated}
+          returnToOrderPath={returnToOrderPath}
           hint={facilityHint}
           required
           error={
@@ -1209,9 +1303,6 @@ function OrderDetailsForm({
               : "")
           }
         />
-        {resolvingFacility && (
-          <p className="-mt-2 text-[10px] text-[#64748B]">Resolving facility...</p>
-        )}
 
         <RecordTypeMultiSelect
           formData={formData}

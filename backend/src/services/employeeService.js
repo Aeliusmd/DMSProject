@@ -1,7 +1,7 @@
 const bcrypt = require("bcryptjs");
 const ApiError = require("../utils/ApiError");
 const Employee = require("../models/Employee");
-const ActivityLog = require("../models/ActivityLog");
+const EmployeeMilestoneEvent = require("../models/EmployeeMilestoneEvent");
 const EmployeeSettings = require("../models/EmployeeSettings");
 const AuthSession = require("../models/AuthSession");
 const { isAdminOrManager } = require("../utils/roles");
@@ -269,7 +269,7 @@ async function getEmployeeMilestoneStats(
     }
   }
 
-  const row = await ActivityLog.countOrderMilestoneStatsByPerformer(targetId, filters);
+  const row = await EmployeeMilestoneEvent.countStatsByEmployee(targetId, filters);
 
   return {
     employeeId: targetId,
@@ -283,7 +283,7 @@ async function getEmployeeMilestoneStats(
     dateFrom: filters.from || null,
     dateTo: filters.to || null,
     canFilterByDate: privileged,
-    attribution: "activity_logs",
+    attribution: "milestone_events",
   };
 }
 

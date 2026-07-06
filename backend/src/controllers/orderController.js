@@ -8,6 +8,7 @@ const notificationService = require("../services/notificationService");
 const {
   validateCreateOrder,
   validateUpdateOrder,
+  validateOrderFacilityUpdate,
   validateOrderNote,
   validateWorkflowStageUpdate,
 } = require("../validators/orderValidator");
@@ -360,6 +361,27 @@ exports.update = asyncHandler(async (req, res) => {
   });
 
   return ApiResponse.success(res, { order }, "Order updated successfully");
+});
+
+exports.updateFacility = asyncHandler(async (req, res) => {
+  const validation = validateOrderFacilityUpdate(req.body);
+
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
+  const order = await orderService.updateOrderFacility(
+    req.params.id,
+    req.body,
+    req.user.id
+  );
+
+  await logOrderActivity(req, order, {
+    action: "update",
+    details: `Updated facility for order ${order.orderNumber} to ${order.facilityName || "facility"}`,
+  });
+
+  return ApiResponse.success(res, { order }, "Order facility updated successfully");
 });
 
 exports.remove = asyncHandler(async (req, res) => {

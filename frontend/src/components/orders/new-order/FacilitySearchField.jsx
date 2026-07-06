@@ -11,8 +11,11 @@ export default function FacilitySearchField({
   onInputChange,
   onSelect,
   onBlur,
+  onCommit,
   facilityProfileIncomplete = false,
   facilityCreated = false,
+  returnToOrderPath = "",
+  resolving = false,
   hint = "",
   required = false,
   error = "",
@@ -23,9 +26,32 @@ export default function FacilitySearchField({
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [searchError, setSearchError] = useState("");
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const skipBlurCommitRef = useRef(false);
+
+  const commitFacility = onCommit || onBlur;
+  const trimmedValue = value.trim();
+  const hasError = Boolean(error);
+  const showSuggestions = open && trimmedValue.length >= 2;
+  const facilityInfoHref = facilityId
+    ? returnToOrderPath
+      ? `/facilities/${facilityId}/info?returnTo=${encodeURIComponent(returnToOrderPath)}`
+      : `/facilities/${facilityId}/info`
+    : "";
+
+  const hasExactMatch = suggestions.some((facility) => {
+    const name = `${facility.facility || facility.facilityName || ""}`.trim();
+    return name.toLowerCase() === trimmedValue.toLowerCase();
+  });
+
+  const showAddOption = Boolean(trimmedValue) && !hasExactMatch;
+
+  const listItems = showAddOption
+    ? [{ type: "add", label: trimmedValue }, ...suggestions.map((f) => ({ type: "facility", facility: f }))]
+    : suggestions.map((f) => ({ type: "facility", facility: f }));
 
   useEffect(() => {
-    const query = value.trim();
+    const query = trimmedValue;
 
     if (!open || query.length < 2) {
       setSuggestions([]);
@@ -58,7 +84,11 @@ export default function FacilitySearchField({
       active = false;
       clearTimeout(timer);
     };
-  }, [value, open]);
+  }, [trimmedValue, open]);
+
+  useEffect(() => {
+    setHighlightIndex(-1);
+  }, [suggestions, trimmedValue, showAddOption]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -71,8 +101,73 @@ export default function FacilitySearchField({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const hasError = Boolean(error);
-  const showSuggestions = open && value.trim().length >= 2;
+  const selectFacility = (facility) => {
+    skipBlurCommitRef.current = true;
+    onSelect(facility);
+    setOpen(false);
+    setHighlightIndex(-1);
+  };
+
+  const confirmTypedFacility = (typedValue = trimmedValue) => {
+    const nextValue = `${typedValue || ""}`.trim();
+    setOpen(false);
+    setHighlightIndex(-1);
+
+    if (!nextValue) {
+      return;
+    }
+
+    skipBlurCommitRef.current = true;
+
+    if (onCommit) {
+      onCommit(nextValue);
+      return;
+    }
+
+    commitFacility?.();
+  };
+
+  const activateListItem = (item) => {
+    if (item.type === "add") {
+      confirmTypedFacility();
+      return;
+    }
+
+    selectFacility(item.facility);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "ArrowDown") {
+      if (!showSuggestions || loading || listItems.length === 0) return;
+      e.preventDefault();
+      setHighlightIndex((index) => Math.min(index + 1, listItems.length - 1));
+      return;
+    }
+
+    if (e.key === "ArrowUp") {
+      if (!showSuggestions || loading || listItems.length === 0) return;
+      e.preventDefault();
+      setHighlightIndex((index) => Math.max(index - 1, 0));
+      return;
+    }
+
+    if (e.key === "Escape") {
+      setOpen(false);
+      setHighlightIndex(-1);
+      return;
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault();
+
+      if (showSuggestions && !loading && highlightIndex >= 0 && listItems[highlightIndex]) {
+        activateListItem(listItems[highlightIndex]);
+        return;
+      }
+
+      confirmTypedFacility(e.currentTarget.value);
+    }
+  };
 
   return (
     <div ref={rootRef} className="relative min-w-0">
@@ -89,7 +184,25 @@ export default function FacilitySearchField({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        onBlur={onBlur}
+        onBlur={(e) => {
+          if (rootRef.current?.contains(e.relatedTarget)) return;
+
+          if (skipBlurCommitRef.current) {
+            skipBlurCommitRef.current = false;
+            return;
+          }
+
+          if (onCommit) {
+            const nextValue = e.currentTarget.value.trim();
+            if (nextValue) {
+              onCommit(nextValue);
+            }
+            return;
+          }
+
+          onBlur?.();
+        }}
+        onKeyDown={handleKeyDown}
         placeholder="Search or type facility name"
         className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
           hasError
@@ -102,13 +215,17 @@ export default function FacilitySearchField({
         autoComplete="off"
       />
 
-      {facilityId && !facilityProfileIncomplete && (
+      {resolving && (
+        <p className="mt-[4px] text-[10px] text-[#64748B]">Resolving facility...</p>
+      )}
+
+      {facilityId && !facilityProfileIncomplete && !resolving && (
         <p className="mt-[4px] text-[10px] font-medium text-[#059669]">
-          Existing facility selected
+          {facilityCreated ? "Facility added" : "Existing facility selected"}
         </p>
       )}
 
-      {facilityId && facilityProfileIncomplete && (
+      {facilityId && facilityProfileIncomplete && !resolving && (
         <div className="mt-2 rounded-[6px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
           <p className="text-[11px] font-semibold text-[#B45309]">
             {facilityCreated
@@ -119,7 +236,7 @@ export default function FacilitySearchField({
             Complete the facility details before continuing this order.
           </p>
           <Link
-            href={`/facilities/${facilityId}/info`}
+            href={facilityInfoHref}
             className="mt-2 inline-flex text-[11px] font-semibold text-[#007F96] underline"
           >
             Open facility profile to complete
@@ -127,9 +244,9 @@ export default function FacilitySearchField({
         </div>
       )}
 
-      {!facilityId && value.trim() && (
+      {!facilityId && trimmedValue && !resolving && (
         <p className="mt-[4px] text-[10px] text-[#94A3B8]">
-          New facility will be added when you leave this field
+          Press Enter or pick from the list to add this facility
         </p>
       )}
 
@@ -158,32 +275,57 @@ export default function FacilitySearchField({
             <li className="px-3 py-2 text-[12px] text-red-500">{searchError}</li>
           )}
 
+          {!loading && !searchError && showAddOption && (
+            <li>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => confirmTypedFacility(trimmedValue)}
+                className={`block w-full px-3 py-2 text-left ${
+                  highlightIndex === 0 ? "bg-[#F0FBFD]" : "hover:bg-[#F0FBFD]"
+                }`}
+              >
+                <span className="block text-[12px] font-semibold text-[#007F96]">
+                  Add &ldquo;{trimmedValue}&rdquo; as facility
+                </span>
+                <span className="block text-[10px] text-[#94A3B8]">
+                  Press Enter to confirm
+                </span>
+              </button>
+            </li>
+          )}
+
           {!loading &&
             !searchError &&
-            suggestions.map((facility) => (
-              <li key={facility.id}>
-                <button
-                  type="button"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    onSelect(facility);
-                    setOpen(false);
-                  }}
-                  className="block w-full px-3 py-2 text-left hover:bg-[#F0FBFD]"
-                >
-                  <span className="block text-[12px] font-semibold text-[#111827]">
-                    {facility.facility || facility.facilityName}
-                  </span>
-                  {(facility.city || facility.state) && (
-                    <span className="block text-[10px] text-[#94A3B8]">
-                      {[facility.city, facility.state].filter(Boolean).join(", ")}
-                    </span>
-                  )}
-                </button>
-              </li>
-            ))}
+            suggestions.map((facility, index) => {
+              const itemIndex = showAddOption ? index + 1 : index;
 
-          {!loading && !searchError && suggestions.length === 0 && (
+              return (
+                <li key={facility.id}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => selectFacility(facility)}
+                    className={`block w-full px-3 py-2 text-left ${
+                      highlightIndex === itemIndex
+                        ? "bg-[#F0FBFD]"
+                        : "hover:bg-[#F0FBFD]"
+                    }`}
+                  >
+                    <span className="block text-[12px] font-semibold text-[#111827]">
+                      {facility.facility || facility.facilityName}
+                    </span>
+                    {(facility.city || facility.state) && (
+                      <span className="block text-[10px] text-[#94A3B8]">
+                        {[facility.city, facility.state].filter(Boolean).join(", ")}
+                      </span>
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+
+          {!loading && !searchError && suggestions.length === 0 && !showAddOption && (
             <li className="px-3 py-2 text-[12px] text-[#94A3B8]">
               No matching facilities — continue typing to add a new one
             </li>

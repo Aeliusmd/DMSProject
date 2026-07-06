@@ -13,9 +13,9 @@ const Provider = require("../models/Provider");
 const { buildProviderPayload, findOrCreateProvider, resolveProviderFromHints } = require("./providerService");
 const {
   findOrCreateFacility,
-  resolveFacilityFromHints,
   isFacilityProfileIncomplete,
 } = require("./facilityService");
+const { normalizeFacilityName } = require("../utils/facilityNameUtils");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -1704,15 +1704,21 @@ async function resolveProviderId(connection, data) {
 
 async function resolveFacilityId(connection, data) {
   const facilityId = Number(data.facility);
+  const facilityName = trimOrNull(data.facilityName);
 
   if (Number.isFinite(facilityId) && facilityId > 0) {
     const selected = await Facility.findById(facilityId, connection);
     if (selected) {
-      return selected.id;
+      const selectedName = selected.facility_name || "";
+      if (
+        !facilityName ||
+        normalizeFacilityName(facilityName) ===
+          normalizeFacilityName(selectedName)
+      ) {
+        return selected.id;
+      }
     }
   }
-
-  const facilityName = trimOrNull(data.facilityName);
 
   if (!facilityName) {
     return Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null;
@@ -1941,10 +1947,13 @@ async function createOrderFromExtract(extractId, actorId) {
   const providerResolution = await resolveProviderFromHints(orderHints);
   orderHints = providerResolution.orderHints;
 
-  const facilityResolution = await resolveFacilityFromHints(orderHints);
-  if (facilityResolution.facility?.id) {
-    payload.facility = String(facilityResolution.facility.id);
-    payload.facilityName = facilityResolution.facility.facilityName;
+  if (!payload.facility && orderHints.customer) {
+    payload.facilityName = orderHints.customer;
+    payload.facilityCity = orderHints.facilityCity || orderHints.city || "";
+    payload.facilityState = orderHints.facilityState || orderHints.state || "";
+    payload.facilityZip = orderHints.facilityZip || orderHints.zip || "";
+    payload.facilityAddress =
+      orderHints.facilityAddress || orderHints.address || "";
   }
 
   if (providerResolution.provider?.id) {
@@ -1991,6 +2000,51 @@ async function autoCreateOrdersFromBatch({ childIds = [], actorId }) {
   }
 
   return { created, failed };
+}
+
+async function updateOrderFacility(id, data, actorId) {
+  const existing = await Order.findById(id);
+
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const resolvedFacilityId = await resolveFacilityId(connection, data);
+
+    if (!resolvedFacilityId) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    const facility = await Facility.findById(resolvedFacilityId, connection);
+
+    if (!facility) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    assertFacilityProfileComplete(facility);
+
+    await connection.execute(
+      `UPDATE orders
+       SET facility_id = :facilityId, updated_at = NOW()
+       WHERE id = :orderId`,
+      { facilityId: resolvedFacilityId, orderId: existing.id }
+    );
+
+    await connection.commit();
+
+    return getOrderById(existing.id);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }
 
 async function updateOrder(id, data, actorId, files) {
@@ -3201,6 +3255,7 @@ module.exports = {
   createOrderFromExtract,
   autoCreateOrdersFromBatch,
   updateOrder,
+  updateOrderFacility,
   deleteOrder,
   cancelOrder,
   restoreOrder,
