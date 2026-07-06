@@ -1095,8 +1095,8 @@ function NewOrderPageContent() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex h-[calc(100vh-92px)] flex-col gap-4 overflow-hidden">
+        <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-[20px] font-semibold text-[#111827]">
               {isEditMode ? "Edit Order" : "New Order"}
@@ -1135,7 +1135,7 @@ function NewOrderPageContent() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-4 xl:h-[calc(100vh-170px)] xl:flex-row xl:items-stretch">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row xl:items-stretch">
           {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
             <CollapsibleOrderPanel
               title="Subpoena"
@@ -1196,21 +1196,6 @@ function NewOrderPageContent() {
               onChange={handleChange}
               onBlur={handleBlur}
               getError={getError}
-              onSave={handleSaveOrder}
-              disableSave={
-                hasImmediateRequiredErrors ||
-                saving ||
-                facilityProfileIncomplete ||
-                resolvingFacility
-              }
-              saveLabel={
-                saving
-                  ? "Saving..."
-                  : isEditMode
-                  ? "Update Order"
-                  : "Save Order"
-              }
-              saveError={saveError}
               onProviderInput={handleProviderInput}
               onProviderSelect={handleProviderSelect}
               onProviderBlur={handleProviderBlur}
@@ -1234,6 +1219,24 @@ function NewOrderPageContent() {
             />
           </CollapsibleOrderPanel>
         </div>
+
+        <OrderSaveActionBar
+          onSave={handleSaveOrder}
+          disabled={
+            hasImmediateRequiredErrors ||
+            saving ||
+            facilityProfileIncomplete ||
+            resolvingFacility
+          }
+          label={
+            saving
+              ? "Saving..."
+              : isEditMode
+              ? "Update Order"
+              : "Save Order"
+          }
+          saveError={saveError}
+        />
       </div>
 
       <SubpoenaExtractionOverlay open={extractingSubpoena} />
@@ -1588,10 +1591,6 @@ function ServeInfoForm({
   onChange,
   onBlur,
   getError,
-  onSave,
-  disableSave,
-  saveLabel = "Save Order",
-  saveError = "",
   onProviderInput,
   onProviderSelect,
   onProviderBlur,
@@ -1890,27 +1889,40 @@ function ServeInfoForm({
           getError={getError}
         />
       )}
+    </div>
+  );
+}
+
+function OrderSaveActionBar({ onSave, disabled, label, saveError = "" }) {
+  return (
+    <section className="shrink-0 rounded-[12px] border border-[#E2E8F0] bg-white px-5 py-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="max-w-[720px] text-[11px] leading-[16px] text-[#64748B]">
+          This button becomes clickable after you complete all mandatory fields
+          in the cards above.
+        </p>
+
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={disabled}
+          className={`flex h-[44px] min-w-[220px] shrink-0 items-center justify-center gap-2 rounded-[8px] px-6 text-[13px] font-semibold transition ${
+            disabled
+              ? "cursor-not-allowed bg-[#E2E8F0] text-[#94A3B8]"
+              : "bg-[#0097B2] text-white shadow-sm hover:bg-[#0086A0]"
+          }`}
+        >
+          <SaveIcon />
+          {label}
+        </button>
+      </div>
 
       {saveError && (
-        <div className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+        <div className="mt-3 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-600">
           {saveError}
         </div>
       )}
-
-      <button
-        type="button"
-        onClick={onSave}
-        disabled={disableSave}
-        className={`mt-4 flex h-[42px] w-full items-center justify-center gap-2 rounded-[7px] text-[13px] font-semibold transition ${
-          disableSave
-            ? "cursor-not-allowed bg-[#E2E8F0] text-[#94A3B8]"
-            : "bg-[#0097B2] text-white hover:bg-[#0086A0]"
-        }`}
-      >
-        <SaveIcon />
-        {saveLabel}
-      </button>
-    </div>
+    </section>
   );
 }
 

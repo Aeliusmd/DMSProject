@@ -85,6 +85,9 @@ export function groupResendInvoices(invoices = []) {
       invoiced: invoice.invoiced,
       paid: invoice.paid,
       due: invoice.due,
+      reminder1: invoice.reminder1 || null,
+      reminder2: invoice.reminder2 || null,
+      reminder3: invoice.reminder3 || null,
     };
 
     if (!groups.has(company)) {

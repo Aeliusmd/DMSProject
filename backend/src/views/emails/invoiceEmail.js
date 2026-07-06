@@ -60,17 +60,23 @@ function renderInvoiceText({
   paid,
   due,
   isResend,
+  reminderLevel = null,
   sendOrderDetails,
   isRushOrder,
   rushLevel,
   orderDetailsText,
 }) {
+  const reminderNumber = Number(reminderLevel) || 0;
+  const isReminder = reminderNumber > 0;
+
   return [
     `Dear ${companyName},`,
     "",
-    isResend
-      ? "Please find the resent invoice details below:"
-      : "Please find the invoice details below:",
+    isReminder
+      ? `This is reminder ${reminderNumber} for the outstanding invoice below:`
+      : isResend
+        ? "Please find the resent invoice details below:"
+        : "Please find the invoice details below:",
     "",
     ...(isRushOrder
       ? [
@@ -105,21 +111,34 @@ function renderInvoiceHtml({
   paid,
   due,
   isResend,
+  reminderLevel = null,
   sendOrderDetails,
   isRushOrder,
   rushLevel,
   orderDetailsText,
 }) {
   const safeCompany = escapeHtml(companyName || "Valued Customer");
-  const heading = isResend ? "Invoice Resent" : "Invoice Notification";
-  const intro = isResend
-    ? "Please review the updated invoice details below."
-    : "Please find your invoice summary below for your records.";
+  const reminderNumber = Number(reminderLevel) || 0;
+  const isReminder = reminderNumber > 0;
+  const heading = isReminder
+    ? `Invoice Reminder ${reminderNumber}`
+    : isResend
+      ? "Invoice Resent"
+      : "Invoice Notification";
+  const intro = isReminder
+    ? `This is reminder ${reminderNumber} for your outstanding invoice. Please review the details below.`
+    : isResend
+      ? "Please review the updated invoice details below."
+      : "Please find your invoice summary below for your records.";
 
-  const badgeColor = isResend ? BRAND.warningBg : BRAND.primaryLight;
-  const badgeBorder = isResend ? "#FDBA74" : "#BDECF3";
-  const badgeText = isResend ? BRAND.warning : BRAND.primaryDark;
-  const badgeLabel = isResend ? "Resent Invoice" : "New Invoice";
+  const badgeColor = isReminder ? "#FEF3C7" : isResend ? BRAND.warningBg : BRAND.primaryLight;
+  const badgeBorder = isReminder ? "#FCD34D" : isResend ? "#FDBA74" : "#BDECF3";
+  const badgeText = isReminder ? "#B45309" : isResend ? BRAND.warning : BRAND.primaryDark;
+  const badgeLabel = isReminder
+    ? `Reminder ${reminderNumber}`
+    : isResend
+      ? "Resent Invoice"
+      : "New Invoice";
 
   const bodyHtml = `
     <tr>
@@ -185,10 +204,16 @@ function renderInvoiceHtml({
       </td>
     </tr>`;
 
-  const preheader = `Invoice for case ${caseNo} — Due: ${due}`;
+  const preheader = isReminder
+    ? `Reminder ${reminderNumber} for case ${caseNo} — Due: ${due}`
+    : `Invoice for case ${caseNo} — Due: ${due}`;
 
   return wrapEmailHtml({
-    title: isResend ? `Resent Invoice - Case ${caseNo}` : `Invoice - Case ${caseNo}`,
+    title: isReminder
+      ? `Reminder ${reminderNumber} - Case ${caseNo}`
+      : isResend
+        ? `Resent Invoice - Case ${caseNo}`
+        : `Invoice - Case ${caseNo}`,
     preheader,
     bodyHtml,
   });

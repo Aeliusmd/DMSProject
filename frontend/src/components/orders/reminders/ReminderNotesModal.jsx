@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getOrderReminders } from "@/lib/orders/orderApi";
 import { filterReminders } from "@/lib/orders/reminderFilters";
-import OrderNotesModal from "@/components/orders/OrderNotesModal";
+import ReminderNoteDetailModal from "@/components/orders/ReminderNoteDetailModal";
+import { toFileUrl } from "@/lib/orders/orderNoteUtils";
 
 const EMPTY_FILTERS = {
   orderId: "",
@@ -112,13 +113,6 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
     router.push(`/orders/new?mode=edit&orderId=${encodeURIComponent(orderId)}`);
   };
 
-  const refreshReminders = () => {
-    const scope = activeTab === "all" && isAdmin ? "all" : "my";
-    getOrderReminders(scope)
-      .then(setReminders)
-      .catch(() => {});
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6 backdrop-blur-[2px]">
       <section className="flex h-[min(880px,92vh)] w-full max-w-[1240px] flex-col overflow-hidden rounded-[12px] bg-white shadow-2xl">
@@ -186,7 +180,12 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
                 : "No reminders found."
             }
             onOrderClick={openOrderForEdit}
-            onDateClick={(reminder) => setSelectedReminder(reminder)}
+            onNoteClick={(reminder) =>
+              setSelectedReminder({
+                ...reminder,
+                attachmentUrl: toFileUrl(reminder.attachmentUrl),
+              })
+            }
           />
 
           <div className="shrink-0 border-t border-[#E2E8F0] px-5 py-4">
@@ -201,27 +200,9 @@ export default function ReminderNotesModal({ isOpen, onClose }) {
         </div>
       </section>
 
-      <OrderNotesModal
-        isOpen={Boolean(selectedReminder)}
-        order={
-          selectedReminder
-            ? {
-                id:
-                  selectedReminder.orderNumber ||
-                  selectedReminder.caseNumber,
-                dbId: selectedReminder.orderId,
-                applicant: selectedReminder.applicant,
-              }
-            : null
-        }
-        initialNoteId={selectedReminder?.noteId || null}
-        disableCreate
-        includeCalled
-        singleNoteMode
-        onClose={() => {
-          setSelectedReminder(null);
-          refreshReminders();
-        }}
+      <ReminderNoteDetailModal
+        reminder={selectedReminder}
+        onClose={() => setSelectedReminder(null)}
       />
     </div>
   );
@@ -325,7 +306,7 @@ function ReminderTable({
   error,
   emptyMessage = "No reminders found.",
   onOrderClick,
-  onDateClick,
+  onNoteClick,
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto">
@@ -380,13 +361,7 @@ function ReminderTable({
                 </td>
 
                 <td className="px-5 py-5 align-top text-[14px] text-[#334155]">
-                  <button
-                    type="button"
-                    onClick={() => onDateClick(reminder)}
-                    className="font-medium text-[#007F96] underline"
-                  >
-                    {reminder.date}
-                  </button>
+                  {reminder.date}
                 </td>
 
                 <td className="px-5 py-5 align-top text-[14px] text-[#334155]">
@@ -394,9 +369,15 @@ function ReminderTable({
                 </td>
 
                 <td className="px-5 py-5 align-top">
-                  <p className="max-w-[620px] text-[14px] leading-[22px] text-[#334155]">
-                    {reminder.note}
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onNoteClick(reminder)}
+                    className="max-w-[620px] text-left"
+                  >
+                    <p className="text-[14px] leading-[22px] text-[#334155] hover:underline">
+                      {reminder.note}
+                    </p>
+                  </button>
 
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]">
                     <span
@@ -406,7 +387,7 @@ function ReminderTable({
                           : "bg-[#FEF2F2] text-[#DC2626]"
                       }`}
                     >
-                      {reminder.isCalled ? "Callbacked" : "Not Callbacked"}
+                      {reminder.isCalled ? "Calledback" : "Not Calledback"}
                     </span>
 
                     <span className="font-semibold text-[#64748B]">

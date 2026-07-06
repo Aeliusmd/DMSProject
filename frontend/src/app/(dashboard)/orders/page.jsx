@@ -57,7 +57,7 @@ export default function OrdersPage() {
               icon={<ReminderIcon />}
               onClick={() => setIsReminderModalOpen(true)}
             >
-              Reminder
+              Reminders
             </OrderActionButton>
           </div>
         </section>

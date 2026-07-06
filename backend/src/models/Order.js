@@ -767,6 +767,55 @@ class Order {
     return rows;
   }
 
+  static async findRecentNotesByOrderIds(orderIds = [], limitPerOrder = 2) {
+    if (!orderIds.length) return {};
+
+    const pool = getPool();
+    const placeholders = orderIds.map(() => "?").join(", ");
+
+    const [rows] = await pool.execute(
+      `SELECT id, order_id, note_date, created_by, author_name, note,
+              callback_date, attachment_path, is_called
+       FROM order_notes
+       WHERE order_id IN (${placeholders})
+       ORDER BY note_date DESC, id DESC`,
+      orderIds
+    );
+
+    const grouped = {};
+
+    rows.forEach((row) => {
+      if (!grouped[row.order_id]) grouped[row.order_id] = [];
+      if (grouped[row.order_id].length < limitPerOrder) {
+        grouped[row.order_id].push(row);
+      }
+    });
+
+    return grouped;
+  }
+
+  static async findActiveReminderFlagsByOrderIds(orderIds = []) {
+    if (!orderIds.length) return {};
+
+    const pool = getPool();
+    const placeholders = orderIds.map(() => "?").join(", ");
+
+    const [rows] = await pool.execute(
+      `SELECT order_id, COUNT(*) AS reminder_count
+       FROM order_notes
+       WHERE order_id IN (${placeholders})
+         AND callback_date IS NOT NULL
+         AND is_called = 0
+       GROUP BY order_id`,
+      orderIds
+    );
+
+    return rows.reduce((acc, row) => {
+      acc[row.order_id] = Number(row.reminder_count) > 0;
+      return acc;
+    }, {});
+  }
+
   static async createNote(data) {
     const pool = getPool();
 

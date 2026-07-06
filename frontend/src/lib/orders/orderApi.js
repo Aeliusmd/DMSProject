@@ -206,13 +206,17 @@ export async function createOrderNote(id, { note, callbackDate, attachment }) {
 export async function updateOrderNote(
   orderId,
   noteId,
-  { note, callbackDate, attachment } = {}
+  { note, callbackDate, attachment, markCalled = false } = {}
 ) {
   const formData = new FormData();
   formData.append("note", note ?? "");
 
   if (callbackDate) {
     formData.append("callbackDate", callbackDate);
+  }
+
+  if (markCalled) {
+    formData.append("markCalled", "true");
   }
 
   if (attachment) {
