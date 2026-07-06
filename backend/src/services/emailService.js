@@ -142,6 +142,7 @@ async function sendInvoiceEmail({
   paid,
   due,
   isResend = false,
+  reminderLevel = null,
   sendOrderDetails = false,
   isRushOrder = false,
   rushLevel = null,
@@ -149,11 +150,15 @@ async function sendInvoiceEmail({
   attachments = [],
   subjectOverride = null,
 }) {
+  const reminderNumber = Number(reminderLevel) || 0;
+  const isReminder = reminderNumber > 0;
   const baseSubject = subjectOverride
     ? subjectOverride
-    : isResend
-      ? `Resent Invoice - Case ${caseNo}`
-      : `Invoice - Case ${caseNo}`;
+    : isReminder
+      ? `Reminder ${reminderNumber} - Invoice - Case ${caseNo}`
+      : isResend
+        ? `Resent Invoice - Case ${caseNo}`
+        : `Invoice - Case ${caseNo}`;
   const subject = isRushOrder ? `RUSH - ${baseSubject}` : baseSubject;
 
   const templateData = {
@@ -166,6 +171,7 @@ async function sendInvoiceEmail({
     paid,
     due,
     isResend,
+    reminderLevel: isReminder ? reminderNumber : null,
     sendOrderDetails,
     isRushOrder,
     rushLevel,

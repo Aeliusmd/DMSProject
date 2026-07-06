@@ -79,6 +79,15 @@ function toShortDate(value) {
   return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}/${String(year).slice(-2)}`;
 }
 
+function toSlashDateLong(value) {
+  const parts = parseDateOnlyParts(value);
+  if (!parts) return "";
+
+  const { year, month, day } = parts;
+
+  return `${year}/${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`;
+}
+
 function formatDobDisplay(value) {
   const parts = parseDateOnlyParts(value);
   if (!parts) return "";
@@ -117,6 +126,7 @@ module.exports = {
   toInputDate,
   toSqlDateOnly,
   toShortDate,
+  toSlashDateLong,
   formatDobDisplay,
   extractYear,
   normalizeDate,

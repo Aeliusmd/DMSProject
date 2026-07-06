@@ -9,6 +9,7 @@ import {
   updateOrderNote,
 } from "@/lib/orders/orderApi";
 import { API_BASE_URL } from "@/config/api";
+import { buildCallbackLine } from "@/lib/orders/orderNoteUtils";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -255,8 +256,7 @@ export default function OrderNotesModal({
   const handleCall = () => {
     if (saving || !isEditing) return;
 
-    const now = new Date();
-    const callLine = `Callback - ${now.toLocaleString()}`;
+    const callLine = buildCallbackLine();
 
     const nextText = noteText.trim()
       ? `${noteText.trim()}\n${callLine}`
