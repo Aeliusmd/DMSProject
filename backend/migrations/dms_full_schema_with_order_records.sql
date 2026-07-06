@@ -70,6 +70,7 @@ CREATE TABLE facilities (
   email           VARCHAR(255)    NOT NULL,
   ip_addresses    TEXT            NULL COMMENT 'Newline-separated IP whitelist',
   is_active       TINYINT(1)      NOT NULL DEFAULT 1,
+  is_auto_created TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1 when created automatically from subpoena extraction or order form',
   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

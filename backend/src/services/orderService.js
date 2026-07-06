@@ -11,6 +11,11 @@ const OrderRecord = require("../models/OrderRecord");
 const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const { buildProviderPayload, findOrCreateProvider, resolveProviderFromHints } = require("./providerService");
+const {
+  findOrCreateFacility,
+  resolveFacilityFromHints,
+  isFacilityProfileIncomplete,
+} = require("./facilityService");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -1114,6 +1119,11 @@ function mapOrderDetail(
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",
     facilityName: row.facility_name || "",
+    facilityIsAutoCreated: Boolean(Number(row.facility_is_auto_created)),
+    facilityProfileIncomplete: isFacilityProfileIncomplete({
+      is_auto_created: row.facility_is_auto_created,
+      email: row.facility_email,
+    }),
     providerId: row.provider_id ? String(row.provider_id) : "",
     providerName: row.provider_name || "",
     type: resolveOrderTypeForForm(row, orderRecords),
@@ -1692,6 +1702,45 @@ async function resolveProviderId(connection, data) {
   return provider.id;
 }
 
+async function resolveFacilityId(connection, data) {
+  const facilityId = Number(data.facility);
+
+  if (Number.isFinite(facilityId) && facilityId > 0) {
+    const selected = await Facility.findById(facilityId, connection);
+    if (selected) {
+      return selected.id;
+    }
+  }
+
+  const facilityName = trimOrNull(data.facilityName);
+
+  if (!facilityName) {
+    return Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null;
+  }
+
+  const { facility } = await findOrCreateFacility(
+    {
+      facilityName,
+      address: data.facilityAddress || "",
+      city: data.facilityCity || "",
+      state: data.facilityState || "",
+      zipCode: data.facilityZip || "",
+    },
+    connection
+  );
+
+  return facility.id;
+}
+
+function assertFacilityProfileComplete(facility) {
+  if (isFacilityProfileIncomplete(facility)) {
+    throw new ApiError(
+      400,
+      "Complete the facility profile before saving this order"
+    );
+  }
+}
+
 function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
   const requiredFieldData = mapOrderRowToRequiredFieldData(row, orderRecords);
   const missingRequiredFields = computeMissingRequiredFields(
@@ -1718,46 +1767,58 @@ async function createOrder(data, actorId, files, options = {}) {
     assertValidCnrDeliveryDate(orderInput);
   }
 
-  const facility = await Facility.findById(Number(orderInput.facility));
-
-  if (!facility) {
-    throw new ApiError(400, "Selected facility does not exist");
-  }
-
-  const orderNumber = await resolveOrderNumber(orderInput.orderNumber);
-  const payments = collectPayments(orderInput);
-
-  const subpoenaFile = getUploadedFile(files, "subpoenaFile");
-  const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
-  const subpoenaExtractId = Number(orderInput.subpoenaExtractId) || null;
-
-  let linkedExtract = null;
-  let subpoenaStoragePath = null;
-  if (subpoenaExtractId) {
-    linkedExtract = await batchScanRepository.getExtractById(subpoenaExtractId);
-    if (!linkedExtract) {
-      throw new ApiError(400, "Subpoena extract not found");
-    }
-    if (linkedExtract.is_processed) {
-      throw new ApiError(409, "This subpoena extract was already processed into an order");
-    }
-    try {
-      subpoenaStoragePath = fileStorage.archiveBatchScanSubpoenaToProcessed(
-        linkedExtract.storage_path,
-        orderNumber
-      );
-    } catch (error) {
-      throw new ApiError(404, error.message || "Subpoena PDF not found on disk");
-    }
-  } else {
-    subpoenaStoragePath = toRelativeStoragePath(subpoenaFile);
-  }
-
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
+
+    const resolvedFacilityId = await resolveFacilityId(connection, orderInput);
+
+    if (!resolvedFacilityId) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    orderInput.facility = String(resolvedFacilityId);
+
+    const facility = await Facility.findById(resolvedFacilityId, connection);
+
+    if (!facility) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    if (!allowIncomplete) {
+      assertFacilityProfileComplete(facility);
+    }
+
+    const orderNumber = await resolveOrderNumber(orderInput.orderNumber);
+    const payments = collectPayments(orderInput);
+
+    const subpoenaFile = getUploadedFile(files, "subpoenaFile");
+    const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
+    const subpoenaExtractId = Number(orderInput.subpoenaExtractId) || null;
+
+    let linkedExtract = null;
+    let subpoenaStoragePath = null;
+    if (subpoenaExtractId) {
+      linkedExtract = await batchScanRepository.getExtractById(subpoenaExtractId);
+      if (!linkedExtract) {
+        throw new ApiError(400, "Subpoena extract not found");
+      }
+      if (linkedExtract.is_processed) {
+        throw new ApiError(409, "This subpoena extract was already processed into an order");
+      }
+      try {
+        subpoenaStoragePath = fileStorage.archiveBatchScanSubpoenaToProcessed(
+          linkedExtract.storage_path,
+          orderNumber
+        );
+      } catch (error) {
+        throw new ApiError(404, error.message || "Subpoena PDF not found on disk");
+      }
+    } else {
+      subpoenaStoragePath = toRelativeStoragePath(subpoenaFile);
+    }
 
     const providerId = await resolveProviderId(connection, orderInput);
     const payload = buildOrderDbPayload(
@@ -1880,6 +1941,12 @@ async function createOrderFromExtract(extractId, actorId) {
   const providerResolution = await resolveProviderFromHints(orderHints);
   orderHints = providerResolution.orderHints;
 
+  const facilityResolution = await resolveFacilityFromHints(orderHints);
+  if (facilityResolution.facility?.id) {
+    payload.facility = String(facilityResolution.facility.id);
+    payload.facilityName = facilityResolution.facility.facilityName;
+  }
+
   if (providerResolution.provider?.id) {
     payload.providerId = String(providerResolution.provider.id);
   }
@@ -1935,29 +2002,39 @@ async function updateOrder(id, data, actorId, files) {
     throw new ApiError(404, "Order not found");
   }
 
-  const facility = await Facility.findById(Number(data.facility));
-
-  if (!facility) {
-    throw new ApiError(400, "Selected facility does not exist");
-  }
-
-  const orderNumber = await resolveOrderNumber(
-    data.orderNumber || existing.order_number,
-    existing.id
-  );
-  const payments = collectPayments(data);
-
-  const subpoenaFile = getUploadedFile(files, "subpoenaFile");
-  const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
-  const newSubpoenaPath = toRelativeStoragePath(subpoenaFile);
-  const subpoenaStoragePath =
-    newSubpoenaPath || existing.subpoena_storage_path || null;
-
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
+
+    const resolvedFacilityId = await resolveFacilityId(connection, data);
+
+    if (!resolvedFacilityId) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    data.facility = String(resolvedFacilityId);
+
+    const facility = await Facility.findById(resolvedFacilityId, connection);
+
+    if (!facility) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    assertFacilityProfileComplete(facility);
+
+    const orderNumber = await resolveOrderNumber(
+      data.orderNumber || existing.order_number,
+      existing.id
+    );
+    const payments = collectPayments(data);
+
+    const subpoenaFile = getUploadedFile(files, "subpoenaFile");
+    const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
+    const newSubpoenaPath = toRelativeStoragePath(subpoenaFile);
+    const subpoenaStoragePath =
+      newSubpoenaPath || existing.subpoena_storage_path || null;
 
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });

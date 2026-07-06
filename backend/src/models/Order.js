@@ -23,6 +23,7 @@ const WORKFLOW_AUTO_COMPLETE_EXCLUDED_STATUSES = new Set([
 const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
+const NON_DELETED_ORDER_ALIAS = `(o.status <> 'Deleted')`;
 const ORDER_COLUMNS = `
   order_number, rec_number, facility_id, provider_id, status, court,
   case_number, order_ref, ssn_last_four, dob,
@@ -116,6 +117,7 @@ const ORDER_DETAIL_SELECT = `
   SELECT o.*, f.facility_name, f.slug AS facility_slug,
          f.address AS facility_address, f.city AS facility_city,
          f.state AS facility_state, f.zip_code AS facility_zip,
+         f.email AS facility_email, f.is_auto_created AS facility_is_auto_created,
          p.company_name AS provider_name,
          p.email AS provider_email
   FROM orders o
@@ -141,10 +143,8 @@ class Order {
     } else if (filters.status) {
       conditions.push("o.status = :status");
       params.status = filters.status;
-    } else if (filters.search) {
-      conditions.push(`o.status <> 'Deleted'`);
     } else {
-      conditions.push(ACTIVE_ORDER_ALIAS);
+      conditions.push(NON_DELETED_ORDER_ALIAS);
     }
 
     if (filters.facilityId) {

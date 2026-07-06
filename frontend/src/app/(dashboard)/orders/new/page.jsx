@@ -10,6 +10,7 @@ import NewOrderField, {
 } from "@/components/orders/new-order/NewOrderField";
 import PaymentChargeCard from "@/components/orders/new-order/PaymentChargeCard";
 import ProviderSearchField from "@/components/orders/new-order/ProviderSearchField";
+import FacilitySearchField from "@/components/orders/new-order/FacilitySearchField";
 import DoctorSearchField from "@/components/orders/new-order/DoctorSearchField";
 import DoctorAddressSearchField from "@/components/orders/new-order/DoctorAddressSearchField";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
@@ -39,6 +40,10 @@ import {
 
 import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import {
+  refreshFacilityProfileStatus,
+  resolvePendingFacility,
+} from "@/lib/orders/facilityOrderUtils";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
@@ -68,6 +73,7 @@ const PROVIDER_SYNC_FIELDS = new Set([
 
 const initialFormData = {
   facility: "",
+  facilityName: "",
   providerId: "",
   type: "",
   caseNumber: "",
@@ -206,8 +212,13 @@ function NewOrderPageContent() {
   const [extractError, setExtractError] = useState("");
   const [extractionMeta, setExtractionMeta] = useState({
     facilityName: "",
+    facilityCreated: false,
     providerName: "",
+    providerCreated: false,
   });
+  const [facilityProfileIncomplete, setFacilityProfileIncomplete] = useState(false);
+  const [facilityCreated, setFacilityCreated] = useState(false);
+  const [resolvingFacility, setResolvingFacility] = useState(false);
   const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
 
   useEffect(() => {
@@ -263,6 +274,13 @@ function NewOrderPageContent() {
             order.invoiceFees
           )
         );
+        setFacilityProfileIncomplete(Boolean(order.facilityProfileIncomplete));
+        setFacilityCreated(Boolean(order.facilityIsAutoCreated));
+        setExtractionMeta((prev) => ({
+          ...prev,
+          facilityName: order.facilityName || "",
+          facilityCreated: Boolean(order.facilityIsAutoCreated),
+        }));
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -454,11 +472,9 @@ function NewOrderPageContent() {
           subpoenaFile
         );
 
-        setFormData({
-          ...initialFormData,
-          ...formUpdates,
+        await applyExtractFormUpdates(formUpdates, meta, subpoenaFile, {
+          reset: true,
         });
-        setExtractionMeta(meta);
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -481,16 +497,84 @@ function NewOrderPageContent() {
     };
   }, [isEditMode, subpoenaId]);
 
-  const facilityOptions = useMemo(
-    () => [
-      { label: "Select facility", value: "", disabled: true, hidden: true },
-      ...facilities.map((facility) => ({
-        label: facility.facility || facility.facilityName || facility.name,
-        value: String(facility.id),
-      })),
-    ],
-    [facilities]
-  );
+  const applyExtractFormUpdates = async (
+    formUpdates,
+    meta,
+    subpoenaFile = null,
+    { reset = false } = {}
+  ) => {
+    let nextUpdates = { ...formUpdates };
+    let nextMeta = { ...meta };
+
+    if (meta.pendingFacilityName && !formUpdates.facility) {
+      const resolved = await resolvePendingFacility({
+        facilityName: meta.pendingFacilityName,
+      });
+      nextUpdates = {
+        ...nextUpdates,
+        facility: resolved.facilityId,
+        facilityName: resolved.facilityName,
+      };
+      nextMeta = {
+        ...nextMeta,
+        facilityName: resolved.facilityName,
+        facilityCreated: resolved.facilityCreated,
+        pendingFacilityName: "",
+      };
+      setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
+      setFacilityCreated(resolved.facilityCreated);
+
+      if (resolved.facilityId) {
+        setFacilities((prev) => {
+          if (prev.some((item) => String(item.id) === String(resolved.facilityId))) {
+            return prev;
+          }
+          return [
+            {
+              id: Number(resolved.facilityId),
+              facility: resolved.facilityName,
+            },
+            ...prev,
+          ];
+        });
+      }
+    }
+
+    setFormData((prev) => ({
+      ...(reset ? initialFormData : prev),
+      ...nextUpdates,
+      ...(subpoenaFile ? { subpoenaFile } : {}),
+    }));
+    setExtractionMeta((prev) => ({ ...prev, ...nextMeta }));
+  };
+
+  useEffect(() => {
+    if (!formData.facility) return undefined;
+
+    const refreshFacilityStatus = async () => {
+      try {
+        const status = await refreshFacilityProfileStatus(formData.facility);
+        setFacilityProfileIncomplete(status.facilityProfileIncomplete);
+        setFacilityCreated(status.facilityCreated);
+      } catch {
+        // Keep the last known facility status.
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refreshFacilityStatus();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
+  }, [formData.facility]);
 
   const errors = useMemo(
     () => ({
@@ -503,6 +587,95 @@ function NewOrderPageContent() {
   const hasImmediateRequiredErrors = immediateRequiredFields.some(
     (field) => errors[field]
   );
+
+  const syncFacilityFromForm = async (data) => {
+    const facilityName = `${data.facilityName || ""}`.trim();
+    const facilityId = `${data.facility || ""}`.trim();
+
+    if (!facilityName && !facilityId) {
+      setFacilityProfileIncomplete(false);
+      setFacilityCreated(false);
+      return null;
+    }
+
+    setResolvingFacility(true);
+
+    try {
+      const resolved = await resolvePendingFacility({
+        facilityName,
+        facilityId,
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        facility: resolved.facilityId,
+        facilityName: resolved.facilityName,
+      }));
+      setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
+      setFacilityCreated(resolved.facilityCreated);
+      setExtractionMeta((prev) => ({
+        ...prev,
+        facilityName: resolved.facilityName,
+        facilityCreated: resolved.facilityCreated,
+      }));
+
+      if (resolved.facilityId) {
+        setFacilities((prev) => {
+          if (prev.some((item) => String(item.id) === String(resolved.facilityId))) {
+            return prev;
+          }
+          return [
+            {
+              id: Number(resolved.facilityId),
+              facility: resolved.facilityName,
+            },
+            ...prev,
+          ];
+        });
+      }
+
+      return resolved;
+    } finally {
+      setResolvingFacility(false);
+    }
+  };
+
+  const handleFacilityInput = (facilityName) => {
+    setExtractionMeta((prev) => ({
+      ...prev,
+      facilityName: "",
+      facilityCreated: false,
+    }));
+    setFacilityProfileIncomplete(false);
+    setFacilityCreated(false);
+    setFormData((prev) => ({
+      ...prev,
+      facility: "",
+      facilityName,
+    }));
+  };
+
+  const handleFacilitySelect = (facility) => {
+    setFormData((prev) => ({
+      ...prev,
+      facility: String(facility.id),
+      facilityName: facility.facility || facility.facilityName || "",
+    }));
+    setFacilityProfileIncomplete(Boolean(facility.isProfileIncomplete));
+    setFacilityCreated(Boolean(facility.isAutoCreated));
+    setExtractionMeta((prev) => ({
+      ...prev,
+      facilityName: facility.facility || facility.facilityName || "",
+      facilityCreated: Boolean(facility.isAutoCreated),
+    }));
+  };
+
+  const handleFacilityBlur = () => {
+    setFormData((prev) => {
+      syncFacilityFromForm(prev);
+      return prev;
+    });
+  };
 
   const hasSubpoena = Boolean(
     formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath
@@ -656,7 +829,7 @@ function NewOrderPageContent() {
     }));
 
     if (name === "facility") {
-      setExtractionMeta((prev) => ({ ...prev, facilityName: "" }));
+      setExtractionMeta((prev) => ({ ...prev, facilityName: "", facilityCreated: false }));
     }
   };
 
@@ -736,11 +909,7 @@ function NewOrderPageContent() {
           file
         );
 
-        setFormData((prev) => ({
-          ...prev,
-          ...formUpdates,
-        }));
-        setExtractionMeta(meta);
+        await applyExtractFormUpdates(formUpdates, meta, file);
         setExpandedPanels((prev) => ({
           ...prev,
           subpoena: true,
@@ -760,23 +929,43 @@ function NewOrderPageContent() {
     setSubmitAttempted(true);
     setSaveError("");
 
-    if (Object.keys(errors).length > 0) {
+    const resolvedFacility = await syncFacilityFromForm(formData);
+
+    if (resolvedFacility?.facilityProfileIncomplete) {
+      setSaveError(
+        "Complete the facility profile before saving this order."
+      );
+      return;
+    }
+
+    const syncedFormData = {
+      ...formData,
+      facility: resolvedFacility?.facilityId || formData.facility,
+      facilityName: resolvedFacility?.facilityName || formData.facilityName,
+    };
+
+    const currentErrors = {
+      ...validateNewOrderForm(syncedFormData, fileErrors),
+      ...validateOrderPaymentAmounts(syncedFormData, syncedFormData.invoiceFees),
+    };
+
+    if (Object.keys(currentErrors).length > 0) {
       setSaveError("Please fix the highlighted fields before saving.");
       return;
     }
 
     setSaving(true);
 
-    const activeOrderId = orderId || String(formData.id || "");
+    const activeOrderId = orderId || String(syncedFormData.id || "");
 
     try {
       if (isEditMode || activeOrderId) {
-        await updateOrder(activeOrderId, formData);
+        await updateOrder(activeOrderId, syncedFormData);
         router.push("/orders");
         return;
       }
 
-      const order = await createOrder(formData);
+      const order = await createOrder(syncedFormData);
       if (order?.id) {
         router.push("/orders");
         return;
@@ -894,10 +1083,15 @@ function NewOrderPageContent() {
               getError={getError}
               onFileChange={handleFileChange}
               submitAttempted={submitAttempted}
-              facilityOptions={facilityOptions}
               extractingSubpoena={extractingSubpoena}
               extractError={extractError}
               extractionMeta={extractionMeta}
+              facilityProfileIncomplete={facilityProfileIncomplete}
+              facilityCreated={facilityCreated}
+              resolvingFacility={resolvingFacility}
+              onFacilityInput={handleFacilityInput}
+              onFacilitySelect={handleFacilitySelect}
+              onFacilityBlur={handleFacilityBlur}
             />
           </CollapsibleOrderPanel>
 
@@ -914,7 +1108,12 @@ function NewOrderPageContent() {
               onBlur={handleBlur}
               getError={getError}
               onSave={handleSaveOrder}
-              disableSave={hasImmediateRequiredErrors || saving}
+              disableSave={
+                hasImmediateRequiredErrors ||
+                saving ||
+                facilityProfileIncomplete ||
+                resolvingFacility
+              }
               saveLabel={
                 saving
                   ? "Saving..."
@@ -960,16 +1159,29 @@ function OrderDetailsForm({
   getError,
   onFileChange,
   submitAttempted,
-  facilityOptions = [],
   extractingSubpoena = false,
   extractError = "",
   extractionMeta = {},
+  facilityProfileIncomplete = false,
+  facilityCreated = false,
+  resolvingFacility = false,
+  onFacilityInput,
+  onFacilitySelect,
+  onFacilityBlur,
 }) {
   const hasRequiredErrors =
     getError("facility") ||
     getError("type") ||
     getError("firstName") ||
     getError("lastName");
+
+  const facilityHint =
+    extractionMeta.facilityName &&
+    formData.facility &&
+    !facilityProfileIncomplete &&
+    !facilityCreated
+      ? `Matched from subpoena: ${extractionMeta.facilityName}`
+      : "";
 
   return (
     <div className="space-y-5">
@@ -979,20 +1191,26 @@ function OrderDetailsForm({
       </div>
 
       <div className="space-y-4">
-        <NewOrderField
+        <FacilitySearchField
           label="Facility"
-          name="facility"
-          value={formData.facility}
-          onChange={onChange}
-          onBlur={onBlur}
+          value={formData.facilityName || ""}
+          facilityId={formData.facility || ""}
+          onInputChange={onFacilityInput}
+          onSelect={onFacilitySelect}
+          onBlur={onFacilityBlur}
+          facilityProfileIncomplete={facilityProfileIncomplete}
+          facilityCreated={facilityCreated}
+          hint={facilityHint}
           required
-          error={getError("facility")}
-          options={facilityOptions}
+          error={
+            getError("facility") ||
+            (facilityProfileIncomplete
+              ? "Complete the facility profile to continue"
+              : "")
+          }
         />
-        {extractionMeta.facilityName && formData.facility && (
-          <p className="-mt-2 text-[10px] font-medium text-[#059669]">
-            Matched from subpoena: {extractionMeta.facilityName}
-          </p>
+        {resolvingFacility && (
+          <p className="-mt-2 text-[10px] text-[#64748B]">Resolving facility...</p>
         )}
 
         <RecordTypeMultiSelect

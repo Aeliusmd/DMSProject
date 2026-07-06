@@ -7,6 +7,30 @@ export async function getFacilities() {
   return data?.data?.facilities || [];
 }
 
+export async function searchFacilities(query) {
+  const params = new URLSearchParams();
+  params.set("q", query);
+
+  const data = await request(`/facilities/search?${params.toString()}`, {
+    auth: true,
+  });
+
+  return data?.data?.facilities || [];
+}
+
+export async function resolveFacility(payload = {}) {
+  const data = await request("/facilities/resolve", {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return {
+    facility: data?.data?.facility || null,
+    created: Boolean(data?.data?.created),
+  };
+}
+
 export async function getFacility(id) {
   const data = await request(`/facilities/${id}`, { auth: true });
   return data?.data?.facility || null;

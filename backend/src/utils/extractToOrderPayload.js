@@ -176,8 +176,6 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
   const facilityMatch = findFacilityMatch(hints.customer, facilities);
   if (facilityMatch) {
     payload.facility = String(facilityMatch.id);
-  } else if (facilities[0]?.id) {
-    payload.facility = String(facilities[0].id);
   }
 
   if (hints.providerId) {
