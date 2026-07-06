@@ -724,6 +724,7 @@ function mapXrayDetail(row, orderPayments = []) {
       prepayment: xrayPaidEarlier.toFixed(2),
       checkNumber: "",
       description: "",
+      recipientEmail: "",
     };
   }
 
@@ -739,6 +740,7 @@ function mapXrayDetail(row, orderPayments = []) {
     prepayment: xrayPaidEarlier.toFixed(2),
     checkNumber: row.check_number || "",
     description: row.description || "",
+    recipientEmail: trimOrNull(row.recipient_emails) || "",
   };
 }
 
@@ -1662,6 +1664,10 @@ async function createOrUpdateXrayInvoice(body, userId) {
     await connection.beginTransaction();
 
     const xrayFee = viewsAmount;
+    const recipientEmails = await resolveInvoiceRecipientFromOrder(
+      order,
+      connection
+    );
 
     await InvoiceXray.upsert(connection, orderId, {
       xrayInvoiceDate,
@@ -1671,6 +1677,7 @@ async function createOrUpdateXrayInvoice(body, userId) {
       payment: xrayFee,
       checkNumber,
       description,
+      recipientEmails,
     });
 
     await connection.execute(

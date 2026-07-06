@@ -279,12 +279,12 @@ class InvoiceXray {
       `INSERT INTO invoice_xray_details (
          order_id, xray_invoice_date, exam_date,
          view_count, per_view_amount, payment,
-         check_number, description,
+         check_number, description, recipient_emails,
          created_at, updated_at
        ) VALUES (
          :orderId, :xrayInvoiceDate, :examDate,
          :viewCount, :perViewAmount, :payment,
-         :checkNumber, :description,
+         :checkNumber, :description, :recipientEmails,
          NOW(), NOW()
        )
        ON DUPLICATE KEY UPDATE
@@ -295,6 +295,7 @@ class InvoiceXray {
          payment = VALUES(payment),
          check_number = VALUES(check_number),
          description = VALUES(description),
+         recipient_emails = VALUES(recipient_emails),
          updated_at = NOW()`,
       {
         orderId,
@@ -305,6 +306,7 @@ class InvoiceXray {
         payment: data.payment,
         checkNumber: data.checkNumber,
         description: data.description,
+        recipientEmails: data.recipientEmails ?? null,
       }
     );
   }

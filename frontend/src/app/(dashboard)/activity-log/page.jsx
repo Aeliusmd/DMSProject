@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
+import EmployeeMilestoneModal from "@/components/employees/EmployeeMilestoneModal";
 import PaginationBar, {
   DEFAULT_PAGE_SIZE,
   paginateItems,
 } from "@/components/ui/PaginationBar";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getStoredUser } from "@/lib/auth/authStorage";
-import { usesOwnActivityLogsOnly } from "@/lib/auth/roles";
+import { usesOwnActivityLogsOnly, isEmployee } from "@/lib/auth/roles";
 import {
   getActivityLogs,
   getMyActivityLogs,
@@ -46,6 +47,8 @@ export default function ActivityLogPage() {
     toDate: "",
   });
   const [performerSearch, setPerformerSearch] = useState("");
+  const [milestoneOpen, setMilestoneOpen] = useState(false);
+  const showMyMilestone = isEmployee(user);
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -163,13 +166,25 @@ export default function ActivityLogPage() {
             </p>
           </div>
 
-          <Link
-            href="/orders"
-            className="inline-flex h-[34px] w-fit items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
-          >
-            <ArrowLeftIcon />
-            Return to Orders
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            {showMyMilestone ? (
+              <button
+                type="button"
+                onClick={() => setMilestoneOpen(true)}
+                className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-4 text-[12px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
+              >
+                View My Milestone
+              </button>
+            ) : null}
+
+            <Link
+              href="/orders"
+              className="inline-flex h-[34px] w-fit items-center justify-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
+            >
+              <ArrowLeftIcon />
+              Return to Orders
+            </Link>
+          </div>
         </div>
 
         <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[430px_minmax(220px,280px)_auto_1fr]">
@@ -253,6 +268,12 @@ export default function ActivityLogPage() {
           />
         </div>
       </div>
+
+      <EmployeeMilestoneModal
+        isOpen={milestoneOpen}
+        useSelfStats
+        onClose={() => setMilestoneOpen(false)}
+      />
     </DashboardShell>
   );
 }

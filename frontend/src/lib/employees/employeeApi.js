@@ -55,3 +55,31 @@ export async function deleteEmployee(id) {
     auth: true,
   });
 }
+
+function buildMilestoneQuery(filters = {}) {
+  const params = new URLSearchParams();
+
+  if (filters.from) params.set("from", filters.from);
+  if (filters.to) params.set("to", filters.to);
+
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function getMyMilestoneStats(filters = {}) {
+  const data = await request(
+    `/employees/me/milestone-stats${buildMilestoneQuery(filters)}`,
+    { auth: true }
+  );
+
+  return data?.data?.stats || null;
+}
+
+export async function getEmployeeMilestoneStats(employeeId, filters = {}) {
+  const data = await request(
+    `/employees/${employeeId}/milestone-stats${buildMilestoneQuery(filters)}`,
+    { auth: true }
+  );
+
+  return data?.data?.stats || null;
+}

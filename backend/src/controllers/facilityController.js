@@ -70,6 +70,16 @@ exports.getAll = asyncHandler(async (_req, res) => {
   return ApiResponse.success(res, { facilities });
 });
 
+exports.search = asyncHandler(async (req, res) => {
+  const facilities = await facilityService.searchFacilities(req.query.q);
+  return ApiResponse.success(res, { facilities });
+});
+
+exports.resolve = asyncHandler(async (req, res) => {
+  const { facility, created } = await facilityService.resolveFacilityByName(req.body);
+  return ApiResponse.success(res, { facility, created });
+});
+
 exports.getById = asyncHandler(async (req, res) => {
   const facility = await facilityService.getFacilityById(req.params.id);
   return ApiResponse.success(res, { facility });

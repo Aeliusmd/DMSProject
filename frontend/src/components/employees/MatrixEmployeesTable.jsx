@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import SuspendEmployeeModal from "@/components/employees/SuspendEmployeeModal";
+import EmployeeMilestoneModal from "@/components/employees/EmployeeMilestoneModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import { getEmployeeActivityLogs } from "@/lib/activityLog/activityLogApi";
 
@@ -39,6 +40,7 @@ export default function MatrixEmployeesTable({
   });
 
   const [selectedLogEmployee, setSelectedLogEmployee] = useState(null);
+  const [milestoneEmployee, setMilestoneEmployee] = useState(null);
   const [activityLogs, setActivityLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState("");
@@ -242,12 +244,8 @@ export default function MatrixEmployeesTable({
                 <th className="w-[150px] px-5 py-3">Role</th>
                 <th className="w-[170px] px-5 py-3">Last Login</th>
                 <th className="w-[130px] px-5 py-3 text-center">Status</th>
-                {!readOnly && (
-                  <>
-                    <th className="w-[140px] px-5 py-3 text-center">Action</th>
-                    <th className="w-[110px] px-5 py-3 text-center">Delete</th>
-                  </>
-                )}
+                <th className="w-[150px] px-5 py-3 text-center">Actions</th>
+                <th className="w-[150px] px-5 py-3 text-center" aria-label="Milestone" />
               </tr>
             </thead>
 
@@ -317,72 +315,81 @@ export default function MatrixEmployeesTable({
                     </div>
                   </td>
 
-                  {!readOnly && (
-                    <>
-                      <td className="px-5 py-4 text-center">
-                        {employee.terminated || employee.suspended ? (
-                          <button
-                            type="button"
-                            onClick={() => handleActivateEmployee(employee)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#86EFAC] bg-[#ECFDF5] px-3 text-[11px] font-semibold text-[#059669] hover:bg-[#DCFCE7]"
-                          >
-                            <ActivateIcon />
-                            Activate User
-                          </button>
-                        ) : isAdminRole(employee.role) ? (
-                          <span className="text-[11px] text-[#94A3B8]">—</span>
-                        ) : (
-                          <div className="flex flex-col items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openTerminateModal(employee)}
-                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
-                              style={{
-                                border: "1px solid #FCD34D",
-                                backgroundColor: "#FFFBEB",
-                                color: "#B45309",
-                              }}
-                            >
-                              <SmallCircleIcon />
-                              Terminate
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => openSuspendModal(employee)}
-                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
-                              style={{
-                                border: "1px solid #FCD34D",
-                                backgroundColor: "#FFFBEB",
-                                color: "#B45309",
-                              }}
-                            >
-                              <SmallCircleIcon />
-                              Suspend
-                            </button>
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="px-5 py-4 text-center">
+                  <td className="px-5 py-4 text-center">
+                    {!readOnly ? (
+                      employee.terminated || employee.suspended ? (
                         <button
                           type="button"
-                          onClick={() => openDeleteModal(employee)}
-                          className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                          onClick={() => handleActivateEmployee(employee)}
+                          className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#86EFAC] bg-[#ECFDF5] px-3 text-[11px] font-semibold text-[#059669] hover:bg-[#DCFCE7]"
                         >
-                          <TrashIcon />
-                          Delete
+                          <ActivateIcon />
+                          Activate User
                         </button>
-                      </td>
-                    </>
-                  )}
+                      ) : isAdminRole(employee.role) ? (
+                        <span className="text-[11px] text-[#94A3B8]">—</span>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openSuspendModal(employee)}
+                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                            style={{
+                              border: "1px solid #FCD34D",
+                              backgroundColor: "#FFFBEB",
+                              color: "#B45309",
+                            }}
+                          >
+                            <SmallCircleIcon />
+                            Suspend
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openTerminateModal(employee)}
+                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                            style={{
+                              border: "1px solid #FCD34D",
+                              backgroundColor: "#FFFBEB",
+                              color: "#B45309",
+                            }}
+                          >
+                            <SmallCircleIcon />
+                            Terminate
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openDeleteModal(employee)}
+                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                          >
+                            <TrashIcon />
+                            Delete
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <span className="text-[11px] text-[#94A3B8]">—</span>
+                    )}
+                  </td>
+
+                  <td className="px-5 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setMilestoneEmployee(employee)}
+                      className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
+                    >
+                      <MilestoneIcon />
+                      View Milestone
+                    </button>
+                  </td>
                 </tr>
               ))}
 
               {tableEmployees.length === 0 && (
                 <tr>
                   <td
-                    colSpan={readOnly ? 7 : 9}
+                    colSpan={9}
                     className="px-5 py-12 text-center text-[13px] text-[#94A3B8]"
                   >
                     No employees found.
@@ -435,7 +442,26 @@ export default function MatrixEmployeesTable({
         error={logsError}
         onClose={() => setSelectedLogEmployee(null)}
       />
+      <EmployeeMilestoneModal
+        isOpen={Boolean(milestoneEmployee)}
+        employee={milestoneEmployee}
+        onClose={() => setMilestoneEmployee(null)}
+      />
     </>
+  );
+}
+
+function MilestoneIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 19V5M4 19h16M8 15l3-4 3 2 4-6"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

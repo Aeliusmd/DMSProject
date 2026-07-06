@@ -3,6 +3,9 @@ const crypto = require("crypto");
 const ApiError = require("../utils/ApiError");
 const { slugify } = require("../utils/slugify");
 const {
+  normalizeFacilityName,
+} = require("../utils/facilityNameUtils");
+const {
   validateFacilityPayload,
   validateDoctorsPayload,
 } = require("../lib/facilityValidation");
@@ -46,12 +49,70 @@ function mapDoctorRow(row) {
   };
 }
 
+const PLACEHOLDER_FACILITY_EMAIL_SUFFIX = "@facility.pending";
+
+function isPlaceholderFacilityEmail(email) {
+  return String(email || "")
+    .trim()
+    .toLowerCase()
+    .endsWith(PLACEHOLDER_FACILITY_EMAIL_SUFFIX);
+}
+
+function sanitizeFacilityEmail(email) {
+  if (isPlaceholderFacilityEmail(email)) return "";
+  return `${email || ""}`.trim();
+}
+
+function resolveFacilityEmailForStorage(data = {}) {
+  if (data.isAutoCreated) {
+    return "";
+  }
+
+  if (data.email === "") {
+    return "";
+  }
+
+  const trimmed = data.email?.trim() || null;
+  if (!trimmed) {
+    return null;
+  }
+
+  if (isPlaceholderFacilityEmail(trimmed)) {
+    return "";
+  }
+
+  return trimmed;
+}
+
+function isFacilityProfileIncomplete(row = {}) {
+  if (!row) return false;
+  if (Number(row.is_auto_created)) return true;
+  if (isPlaceholderFacilityEmail(row.email)) return true;
+  return false;
+}
+
+function mapFacilityRow(row) {
+  return {
+    id: row.id,
+    facility: row.facility_name,
+    facilityName: row.facility_name,
+    city: row.city || "",
+    zip: row.zip_code || "",
+    state: row.state || "",
+    email: sanitizeFacilityEmail(row.email),
+    isAutoCreated: Boolean(Number(row.is_auto_created)),
+    isProfileIncomplete: isFacilityProfileIncomplete(row),
+  };
+}
+
 function mapFacilityListRow(row) {
   return {
     id: row.id,
     facility: row.facility_name,
     city: row.city || "",
     zip: row.zip_code || "",
+    isAutoCreated: Boolean(Number(row.is_auto_created)),
+    isProfileIncomplete: isFacilityProfileIncomplete(row),
   };
 }
 
@@ -69,17 +130,128 @@ function mapFacilityDetail(row, managers = [], doctors = []) {
     state: row.state || "",
     phone: row.phone || "",
     fax: row.fax || "",
-    email: row.email || "",
+    email: sanitizeFacilityEmail(row.email),
     ipAddresses: row.ip_addresses || "",
+    isAutoCreated: Boolean(Number(row.is_auto_created)),
+    isProfileIncomplete: isFacilityProfileIncomplete(row),
     officeManagers: managers.map(mapManagerRow),
     doctors: doctors.map(mapDoctorRow),
   };
 }
 
+async function acquireFacilityCreateLock(connection, facilityName) {
+  if (!connection) return null;
+
+  const lockKey = `facility-create:${normalizeFacilityName(facilityName)}`.slice(
+    0,
+    64
+  );
+
+  const [rows] = await connection.execute(
+    `SELECT GET_LOCK(:lockKey, 10) AS acquired`,
+    { lockKey }
+  );
+
+  if (!Number(rows[0]?.acquired)) {
+    throw new ApiError(409, "Facility lookup is busy, please retry");
+  }
+
+  return lockKey;
+}
+
+async function releaseFacilityCreateLock(connection, lockKey) {
+  if (!connection || !lockKey) return;
+
+  await connection.execute(`SELECT RELEASE_LOCK(:lockKey)`, { lockKey });
+}
+
+async function findOrCreateFacility(data, connection = null) {
+  const facilityName = `${data.facilityName || ""}`.trim();
+
+  if (!facilityName) {
+    throw new ApiError(400, "Facility name is required");
+  }
+
+  const lockKey = await acquireFacilityCreateLock(connection, facilityName);
+
+  try {
+    const existing = await Facility.findBestMatch(
+      {
+        facilityName,
+        address: data.address || "",
+        city: data.city || "",
+        state: data.state || "",
+        zipCode: data.zipCode || data.zip || "",
+      },
+      connection
+    );
+
+    if (existing) {
+      return { facility: mapFacilityRow(existing), created: false };
+    }
+
+    const userName = await generateUniqueFacilityUserName(facilityName);
+    const passwordHash = await generateInternalPasswordHash();
+    const facilityPayload = buildFacilityDbPayload(
+      {
+        facilityName,
+        email: "",
+        address: data.address || "",
+        city: data.city || "",
+        state: data.state || "",
+        zipCode: data.zipCode || data.zip || "",
+        isAutoCreated: true,
+      },
+      { userName, passwordHash }
+    );
+
+    const db = connection || getPool();
+    const facilityId = await Facility.create(db, facilityPayload);
+    const created = await Facility.findById(facilityId, connection);
+
+    return { facility: mapFacilityRow(created), created: true };
+  } finally {
+    await releaseFacilityCreateLock(connection, lockKey);
+  }
+}
+
+async function resolveFacilityFromHints(hints = {}, connection = null) {
+  const facilityName = `${hints.customer || hints.facilityName || ""}`.trim();
+
+  if (!facilityName) {
+    return { facility: null, created: false };
+  }
+
+  const { facility, created } = await findOrCreateFacility(
+    {
+      facilityName,
+      address: hints.facilityAddress || hints.address || "",
+      city: hints.facilityCity || hints.city || "",
+      state: hints.facilityState || hints.state || "",
+      zipCode: hints.facilityZip || hints.zip || "",
+    },
+    connection
+  );
+
+  return { facility, created };
+}
+
+async function searchFacilities(query) {
+  const rows = await Facility.search(query);
+  return rows.map(mapFacilityRow);
+}
+
+async function resolveFacilityByName(data = {}) {
+  const { facility, created } = await findOrCreateFacility(data);
+  return { facility, created };
+}
+
 function buildFacilityDbPayload(data, credentials = null) {
+  const facilityName = data.facilityName?.trim();
   const payload = {
-    facilityName: data.facilityName?.trim(),
-    slug: slugify(data.facilityName),
+    facilityName,
+    nameNormalized: normalizeFacilityName(facilityName),
+    slug: slugify(facilityName),
     contactFirstName: data.firstName?.trim() || null,
     contactMiddleName: data.middleName?.trim() || null,
     contactLastName: data.lastName?.trim() || null,
@@ -89,8 +261,10 @@ function buildFacilityDbPayload(data, credentials = null) {
     state: data.state?.trim() || null,
     phone: data.phone?.trim() || null,
     fax: data.fax?.trim() || null,
-    email: data.email?.trim() || null,
+    email: resolveFacilityEmailForStorage(data),
     ipAddresses: data.ipAddresses?.trim() || null,
+    isAutoCreated:
+      data.isAutoCreated !== undefined ? (data.isAutoCreated ? 1 : 0) : 0,
   };
 
   if (credentials?.userName) {
@@ -237,6 +411,16 @@ async function updateFacility(id, data, actorId) {
   }
 
   const facilityPayload = buildFacilityDbPayload(data);
+
+  if (
+    Number(facility.is_auto_created) &&
+    `${facilityPayload.email || ""}`.trim() &&
+    !isPlaceholderFacilityEmail(facilityPayload.email)
+  ) {
+    facilityPayload.isAutoCreated = 0;
+  } else {
+    facilityPayload.isAutoCreated = Number(facility.is_auto_created) || 0;
+  }
 
   await Facility.update(id, facilityPayload);
 
@@ -432,4 +616,10 @@ module.exports = {
   deactivateDoctor,
   reactivateDoctor,
   setDefaultDoctor,
+  searchFacilities,
+  resolveFacilityByName,
+  findOrCreateFacility,
+  resolveFacilityFromHints,
+  isFacilityProfileIncomplete,
+  isPlaceholderFacilityEmail,
 };

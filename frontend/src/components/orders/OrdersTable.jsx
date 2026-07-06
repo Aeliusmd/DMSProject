@@ -248,6 +248,25 @@ function isInactiveOrderStatus(status) {
   return status === "Cancelled" || status === "Deleted";
 }
 
+function isDeletedOrderStatus(status) {
+  return status === "Deleted";
+}
+
+function isCancelledOrderStatus(status) {
+  return status === "Cancelled";
+}
+
+function getOrderRowClassName(orderStatus) {
+  const base =
+    "border-b border-[#F1F5F9] text-[11px] text-[#334155] last:border-b-0";
+
+  if (isCancelledOrderStatus(orderStatus)) {
+    return `${base} bg-[#FEE2E2] hover:bg-[#FECDD3]`;
+  }
+
+  return `${base} hover:bg-[#F8FBFC]`;
+}
+
 function formatShortDate(dateValue) {
   if (!dateValue) return "";
 
@@ -1112,7 +1131,7 @@ export default function OrdersTable({
                 currentOrders.map((order) => (
                   <tr
                     key={order.dbId}
-                    className="border-b border-[#F1F5F9] text-[11px] text-[#334155] last:border-b-0 hover:bg-[#F8FBFC]"
+                    className={getOrderRowClassName(order.orderStatus)}
                   >
                     <td className="px-4 py-5 align-top">
                       <div className="inline-flex items-start gap-1">
@@ -1228,14 +1247,8 @@ export default function OrdersTable({
                         ) : null}
                       </div>
 
-                      {isInactiveOrderStatus(order.orderStatus) ? (
+                      {isDeletedOrderStatus(order.orderStatus) ? (
                         <div className="space-y-2">
-                          {order.orderStatus === "Cancelled" && order.cancelReason ? (
-                            <p className="max-w-[140px] text-[10px] leading-snug text-[#64748B]">
-                              Reason: {order.cancelReason}
-                            </p>
-                          ) : null}
-
                           {order.statusBeforeInactive ? (
                             <p className="text-[10px] text-[#94A3B8]">
                               Previous: {order.statusBeforeInactive}
@@ -1243,39 +1256,46 @@ export default function OrdersTable({
                           ) : null}
                         </div>
                       ) : (
-                      <div className="space-y-1">
-                        {order.status.map((stage) => (
-                          <WorkflowStageItem
-                            key={stage.key || stage.label}
-                            stage={stage}
-                            href={getWorkflowStageHref(stage, order)}
-                            onResend={
-                              stage.showResend
-                                ? () =>
-                                    handleResendInvoice(order, stage.invoiceId)
-                                : undefined
-                            }
-                            onPreviewRecords={
-                              stage.showPreviewRecords
-                                ? () => setSelectedMedicalRecordsOrder(order)
-                                : undefined
-                            }
-                            onRemoveRecords={
-                              stage.showRemoveRecords
-                                ? () => openRemoveRecordsModal(order)
-                                : undefined
-                            }
-                            removingRecords={
-                              actionLoading &&
-                              removeRecordsModal.order?.dbId === order.dbId
-                            }
-                            resending={
-                              emailingOrderId === order.dbId ||
-                              sendingInvoiceOrderId === order.dbId
-                            }
-                          />
-                        ))}
-                      </div>
+                        <div className="space-y-1">
+                          {order.status.map((stage) => (
+                            <WorkflowStageItem
+                              key={stage.key || stage.label}
+                              stage={stage}
+                              href={getWorkflowStageHref(stage, order)}
+                              onResend={
+                                stage.showResend
+                                  ? () =>
+                                      handleResendInvoice(order, stage.invoiceId)
+                                  : undefined
+                              }
+                              onPreviewRecords={
+                                stage.showPreviewRecords
+                                  ? () => setSelectedMedicalRecordsOrder(order)
+                                  : undefined
+                              }
+                              onRemoveRecords={
+                                stage.showRemoveRecords
+                                  ? () => openRemoveRecordsModal(order)
+                                  : undefined
+                              }
+                              removingRecords={
+                                actionLoading &&
+                                removeRecordsModal.order?.dbId === order.dbId
+                              }
+                              resending={
+                                emailingOrderId === order.dbId ||
+                                sendingInvoiceOrderId === order.dbId
+                              }
+                            />
+                          ))}
+
+                          {isCancelledOrderStatus(order.orderStatus) &&
+                          order.cancelReason ? (
+                            <p className="max-w-[140px] pt-1 text-[10px] leading-snug text-[#991B1B]">
+                              Reason: {order.cancelReason}
+                            </p>
+                          ) : null}
+                        </div>
                       )}
 
                       {(order.orderStatus === "Ready to Pickup" ||

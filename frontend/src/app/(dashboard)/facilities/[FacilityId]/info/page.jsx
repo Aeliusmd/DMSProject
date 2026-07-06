@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
@@ -39,6 +39,8 @@ const createEmptyDoctorInput = (id) => ({
 export default function FacilityDetailsPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnToOrderPath = getSafeOrderReturnPath(searchParams.get("returnTo"));
 
   const facilityId = String(
     params?.facilityId || params?.FacilityId || params?.id || ""
@@ -82,6 +84,7 @@ export default function FacilityDetailsPage() {
   const [savedSnapshot, setSavedSnapshot] = useState(null);
 
   const [saveConfirmModal, setSaveConfirmModal] = useState({ open: false });
+  const [returnToOrderModal, setReturnToOrderModal] = useState({ open: false });
 
   const [removeManagerModal, setRemoveManagerModal] = useState({
     open: false,
@@ -467,8 +470,16 @@ export default function FacilityDetailsPage() {
     setSubmitError("");
 
     try {
-      await persistFacilityUpdate(formData);
-      router.push("/facilities");
+      const updated = await persistFacilityUpdate(formData);
+
+      if (returnToOrderPath && !updated.isProfileIncomplete) {
+        setReturnToOrderModal({ open: true });
+        return;
+      }
+
+      if (!returnToOrderPath) {
+        router.push("/facilities");
+      }
     } catch (err) {
       if (err instanceof ApiRequestError && err.errors) {
         setErrors(mapApiErrors(err.errors));
@@ -948,6 +959,21 @@ export default function FacilityDetailsPage() {
         cancelLabel="No"
         onCancel={closeSaveConfirmModal}
         onConfirm={confirmSaveFacility}
+      />
+
+      <ConfirmModal
+        open={returnToOrderModal.open}
+        title="Return to order?"
+        message="Facility details were saved. Do you want to go back to the order you were working on?"
+        variant="warning"
+        confirmLabel="Yes, go to order"
+        cancelLabel="Stay on facility"
+        onCancel={() => setReturnToOrderModal({ open: false })}
+        onConfirm={() => {
+          setReturnToOrderModal({ open: false });
+          const separator = returnToOrderPath.includes("?") ? "&" : "?";
+          router.push(`${returnToOrderPath}${separator}facilityRefresh=1`);
+        }}
       />
 
       <ConfirmModal
@@ -1780,6 +1806,12 @@ function isValidEmail(email) {
 
 function getDigits(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function getSafeOrderReturnPath(value) {
+  const path = `${value || ""}`.trim();
+  if (!path.startsWith("/orders/new")) return "";
+  return path;
 }
 
 function formatPhone(value) {

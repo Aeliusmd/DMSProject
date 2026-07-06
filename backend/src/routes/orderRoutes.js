@@ -45,6 +45,7 @@ router.delete("/:id/medical-records", orderController.removeMedicalRecords);
 router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);
+router.patch("/:id/facility", orderController.updateFacility);
 router.delete("/:id", orderController.remove);
 router.post("/:id/cancel", orderController.cancel);
 router.post("/:id/restore", orderController.restore);

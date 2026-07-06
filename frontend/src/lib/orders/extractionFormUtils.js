@@ -378,6 +378,9 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   if (facilityMatch) {
     updates.facility = String(facilityMatch.id);
     meta.facilityName = getFacilityLabel(facilityMatch);
+  } else if (hints.customer) {
+    updates.facilityName = hints.customer;
+    meta.pendingFacilityName = hints.customer;
   }
 
   const providerName = hints.companyName;

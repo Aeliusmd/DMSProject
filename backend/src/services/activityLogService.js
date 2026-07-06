@@ -1,6 +1,7 @@
 const Employee = require("../models/Employee");
 const Facility = require("../models/Facility");
 const ActivityLog = require("../models/ActivityLog");
+const milestoneRollupService = require("./milestoneRollupService");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
 
@@ -106,6 +107,8 @@ function formatActionLabel(action, context) {
           : "Note Added",
     update_note: "Order Note Callback",
     workflow_update: "Order Workflow Updated",
+    cancel: "Order Cancelled",
+    order_pickup: "Order Pickup Recorded",
     order_mail: "Records Ready Email Sent",
     copy_service_letter: "Copy Service Letter Sent",
     print_invoice: "Print Invoice",
@@ -305,7 +308,7 @@ async function recordActivity({
   const resolvedCompanyName = await resolveCompanyName({ companyName, facilityId });
   const resolvedDetails = appendTargetEmployee(details, targetEmployeeId);
 
-  return ActivityLog.create({
+  const logId = await ActivityLog.create({
     logDate,
     logTime,
     action: resolvedAction,
@@ -317,6 +320,16 @@ async function recordActivity({
     performerInitials: getInitials(resolvedName),
     details: resolvedDetails,
   });
+
+  await milestoneRollupService.recordFromActivityLogSafe({
+    employeeId: performedBy,
+    action: resolvedAction,
+    module: resolvedModule,
+    details: resolvedDetails,
+    eventDate: logDate,
+  });
+
+  return logId;
 }
 
 async function recordFromRequest(req, data) {

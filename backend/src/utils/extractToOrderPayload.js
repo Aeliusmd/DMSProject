@@ -1,5 +1,8 @@
 const { toInputDate } = require("./dateUtils");
 const {
+  findFacilityByNameMatch,
+} = require("./facilityNameUtils");
+const {
   mapSchemaToOrderHints,
   enrichOrderHintsFromRow,
   resolveExtractionSchema,
@@ -18,38 +21,6 @@ const RECORD_FLAG_MAP = {
   employment: "employmentRecords",
   xrays: "xrays",
 };
-
-function normalizeForMatch(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function getFacilityLabel(facility) {
-  return facility?.facility_name || facility?.facility || facility?.name || "";
-}
-
-function findFacilityMatch(name, facilityList = []) {
-  const normalized = normalizeForMatch(name);
-  if (!normalized || !facilityList.length) return null;
-
-  const exact = facilityList.find(
-    (facility) => normalizeForMatch(getFacilityLabel(facility)) === normalized
-  );
-  if (exact) return exact;
-
-  return (
-    facilityList.find((facility) => {
-      const facilityName = normalizeForMatch(getFacilityLabel(facility));
-      return (
-        facilityName &&
-        (normalized.includes(facilityName) || facilityName.includes(normalized))
-      );
-    }) || null
-  );
-}
 
 function splitApplicantName(name) {
   const parts = String(name || "")
@@ -173,11 +144,9 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
     Object.assign(payload, splitApplicantName(hints.applicantName));
   }
 
-  const facilityMatch = findFacilityMatch(hints.customer, facilities);
+  const facilityMatch = findFacilityByNameMatch(hints.customer, facilities);
   if (facilityMatch) {
     payload.facility = String(facilityMatch.id);
-  } else if (facilities[0]?.id) {
-    payload.facility = String(facilities[0].id);
   }
 
   if (hints.providerId) {
@@ -221,5 +190,5 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
 
 module.exports = {
   buildOrderPayloadFromExtractRow,
-  findFacilityMatch,
+  findFacilityMatch: findFacilityByNameMatch,
 };

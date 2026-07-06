@@ -13,6 +13,8 @@ router.use(authenticate);
 const employeeWriteGuard = denyRoles("Employee");
 
 router.get("/", facilityController.getAll);
+router.get("/search", facilityController.search);
+router.post("/resolve", facilityController.resolve);
 router.post("/", employeeWriteGuard, facilityController.create);
 
 router.get("/:id/documents", facilityDocumentController.listDocuments);

@@ -6,6 +6,8 @@
 -- orders table does NOT include: order_type, flag_*, medical_records_storage_path
 --
 -- For existing DB: use add_order_records_migration.sql instead.
+-- For employee milestone rollup on existing DB: add_employee_milestone_events.sql
+--   then: node backend/scripts/backfill-employee-milestone-events.js
 -- =============================================================================
 
 SET NAMES utf8mb4;
@@ -55,6 +57,7 @@ CREATE TABLE matrix_employees (
 CREATE TABLE facilities (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   facility_name   VARCHAR(200)    NOT NULL COMMENT 'Display name; same entity used for company-wise invoicing',
+  name_normalized VARCHAR(200)    NULL COMMENT 'Lowercase alphanumeric name key for deduplication',
   slug            VARCHAR(100)    NULL COMMENT 'URL/login slug e.g. smith, martinez',
   user_name       VARCHAR(100)    NOT NULL COMMENT 'Facility portal login',
   password_hash   VARCHAR(255)    NOT NULL,
@@ -70,11 +73,13 @@ CREATE TABLE facilities (
   email           VARCHAR(255)    NOT NULL,
   ip_addresses    TEXT            NULL COMMENT 'Newline-separated IP whitelist',
   is_active       TINYINT(1)      NOT NULL DEFAULT 1,
+  is_auto_created TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1 when created automatically from subpoena extraction or order form',
   created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_facilities_user_name (user_name),
   UNIQUE KEY uq_facilities_slug (slug),
+  KEY idx_facilities_name_normalized (name_normalized),
   KEY idx_facilities_city_state (city, state)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -619,6 +624,7 @@ CREATE TABLE invoice_xray_details (
   check_number        VARCHAR(50)     NULL,
   description         TEXT            NULL,
   sent_date           DATE            NULL,
+  recipient_emails    VARCHAR(500)    NULL,
   created_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at          DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -649,6 +655,7 @@ CREATE TABLE activity_logs (
   KEY idx_activity_logs_module (module),
   KEY idx_activity_logs_facility (facility_id),
   KEY idx_activity_logs_performed_by (performed_by),
+  KEY idx_activity_logs_milestone (performed_by, module, action, log_date),
   CONSTRAINT fk_activity_logs_facility
     FOREIGN KEY (facility_id) REFERENCES facilities (id)
     ON DELETE SET NULL ON UPDATE CASCADE,
@@ -737,6 +744,25 @@ CREATE TABLE user_activity_logs (
     FOREIGN KEY (actor_id) REFERENCES matrix_employees (id),
   CONSTRAINT fk_activity_target_employee
     FOREIGN KEY (target_employee_id) REFERENCES matrix_employees (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Employee order milestone rollup (View Milestone — fast reads on large activity_logs).
+-- Populated when order actions occur; backfill from logs for existing data.
+CREATE TABLE employee_order_milestone_events (
+  employee_id   BIGINT UNSIGNED NOT NULL,
+  order_id        BIGINT UNSIGNED NOT NULL,
+  metric_type     ENUM('created', 'updated', 'completed', 'cancelled', 'deleted') NOT NULL,
+  event_date      DATE            NOT NULL,
+  created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (employee_id, metric_type, order_id, event_date),
+  KEY idx_milestone_events_lookup (employee_id, metric_type, event_date),
+  KEY idx_milestone_events_order (order_id),
+  CONSTRAINT fk_milestone_events_employee
+    FOREIGN KEY (employee_id) REFERENCES matrix_employees (id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT fk_milestone_events_order
+    FOREIGN KEY (order_id) REFERENCES orders (id)
+    ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
