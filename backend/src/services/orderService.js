@@ -34,6 +34,7 @@ const {
   toInputDate,
   toSqlDateOnly,
   toShortDate,
+  toSlashDateLong,
   formatDobDisplay,
   extractYear,
   formatSsnLastFourDisplay,
@@ -815,14 +816,36 @@ function buildFacilityBlock(row) {
   };
 }
 
+function normalizeCaptionText(value) {
+  const text = trimOrNull(value);
+  if (!text) return "";
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
 function buildRecordsBlock(row, orderRecords = []) {
   const mappedRecords = mapOrderRecords(orderRecords);
   const primaryType = getPrimaryRecordType(orderRecords);
   const title = RECORD_TITLES[primaryType] || "Records";
 
+  const requestedTypes = [
+    ...new Map(
+      orderRecords.map((record) => [
+        record.record_type,
+        RECORD_TITLES[record.record_type] || record.record_type,
+      ])
+    ),
+  ].map(([type, label]) => ({ type, label }));
+
+  const caption = normalizeCaptionText(row.specific_record);
+  const dateRangeStart = toSlashDateLong(row.date_requested);
+  const dateRange = dateRangeStart ? `${dateRangeStart} - Present` : "";
+
   const lines = [];
-  if (row.specific_record) lines.push(row.specific_record);
-  if (row.specific_doctor) lines.push(row.specific_doctor);
 
   const uploadedRecords = mappedRecords.filter((record) => record.hasFile);
   const hasMedicalRecords = allOrderRecordsUploaded(orderRecords);
@@ -833,6 +856,10 @@ function buildRecordsBlock(row, orderRecords = []) {
   return {
     title,
     lines,
+    requestedTypes,
+    caption,
+    dateRange,
+    specificDoctor: row.specific_doctor || "",
     links: [],
     hasMedicalRecords,
     allRecordsUploaded: hasMedicalRecords,
@@ -864,7 +891,8 @@ function mapOrderListRow(
   invoiceRow = null,
   xrayRow = null,
   orderPayments = [],
-  orderRecords = []
+  orderRecords = [],
+  extras = {}
 ) {
   const orderYear = extractYear(row.subpoena_date) || extractYear(row.created_at) || "";
   const dob = formatDobDisplay(row.dob);
@@ -938,6 +966,8 @@ function mapOrderListRow(
     deliveryDate: toInputDate(row.delivery_date),
     pickupPersonName: row.pickup_person_name || "",
     cnrDateSent: toInputDate(row.cnr_date_sent),
+    recentNotes: extras.recentNotes || [],
+    hasActiveReminder: Boolean(extras.hasActiveReminder),
   };
 
   return appendOrderCompletenessFields(mapped, row, orderRecords);
@@ -1271,6 +1301,9 @@ async function getAllOrders(query = {}) {
   const xrayByOrderId = await invoiceService.getXrayDetailsByOrderIds(orderIds);
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const orderRecordRows = await OrderRecord.findByOrderIds(orderIds);
+  const recentNotesByOrderId = await Order.findRecentNotesByOrderIds(orderIds, 2);
+  const activeReminderByOrderId =
+    await Order.findActiveReminderFlagsByOrderIds(orderIds);
 
   const stagesByOrderId = stages.reduce((acc, stage) => {
     if (!acc[stage.order_id]) acc[stage.order_id] = [];
@@ -1300,7 +1333,11 @@ async function getAllOrders(query = {}) {
       invoiceRow,
       xrayRow,
       paymentsByOrderId[row.id] || [],
-      recordsByOrderId[row.id] || []
+      recordsByOrderId[row.id] || [],
+      {
+        recentNotes: (recentNotesByOrderId[row.id] || []).map(mapNote),
+        hasActiveReminder: Boolean(activeReminderByOrderId[row.id]),
+      }
     );
   });
 }
@@ -1434,8 +1471,20 @@ async function addOrderNote(orderId, data, actorId, file) {
     attachmentPath: toRelativeStoragePath(file),
   });
 
-  const notes = await Order.findNotesByOrderId(order.id, true);
+  const notes = await Order.findNotesByOrderId(order.id, false);
   return notes.map(mapNote);
+}
+
+function parseBooleanFlag(value) {
+  return value === true || value === "true" || value === "1" || value === 1;
+}
+
+function buildCallbackLine(date = new Date()) {
+  return `Calledback - ${date.toLocaleString("en-US")}`;
+}
+
+function hasCalledbackLine(text) {
+  return /\bCalledback\b/i.test(text) || /\bCallback\s*-/i.test(text);
 }
 
 async function updateOrderNote(orderId, noteId, data, actorId, file) {
@@ -1451,6 +1500,10 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
     throw new ApiError(404, "Note not found");
   }
 
+  if (Number(note.is_called)) {
+    throw new ApiError(400, "This note has been called back and cannot be edited");
+  }
+
   const employee = await Employee.findById(actorId);
   const isAdmin = String(employee?.role || "").toLowerCase() === "admin";
 
@@ -1458,10 +1511,18 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
     throw new ApiError(403, "You can only update your own notes");
   }
 
-  const noteText = trimOrNull(data.note);
+  const markCalled = parseBooleanFlag(data.markCalled);
+  let noteText = trimOrNull(data.note);
 
   if (!noteText) {
     throw new ApiError(400, "Note text is required");
+  }
+
+  if (markCalled) {
+    if (!hasCalledbackLine(noteText)) {
+      const callLine = buildCallbackLine();
+      noteText = noteText ? `${noteText}\n${callLine}` : callLine;
+    }
   }
 
   const authorName = await resolveAuthorName(actorId);
@@ -1477,24 +1538,26 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
       note: noteText,
       callbackDate: dateOrNull(data.callbackDate),
       attachmentPath,
-      isCalled: 1,
+      isCalled: markCalled ? 1 : Number(note.is_called) || 0,
     });
 
     const updatedNote = await Order.findNoteById(note.id, connection);
 
-    await Order.createActivityLog(
-      {
-        orderId: order.id,
-        activityDate: new Date(),
-        performedBy: actorId || null,
-        authorName,
-        callbackDate:
-          dateOrNull(data.callbackDate) || updatedNote?.callback_date || null,
-        note: noteText,
-        attachmentPath: updatedNote?.attachment_path || null,
-      },
-      connection
-    );
+    if (markCalled) {
+      await Order.createActivityLog(
+        {
+          orderId: order.id,
+          activityDate: new Date(),
+          performedBy: actorId || null,
+          authorName,
+          callbackDate:
+            dateOrNull(data.callbackDate) || updatedNote?.callback_date || null,
+          note: noteText,
+          attachmentPath: updatedNote?.attachment_path || null,
+        },
+        connection
+      );
+    }
 
     await connection.commit();
   } catch (error) {
@@ -1504,7 +1567,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
     connection.release();
   }
 
-  const notes = await Order.findNotesByOrderId(order.id, true);
+  const notes = await Order.findNotesByOrderId(order.id, false);
   const activityLogs = await Order.findActivityLogsByOrderId(order.id);
 
   return {

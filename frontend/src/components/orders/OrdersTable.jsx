@@ -12,7 +12,9 @@ import CnrNoteModal from "@/components/orders/CnrNoteModal";
 import CertificateOfRecordsModal from "@/components/orders/CertificateOfRecordsModal";
 import SendCopyLetterModal from "@/components/orders/SendCopyLetterModal";
 import OrderActivityLogModal from "@/components/orders/OrderActivityLogModal";
-import OrderNotesModal from "@/components/orders/OrderNotesModal";
+import OrderAddNoteModal from "@/components/orders/OrderAddNoteModal";
+import OrderNotesListModal from "@/components/orders/OrderNotesListModal";
+import OrderNotesColumn from "@/components/orders/OrderNotesColumn";
 import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
 import OrderPickupModal from "@/components/orders/OrderPickupModal";
 import OrderFaxModal from "@/components/orders/OrderFaxModal";
@@ -322,6 +324,8 @@ function toRenderOrder(order) {
       order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
     ),
     note: order.note,
+    recentNotes: order.recentNotes || [],
+    hasActiveReminder: Boolean(order.hasActiveReminder),
     subpoena: order.subpoena,
     hasSubpoenaFile: Boolean(order.hasSubpoenaFile),
     court: order.court || "",
@@ -391,7 +395,8 @@ export default function OrdersTable({
   const [selectedCertificationOrder, setSelectedCertificationOrder] = useState(null);
   const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
-  const [selectedNoteOrder, setSelectedNoteOrder] = useState(null);
+  const [selectedNoteListOrder, setSelectedNoteListOrder] = useState(null);
+  const [selectedAddNoteOrder, setSelectedAddNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
     useState(null);
   const [selectedPrintInvoiceOrder, setSelectedPrintInvoiceOrder] =
@@ -443,12 +448,13 @@ export default function OrdersTable({
     year: filters.year || "",
     period: filters.period || "",
     status: filters.status || "",
+    rushLevel: filters.rushLevel || "",
     search: filters.search || "",
     createdFrom: filters.createdFrom || "",
     createdTo: filters.createdTo || "",
   };
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
 
   if (filterKey !== prevFilterKey) {
@@ -854,6 +860,12 @@ export default function OrdersTable({
       );
     }
 
+    if (normalizedFilters.rushLevel) {
+      result = result.filter(
+        (order) => order.rushLabel === normalizedFilters.rushLevel
+      );
+    }
+
     if (createdSortDir === "asc" || createdSortDir === "desc") {
       const factor = createdSortDir === "asc" ? 1 : -1;
       result = [...result].sort((a, b) => {
@@ -866,7 +878,13 @@ export default function OrdersTable({
     }
 
     return result;
-  }, [orders, normalizedFilters.period, excludeCompleted, createdSortDir]);
+  }, [
+    orders,
+    normalizedFilters.period,
+    normalizedFilters.rushLevel,
+    excludeCompleted,
+    createdSortDir,
+  ]);
 
   const totalPages = Math.max(
     1,
@@ -988,25 +1006,49 @@ export default function OrdersTable({
             /* Percentage widths sum to 100% so the table always fits the
                window (no overflow / clipping) with table-layout: fixed. */
             .orders-table-fit th:nth-child(1),
-            .orders-table-fit td:nth-child(1) { width: 7% !important; }
+            .orders-table-fit td:nth-child(1) { width: 6% !important; }
             .orders-table-fit th:nth-child(2),
-            .orders-table-fit td:nth-child(2) { width: 11% !important; }
+            .orders-table-fit td:nth-child(2) { width: 8% !important; }
             .orders-table-fit th:nth-child(3),
             .orders-table-fit td:nth-child(3) { width: 10% !important; }
             .orders-table-fit th:nth-child(4),
-            .orders-table-fit td:nth-child(4) { width: 12% !important; }
+            .orders-table-fit td:nth-child(4) { width: 10% !important; }
             .orders-table-fit th:nth-child(5),
             .orders-table-fit td:nth-child(5) { width: 11% !important; }
             .orders-table-fit th:nth-child(6),
-            .orders-table-fit td:nth-child(6) { width: 11% !important; }
+            .orders-table-fit td:nth-child(6) { width: 10% !important; }
             .orders-table-fit th:nth-child(7),
-            .orders-table-fit td:nth-child(7) { width: 13% !important; }
+            .orders-table-fit td:nth-child(7) { width: 10% !important; }
             .orders-table-fit th:nth-child(8),
-            .orders-table-fit td:nth-child(8) { width: 8% !important; }
+            .orders-table-fit td:nth-child(8) { width: 11% !important; }
             .orders-table-fit th:nth-child(9),
-            .orders-table-fit td:nth-child(9) { width: 9% !important; }
+            .orders-table-fit td:nth-child(9) { width: 8% !important; }
             .orders-table-fit th:nth-child(10),
-            .orders-table-fit td:nth-child(10) { width: 8% !important; }
+            .orders-table-fit td:nth-child(10) { width: 7% !important; }
+            .orders-table-fit th:nth-child(11),
+            .orders-table-fit td:nth-child(11) { width: 9% !important; }
+            .orders-table-fit .order-action-btn {
+              width: 100%;
+              max-width: 100%;
+              min-width: 0;
+              height: 22px;
+              padding-left: 4px;
+              padding-right: 4px;
+              font-size: 9px;
+              line-height: 1.1;
+              gap: 3px;
+              white-space: nowrap !important;
+              overflow-wrap: normal !important;
+              word-break: normal !important;
+            }
+            .orders-table-fit .order-action-btn svg {
+              width: 10px;
+              height: 10px;
+              flex-shrink: 0;
+            }
+            .orders-table-fit .order-actions {
+              gap: 4px;
+            }
           `}</style>
         )}
 
@@ -1023,6 +1065,7 @@ export default function OrdersTable({
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th className="w-[90px] px-4 py-3">ID</th>
+                <th className="w-[110px] px-4 py-3">Notes</th>
                 <th className="w-[150px] px-4 py-3">Case</th>
                 <th className="w-[160px] px-4 py-3">
                   {showDoctorColumn ? "Doctor" : "Facility"}
@@ -1041,7 +1084,7 @@ export default function OrdersTable({
               {loading ? (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={11}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     Loading orders...
@@ -1050,7 +1093,7 @@ export default function OrdersTable({
               ) : error ? (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={11}
                     className="px-4 py-10 text-center text-[12px] font-semibold text-red-500"
                   >
                     {error}
@@ -1059,7 +1102,7 @@ export default function OrdersTable({
               ) : currentOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={11}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     No orders match the selected filters.
@@ -1108,14 +1151,6 @@ export default function OrdersTable({
                         </p>
                       ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => setSelectedNoteOrder(order)}
-                          className="mt-1 block text-[10px] text-[#007F96] underline"
-                        >
-                        {order.note ? "Note ●" : "Note"}
-                        </button>
-
                       <button
                         type="button"
                         onClick={() => setSelectedLogOrder(order)}
@@ -1123,6 +1158,14 @@ export default function OrdersTable({
                       >
                         Order Log
                       </button>
+                    </td>
+
+                    <td className="px-4 py-5 align-top">
+                      <OrderNotesColumn
+                        order={order}
+                        onOpenNotes={setSelectedNoteListOrder}
+                        onOpenAddNote={setSelectedAddNoteOrder}
+                      />
                     </td>
 
                     <td className="px-4 py-5 align-top">
@@ -1343,6 +1386,8 @@ export default function OrdersTable({
                     <td className="px-4 py-5 align-top">
                       <RecordsBlock
                         records={order.records}
+                        dateRequested={order.dateRequested}
+                        dateRequestedDisplay={order.dateRequestedDisplay}
                         isCnr={order.certificateNoRecords}
                         cnrMemo={order.cnrMemo}
                         cnrDelivery={order.cnrDelivery}
@@ -1408,14 +1453,22 @@ export default function OrdersTable({
                       />
                     </td>
 
-                    <td className="px-4 py-5 align-top">
-                      <div className="flex flex-col items-start gap-2">
+                    <td className={`align-top ${fitToWindow ? "px-1 py-3" : "px-4 py-5"}`}>
+                      <div
+                        className={`order-actions flex flex-col ${
+                          fitToWindow ? "items-stretch" : "items-start gap-2"
+                        }`}
+                      >
                         {!isInactiveOrderStatus(order.orderStatus) ? (
                           <>
                             <button
                               type="button"
                               onClick={() => openDeleteModal(order)}
-                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                              className={`order-action-btn inline-flex items-center justify-center rounded-[6px] border border-red-200 bg-red-50 font-semibold text-red-500 hover:bg-red-100 ${
+                                fitToWindow
+                                  ? ""
+                                  : "h-[28px] gap-2 whitespace-nowrap px-3 text-[11px]"
+                              }`}
                             >
                               <TrashIcon />
                               Delete
@@ -1424,7 +1477,11 @@ export default function OrdersTable({
                             <button
                               type="button"
                               onClick={() => openCancelModal(order)}
-                              className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                              className={`order-action-btn inline-flex items-center justify-center rounded-[6px] font-semibold transition hover:opacity-85 ${
+                                fitToWindow
+                                  ? ""
+                                  : "h-[28px] gap-2 whitespace-nowrap px-3 text-[11px]"
+                              }`}
                               style={{
                                 border: "1px solid #FCD34D",
                                 backgroundColor: "#FFFBEB",
@@ -1439,7 +1496,11 @@ export default function OrdersTable({
                           <button
                             type="button"
                             onClick={() => openRestoreModal(order)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] hover:bg-[#E0F2FE]"
+                            className={`order-action-btn inline-flex items-center justify-center rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] font-semibold text-[#0369A1] hover:bg-[#E0F2FE] ${
+                              fitToWindow
+                                ? ""
+                                : "h-[28px] gap-2 whitespace-nowrap px-3 text-[11px]"
+                            }`}
                           >
                             <RestoreIcon />
                             Recover
@@ -1584,10 +1645,18 @@ export default function OrdersTable({
         onClose={() => setSelectedLogOrder(null)}
       />
 
-      <OrderNotesModal
-        isOpen={Boolean(selectedNoteOrder)}
-        order={selectedNoteOrder}
-        onClose={() => setSelectedNoteOrder(null)}
+      <OrderNotesListModal
+        isOpen={Boolean(selectedNoteListOrder)}
+        order={selectedNoteListOrder}
+        onClose={() => setSelectedNoteListOrder(null)}
+        onSaved={() => fetchOrders({ silent: true, force: true })}
+      />
+
+      <OrderAddNoteModal
+        isOpen={Boolean(selectedAddNoteOrder)}
+        order={selectedAddNoteOrder}
+        onClose={() => setSelectedAddNoteOrder(null)}
+        onSaved={() => fetchOrders({ silent: true, force: true })}
       />
 
       <UploadedRecordsPreviewModal
@@ -2435,8 +2504,53 @@ function InvoiceMoneyRow({ label, date, amount, amountClassName = "" }) {
   );
 }
 
+function formatRecordsDateLong(value) {
+  if (!value) return "";
+
+  const iso = String(value).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [year, month, day] = iso.split("-");
+    return `${year}/${month}/${day}`;
+  }
+
+  return String(value);
+}
+
+function resolveRecordsDateRange(records, dateRequested, dateRequestedDisplay) {
+  if (records?.dateRange) return records.dateRange;
+
+  const start = formatRecordsDateLong(dateRequested || dateRequestedDisplay);
+  return start ? `${start} - Present` : "";
+}
+
+function normalizeRecordsCaption(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function RecordsCaptionPreview({ text }) {
+  const normalizedText = normalizeRecordsCaption(text);
+  if (!normalizedText) return null;
+
+  return (
+    <div className="group/records-caption relative">
+      <p className="line-clamp-2 whitespace-pre-line text-left text-[#334155]">
+        {normalizedText}
+      </p>
+      <div className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden min-w-[320px] max-w-[480px] rounded-[8px] border border-[#E2E8F0] bg-white p-4 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/records-caption:block">
+        {normalizedText}
+      </div>
+    </div>
+  );
+}
+
 function RecordsBlock({
   records,
+  dateRequested = "",
+  dateRequestedDisplay = "",
   isCnr = false,
   cnrMemo = false,
   cnrDelivery = "",
@@ -2446,17 +2560,40 @@ function RecordsBlock({
 }) {
   const showPrintedSentOutNote = isCnr && cnrDelivery && cnrDateSent;
   const showCnrNote = isCnr && !cnrMemo && records.cnrNote;
+  const requestedTypes =
+    records.requestedTypes?.length > 0
+      ? records.requestedTypes
+      : records.title
+      ? [{ type: "default", label: records.title }]
+      : [];
+  const caption = records.caption || "";
+  const dateRange = resolveRecordsDateRange(
+    records,
+    dateRequested,
+    dateRequestedDisplay
+  );
 
   return (
     <div className="space-y-1 text-[10px]">
-      <p className="font-semibold text-[#111827]">{records.title}</p>
+      {!isCnr && (
+        <>
+          {requestedTypes.map(({ type, label }) => (
+            <p key={type} className="font-semibold text-[#007F96]">
+              {label}
+            </p>
+          ))}
 
-      {!isCnr &&
-        records.lines.map((line) => (
-        <p key={line} className="text-[#334155]">
-          {line}
-        </p>
-      ))}
+          {dateRange ? (
+            <p className="font-medium text-[#334155]">{dateRange}</p>
+          ) : null}
+
+          {caption ? <RecordsCaptionPreview text={caption} /> : null}
+        </>
+      )}
+
+      {isCnr && records.title ? (
+        <p className="font-semibold text-[#111827]">{records.title}</p>
+      ) : null}
 
       {showPrintedSentOutNote ? (
         <button

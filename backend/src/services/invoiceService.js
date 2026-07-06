@@ -27,7 +27,12 @@ function getInvoiceRecipientEmail(row) {
 }
 
 function getInvoiceDisplayEmail(row) {
-  return getInvoiceRecipientEmail(row) || "";
+  return (
+    getInvoiceRecipientEmail(row) ||
+    trimOrNull(row?.recipient_emails) ||
+    trimOrNull(row?.serve_email) ||
+    ""
+  );
 }
 
 async function resolveInvoiceRecipientFromOrder(order, connection = null) {
@@ -54,6 +59,40 @@ async function resolveInvoiceRecipientEmail(invoice, connection = null) {
   }
 
   return getInvoiceRecipientEmail(invoice);
+}
+
+async function resolveAutomaticReminderRecipientEmails({
+  invoice = null,
+  order = null,
+  xrayRow = null,
+} = {}) {
+  const stored =
+    trimOrNull(invoice?.recipient_emails) || trimOrNull(xrayRow?.recipient_emails);
+
+  if (stored) {
+    return normalizeRecipientEmails(stored);
+  }
+
+  if (invoice) {
+    const resolved = await resolveInvoiceRecipientEmail(invoice);
+    if (resolved) {
+      return normalizeRecipientEmails(resolved);
+    }
+  }
+
+  if (order) {
+    const fromOrder = await resolveInvoiceRecipientFromOrder(order);
+    if (fromOrder) {
+      return normalizeRecipientEmails(fromOrder);
+    }
+
+    const serveEmail = trimOrNull(order.serve_email);
+    if (serveEmail) {
+      return normalizeRecipientEmails(serveEmail);
+    }
+  }
+
+  return [];
 }
 
 const NO_PROVIDER_EMAIL_MESSAGE =
@@ -263,6 +302,41 @@ function toCompactDate(value) {
   const year = String(date.getFullYear()).slice(-2);
 
   return `${month}/${day}/${year}`;
+}
+
+function formatDateTimeDisplay(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleString("en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function mapInvoiceReminderField(sentAt, level) {
+  const sent = Boolean(sentAt);
+
+  return {
+    level,
+    sent,
+    sentAt: sentAt || null,
+    sentAtDisplay: sent ? formatDateTimeDisplay(sentAt) : null,
+    label: sent ? `Sent Reminder ${level}` : "Didn't send",
+  };
+}
+
+function mapInvoiceReminderFields(row = {}) {
+  return {
+    reminder1: mapInvoiceReminderField(row.reminder_1_sent_at, 1),
+    reminder2: mapInvoiceReminderField(row.reminder_2_sent_at, 2),
+    reminder3: mapInvoiceReminderField(row.reminder_3_sent_at, 3),
+  };
 }
 
 function toInputDate(value) {
@@ -1174,7 +1248,11 @@ function resolveXrayRowFinancials(xrayRow, orderPayments = []) {
 }
 
 function getXrayRecipientEmail(row) {
-  return trimOrNull(row?.provider_email) || trimOrNull(row?.serve_email);
+  return (
+    trimOrNull(row?.provider_email) ||
+    trimOrNull(row?.recipient_emails) ||
+    trimOrNull(row?.serve_email)
+  );
 }
 
 function mapXrayOutstandingRow(row, orderPayments = []) {
@@ -1222,6 +1300,7 @@ function mapXrayResendRow(row, orderPayments = []) {
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
     due: formatMoney(financials.amountDue),
+    ...mapInvoiceReminderFields(row),
   };
 }
 
@@ -1332,6 +1411,7 @@ function mapResendRow(row, orderPayments = []) {
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
     due: formatMoney(financials.amountDue),
+    ...mapInvoiceReminderFields(row),
   };
 }
 
@@ -2164,7 +2244,12 @@ async function getByCompany(providerId, query = {}) {
 
 async function deliverInvoiceEmail(
   invoice,
-  { isResend = false, orderPayments = [], recipientEmails = null } = {}
+  {
+    isResend = false,
+    reminderLevel = null,
+    orderPayments = [],
+    recipientEmails = null,
+  } = {}
 ) {
   if (!invoice) {
     throw new ApiError(404, "Invoice not found");
@@ -2211,6 +2296,9 @@ async function deliverInvoiceEmail(
   const { sendInvoiceEmail } = require("./emailService");
   const deliveredTo = [];
 
+  const reminderNumber = Number(reminderLevel) || 0;
+  const isReminder = reminderNumber > 0;
+
   for (const email of recipients) {
     const result = await sendInvoiceEmail({
       to: email,
@@ -2222,7 +2310,8 @@ async function deliverInvoiceEmail(
       invoiced: formatMoney(financials.totalAmount),
       paid: formatMoney(financials.amountPaid),
       due: formatMoney(financials.amountDue),
-      isResend,
+      isResend: isResend || isReminder,
+      reminderLevel: isReminder ? reminderNumber : null,
       sendOrderDetails: Boolean(invoice.send_order_details),
       isRushOrder: Boolean(invoice.is_rush_order),
       rushLevel: calculateOrderRushLevel(invoice.order_created_at).label,
@@ -2230,6 +2319,9 @@ async function deliverInvoiceEmail(
         ? buildOrderDetailsText(invoice, payments)
         : "",
       attachments,
+      subjectOverride: isReminder
+        ? `Reminder ${reminderNumber} - Invoice - Case ${invoice.order_number || ""}`
+        : null,
     });
 
     if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
@@ -2256,7 +2348,7 @@ async function deliverXrayInvoiceEmail(
   xrayRow,
   order,
   orderPayments = [],
-  { isResend = false, recipientEmails = null } = {}
+  { isResend = false, reminderLevel = null, recipientEmails = null } = {}
 ) {
   if (!xrayRow || !order) {
     throw new ApiError(404, "X-Ray invoice not found");
@@ -2301,6 +2393,9 @@ async function deliverXrayInvoiceEmail(
   const { sendInvoiceEmail } = require("./emailService");
   const deliveredTo = [];
 
+  const reminderNumber = Number(reminderLevel) || 0;
+  const isReminder = reminderNumber > 0;
+
   for (const email of recipients) {
     const result = await sendInvoiceEmail({
       to: email,
@@ -2314,10 +2409,13 @@ async function deliverXrayInvoiceEmail(
       invoiced: formatMoney(financials.totalAmount),
       paid: formatMoney(financials.amountPaid),
       due: formatMoney(financials.amountDue),
-      isResend,
-      subjectOverride: isResend
-        ? `Resent X-Ray Invoice - Case ${order.order_number || ""}`
-        : `X-Ray Invoice - Case ${order.order_number || ""}`,
+      isResend: isResend || isReminder,
+      reminderLevel: isReminder ? reminderNumber : null,
+      subjectOverride: isReminder
+        ? `Reminder ${reminderNumber} - X-Ray Invoice - Case ${order.order_number || ""}`
+        : isResend
+          ? `Resent X-Ray Invoice - Case ${order.order_number || ""}`
+          : `X-Ray Invoice - Case ${order.order_number || ""}`,
       attachments,
     });
 
@@ -2904,6 +3002,157 @@ async function writeOffInvoices(body = {}, userId) {
   }
 }
 
+function isReminderAlreadySent(row, reminderLevel) {
+  if (reminderLevel === 1) return Boolean(row.reminder_1_sent_at);
+  if (reminderLevel === 2) return Boolean(row.reminder_2_sent_at);
+  if (reminderLevel === 3) return Boolean(row.reminder_3_sent_at);
+  return true;
+}
+
+function canSendInvoiceReminder(row, orderPayments, reminderLevel) {
+  if (!row?.sent_date) return false;
+  if (isReminderAlreadySent(row, reminderLevel)) return false;
+
+  if (reminderLevel === 2 && !row.reminder_1_sent_at) return false;
+  if (reminderLevel === 3 && !row.reminder_2_sent_at) return false;
+
+  if (row.status === "Paid" || row.status === "Written Off") return false;
+
+  const financials = resolveRowFinancials(row, orderPayments);
+  return financials.amountDue > 0;
+}
+
+function canSendXrayInvoiceReminder(row, orderPayments, reminderLevel) {
+  if (!row?.sent_date) return false;
+  if (isReminderAlreadySent(row, reminderLevel)) return false;
+
+  if (reminderLevel === 2 && !row.reminder_1_sent_at) return false;
+  if (reminderLevel === 3 && !row.reminder_2_sent_at) return false;
+
+  const financials = resolveXrayRowFinancials(row, orderPayments);
+  return financials.amountDue > 0;
+}
+
+async function markStandardInvoiceReminderSent(invoiceId, reminderLevel) {
+  const columnMap = {
+    1: "reminder_1_sent_at",
+    2: "reminder_2_sent_at",
+    3: "reminder_3_sent_at",
+  };
+  const column = columnMap[reminderLevel];
+
+  if (!column) {
+    throw new ApiError(400, "Invalid reminder level");
+  }
+
+  await getPool().execute(
+    `UPDATE invoices
+     SET ${column} = NOW(), updated_at = NOW()
+     WHERE id = :invoiceId`,
+    { invoiceId }
+  );
+}
+
+async function markXrayInvoiceReminderSent(orderId, reminderLevel) {
+  const columnMap = {
+    1: "reminder_1_sent_at",
+    2: "reminder_2_sent_at",
+    3: "reminder_3_sent_at",
+  };
+  const column = columnMap[reminderLevel];
+
+  if (!column) {
+    throw new ApiError(400, "Invalid reminder level");
+  }
+
+  await getPool().execute(
+    `UPDATE invoice_xray_details
+     SET ${column} = NOW(), updated_at = NOW()
+     WHERE order_id = :orderId`,
+    { orderId }
+  );
+}
+
+async function sendAutomaticInvoiceReminder(targetId, reminderLevel, type = "standard") {
+  const level = Number(reminderLevel);
+
+  if (![1, 2, 3].includes(level)) {
+    throw new ApiError(400, "Invalid reminder level");
+  }
+
+  if (type === "xray") {
+    const orderId = normalizeOrderId(targetId);
+
+    if (!orderId) {
+      throw new ApiError(400, "Invalid order id");
+    }
+
+    const order = await Order.findById(orderId);
+    const xrayRow = await InvoiceXray.findByOrderId(orderId);
+
+    if (!order || !xrayRow) {
+      throw new ApiError(404, "X-Ray invoice not found");
+    }
+
+    const orderPayments = await Order.findPaymentsByOrderId(orderId);
+
+    if (!canSendXrayInvoiceReminder(xrayRow, orderPayments, level)) {
+      return false;
+    }
+
+    const recipientEmails = await resolveAutomaticReminderRecipientEmails({
+      order,
+      xrayRow,
+    });
+
+    if (!recipientEmails.length) {
+      throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+    }
+
+    await deliverXrayInvoiceEmail(xrayRow, order, orderPayments, {
+      isResend: true,
+      reminderLevel: level,
+      recipientEmails,
+    });
+
+    await markXrayInvoiceReminderSent(orderId, level);
+    return true;
+  }
+
+  const invoiceId = normalizeInvoiceId(targetId);
+  const invoice = await Invoice.findById(invoiceId);
+
+  if (!invoice) {
+    throw new ApiError(404, "Invoice not found");
+  }
+
+  const orderPayments = await Order.findPaymentsByOrderId(invoice.order_id);
+
+  if (!canSendInvoiceReminder(invoice, orderPayments, level)) {
+    return false;
+  }
+
+  const order = await Order.findById(invoice.order_id);
+  const recipientEmails = await resolveAutomaticReminderRecipientEmails({
+    invoice,
+    order,
+  });
+
+  if (!recipientEmails.length) {
+    throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
+  }
+
+  await deliverInvoiceEmail(invoice, {
+    isResend: true,
+    reminderLevel: level,
+    orderPayments,
+    recipientEmails,
+  });
+
+  await markStandardInvoiceReminderSent(invoiceId, level);
+  return true;
+}
+
 module.exports = {
   getInvoices,
   getOutstandingInvoices,
@@ -2926,6 +3175,7 @@ module.exports = {
   getXrayDetailsByOrderIds,
   getXrayInvoiceByOrderId,
   createOrUpdateXrayInvoice,
+  sendAutomaticInvoiceReminder,
   mapOrderInvoiceSummary,
   mapOrderPaymentsSummary,
   mapOrderInvoiceFees,

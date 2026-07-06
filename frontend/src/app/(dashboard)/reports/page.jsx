@@ -20,6 +20,11 @@ const STATUS_OPTIONS = [
   { value: "deleted", label: "Deleted" },
 ];
 
+const RUSH_LEVEL_OPTIONS = [
+  { value: "", label: "All Rush Levels" },
+  ...RUSH_LEVEL_LEGEND.map(({ label }) => ({ value: label, label })),
+];
+
 export default function ReportsPage() {
   const user = getStoredUser();
   const showActivityReportLink = canAccessActivityReport(user);
@@ -30,6 +35,7 @@ export default function ReportsPage() {
 
   const [selectedFacility, setSelectedFacility] = useState("");
   const [status, setStatus] = useState("");
+  const [rushLevel, setRushLevel] = useState("");
   const [search, setSearch] = useState("");
   const [sortDir, setSortDir] = useState("asc");
   const [fromDate, setFromDate] = useState("");
@@ -79,11 +85,12 @@ export default function ReportsPage() {
       year: "",
       period: "",
       status,
+      rushLevel,
       search,
       createdFrom: fromDate,
       createdTo: toDate,
     }),
-    [selectedFacility, status, search, fromDate, toDate]
+    [selectedFacility, status, rushLevel, search, fromDate, toDate]
   );
 
   const handleSummaryChange = useCallback((next) => {
@@ -159,7 +166,7 @@ export default function ReportsPage() {
         </div>
 
         <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,1fr)_150px_140px_140px_minmax(180px,1fr)_180px_auto]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(160px,1fr)_130px_130px_130px_130px_minmax(160px,1fr)_170px_auto]">
             <div>
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Facility
@@ -192,6 +199,23 @@ export default function ReportsPage() {
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               >
                 {STATUS_OPTIONS.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
+                Rush Level
+              </label>
+              <select
+                value={rushLevel}
+                onChange={(e) => setRushLevel(e.target.value)}
+                className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              >
+                {RUSH_LEVEL_OPTIONS.map((option) => (
                   <option key={option.value || "all"} value={option.value}>
                     {option.label}
                   </option>
@@ -263,6 +287,7 @@ export default function ReportsPage() {
                 type="button"
                 onClick={() => {
                   setStatus("");
+                  setRushLevel("");
                   setSearch("");
                   setSortDir("asc");
                   setFromDate("");

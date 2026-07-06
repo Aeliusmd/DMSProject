@@ -48,4 +48,10 @@ module.exports = {
     pass: (process.env.SMTP_PASS || "").replace(/\s+/g, ""),
     from: (process.env.SMTP_FROM || process.env.SMTP_USER || "").trim(),
   },
+
+  invoiceReminder: {
+    intervalDays: Number(process.env.INVOICE_REMINDER_INTERVAL_DAYS) || 5,
+    checkIntervalMs:
+      Number(process.env.INVOICE_REMINDER_CHECK_INTERVAL_MS) || 60 * 60 * 1000,
+  },
 };

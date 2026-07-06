@@ -298,8 +298,8 @@ export default function InvoiceReportTable({
                 <th className="w-[130px] px-4 py-3 text-right">Invoiced</th>
                 <th className="w-[130px] px-4 py-3 text-right">Paid</th>
                 <th className="w-[130px] px-4 py-3 text-right">Due</th>
-                <th className="w-[110px] px-4 py-3 text-right">
-                  {isResendMode ? "Action" : ""}
+                <th className={`px-4 py-3 text-right ${isResendMode ? "min-w-[220px]" : "w-[110px]"}`}>
+                  {isResendMode ? "Action / Reminders" : ""}
                 </th>
               </tr>
             </thead>
@@ -608,27 +608,37 @@ function InvoiceRow({
       </td>
 
       <td className="px-4 py-4 align-top text-right">
-        {isResendMode && (
-          <button
-            type="button"
-            disabled={isResending || isBlocked || !canResendInvoice(row)}
-            onClick={() => onResendSingle(group, row)}
-            className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isResending ? "Sending..." : "Resend"}
-          </button>
-        )}
+        <div className="ml-auto flex w-full max-w-[220px] flex-col items-end gap-2">
+          {isResendMode && (
+            <button
+              type="button"
+              disabled={isResending || isBlocked || !canResendInvoice(row)}
+              onClick={() => onResendSingle(group, row)}
+              className="inline-flex h-[28px] w-full items-center justify-center rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isResending ? "Sending..." : "Resend"}
+            </button>
+          )}
 
-        {enableWriteOff && !row.isWrittenOff && (
-          <button
-            type="button"
-            onClick={() => onOpenSingleWriteOffModal(group, row)}
-            disabled={!canWriteOffInvoice(row)}
-            className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Writeoff
-          </button>
-        )}
+          {isResendMode && (
+            <div className="w-full space-y-1.5 border-t border-[#E2E8F0] pt-2">
+              <InvoiceReminderStatus reminder={row.reminder1} />
+              <InvoiceReminderStatus reminder={row.reminder2} />
+              <InvoiceReminderStatus reminder={row.reminder3} />
+            </div>
+          )}
+
+          {enableWriteOff && !row.isWrittenOff && (
+            <button
+              type="button"
+              onClick={() => onOpenSingleWriteOffModal(group, row)}
+              disabled={!canWriteOffInvoice(row)}
+              className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Writeoff
+            </button>
+          )}
+        </div>
       </td>
     </tr>
   );
@@ -642,5 +652,34 @@ function InvoiceCheckbox({ checked, onChange }) {
       onChange={onChange}
       className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
     />
+  );
+}
+
+function InvoiceReminderStatus({ reminder }) {
+  const level = reminder?.level || 0;
+  const title = level ? `Reminder ${level}` : "Reminder";
+
+  if (!reminder?.sent) {
+    return (
+      <div className="rounded-[6px] bg-[#F8FAFC] px-2.5 py-1.5 text-left">
+        <p className="text-[10px] font-medium text-[#64748B]">
+          {title}: Didn&apos;t send
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[6px] bg-[#ECFDF5] px-2.5 py-1.5 text-left">
+      <p className="flex items-center gap-1 text-[10px] font-semibold text-[#059669]">
+        <span aria-hidden="true">✓</span>
+        <span>{reminder.label || `Sent Reminder ${level}`}</span>
+      </p>
+      {reminder.sentAtDisplay ? (
+        <p className="mt-0.5 text-[9px] leading-[13px] text-[#047857]">
+          {reminder.sentAtDisplay}
+        </p>
+      ) : null}
+    </div>
   );
 }
