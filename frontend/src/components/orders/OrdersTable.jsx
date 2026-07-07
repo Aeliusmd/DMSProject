@@ -277,6 +277,68 @@ function formatShortDate(dateValue) {
   return `${month}/${day}/${year.slice(2)}`;
 }
 
+function formatReportDate(order, displayKey, rawKey) {
+  return order[displayKey] || formatShortDate(order[rawKey]);
+}
+
+function ReportCaseCell({ order, onOpenSubpoena }) {
+  const subpoenaDate = formatReportDate(
+    order,
+    "subpoenaDateDisplay",
+    "subpoenaDate"
+  );
+  const dateServed = formatReportDate(order, "dateServedDisplay", "dateServed");
+
+  return (
+    <>
+      {order.caseNumber ? (
+        <p className="font-semibold text-[#111827]">{order.caseNumber}</p>
+      ) : null}
+
+      {order.orderRef ? (
+        <p className={`text-[10px] text-[#64748B] ${order.caseNumber ? "mt-1" : ""}`}>
+          {order.orderRef}
+        </p>
+      ) : null}
+
+      {order.hasSubpoenaFile ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={onOpenSubpoena}
+            className="block text-left text-[10px] font-semibold text-[#059669] hover:underline"
+          >
+            ✓ Subpoena
+          </button>
+          {subpoenaDate ? (
+            <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+              Subp: {subpoenaDate}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {dateServed ? (
+        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+          Served: {dateServed}
+        </p>
+      ) : null}
+
+      {order.court ? (
+        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
+          {order.court}
+        </p>
+      ) : null}
+
+      {order.recNumber ? (
+        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+          REC {order.recNumber}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function getRestoreTargetStatus(order) {
   const previous = `${order?.statusBeforeInactive || ""}`.trim();
   return previous || "Active";
@@ -350,6 +412,7 @@ function toRenderOrder(order) {
     court: order.court || "",
     recNumber: order.recNumber || "",
     applicant: order.applicant || "",
+    caseNumber: order.caseNumber || "",
     orderRef: order.orderRef || "",
     providerName: order.providerName || "",
     providerEmail: order.providerEmail || order.invoice?.providerEmail || "",
@@ -382,6 +445,9 @@ function toRenderOrder(order) {
     hasDoi: Boolean(order.hasDoi),
     createdAt: order.createdAt || order.created_at || "",
     subpoenaDate: order.subpoenaDate || "",
+    subpoenaDateDisplay: order.subpoenaDateDisplay || "",
+    dateServed: order.dateServed || "",
+    dateServedDisplay: order.dateServedDisplay || "",
     dateRequested: order.dateRequested || "",
     dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
@@ -960,6 +1026,9 @@ export default function OrdersTable({
     setCurrentPage((page) => Math.min(page + 1, totalPages));
   };
 
+  const isReportView = Boolean(showDoctorColumn && excludeCompleted);
+  const tableColumnCount = isReportView ? 12 : 11;
+
   return (
     <>
       <section className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-[9px] border border-[#E2E8F0] bg-white shadow-sm">
@@ -1022,8 +1091,35 @@ export default function OrdersTable({
               overflow-wrap: anywhere;
               word-break: break-word;
             }
-            /* Percentage widths sum to 100% so the table always fits the
-               window (no overflow / clipping) with table-layout: fixed. */
+            ${
+              isReportView
+                ? `
+            .orders-table-fit th:nth-child(1),
+            .orders-table-fit td:nth-child(1) { width: 5% !important; }
+            .orders-table-fit th:nth-child(2),
+            .orders-table-fit td:nth-child(2) { width: 7% !important; }
+            .orders-table-fit th:nth-child(3),
+            .orders-table-fit td:nth-child(3) { width: 11% !important; }
+            .orders-table-fit th:nth-child(4),
+            .orders-table-fit td:nth-child(4) { width: 9% !important; }
+            .orders-table-fit th:nth-child(5),
+            .orders-table-fit td:nth-child(5) { width: 9% !important; }
+            .orders-table-fit th:nth-child(6),
+            .orders-table-fit td:nth-child(6) { width: 9% !important; }
+            .orders-table-fit th:nth-child(7),
+            .orders-table-fit td:nth-child(7) { width: 9% !important; }
+            .orders-table-fit th:nth-child(8),
+            .orders-table-fit td:nth-child(8) { width: 10% !important; }
+            .orders-table-fit th:nth-child(9),
+            .orders-table-fit td:nth-child(9) { width: 10% !important; }
+            .orders-table-fit th:nth-child(10),
+            .orders-table-fit td:nth-child(10) { width: 10% !important; }
+            .orders-table-fit th:nth-child(11),
+            .orders-table-fit td:nth-child(11) { width: 6% !important; }
+            .orders-table-fit th:nth-child(12),
+            .orders-table-fit td:nth-child(12) { width: 5% !important; }
+                `
+                : `
             .orders-table-fit th:nth-child(1),
             .orders-table-fit td:nth-child(1) { width: 6% !important; }
             .orders-table-fit th:nth-child(2),
@@ -1046,6 +1142,8 @@ export default function OrdersTable({
             .orders-table-fit td:nth-child(10) { width: 7% !important; }
             .orders-table-fit th:nth-child(11),
             .orders-table-fit td:nth-child(11) { width: 9% !important; }
+                `
+            }
             .orders-table-fit .order-action-btn {
               width: 100%;
               max-width: 100%;
@@ -1086,6 +1184,9 @@ export default function OrdersTable({
                 <th className="w-[90px] px-4 py-3">ID</th>
                 <th className="w-[110px] px-4 py-3">Notes</th>
                 <th className="w-[150px] px-4 py-3">Case</th>
+                {isReportView && (
+                  <th className="w-[130px] px-4 py-3">Applicant</th>
+                )}
                 <th className="w-[160px] px-4 py-3">
                   {showDoctorColumn ? "Doctor" : "Facility"}
                 </th>
@@ -1103,7 +1204,7 @@ export default function OrdersTable({
               {loading ? (
                 <tr>
                   <td
-                    colSpan={11}
+                    colSpan={tableColumnCount}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     Loading orders...
@@ -1112,7 +1213,7 @@ export default function OrdersTable({
               ) : error ? (
                 <tr>
                   <td
-                    colSpan={11}
+                    colSpan={tableColumnCount}
                     className="px-4 py-10 text-center text-[12px] font-semibold text-red-500"
                   >
                     {error}
@@ -1121,7 +1222,7 @@ export default function OrdersTable({
               ) : currentOrders.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={11}
+                    colSpan={tableColumnCount}
                     className="px-4 py-10 text-center text-[12px] font-medium text-[#94A3B8]"
                   >
                     No orders match the selected filters.
@@ -1188,36 +1289,53 @@ export default function OrdersTable({
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <p className="font-semibold text-[#111827]">
-                        {order.applicant}
-                      </p>
+                      {isReportView ? (
+                        <ReportCaseCell
+                          order={order}
+                          onOpenSubpoena={() => setSelectedSubpoenaOrder(order)}
+                        />
+                      ) : (
+                        <>
+                          <p className="font-semibold text-[#111827]">
+                            {order.applicant}
+                          </p>
 
-                      <p className="mt-1 text-[10px] text-[#64748B]">
-                        {order.orderRef}
-                      </p>
+                          <p className="mt-1 text-[10px] text-[#64748B]">
+                            {order.orderRef}
+                          </p>
 
-                      {order.hasSubpoenaFile && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedSubpoenaOrder(order)}
-                          className="mt-2 block text-left text-[10px] font-semibold text-[#059669] hover:underline"
-                        >
-                          ✓ Subpoena
-                        </button>
-                      )}
+                          {order.hasSubpoenaFile && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSubpoenaOrder(order)}
+                              className="mt-2 block text-left text-[10px] font-semibold text-[#059669] hover:underline"
+                            >
+                              ✓ Subpoena
+                            </button>
+                          )}
 
-                      {order.court && (
-                        <p className="mt-1 text-[10px] font-semibold text-[#334155]">
-                          {order.court}
-                        </p>
-                      )}
+                          {order.court && (
+                            <p className="mt-1 text-[10px] font-semibold text-[#334155]">
+                              {order.court}
+                            </p>
+                          )}
 
-                      {order.recNumber && (
-                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
-                          REC {order.recNumber}
-                        </p>
+                          {order.recNumber && (
+                            <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                              REC {order.recNumber}
+                            </p>
+                          )}
+                        </>
                       )}
                     </td>
+
+                    {isReportView && (
+                      <td className="px-4 py-5 align-top">
+                        <p className="font-semibold text-[#111827]">
+                          {order.applicant || "—"}
+                        </p>
+                      </td>
+                    )}
 
                     <td className="px-4 py-5 align-top">
                       {showDoctorColumn ? (

@@ -943,6 +943,8 @@ function mapOrderListRow(
     providerEmail: trimOrNull(row.provider_email) || "",
     subpoenaDate: toInputDate(row.subpoena_date),
     subpoenaDateDisplay: toShortDate(row.subpoena_date),
+    dateServed: toInputDate(row.date_served),
+    dateServedDisplay: toShortDate(row.date_served),
     dateRequested: toInputDate(row.date_requested),
     dateRequestedDisplay: toShortDate(row.date_requested),
     createdAt: row.created_at || null,
