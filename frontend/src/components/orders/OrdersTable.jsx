@@ -27,6 +27,7 @@ import {
   deleteOrder,
   restoreOrder,
   getOrders,
+  getOrdersPaginated,
   fetchOrderMedicalRecordsPdf,
   fetchOrderPrintInvoicePdf,
   fetchOrderPrintXrayInvoicePdf,
@@ -465,6 +466,7 @@ export default function OrdersTable({
   createdSortDir = null,
   fitToWindow = false,
   showDoctorColumn = false,
+  useServerPagination = false,
   onSummaryChange = null,
 }) {
   const router = useRouter();
@@ -517,6 +519,11 @@ export default function OrdersTable({
   const [actionError, setActionError] = useState("");
 
   const [orders, setOrders] = useState([]);
+  const [keysetPagination, setKeysetPagination] = useState({
+    pageSize: ORDERS_PER_PAGE,
+    hasMore: false,
+    nextCursor: null,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
@@ -526,6 +533,7 @@ export default function OrdersTable({
   // from stale requests so a late silent fetch never overwrites fresh data.
   const lastFetchAtRef = useRef(0);
   const requestIdRef = useRef(0);
+  const tableTopRef = useRef(null);
 
   const normalizedFilters = {
     facility: filters.facility || "",
@@ -541,11 +549,8 @@ export default function OrdersTable({
 
   const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
-
-  if (filterKey !== prevFilterKey) {
-    setPrevFilterKey(filterKey);
-    setCurrentPage(1);
-  }
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const cursorHistoryRef = useRef([null]);
 
   const fetchOrders = useCallback(
     async ({ silent = false, force = false } = {}) => {
@@ -559,7 +564,7 @@ export default function OrdersTable({
       }
 
       try {
-        const data = await getOrders({
+        const baseFilters = {
           facility: normalizedFilters.facility,
           company: normalizedFilters.company,
           year: normalizedFilters.year,
@@ -568,9 +573,44 @@ export default function OrdersTable({
           search: normalizedFilters.search,
           createdFrom: normalizedFilters.createdFrom,
           createdTo: normalizedFilters.createdTo,
-        });
+        };
+
+        let data = [];
+        let paginationMeta = null;
+        if (useServerPagination) {
+          const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+          const result = await getOrdersPaginated({
+            ...baseFilters,
+            pagination: "keyset",
+            cursor,
+            pageSize: ORDERS_PER_PAGE,
+          });
+          data = result.orders || [];
+          paginationMeta = result.pagination || null;
+        } else {
+          data = await getOrders(baseFilters);
+        }
 
         if (requestId !== requestIdRef.current) return;
+        if (useServerPagination) {
+          const hasMore = Boolean(paginationMeta?.hasMore);
+          const nextCursor = paginationMeta?.nextCursor ?? null;
+          setKeysetPagination({
+            pageSize: Number(paginationMeta?.pageSize) || ORDERS_PER_PAGE,
+            hasMore,
+            nextCursor,
+          });
+          setCursorHistory((prev) => {
+            const next = prev.slice(0, currentPage);
+            if (hasMore && nextCursor != null) {
+              next[currentPage] = nextCursor;
+            }
+            if (!hasMore) {
+              next.length = currentPage;
+            }
+            return next;
+          });
+        }
         setOrders(data.map(toRenderOrder));
         setLastUpdatedAt(new Date());
         setError("");
@@ -594,8 +634,26 @@ export default function OrdersTable({
     normalizedFilters.search,
     normalizedFilters.createdFrom,
     normalizedFilters.createdTo,
+    useServerPagination,
+    currentPage,
     ]
   );
+
+  useEffect(() => {
+    cursorHistoryRef.current = cursorHistory;
+  }, [cursorHistory]);
+
+  useEffect(() => {
+    if (filterKey === prevFilterKey) return;
+    setPrevFilterKey(filterKey);
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    setKeysetPagination({
+      pageSize: ORDERS_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
+    });
+  }, [filterKey, prevFilterKey]);
 
   function openDeleteModal(order) {
     setActionError("");
@@ -937,6 +995,10 @@ export default function OrdersTable({
   }, [fetchOrders]);
 
   const filteredOrders = useMemo(() => {
+    if (useServerPagination) {
+      return orders;
+    }
+
     let result = filterOrdersByPeriod(orders, normalizedFilters.period);
 
     if (excludeCompleted) {
@@ -965,16 +1027,16 @@ export default function OrdersTable({
     return result;
   }, [
     orders,
+    useServerPagination,
     normalizedFilters.period,
     normalizedFilters.rushLevel,
     excludeCompleted,
     createdSortDir,
   ]);
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredOrders.length / ORDERS_PER_PAGE)
-  );
+  const totalPages = useServerPagination
+    ? Math.max(currentPage + (keysetPagination.hasMore ? 1 : 0), 1)
+    : Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
 
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
@@ -983,25 +1045,36 @@ export default function OrdersTable({
   }
 
   const currentOrders = useMemo(() => {
+    if (useServerPagination) {
+      return filteredOrders;
+    }
     const startIndex = (safeCurrentPage - 1) * ORDERS_PER_PAGE;
     return filteredOrders.slice(startIndex, startIndex + ORDERS_PER_PAGE);
-  }, [safeCurrentPage, filteredOrders]);
+  }, [useServerPagination, safeCurrentPage, filteredOrders]);
 
-  const startRecord =
-    filteredOrders.length === 0
+  const startRecord = useServerPagination
+    ? currentOrders.length === 0
       ? 0
-      : (safeCurrentPage - 1) * ORDERS_PER_PAGE + 1;
+      : (safeCurrentPage - 1) * ORDERS_PER_PAGE + 1
+    : filteredOrders.length === 0
+    ? 0
+    : (safeCurrentPage - 1) * ORDERS_PER_PAGE + 1;
 
-  const endRecord = Math.min(
-    safeCurrentPage * ORDERS_PER_PAGE,
-    filteredOrders.length
-  );
+  const endRecord = useServerPagination
+    ? startRecord + currentOrders.length - (currentOrders.length ? 1 : 0)
+    : Math.min(safeCurrentPage * ORDERS_PER_PAGE, filteredOrders.length);
 
   useEffect(() => {
     if (typeof onSummaryChange !== "function") return;
 
+    const totalCount = useServerPagination
+      ? keysetPagination.hasMore
+        ? endRecord + 1
+        : endRecord
+      : filteredOrders.length;
+
     onSummaryChange({
-      total: filteredOrders.length,
+      total: totalCount,
       startRecord,
       endRecord,
       currentPage: safeCurrentPage,
@@ -1011,6 +1084,8 @@ export default function OrdersTable({
   }, [
     onSummaryChange,
     filteredOrders.length,
+    useServerPagination,
+    keysetPagination.hasMore,
     startRecord,
     endRecord,
     safeCurrentPage,
@@ -1018,12 +1093,23 @@ export default function OrdersTable({
     loading,
   ]);
 
+  const scrollToTableTop = () => {
+    tableTopRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
   const goToPreviousPage = () => {
+    if (safeCurrentPage <= 1) return;
     setCurrentPage((page) => Math.max(page - 1, 1));
+    scrollToTableTop();
   };
 
   const goToNextPage = () => {
+    if (safeCurrentPage >= totalPages || currentOrders.length === 0) return;
     setCurrentPage((page) => Math.min(page + 1, totalPages));
+    scrollToTableTop();
   };
 
   const isReportView = Boolean(showDoctorColumn && excludeCompleted);
@@ -1031,7 +1117,10 @@ export default function OrdersTable({
 
   return (
     <>
-      <section className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-[9px] border border-[#E2E8F0] bg-white shadow-sm">
+      <section
+        ref={tableTopRef}
+        className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-[9px] border border-[#E2E8F0] bg-white shadow-sm"
+      >
         <div className="flex flex-col gap-2 border-b border-[#F1F5F9] px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-[13px] font-semibold text-[#111827]">
             All Orders
@@ -1655,7 +1744,11 @@ export default function OrdersTable({
 
         <div className="flex flex-col gap-3 border-t border-[#F1F5F9] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[11px] text-[#64748B]">
-            Showing {startRecord}-{endRecord} of {filteredOrders.length} orders
+            {useServerPagination
+              ? keysetPagination.hasMore
+                ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ orders`
+                : `Showing ${startRecord}-${endRecord} of ${endRecord} orders`
+              : `Showing ${startRecord}-${endRecord} of ${filteredOrders.length} orders`}
           </p>
 
           <div className="flex items-center gap-1">
@@ -1668,20 +1761,30 @@ export default function OrdersTable({
               ‹
             </button>
 
-            {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-              (page) => (
-                <button
-                  key={page}
-                  type="button"
-                  onClick={() => setCurrentPage(page)}
-                  className={`flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] px-2 text-[12px] font-semibold ${
-                    safeCurrentPage === page
-                      ? "bg-[#111827] text-white"
-                      : "border border-[#E2E8F0] bg-white text-[#334155] hover:bg-[#F8FAFC]"
-                  }`}
-                >
-                  {page}
-                </button>
+            {useServerPagination ? (
+              <span className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] bg-[#111827] px-2 text-[12px] font-semibold text-white">
+                {safeCurrentPage}
+              </span>
+            ) : (
+              Array.from({ length: totalPages }, (_, index) => index + 1).map(
+                (page) => (
+                  <button
+                    key={page}
+                    type="button"
+                    onClick={() => {
+                      if (page === safeCurrentPage) return;
+                      setCurrentPage(page);
+                      scrollToTableTop();
+                    }}
+                    className={`flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] px-2 text-[12px] font-semibold ${
+                      safeCurrentPage === page
+                        ? "bg-[#111827] text-white"
+                        : "border border-[#E2E8F0] bg-white text-[#334155] hover:bg-[#F8FAFC]"
+                    }`}
+                  >
+                    {page}
+                  </button>
+                )
               )
             )}
 
@@ -1689,7 +1792,7 @@ export default function OrdersTable({
               type="button"
               onClick={goToNextPage}
               disabled={
-                safeCurrentPage === totalPages || filteredOrders.length === 0
+                safeCurrentPage === totalPages || currentOrders.length === 0
               }
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >

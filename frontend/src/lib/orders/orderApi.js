@@ -12,6 +12,10 @@ function buildOrdersQuery(filters = {}) {
   if (filters.createdFrom) params.set("createdFrom", filters.createdFrom);
   if (filters.createdTo) params.set("createdTo", filters.createdTo);
   if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.page) params.set("page", String(filters.page));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+  if (filters.cursor) params.set("cursor", String(filters.cursor));
+  if (filters.pagination) params.set("pagination", String(filters.pagination));
 
   const queryString = params.toString();
   return queryString ? `?${queryString}` : "";
@@ -59,6 +63,22 @@ export async function getOrders(filters = {}) {
   });
 
   return data?.data?.orders || [];
+}
+
+export async function getOrdersPaginated(filters = {}) {
+  const data = await request(`/orders${buildOrdersQuery(filters)}`, {
+    auth: true,
+    cache: "no-store",
+  });
+
+  return {
+    orders: data?.data?.orders || [],
+    pagination: data?.data?.pagination || {
+      pageSize: Number(filters.pageSize) || 10,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
 }
 
 export async function getOrderFilterCompanies() {
@@ -182,6 +202,38 @@ export async function getOrderNotes(id, { includeCalled = false, noteId = null }
   return data?.data?.notes || [];
 }
 
+export async function getOrderNotesPaginated(
+  id,
+  {
+    includeCalled = false,
+    cursor = null,
+    pageSize = 10,
+    fromDate = "",
+    toDate = "",
+  } = {}
+) {
+  const params = new URLSearchParams();
+  if (includeCalled) params.set("includeCalled", "1");
+  if (cursor) params.set("cursor", String(cursor));
+  params.set("pagination", "keyset");
+  params.set("pageSize", String(pageSize));
+  if (fromDate) params.set("fromDate", fromDate);
+  if (toDate) params.set("toDate", toDate);
+
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const data = await request(`/orders/${id}/notes${query}`, { auth: true });
+
+  return {
+    notes: data?.data?.notes || [],
+    pagination: data?.data?.pagination || {
+      type: "keyset",
+      pageSize: Number(pageSize) || 10,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
+}
+
 export async function createOrderNote(id, { note, callbackDate, attachment }) {
   const formData = new FormData();
   formData.append("note", note ?? "");
@@ -235,6 +287,31 @@ export async function updateOrderNote(
 export async function getOrderActivityLogs(id) {
   const data = await request(`/orders/${id}/activity-logs`, { auth: true });
   return data?.data?.logs || [];
+}
+
+export async function getOrderActivityLogsPaginated(
+  id,
+  { cursor = null, pageSize = 10, search = "" } = {}
+) {
+  const params = new URLSearchParams();
+  params.set("pagination", "keyset");
+  params.set("pageSize", String(pageSize));
+  if (cursor) params.set("cursor", String(cursor));
+  if (search?.trim()) params.set("search", search.trim());
+
+  const data = await request(`/orders/${id}/activity-logs?${params.toString()}`, {
+    auth: true,
+  });
+
+  return {
+    logs: data?.data?.logs || [],
+    pagination: data?.data?.pagination || {
+      type: "keyset",
+      pageSize: Number(pageSize) || 10,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
 }
 
 export async function uploadBatchScan(file) {
