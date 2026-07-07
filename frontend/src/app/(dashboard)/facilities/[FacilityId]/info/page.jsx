@@ -20,6 +20,7 @@ import {
   downloadFacilityNoteAttachment,
   reactivateDoctor,
   setDefaultDoctor,
+  updateDoctor,
   updateFacility,
   uploadFacilityDocument,
 } from "@/lib/facilities/facilityApi";
@@ -41,6 +42,7 @@ export default function FacilityDetailsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const returnToOrderPath = getSafeOrderReturnPath(searchParams.get("returnTo"));
+  const focusSection = searchParams.get("focus");
 
   const facilityId = String(
     params?.facilityId || params?.FacilityId || params?.id || ""
@@ -95,6 +97,15 @@ export default function FacilityDetailsPage() {
     open: false,
     doctor: null,
   });
+  const [editDoctorModal, setEditDoctorModal] = useState({
+    open: false,
+    doctor: null,
+  });
+  const [editDoctorForm, setEditDoctorForm] = useState(null);
+  const [editDoctorErrors, setEditDoctorErrors] = useState({});
+  const [editDoctorSubmitAttempted, setEditDoctorSubmitAttempted] = useState(false);
+  const [savingDoctor, setSavingDoctor] = useState(false);
+  const [editDoctorError, setEditDoctorError] = useState("");
 
   const loadDocuments = useCallback(async () => {
     if (!facilityId) return;
@@ -174,6 +185,18 @@ export default function FacilityDetailsPage() {
   useEffect(() => {
     loadNotes();
   }, [loadNotes]);
+
+  useEffect(() => {
+    if (focusSection !== "doctors" || loading) return undefined;
+
+    const timer = setTimeout(() => {
+      document
+        .getElementById("facility-doctors")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [focusSection, loading]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -391,6 +414,85 @@ export default function FacilityDetailsPage() {
     });
   };
 
+  const openEditDoctorModal = (doctor) => {
+    setEditDoctorModal({
+      open: true,
+      doctor,
+    });
+    setEditDoctorForm(doctorRowToEditForm(doctor));
+    setEditDoctorErrors({});
+    setEditDoctorSubmitAttempted(false);
+    setEditDoctorError("");
+  };
+
+  const closeEditDoctorModal = () => {
+    setEditDoctorModal({
+      open: false,
+      doctor: null,
+    });
+    setEditDoctorForm(null);
+    setEditDoctorErrors({});
+    setEditDoctorSubmitAttempted(false);
+    setEditDoctorError("");
+  };
+
+  const handleEditDoctorFieldChange = (field, value) => {
+    let nextValue = value;
+
+    if (field === "phone" || field === "fax") {
+      nextValue = formatPhone(value);
+    }
+
+    setEditDoctorForm((prev) => ({
+      ...prev,
+      [field]: nextValue,
+    }));
+  };
+
+  const handleEditDoctorDefaultChange = (checked) => {
+    setEditDoctorForm((prev) => ({
+      ...prev,
+      isDefault: checked,
+    }));
+  };
+
+  const getEditDoctorFieldError = (field) => {
+    if (!editDoctorSubmitAttempted) return "";
+    return editDoctorErrors[`doctors.0.${field}`] || "";
+  };
+
+  const handleSaveEditDoctor = async () => {
+    if (!editDoctorModal.doctor || !editDoctorForm) return;
+
+    setEditDoctorSubmitAttempted(true);
+    setEditDoctorError("");
+
+    const validationErrors = validateDoctorsForm([editDoctorForm]);
+    setEditDoctorErrors(validationErrors);
+
+    if (Object.keys(validationErrors).length > 0) return;
+
+    setSavingDoctor(true);
+
+    try {
+      await updateDoctor(
+        facilityId,
+        editDoctorModal.doctor.id,
+        editDoctorForm
+      );
+      const refreshed = await getFacility(facilityId);
+      setDoctors(refreshed.doctors || []);
+      closeEditDoctorModal();
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.errors) {
+        setEditDoctorErrors(mapApiErrors(err.errors));
+      }
+      setEditDoctorError(err.message || "Failed to update doctor");
+    } finally {
+      setSavingDoctor(false);
+    }
+  };
+
   const closeDeleteDoctorModal = () => {
     setDeleteDoctorModal({
       open: false,
@@ -528,11 +630,20 @@ export default function FacilityDetailsPage() {
     setCreatingDoctors(true);
 
     try {
-      const created = await createDoctors(facilityId, doctorsToCreate);
-      setDoctors(created);
+      await createDoctors(facilityId, doctorsToCreate);
+      const refreshed = await getFacility(facilityId);
+      setDoctors(refreshed.doctors || []);
       setDoctorInputs([createEmptyDoctorInput(`doctor-input-${Date.now()}`)]);
       setDoctorSubmitAttempted(false);
       setDoctorErrors({});
+
+      const hasDefaultDoctor = (refreshed.doctors || []).some(
+        (doctor) => doctor.defaultDoctor
+      );
+
+      if (returnToOrderPath && hasDefaultDoctor) {
+        setReturnToOrderModal({ open: true });
+      }
     } catch (err) {
       if (err instanceof ApiRequestError && err.errors) {
         setDoctorErrors(mapApiErrors(err.errors));
@@ -873,7 +984,10 @@ export default function FacilityDetailsPage() {
           </button>
         </section>
 
-        <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-sm">
+        <section
+          id="facility-doctors"
+          className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-sm"
+        >
           <h2 className="mb-5 text-[13px] font-semibold text-[#111827]">
             New Doctor
           </h2>
@@ -922,6 +1036,7 @@ export default function FacilityDetailsPage() {
 
         <DoctorsTable
           doctors={doctors}
+          onEdit={openEditDoctorModal}
           onDelete={openDeleteDoctorModal}
           onReactivate={handleReactivateDoctor}
           onSetDefault={handleSetDefaultDoctor}
@@ -989,6 +1104,19 @@ export default function FacilityDetailsPage() {
         onConfirm={handleConfirmRemoveManager}
       />
 
+      <EditDoctorModal
+        open={editDoctorModal.open}
+        doctor={editDoctorModal.doctor}
+        form={editDoctorForm}
+        saving={savingDoctor}
+        error={editDoctorError}
+        getError={getEditDoctorFieldError}
+        onChange={handleEditDoctorFieldChange}
+        onDefaultChange={handleEditDoctorDefaultChange}
+        onCancel={closeEditDoctorModal}
+        onSave={handleSaveEditDoctor}
+      />
+
       <ConfirmModal
         open={deleteDoctorModal.open}
         title="Deactivate Doctor"
@@ -1049,6 +1177,140 @@ export default function FacilityDetailsPage() {
         onSaved={() => loadNotes()}
       />
     </DashboardShell>
+  );
+}
+
+function doctorRowToEditForm(doctor) {
+  return {
+    officeName: doctor?.officeName || doctor?.office || "",
+    firstName: doctor?.firstName || "",
+    middleName: doctor?.middleName || "",
+    lastName: doctor?.lastName || "",
+    phone: doctor?.phone || "",
+    fax: doctor?.fax || "",
+    email: doctor?.email || "",
+    isDefault: Boolean(doctor?.defaultDoctor),
+  };
+}
+
+function EditDoctorModal({
+  open,
+  doctor,
+  form,
+  saving,
+  error,
+  getError,
+  onChange,
+  onDefaultChange,
+  onCancel,
+  onSave,
+}) {
+  if (!open || !form) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6 backdrop-blur-[2px]">
+      <section className="max-h-[90vh] w-full max-w-[720px] overflow-y-auto rounded-[10px] bg-white px-5 py-5 shadow-2xl">
+        <div className="mb-4">
+          <h2 className="text-[15px] font-semibold text-[#111827]">Edit Doctor</h2>
+          <p className="mt-1 text-[12px] text-[#64748B]">
+            {doctor?.doctor || "Update doctor details"}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_160px] lg:items-end">
+          <TextField
+            label="Office Name"
+            value={form.officeName}
+            onChange={(e) => onChange("officeName", e.target.value)}
+            placeholder="Office Name"
+            hint="Office"
+            error={getError("officeName")}
+          />
+
+          <label className="mb-[10px] flex items-center gap-2 text-[12px] text-[#475569]">
+            <input
+              type="checkbox"
+              checked={form.isDefault}
+              disabled={!doctor?.active}
+              onChange={(e) => onDefaultChange(e.target.checked)}
+              className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2] disabled:opacity-50"
+            />
+            Default Doctor
+          </label>
+        </div>
+
+        <p className="mt-2 text-[11px] text-[#64748B]">First, Middle, Last Name</p>
+
+        <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <TextField
+            value={form.firstName}
+            onChange={(e) => onChange("firstName", e.target.value)}
+            placeholder="First Name"
+            error={getError("firstName")}
+          />
+          <TextField
+            value={form.middleName}
+            onChange={(e) => onChange("middleName", e.target.value)}
+            placeholder="Middle Name"
+          />
+          <TextField
+            value={form.lastName}
+            onChange={(e) => onChange("lastName", e.target.value)}
+            placeholder="Last Name"
+          />
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+          <TextField
+            label="Phone"
+            value={form.phone}
+            onChange={(e) => onChange("phone", e.target.value)}
+            placeholder="XXX-XXX-XXXX"
+            error={getError("phone")}
+          />
+          <TextField
+            label="Fax"
+            value={form.fax}
+            onChange={(e) => onChange("fax", e.target.value)}
+            placeholder="XXX-XXX-XXXX"
+            error={getError("fax")}
+          />
+        </div>
+
+        <div className="mt-4">
+          <TextField
+            label="Email"
+            value={form.email}
+            onChange={(e) => onChange("email", e.target.value)}
+            error={getError("email")}
+          />
+        </div>
+
+        {error && (
+          <div className="mt-4 rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+            {error}
+          </div>
+        )}
+
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="h-[36px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={saving}
+            className="h-[36px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save Changes"}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1220,7 +1482,7 @@ function OfficeManagerCard({
   );
 }
 
-function DoctorsTable({ doctors, onDelete, onReactivate, onSetDefault }) {
+function DoctorsTable({ doctors, onEdit, onDelete, onReactivate, onSetDefault }) {
   return (
     <section className="overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
       <div className="max-h-[360px] overflow-auto">
@@ -1293,25 +1555,36 @@ function DoctorsTable({ doctors, onDelete, onReactivate, onSetDefault }) {
                   )}
                 </td>
 
-                <td className="px-5 py-4 text-center">
-                  {doctor.active ? (
+                <td className="px-5 py-4">
+                  <div className="flex flex-col items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => onDelete(doctor)}
-                      className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                      onClick={() => onEdit(doctor)}
+                      className="inline-flex h-[28px] w-full min-w-[88px] items-center justify-center gap-2 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
                     >
-                      <TrashIcon />
-                      Delete
+                      <PencilIcon />
+                      Edit
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onReactivate(doctor)}
-                      className="inline-flex h-[28px] items-center justify-center gap-2 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
-                    >
-                      Reactivate
-                    </button>
-                  )}
+
+                    {doctor.active ? (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(doctor)}
+                        className="inline-flex h-[28px] w-full min-w-[88px] items-center justify-center gap-2 rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                      >
+                        <TrashIcon />
+                        Delete
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onReactivate(doctor)}
+                        className="inline-flex h-[28px] w-full min-w-[88px] items-center justify-center gap-2 rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+                      >
+                        Reactivate
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -1873,6 +2146,20 @@ function UploadTinyIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
       <path
         d="M12 16V5M8 9l4-4 4 4M5 19h14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"

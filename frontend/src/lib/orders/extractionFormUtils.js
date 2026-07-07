@@ -339,7 +339,11 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   }
   applyDateOfInjuryFromHints(updates, hints);
   if (hints.companyAddress) applyParsedServeAddress(updates, hints.companyAddress);
-  if (hints.specificDoctor) updates.specificDoctor = hints.specificDoctor;
+  if (hints.extractedDoctorName) {
+    meta.extractedDoctorName = hints.extractedDoctorName;
+  } else if (hints.specificDoctor && !hints.specificDoctorIsDefault) {
+    meta.extractedDoctorName = hints.specificDoctor;
+  }
   if (hints.doctorAddress) updates.fullAddress = hints.doctorAddress;
   if (hints.subpoenaDate) updates.subpoenaDate = hints.subpoenaDate;
   if (hints.dateRequested) {
@@ -375,12 +379,29 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   }
 
   const facilityMatch = findFacilityMatch(hints.customer, facilityList);
-  if (facilityMatch) {
+  if (hints.facilityId) {
+    updates.facility = String(hints.facilityId);
+    updates.facilityName =
+      hints.facilityName || hints.customer || getFacilityLabel(facilityMatch);
+    meta.facilityName = updates.facilityName;
+    meta.facilityCreated = Boolean(hints.facilityCreated);
+    meta.facilityProfileIncomplete = Boolean(hints.facilityProfileIncomplete);
+  } else if (facilityMatch) {
     updates.facility = String(facilityMatch.id);
     meta.facilityName = getFacilityLabel(facilityMatch);
   } else if (hints.customer) {
     updates.facilityName = hints.customer;
     meta.pendingFacilityName = hints.customer;
+  }
+
+  if (hints.missingDefaultDoctor) {
+    meta.missingDefaultDoctor = true;
+    meta.doctorCreated = Boolean(hints.doctorCreated);
+  } else if (hints.specificDoctor) {
+    updates.specificDoctor = hints.specificDoctor;
+    updates.specificDoctorIsDefault = Boolean(hints.specificDoctorIsDefault);
+    meta.doctorCreated = Boolean(hints.doctorCreated);
+    meta.missingDefaultDoctor = false;
   }
 
   const providerName = hints.companyName;
@@ -475,6 +496,29 @@ export function buildFormFromExtract(
       : {}),
     ...(extract?.providerCreated != null
       ? { providerCreated: extract.providerCreated }
+      : {}),
+    ...(extract?.facilityId != null
+      ? { facilityId: String(extract.facilityId) }
+      : {}),
+    ...(extract?.facilityName
+      ? { facilityName: extract.facilityName }
+      : {}),
+    ...(extract?.facilityCreated != null
+      ? { facilityCreated: extract.facilityCreated }
+      : {}),
+    ...(extract?.facilityProfileIncomplete != null
+      ? { facilityProfileIncomplete: extract.facilityProfileIncomplete }
+      : {}),
+    ...(extract?.extractedDoctorName
+      ? { extractedDoctorName: extract.extractedDoctorName }
+      : {}),
+    ...(extract?.specificDoctor ? { specificDoctor: extract.specificDoctor } : {}),
+    ...(extract?.specificDoctorIsDefault != null
+      ? { specificDoctorIsDefault: extract.specificDoctorIsDefault }
+      : {}),
+    ...(extract?.doctorCreated != null ? { doctorCreated: extract.doctorCreated } : {}),
+    ...(extract?.missingDefaultDoctor != null
+      ? { missingDefaultDoctor: extract.missingDefaultDoctor }
       : {}),
   };
   const { updates, meta } = mapOrderHintsToForm(orderHints, {

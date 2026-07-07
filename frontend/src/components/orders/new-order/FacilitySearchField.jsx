@@ -15,6 +15,7 @@ export default function FacilitySearchField({
   facilityProfileIncomplete = false,
   facilityCreated = false,
   returnToOrderPath = "",
+  onBeforeFacilityProfileNavigate,
   resolving = false,
   hint = "",
   required = false,
@@ -237,6 +238,7 @@ export default function FacilitySearchField({
           </p>
           <Link
             href={facilityInfoHref}
+            onClick={() => onBeforeFacilityProfileNavigate?.()}
             className="mt-2 inline-flex text-[11px] font-semibold text-[#007F96] underline"
           >
             Open facility profile to complete

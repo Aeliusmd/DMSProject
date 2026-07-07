@@ -31,6 +31,22 @@ export async function resolveFacility(payload = {}) {
   };
 }
 
+export async function resolveFacilityDoctor(facilityId, payload = {}) {
+  const data = await request(`/facilities/${facilityId}/doctors/resolve`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return {
+    doctor: data?.data?.doctor || null,
+    doctorName: data?.data?.doctorName || "",
+    created: Boolean(data?.data?.created),
+    usedDefault: Boolean(data?.data?.usedDefault),
+    missingDefault: Boolean(data?.data?.missingDefault),
+  };
+}
+
 export async function getFacility(id) {
   const data = await request(`/facilities/${id}`, { auth: true });
   return data?.data?.facility || null;
@@ -71,6 +87,16 @@ export async function createDoctors(facilityId, doctors) {
   });
 
   return data?.data?.doctors || [];
+}
+
+export async function updateDoctor(facilityId, doctorId, doctor) {
+  const data = await request(`/facilities/${facilityId}/doctors/${doctorId}`, {
+    method: "PUT",
+    auth: true,
+    body: doctor,
+  });
+
+  return data?.data?.doctor;
 }
 
 export async function deactivateDoctor(facilityId, doctorId) {

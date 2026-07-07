@@ -1,22 +1,84 @@
 import { getFacility, resolveFacility } from "@/lib/facilities/facilityApi";
 
-const draftFacilityStorageKey = (orderId) =>
-  `dms:order-draft-facility:${orderId}`;
+const DRAFT_FORM_OMIT_KEYS = new Set(["subpoenaFile", "additionalDocumentFile"]);
 
-export function rememberDraftOrderFacility(orderId, { facilityId, facilityName }) {
-  const id = `${orderId || ""}`.trim();
-  const facility = `${facilityId || ""}`.trim();
+const draftSessionStorageKey = (scope) => `dms:order-draft-session:${scope}`;
 
-  if (!id || !facility || typeof window === "undefined") {
+export function getDraftOrderScope({ orderId = "", subpoenaId = "" } = {}) {
+  const order = `${orderId || ""}`.trim();
+  if (order) return `order:${order}`;
+
+  const subpoena = `${subpoenaId || ""}`.trim();
+  if (subpoena) return `subpoena:${subpoena}`;
+
+  return "new";
+}
+
+export function serializeFormForDraft(formData = {}) {
+  const snapshot = {};
+
+  for (const [key, value] of Object.entries(formData || {})) {
+    if (DRAFT_FORM_OMIT_KEYS.has(key)) continue;
+    if (value instanceof File) continue;
+    snapshot[key] = value;
+  }
+
+  return snapshot;
+}
+
+export function hasDraftableOrderContent(formData = {}) {
+  const data = formData || {};
+
+  if (`${data.facility || ""}`.trim() || `${data.facilityName || ""}`.trim()) {
+    return true;
+  }
+
+  if (`${data.subpoenaExtractId || ""}`.trim()) {
+    return true;
+  }
+
+  const textFields = [
+    "firstName",
+    "lastName",
+    "caseNumber",
+    "orderNumber",
+    "specificDoctor",
+    "specificRecord",
+    "serveCompanyName",
+    "providerId",
+  ];
+
+  return textFields.some((field) => `${data[field] || ""}`.trim());
+}
+
+export function rememberDraftOrderSession(
+  scope,
+  { facilityId, facilityName, formSnapshot = null, extractionMeta = null } = {}
+) {
+  const draftScope = `${scope || ""}`.trim();
+
+  if (!draftScope || typeof window === "undefined") {
     return;
   }
 
   try {
+    const existing = readDraftOrderSession(draftScope, { allowIncomplete: true }) || {};
+    const snapshot = formSnapshot || existing.formSnapshot || null;
+    const resolvedFacilityId = `${facilityId || existing.facilityId || snapshot?.facility || ""}`.trim();
+    const resolvedFacilityName = `${facilityName || existing.facilityName || snapshot?.facilityName || ""}`.trim();
+
+    if (!resolvedFacilityId && !snapshot) {
+      return;
+    }
+
     window.sessionStorage.setItem(
-      draftFacilityStorageKey(id),
+      draftSessionStorageKey(draftScope),
       JSON.stringify({
-        facilityId: facility,
-        facilityName: `${facilityName || ""}`.trim(),
+        facilityId: resolvedFacilityId,
+        facilityName: resolvedFacilityName,
+        formSnapshot: snapshot,
+        extractionMeta: extractionMeta || existing.extractionMeta || null,
+        savedAt: Date.now(),
       })
     );
   } catch {
@@ -24,42 +86,64 @@ export function rememberDraftOrderFacility(orderId, { facilityId, facilityName }
   }
 }
 
-export function readDraftOrderFacility(orderId) {
-  const id = `${orderId || ""}`.trim();
+export function readDraftOrderSession(scope, { allowIncomplete = false } = {}) {
+  const draftScope = `${scope || ""}`.trim();
 
-  if (!id || typeof window === "undefined") {
+  if (!draftScope || typeof window === "undefined") {
     return null;
   }
 
   try {
-    const raw = window.sessionStorage.getItem(draftFacilityStorageKey(id));
+    const raw = window.sessionStorage.getItem(draftSessionStorageKey(draftScope));
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
-    const facilityId = `${parsed?.facilityId || ""}`.trim();
-    if (!facilityId) return null;
+    const snapshot = parsed?.formSnapshot || null;
+    const facilityId = `${parsed?.facilityId || snapshot?.facility || ""}`.trim();
+    const facilityName = `${parsed?.facilityName || snapshot?.facilityName || ""}`.trim();
+
+    if (!facilityId && !snapshot) return null;
+    if (!allowIncomplete && !facilityId && !snapshot) return null;
 
     return {
       facilityId,
-      facilityName: `${parsed?.facilityName || ""}`.trim(),
+      facilityName,
+      formSnapshot: snapshot,
+      extractionMeta: parsed?.extractionMeta || null,
+      savedAt: parsed?.savedAt || null,
     };
   } catch {
     return null;
   }
 }
 
-export function clearDraftOrderFacility(orderId) {
-  const id = `${orderId || ""}`.trim();
+export function clearDraftOrderSession(scope) {
+  const draftScope = `${scope || ""}`.trim();
 
-  if (!id || typeof window === "undefined") {
+  if (!draftScope || typeof window === "undefined") {
     return;
   }
 
   try {
-    window.sessionStorage.removeItem(draftFacilityStorageKey(id));
+    window.sessionStorage.removeItem(draftSessionStorageKey(draftScope));
   } catch {
     // Ignore storage failures.
   }
+}
+
+export function rememberDraftOrderFacility(orderId, { facilityId, facilityName }) {
+  rememberDraftOrderSession(getDraftOrderScope({ orderId }), {
+    facilityId,
+    facilityName,
+  });
+}
+
+export function readDraftOrderFacility(orderId) {
+  return readDraftOrderSession(getDraftOrderScope({ orderId }));
+}
+
+export function clearDraftOrderFacility(orderId) {
+  clearDraftOrderSession(getDraftOrderScope({ orderId }));
 }
 
 export function isSameFacilityLabel(left, right) {

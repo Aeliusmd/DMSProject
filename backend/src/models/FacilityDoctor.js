@@ -46,6 +46,34 @@ class FacilityDoctor {
     return result.insertId;
   }
 
+  static async update(connection, id, facilityId, data) {
+    await connection.execute(
+      `UPDATE facility_doctors
+       SET office_name = :officeName,
+           first_name = :firstName,
+           middle_name = :middleName,
+           last_name = :lastName,
+           phone = :phone,
+           fax = :fax,
+           email = :email,
+           is_default = :isDefault,
+           updated_at = NOW()
+       WHERE id = :id AND facility_id = :facilityId`,
+      {
+        id,
+        facilityId,
+        officeName: data.officeName,
+        firstName: data.firstName,
+        middleName: data.middleName,
+        lastName: data.lastName,
+        phone: data.phone,
+        fax: data.fax,
+        email: data.email,
+        isDefault: data.isDefault ? 1 : 0,
+      }
+    );
+  }
+
   static async clearDefaultForFacility(facilityId, connection = null) {
     const executor = connection || getPool();
 

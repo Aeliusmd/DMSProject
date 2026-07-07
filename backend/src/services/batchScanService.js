@@ -12,6 +12,7 @@ const {
 } = require("../utils/extractionMapper");
 const subpoenaExtractionService = require("./subpoenaExtractionService");
 const { resolveProviderFromHints } = require("./providerService");
+const { resolveFacilityFromHints, resolveDoctorFromExtractHints } = require("./facilityService");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const { withTransaction } = require("../config/database");
 
@@ -68,6 +69,51 @@ async function mapExtractRowToApi(row) {
     orderHints = providerResolution.orderHints;
   }
 
+  let facilityResolution = { facility: null, created: false };
+  if (orderHints.customer) {
+    facilityResolution = await resolveFacilityFromHints(orderHints);
+    if (facilityResolution.facility) {
+      orderHints = {
+        ...orderHints,
+        facilityId: facilityResolution.facility.id,
+        facilityName:
+          facilityResolution.facility.facilityName || orderHints.customer,
+        facilityCreated: facilityResolution.created,
+        facilityProfileIncomplete: Boolean(
+          facilityResolution.facility.isProfileIncomplete
+        ),
+      };
+    }
+  }
+
+  let doctorResolution = {
+    doctorName: "",
+    created: false,
+    usedDefault: false,
+    missingDefault: false,
+    extractedDoctorName: `${orderHints.specificDoctor || ""}`.trim(),
+  };
+  if (facilityResolution.facility?.id) {
+    doctorResolution = await resolveDoctorFromExtractHints(
+      facilityResolution.facility.id,
+      orderHints
+    );
+    orderHints = {
+      ...orderHints,
+      extractedDoctorName: doctorResolution.extractedDoctorName,
+      doctorCreated: Boolean(doctorResolution.created),
+      missingDefaultDoctor: Boolean(doctorResolution.missingDefault),
+      ...(doctorResolution.doctorName
+        ? {
+            specificDoctor: doctorResolution.doctorName,
+            specificDoctorIsDefault: Boolean(doctorResolution.usedDefault),
+          }
+        : {
+            specificDoctorIsDefault: false,
+          }),
+    };
+  }
+
   return {
     id: row.id,
     parentId: row.parent_id,
@@ -81,6 +127,18 @@ async function mapExtractRowToApi(row) {
     uploadedAt: formatUploadDate(row.uploaded_at || row.created_at),
     isProcessed: Boolean(row.is_processed),
     orderHints,
+    facilityId: facilityResolution.facility?.id || null,
+    facilityName:
+      facilityResolution.facility?.facilityName || orderHints.customer || null,
+    facilityCreated: facilityResolution.created,
+    facilityProfileIncomplete: Boolean(
+      facilityResolution.facility?.isProfileIncomplete
+    ),
+    extractedDoctorName: doctorResolution.extractedDoctorName || null,
+    specificDoctor: doctorResolution.doctorName || null,
+    specificDoctorIsDefault: Boolean(doctorResolution.usedDefault),
+    doctorCreated: doctorResolution.created,
+    missingDefaultDoctor: Boolean(doctorResolution.missingDefault),
     providerId: providerResolution.provider?.id || null,
     providerCreated: providerResolution.created,
     providerName: providerResolution.provider?.companyName || null,

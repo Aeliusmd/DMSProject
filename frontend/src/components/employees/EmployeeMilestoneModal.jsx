@@ -19,15 +19,28 @@ function formatDateInput(date) {
 }
 
 function getDefaultDateRange() {
+  return getPresetDateRange(1);
+}
+
+function getPresetDateRange(months) {
   const today = new Date();
   const start = new Date(today);
-  start.setMonth(start.getMonth() - 1);
+  start.setMonth(start.getMonth() - Number(months));
 
   return {
     from: formatDateInput(start),
     to: formatDateInput(today),
   };
 }
+
+const PRESET_RANGE_OPTIONS = [
+  { value: "1", label: "1 month" },
+  { value: "2", label: "2 months" },
+  { value: "3", label: "3 months" },
+  { value: "6", label: "6 months" },
+  { value: "12", label: "1 year" },
+  { value: "24", label: "2 years" },
+];
 
 const STAT_CARDS = [
   { key: "created", label: "Created Orders", color: "text-[#2563EB]", bg: "bg-[#EFF6FF]" },
@@ -91,8 +104,11 @@ export default function EmployeeMilestoneModal({
   const canFilterByDate = isAdminOrManager(user);
   const defaultRange = getDefaultDateRange();
 
-  const [dateFrom, setDateFrom] = useState(defaultRange.from);
-  const [dateTo, setDateTo] = useState(defaultRange.to);
+  const [draftDateFrom, setDraftDateFrom] = useState(defaultRange.from);
+  const [draftDateTo, setDraftDateTo] = useState(defaultRange.to);
+  const [presetMonths, setPresetMonths] = useState("1");
+  const [appliedDateFrom, setAppliedDateFrom] = useState(defaultRange.from);
+  const [appliedDateTo, setAppliedDateTo] = useState(defaultRange.to);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -122,10 +138,16 @@ export default function EmployeeMilestoneModal({
       return;
     }
 
+    const initialRange = getDefaultDateRange();
+    setDraftDateFrom(initialRange.from);
+    setDraftDateTo(initialRange.to);
+    setPresetMonths("1");
+    setAppliedDateFrom(initialRange.from);
+    setAppliedDateTo(initialRange.to);
     setLoading(true);
     setError("");
     setStats(null);
-  }, [isOpen, employee?.id, useSelfStats, canFilterByDate, dateFrom, dateTo]);
+  }, [isOpen, employee?.id, useSelfStats]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -139,10 +161,14 @@ export default function EmployeeMilestoneModal({
     let cancelled = false;
 
     async function loadStats() {
+      setLoading(true);
+      setError("");
+      setStats(null);
+
       try {
         const filters =
           canFilterByDate && !useSelfStats
-            ? { from: dateFrom, to: dateTo }
+            ? { from: appliedDateFrom, to: appliedDateTo }
             : {};
 
         const data = useSelfStats
@@ -187,9 +213,29 @@ export default function EmployeeMilestoneModal({
     employee?.id,
     useSelfStats,
     canFilterByDate,
-    dateFrom,
-    dateTo,
+    appliedDateFrom,
+    appliedDateTo,
   ]);
+
+  const handleApplyCustomRangeFilter = () => {
+    if (!draftDateFrom || !draftDateTo || draftDateFrom > draftDateTo) {
+      return;
+    }
+
+    setAppliedDateFrom(draftDateFrom);
+    setAppliedDateTo(draftDateTo);
+  };
+
+  const handleApplyPresetRangeFilter = () => {
+    const range = getPresetDateRange(presetMonths);
+    setDraftDateFrom(range.from);
+    setDraftDateTo(range.to);
+    setAppliedDateFrom(range.from);
+    setAppliedDateTo(range.to);
+  };
+
+  const customRangeInvalid =
+    !draftDateFrom || !draftDateTo || draftDateFrom > draftDateTo;
 
   if (!mounted || !isOpen) return null;
 
@@ -221,30 +267,69 @@ export default function EmployeeMilestoneModal({
 
         <div className="flex-1 overflow-auto px-5 py-4">
           {canFilterByDate && !useSelfStats ? (
-            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-[#475569]">
-                  From
-                </span>
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="h-[36px] w-full rounded-[6px] border border-[#E2E8F0] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-                />
-              </label>
+            <div className="mb-4 space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#475569]">
+                    From
+                  </span>
+                  <input
+                    type="date"
+                    value={draftDateFrom}
+                    onChange={(e) => setDraftDateFrom(e.target.value)}
+                    className="h-[36px] w-full rounded-[6px] border border-[#E2E8F0] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                  />
+                </label>
 
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold text-[#475569]">
-                  To
-                </span>
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="h-[36px] w-full rounded-[6px] border border-[#E2E8F0] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-                />
-              </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#475569]">
+                    To
+                  </span>
+                  <input
+                    type="date"
+                    value={draftDateTo}
+                    onChange={(e) => setDraftDateTo(e.target.value)}
+                    className="h-[36px] w-full rounded-[6px] border border-[#E2E8F0] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleApplyCustomRangeFilter}
+                  disabled={customRangeInvalid || loading}
+                  className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Filter
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-semibold text-[#475569]">
+                    Quick range
+                  </span>
+                  <select
+                    value={presetMonths}
+                    onChange={(e) => setPresetMonths(e.target.value)}
+                    className="h-[36px] w-full rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                  >
+                    {PRESET_RANGE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleApplyPresetRangeFilter}
+                  disabled={loading}
+                  className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Filter
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -256,8 +341,8 @@ export default function EmployeeMilestoneModal({
           ) : (
             <p className="mb-4 rounded-[6px] bg-[#F8FAFC] px-3 py-2 text-[11px] text-[#64748B]">
               Created = orders this employee created. Updated, completed,
-              cancelled, and deleted = actions they performed. Date range
-              filters each metric by when the action occurred.
+              cancelled, and deleted = actions they performed. Use Filter on
+              either row to apply the date range.
             </p>
           )}
 
@@ -294,9 +379,10 @@ export default function EmployeeMilestoneModal({
                 </p>
               </div>
 
-              {canFilterByDate && !useSelfStats && stats?.dateFrom && stats?.dateTo ? (
+              {canFilterByDate && !useSelfStats ? (
                 <p className="mt-3 text-[10px] text-[#94A3B8]">
-                  Filtered from {stats.dateFrom} to {stats.dateTo}
+                  Filtered from {stats?.dateFrom || appliedDateFrom} to{" "}
+                  {stats?.dateTo || appliedDateTo}
                 </p>
               ) : null}
             </>

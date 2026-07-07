@@ -1962,22 +1962,22 @@ async function createOrder(data, actorId, files, options = {}) {
 }
 
 async function applyDefaultFacilityDoctorIfMissing(payload) {
-  if (`${payload.specificDoctor || ""}`.trim()) {
-    return false;
-  }
-
   const facilityId = Number(payload.facility);
   if (!Number.isFinite(facilityId)) {
     return false;
   }
 
-  const defaultDoctor = await FacilityDoctor.findDefaultByFacilityId(facilityId);
-  if (!defaultDoctor) {
+  const facilityService = require("./facilityService");
+  const result = await facilityService.resolveDoctorFromExtractHints(facilityId, {
+    specificDoctor: payload.specificDoctor,
+  });
+
+  if (result.missingDefault || !result.doctorName) {
     return false;
   }
 
-  payload.specificDoctor = FacilityDoctor.formatDoctorName(defaultDoctor);
-  payload.specificDoctorIsDefault = true;
+  payload.specificDoctor = result.doctorName;
+  payload.specificDoctorIsDefault = Boolean(result.usedDefault);
   return true;
 }
 
@@ -2012,15 +2012,6 @@ async function createOrderFromExtract(extractId, actorId) {
   const providerResolution = await resolveProviderFromHints(orderHints);
   orderHints = providerResolution.orderHints;
 
-  if (!payload.facility && orderHints.customer) {
-    payload.facilityName = orderHints.customer;
-    payload.facilityCity = orderHints.facilityCity || orderHints.city || "";
-    payload.facilityState = orderHints.facilityState || orderHints.state || "";
-    payload.facilityZip = orderHints.facilityZip || orderHints.zip || "";
-    payload.facilityAddress =
-      orderHints.facilityAddress || orderHints.address || "";
-  }
-
   if (providerResolution.provider?.id) {
     payload.providerId = String(providerResolution.provider.id);
   }
@@ -2029,9 +2020,28 @@ async function createOrderFromExtract(extractId, actorId) {
     payload.serveCompanyName = orderHints.companyName;
   }
 
+  if (orderHints.customer) {
+    const facilityService = require("./facilityService");
+    const { facility } = await facilityService.resolveFacilityFromHints(orderHints);
+    if (facility) {
+      payload.facility = String(facility.id);
+      payload.facilityName = facility.facilityName || orderHints.customer;
+    }
+  }
+
   payload.subpoenaExtractId = String(extractId);
 
-  await applyDefaultFacilityDoctorIfMissing(payload);
+  if (payload.facility) {
+    const facilityService = require("./facilityService");
+    const doctorResolution = await facilityService.resolveDoctorFromExtractHints(
+      payload.facility,
+      orderHints
+    );
+    if (doctorResolution.doctorName) {
+      payload.specificDoctor = doctorResolution.doctorName;
+      payload.specificDoctorIsDefault = Boolean(doctorResolution.usedDefault);
+    }
+  }
 
   return createOrder(payload, actorId, {}, {
     allowIncomplete: true,

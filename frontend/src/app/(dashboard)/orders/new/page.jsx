@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CollapsibleOrderPanel from "@/components/orders/new-order/CollapsibleOrderPanel";
@@ -41,12 +41,18 @@ import {
 import { createOrder, getOrder, updateOrder, updateOrderFacility, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import {
-  clearDraftOrderFacility,
+  clearDraftOrderSession,
+  getDraftOrderScope,
+  hasDraftableOrderContent,
   isSameFacilityLabel,
-  readDraftOrderFacility,
-  rememberDraftOrderFacility,
+  readDraftOrderSession,
+  rememberDraftOrderSession,
   resolvePendingFacility,
+  serializeFormForDraft,
 } from "@/lib/orders/facilityOrderUtils";
+import {
+  resolvePendingDoctorForOrder,
+} from "@/lib/orders/doctorOrderUtils";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
@@ -138,6 +144,7 @@ const initialFormData = {
 
   specificRecord: "",
   specificDoctor: "",
+  specificDoctorId: "",
   specificDoctorIsDefault: false,
   fullAddress: "",
 
@@ -201,6 +208,11 @@ function NewOrderPageContent() {
     return `/orders/new${query ? `?${query}` : ""}`;
   }, [orderId, subpoenaId, panel]);
 
+  const draftScope = useMemo(
+    () => getDraftOrderScope({ orderId, subpoenaId }),
+    [orderId, subpoenaId]
+  );
+
   const [expandedPanels, setExpandedPanels] = useState({
     subpoena: false,
     order: true,
@@ -211,6 +223,7 @@ function NewOrderPageContent() {
   const [formData, setFormData] = useState(initialFormData);
   const formDataRef = useRef(formData);
   const committedFacilityRef = useRef({ id: "", name: "" });
+  const draftRestoredRef = useRef(false);
 
   useEffect(() => {
     formDataRef.current = formData;
@@ -242,13 +255,194 @@ function NewOrderPageContent() {
   const [extractionMeta, setExtractionMeta] = useState({
     facilityName: "",
     facilityCreated: false,
+    extractedDoctorName: "",
     providerName: "",
     providerCreated: false,
   });
   const [facilityProfileIncomplete, setFacilityProfileIncomplete] = useState(false);
   const [facilityCreated, setFacilityCreated] = useState(false);
   const [resolvingFacility, setResolvingFacility] = useState(false);
+  const [missingDefaultDoctor, setMissingDefaultDoctor] = useState(false);
+  const [doctorCreated, setDoctorCreated] = useState(false);
+  const [resolvingDoctor, setResolvingDoctor] = useState(false);
   const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
+  const extractionMetaRef = useRef(extractionMeta);
+  const doctorCreatedRef = useRef(false);
+
+  useEffect(() => {
+    extractionMetaRef.current = extractionMeta;
+  }, [extractionMeta]);
+
+  useEffect(() => {
+    doctorCreatedRef.current = doctorCreated;
+  }, [doctorCreated]);
+
+  const persistOrderDraft = useCallback(() => {
+    const current = formDataRef.current;
+
+    if (!hasDraftableOrderContent(current)) {
+      return;
+    }
+
+    rememberDraftOrderSession(draftScope, {
+      facilityId: current.facility,
+      facilityName: current.facilityName,
+      formSnapshot: serializeFormForDraft(current),
+      extractionMeta: {
+        ...extractionMetaRef.current,
+        doctorCreated: doctorCreatedRef.current,
+      },
+    });
+  }, [draftScope]);
+
+  useEffect(() => {
+    if (!hasDraftableOrderContent(formData)) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      persistOrderDraft();
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [formData, persistOrderDraft]);
+
+  useEffect(() => {
+    return () => {
+      persistOrderDraft();
+    };
+  }, [persistOrderDraft]);
+
+  const clearFacilityRefreshParam = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("facilityRefresh");
+    params.delete("applyFacilityId");
+    const query = params.toString();
+    router.replace(`/orders/new${query ? `?${query}` : ""}`, { scroll: false });
+  }, [router, searchParams]);
+
+  const restoreOrderDraftAfterFacilityReturn = useCallback(async () => {
+    const draft = readDraftOrderSession(draftScope);
+    if (!draft?.formSnapshot && !draft?.facilityId) {
+      return false;
+    }
+
+    let resolved = {
+      facilityId: draft.facilityId || draft.formSnapshot?.facility || "",
+      facilityName: draft.facilityName || draft.formSnapshot?.facilityName || "",
+      facilityProfileIncomplete: false,
+      facilityCreated: false,
+    };
+
+    if (resolved.facilityId || resolved.facilityName) {
+      try {
+        resolved = await resolvePendingFacility({
+          facilityId: resolved.facilityId,
+          facilityName: resolved.facilityName,
+        });
+      } catch {
+        // Keep the facility details already stored in the draft.
+      }
+    }
+
+    let nextForm = {
+      ...(draft.formSnapshot || {}),
+      facility: resolved.facilityId || draft.formSnapshot?.facility || "",
+      facilityName: resolved.facilityName || draft.formSnapshot?.facilityName || "",
+    };
+
+    let doctorResolved = null;
+    const extractedDoctorName = `${draft.extractionMeta?.extractedDoctorName || ""}`.trim();
+
+    if (resolved.facilityId || nextForm.facility) {
+      try {
+        doctorResolved = await resolvePendingDoctorForOrder({
+          facilityId: resolved.facilityId || nextForm.facility,
+          doctorId:
+            nextForm.specificDoctorId || draft.formSnapshot?.specificDoctorId || "",
+          doctorName: nextForm.specificDoctor || extractedDoctorName,
+          extractedDoctorName,
+          priorDoctorCreated: Boolean(draft.extractionMeta?.doctorCreated),
+        });
+        nextForm = {
+          ...nextForm,
+          specificDoctor: doctorResolved.specificDoctor,
+          specificDoctorId: doctorResolved.specificDoctorId,
+          specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
+        };
+        setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
+        setDoctorCreated(doctorResolved.doctorCreated);
+      } catch {
+        // Keep the doctor already stored in the draft.
+      }
+    }
+
+    const activeSubpoenaId =
+      `${subpoenaId || nextForm.subpoenaExtractId || ""}`.trim();
+    if (activeSubpoenaId && !nextForm.subpoenaFile) {
+      try {
+        const [blob, extract] = await Promise.all([
+          fetchUnprocessedSubpoenaPdf(activeSubpoenaId),
+          getUnprocessedSubpoenaById(activeSubpoenaId),
+        ]);
+        nextForm.subpoenaFile = new File(
+          [blob],
+          extract?.fileName || "subpoena.pdf",
+          { type: "application/pdf" }
+        );
+      } catch {
+        // Prefill can still proceed without the PDF attachment.
+      }
+    }
+
+    setFormData(nextForm);
+    markCommittedFacility(resolved.facilityId, resolved.facilityName);
+    setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
+    setFacilityCreated(resolved.facilityCreated);
+    if (draft.extractionMeta) {
+      setExtractionMeta(draft.extractionMeta);
+    } else {
+      setExtractionMeta((prev) => ({
+        ...prev,
+        facilityName: resolved.facilityName,
+        facilityCreated: resolved.facilityCreated,
+      }));
+    }
+    if (doctorResolved) {
+      setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
+      setDoctorCreated(doctorResolved.doctorCreated);
+    }
+    setExpandedPanels((prev) => ({
+      ...prev,
+      subpoena: Boolean(nextForm.subpoenaFile),
+      order: true,
+    }));
+
+    rememberDraftOrderSession(draftScope, {
+      facilityId: resolved.facilityId,
+      facilityName: resolved.facilityName,
+      formSnapshot: serializeFormForDraft(nextForm),
+      extractionMeta: draft.extractionMeta || extractionMetaRef.current,
+    });
+
+    if (resolved.facilityId) {
+      setFacilities((prev) => {
+        if (prev.some((item) => String(item.id) === String(resolved.facilityId))) {
+          return prev;
+        }
+        return [
+          {
+            id: Number(resolved.facilityId),
+            facility: resolved.facilityName,
+          },
+          ...prev,
+        ];
+      });
+    }
+
+    draftRestoredRef.current = true;
+    return true;
+  }, [draftScope, subpoenaId]);
 
   useEffect(() => {
     let active = true;
@@ -273,13 +467,16 @@ function NewOrderPageContent() {
     let active = true;
 
     if (!isEditMode || !orderId) {
-      if (!subpoenaId) {
-        setFormData(initialFormData);
-        setTouched({});
-        setSubmitAttempted(false);
-        setFileErrors({});
+      if (!subpoenaId && facilityRefresh !== "1") {
+        if (!draftRestoredRef.current) {
+          setFormData(initialFormData);
+          setTouched({});
+          setSubmitAttempted(false);
+          setFileErrors({});
+          clearDraftOrderSession(draftScope);
+        }
       }
-      if (!isEditMode && !subpoenaId) {
+      if (!isEditMode && !subpoenaId && facilityRefresh !== "1") {
         setLoadingOrder(false);
       }
       return undefined;
@@ -298,7 +495,7 @@ function NewOrderPageContent() {
         }
 
         const isReturnFromFacilityEdit = facilityRefresh === "1";
-        const draftFacility = readDraftOrderFacility(orderId);
+        const draftFacility = readDraftOrderSession(draftScope);
 
         let nextForm = syncPaymentDueFields(
           { ...initialFormData, ...order },
@@ -309,51 +506,111 @@ function NewOrderPageContent() {
         let facilityLabel = order.facilityName || "";
 
         if (isReturnFromFacilityEdit && draftFacility) {
+          if (draftFacility.formSnapshot) {
+            nextForm = syncPaymentDueFields(
+              { ...nextForm, ...draftFacility.formSnapshot },
+              order.invoiceFees
+            );
+          }
+
           try {
             const resolved = await resolvePendingFacility({
-              facilityId: draftFacility.facilityId,
-              facilityName: draftFacility.facilityName,
+              facilityId: draftFacility.facilityId || draftFacility.formSnapshot?.facility,
+              facilityName:
+                draftFacility.facilityName || draftFacility.formSnapshot?.facilityName,
             });
 
             nextForm = {
               ...nextForm,
-              facility: resolved.facilityId,
-              facilityName: resolved.facilityName,
+              facility: resolved.facilityId || nextForm.facility,
+              facilityName: resolved.facilityName || nextForm.facilityName,
             };
             profileIncomplete = resolved.facilityProfileIncomplete;
             facilityWasCreated = resolved.facilityCreated;
-            facilityLabel = resolved.facilityName;
+            facilityLabel = resolved.facilityName || nextForm.facilityName;
 
-            rememberDraftOrderFacility(orderId, {
-              facilityId: resolved.facilityId,
-              facilityName: resolved.facilityName,
+            rememberDraftOrderSession(draftScope, {
+              facilityId: resolved.facilityId || nextForm.facility,
+              facilityName: resolved.facilityName || nextForm.facilityName,
+              formSnapshot: serializeFormForDraft(nextForm),
+              extractionMeta: draftFacility.extractionMeta || extractionMetaRef.current,
             });
+
+            try {
+              const extractedDoctorName = `${draftFacility.extractionMeta?.extractedDoctorName || ""}`.trim();
+              const doctorResolved = await resolvePendingDoctorForOrder({
+                facilityId: resolved.facilityId || nextForm.facility,
+                doctorId:
+                  nextForm.specificDoctorId ||
+                  draftFacility.formSnapshot?.specificDoctorId ||
+                  "",
+                doctorName: nextForm.specificDoctor || extractedDoctorName,
+                extractedDoctorName,
+                priorDoctorCreated: Boolean(draftFacility.extractionMeta?.doctorCreated),
+              });
+              nextForm = {
+                ...nextForm,
+                specificDoctor: doctorResolved.specificDoctor,
+                specificDoctorId: doctorResolved.specificDoctorId,
+                specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
+              };
+              if (active) {
+                setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
+                setDoctorCreated(doctorResolved.doctorCreated);
+              }
+            } catch {
+              // Keep the doctor already stored on the order.
+            }
           } catch {
             // Keep the facility already stored on the order.
           }
-        } else {
-          clearDraftOrderFacility(orderId);
+        } else if (!isReturnFromFacilityEdit) {
+          clearDraftOrderSession(draftScope);
         }
 
         if (!active) return;
 
         if (isReturnFromFacilityEdit) {
-          const params = new URLSearchParams(searchParams.toString());
-          params.delete("facilityRefresh");
-          params.delete("applyFacilityId");
-          const query = params.toString();
-          router.replace(`/orders/new${query ? `?${query}` : ""}`, { scroll: false });
+          draftRestoredRef.current = true;
+          clearFacilityRefreshParam();
+        }
+
+        if (nextForm.facility && !`${nextForm.specificDoctor || ""}`.trim()) {
+          try {
+            const doctorResolved = await resolvePendingDoctorForOrder({
+              facilityId: nextForm.facility,
+              doctorId: nextForm.specificDoctorId || "",
+            });
+            nextForm = {
+              ...nextForm,
+              specificDoctor: doctorResolved.specificDoctor,
+              specificDoctorId: doctorResolved.specificDoctorId,
+              specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
+            };
+            if (active) {
+              setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
+              setDoctorCreated(doctorResolved.doctorCreated);
+            }
+          } catch {
+            if (active) setMissingDefaultDoctor(false);
+          }
+        } else if (active) {
+          setMissingDefaultDoctor(false);
         }
 
         setFormData(nextForm);
         markCommittedFacility(nextForm.facility, nextForm.facilityName);
         setFacilityProfileIncomplete(profileIncomplete);
         setFacilityCreated(facilityWasCreated);
-        setExtractionMeta((prev) => ({
-          ...prev,
-          facilityName: facilityLabel,
-          facilityCreated: facilityWasCreated,
-        }));
+        if (isReturnFromFacilityEdit && draftFacility?.extractionMeta) {
+          setExtractionMeta(draftFacility.extractionMeta);
+        } else {
+          setExtractionMeta((prev) => ({
+            ...prev,
+            facilityName: facilityLabel,
+            facilityCreated: facilityWasCreated,
+          }));
+        }
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
@@ -368,7 +625,95 @@ function NewOrderPageContent() {
     return () => {
       active = false;
     };
-  }, [isEditMode, orderId, subpoenaId]);
+  }, [isEditMode, orderId, subpoenaId, facilityRefresh, draftScope, clearFacilityRefreshParam]);
+
+  useEffect(() => {
+    if (isEditMode || facilityRefresh !== "1") {
+      return undefined;
+    }
+
+    let active = true;
+
+    (async () => {
+      setLoadingOrder(true);
+      setLoadError("");
+
+      try {
+        const restored = await restoreOrderDraftAfterFacilityReturn();
+        if (!active) return;
+
+        if (!restored && subpoenaId) {
+          const facilityList = facilities.length ? facilities : await getFacilities();
+          const providerList = await getProviders();
+          if (!active) return;
+
+          if (!facilities.length) {
+            setFacilities(facilityList);
+          }
+
+          const extract = await getUnprocessedSubpoenaById(subpoenaId);
+          if (!active) return;
+
+          if (extract) {
+            let subpoenaFile = null;
+            try {
+              const blob = await fetchUnprocessedSubpoenaPdf(subpoenaId);
+              subpoenaFile = new File(
+                [blob],
+                extract.fileName || "subpoena.pdf",
+                { type: "application/pdf" }
+              );
+            } catch {
+              // Prefill can still proceed without the PDF attachment.
+            }
+
+            const { formUpdates, meta } = buildFormFromExtract(
+              extract,
+              { facilityList, providerList },
+              subpoenaFile
+            );
+
+            await applyExtractFormUpdates(formUpdates, meta, subpoenaFile, {
+              reset: true,
+            });
+            setExpandedPanels((prev) => ({
+              ...prev,
+              subpoena: Boolean(subpoenaFile),
+              order: true,
+            }));
+          } else {
+            setLoadError("Could not restore your in-progress order.");
+          }
+        } else if (!restored) {
+          setLoadError(
+            "Could not restore your in-progress order. Please re-open it from the orders list or re-upload the subpoena."
+          );
+        }
+
+        clearFacilityRefreshParam();
+        setTouched({});
+        setSubmitAttempted(false);
+        setFileErrors({});
+      } catch (err) {
+        if (active) {
+          setLoadError(err.message || "Failed to restore order after facility update");
+        }
+      } finally {
+        if (active) setLoadingOrder(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    isEditMode,
+    facilityRefresh,
+    restoreOrderDraftAfterFacilityReturn,
+    clearFacilityRefreshParam,
+    subpoenaId,
+    facilities,
+  ]);
 
   useEffect(() => {
     if (!isEditMode) return;
@@ -500,7 +845,7 @@ function NewOrderPageContent() {
   }, [isEditMode, orderId, formData.subpoenaStoragePath, formData.subpoenaFile, formData.subpoenaUrl]);
 
   useEffect(() => {
-    if (isEditMode || !subpoenaId) {
+    if (isEditMode || !subpoenaId || facilityRefresh === "1") {
       return undefined;
     }
 
@@ -579,9 +924,37 @@ function NewOrderPageContent() {
     let nextUpdates = { ...formUpdates };
     let nextMeta = { ...meta };
 
-    if (meta.pendingFacilityName && !formUpdates.facility) {
+    if (formUpdates.facility) {
+      setFacilityProfileIncomplete(Boolean(meta.facilityProfileIncomplete));
+      setFacilityCreated(Boolean(meta.facilityCreated));
+      markCommittedFacility(
+        formUpdates.facility,
+        formUpdates.facilityName || meta.facilityName || ""
+      );
+
+      if (formUpdates.facility) {
+        setFacilities((prev) => {
+          if (prev.some((item) => String(item.id) === String(formUpdates.facility))) {
+            return prev;
+          }
+          return [
+            {
+              id: Number(formUpdates.facility),
+              facility: formUpdates.facilityName || meta.facilityName || "",
+            },
+            ...prev,
+          ];
+        });
+      }
+    }
+
+    const unresolvedFacilityName =
+      !formUpdates.facility &&
+      `${meta.pendingFacilityName || formUpdates.facilityName || ""}`.trim();
+
+    if (unresolvedFacilityName) {
       const resolved = await resolvePendingFacility({
-        facilityName: meta.pendingFacilityName,
+        facilityName: unresolvedFacilityName,
       });
       nextUpdates = {
         ...nextUpdates,
@@ -614,12 +987,74 @@ function NewOrderPageContent() {
       }
     }
 
+    const facilityIdForDoctor = `${nextUpdates.facility || formUpdates.facility || ""}`.trim();
+    if (facilityIdForDoctor) {
+      if (nextMeta.missingDefaultDoctor) {
+        nextUpdates = {
+          ...nextUpdates,
+          specificDoctor: "",
+          specificDoctorId: "",
+          specificDoctorIsDefault: false,
+        };
+        setMissingDefaultDoctor(true);
+        setDoctorCreated(Boolean(nextMeta.doctorCreated));
+      } else {
+        const doctorName =
+          nextUpdates.specificDoctor ||
+          formUpdates.specificDoctor ||
+          nextMeta.extractedDoctorName ||
+          "";
+
+        try {
+          const doctorResolved = await resolvePendingDoctorForOrder({
+            facilityId: facilityIdForDoctor,
+            doctorId:
+              nextUpdates.specificDoctorId ||
+              formUpdates.specificDoctorId ||
+              "",
+            doctorName,
+            extractedDoctorName: nextMeta.extractedDoctorName,
+            priorDoctorCreated: Boolean(nextMeta.doctorCreated),
+          });
+          nextUpdates = {
+            ...nextUpdates,
+            specificDoctor: doctorResolved.specificDoctor,
+            specificDoctorId: doctorResolved.specificDoctorId,
+            specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
+          };
+          setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
+          setDoctorCreated(doctorResolved.doctorCreated);
+        } catch {
+          setMissingDefaultDoctor(false);
+          setDoctorCreated(false);
+        }
+      }
+    }
+
     setFormData((prev) => ({
       ...(reset ? initialFormData : prev),
       ...nextUpdates,
       ...(subpoenaFile ? { subpoenaFile } : {}),
     }));
     setExtractionMeta((prev) => ({ ...prev, ...nextMeta }));
+
+    const draftFacilityId = `${nextUpdates.facility || formUpdates.facility || ""}`.trim();
+    if (draftFacilityId) {
+      rememberDraftOrderSession(draftScope, {
+        facilityId: draftFacilityId,
+        facilityName:
+          nextUpdates.facilityName ||
+          formUpdates.facilityName ||
+          nextMeta.facilityName ||
+          "",
+        formSnapshot: serializeFormForDraft({
+          ...(reset ? initialFormData : formDataRef.current),
+          ...nextUpdates,
+          ...(subpoenaFile ? { subpoenaExtractId: nextUpdates.subpoenaExtractId } : {}),
+        }),
+        extractionMeta: { ...extractionMetaRef.current, ...nextMeta },
+      });
+    }
   };
 
   const errors = useMemo(
@@ -634,13 +1069,63 @@ function NewOrderPageContent() {
     (field) => errors[field]
   );
 
-  const syncFacilityFromForm = async (data) => {
+  const syncDoctorFromForm = async (data, options = {}) => {
+    const facilityId = `${data.facility || ""}`.trim();
+
+    if (!facilityId) {
+      setMissingDefaultDoctor(false);
+      setDoctorCreated(false);
+      return null;
+    }
+
+    const doctorName = `${options.doctorName ?? data.specificDoctor ?? ""}`.trim();
+    const extractedDoctorName = `${options.extractedDoctorName ?? ""}`.trim();
+    const nameToResolve = options.resetForFacilityChange
+      ? ""
+      : doctorName || extractedDoctorName;
+
+    setResolvingDoctor(true);
+
+    try {
+      const resolved = await resolvePendingDoctorForOrder({
+        facilityId,
+        doctorId: options.resetForFacilityChange ? "" : data.specificDoctorId || "",
+        doctorName: nameToResolve,
+        extractedDoctorName: options.resetForFacilityChange
+          ? ""
+          : extractedDoctorName || extractionMetaRef.current?.extractedDoctorName,
+        priorDoctorCreated: options.resetForFacilityChange
+          ? false
+          : Boolean(extractionMetaRef.current?.doctorCreated),
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        specificDoctor: resolved.specificDoctor,
+        specificDoctorId: resolved.specificDoctorId,
+        specificDoctorIsDefault: resolved.specificDoctorIsDefault,
+      }));
+      setMissingDefaultDoctor(resolved.missingDefaultDoctor);
+      setDoctorCreated(
+        options.resetForFacilityChange ? false : resolved.doctorCreated
+      );
+
+      return resolved;
+    } finally {
+      setResolvingDoctor(false);
+    }
+  };
+
+  const syncFacilityFromForm = async (data, options = {}) => {
     const facilityName = `${data.facilityName || ""}`.trim();
     const facilityId = `${data.facility || ""}`.trim();
+    const previousFacilityId = `${formDataRef.current.facility || ""}`.trim();
 
     if (!facilityName && !facilityId) {
       setFacilityProfileIncomplete(false);
       setFacilityCreated(false);
+      setMissingDefaultDoctor(false);
+      setDoctorCreated(false);
       return null;
     }
 
@@ -651,26 +1136,65 @@ function NewOrderPageContent() {
         facilityName,
         facilityId,
       });
+      const newFacilityId = `${resolved.facilityId || ""}`.trim();
+      const subpoenaFacilityName = `${extractionMetaRef.current.facilityName || ""}`.trim();
+      const subpoenaDoctorMismatch =
+        Boolean(subpoenaFacilityName) &&
+        Boolean(resolved.facilityName) &&
+        !isSameFacilityLabel(subpoenaFacilityName, resolved.facilityName) &&
+        Boolean(
+          data.specificDoctor ||
+            data.specificDoctorId ||
+            extractionMetaRef.current.extractedDoctorName
+        );
+      const facilityChanged =
+        Boolean(options.facilityChanged) ||
+        Boolean(
+          previousFacilityId &&
+            newFacilityId &&
+            previousFacilityId !== newFacilityId
+        ) ||
+        subpoenaDoctorMismatch;
 
       setFormData((prev) => ({
         ...prev,
         facility: resolved.facilityId,
         facilityName: resolved.facilityName,
+        ...(facilityChanged
+          ? {
+              specificDoctor: "",
+              specificDoctorId: "",
+              specificDoctorIsDefault: false,
+            }
+          : {}),
       }));
       markCommittedFacility(resolved.facilityId, resolved.facilityName);
       setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
       setFacilityCreated(resolved.facilityCreated);
-      setExtractionMeta((prev) => ({
-        ...prev,
-        facilityName: resolved.facilityName,
-        facilityCreated: resolved.facilityCreated,
-      }));
 
-      if (orderId && isEditMode) {
-        rememberDraftOrderFacility(orderId, {
-          facilityId: resolved.facilityId,
+      const keepSubpoenaDoctorContext =
+        extractionMetaRef.current.facilityName &&
+        isSameFacilityLabel(
+          resolved.facilityName,
+          extractionMetaRef.current.facilityName
+        );
+
+      if (facilityChanged) {
+        setExtractionMeta((prev) => ({
+          ...prev,
           facilityName: resolved.facilityName,
-        });
+          facilityCreated: resolved.facilityCreated,
+          ...(keepSubpoenaDoctorContext
+            ? {}
+            : { extractedDoctorName: "", doctorCreated: false }),
+        }));
+        setDoctorCreated(false);
+      } else {
+        setExtractionMeta((prev) => ({
+          ...prev,
+          facilityName: resolved.facilityName,
+          facilityCreated: resolved.facilityCreated,
+        }));
       }
 
       if (resolved.facilityId) {
@@ -688,7 +1212,47 @@ function NewOrderPageContent() {
         });
       }
 
-      return resolved;
+      const doctorResolved = await syncDoctorFromForm(
+        {
+          ...(facilityChanged
+            ? {
+                specificDoctor: "",
+                specificDoctorId: "",
+                specificDoctorIsDefault: false,
+              }
+            : data),
+          facility: resolved.facilityId,
+          facilityName: resolved.facilityName,
+        },
+        facilityChanged
+          ? { resetForFacilityChange: true }
+          : {
+              extractedDoctorName: extractionMetaRef.current?.extractedDoctorName,
+            }
+      );
+
+      if (resolved.facilityId) {
+        rememberDraftOrderSession(draftScope, {
+          facilityId: resolved.facilityId,
+          facilityName: resolved.facilityName,
+          formSnapshot: serializeFormForDraft({
+            ...formDataRef.current,
+            ...data,
+            facility: resolved.facilityId,
+            facilityName: resolved.facilityName,
+            specificDoctor:
+              doctorResolved?.specificDoctor ?? formDataRef.current.specificDoctor,
+            specificDoctorId:
+              doctorResolved?.specificDoctorId ?? formDataRef.current.specificDoctorId,
+            specificDoctorIsDefault:
+              doctorResolved?.specificDoctorIsDefault ??
+              formDataRef.current.specificDoctorIsDefault,
+          }),
+          extractionMeta: extractionMetaRef.current,
+        });
+      }
+
+      return { ...resolved, doctorResolved };
     } finally {
       setResolvingFacility(false);
     }
@@ -696,33 +1260,61 @@ function NewOrderPageContent() {
 
   const handleFacilityInput = (facilityName) => {
     clearCommittedFacility();
-    if (orderId && isEditMode) {
-      clearDraftOrderFacility(orderId);
-    }
+    clearDraftOrderSession(draftScope);
     setExtractionMeta((prev) => ({
       ...prev,
       facilityName: "",
       facilityCreated: false,
+      extractedDoctorName: "",
+      doctorCreated: false,
     }));
     setFacilityProfileIncomplete(false);
     setFacilityCreated(false);
+    setMissingDefaultDoctor(false);
+    setDoctorCreated(false);
     setFormData((prev) => ({
       ...prev,
       facility: "",
       facilityName,
+      specificDoctor: "",
+      specificDoctorId: "",
+      specificDoctorIsDefault: false,
     }));
   };
 
   const handleFacilitySelect = (facility) => {
-    setFormData((prev) => {
-      const next = {
-        ...prev,
-        facility: String(facility.id),
-        facilityName: facility.facility || facility.facilityName || "",
-      };
-      syncFacilityFromForm(next);
-      return next;
-    });
+    const newFacilityId = String(facility.id);
+    const prevFacilityId = `${formDataRef.current.facility || ""}`.trim();
+    const selectedFacilityName = facility.facility || facility.facilityName || "";
+    const subpoenaFacilityName = `${extractionMetaRef.current.facilityName || ""}`.trim();
+    const subpoenaDoctorMismatch =
+      Boolean(subpoenaFacilityName) &&
+      Boolean(selectedFacilityName) &&
+      !isSameFacilityLabel(subpoenaFacilityName, selectedFacilityName) &&
+      Boolean(
+        formDataRef.current.specificDoctor ||
+          formDataRef.current.specificDoctorId ||
+          extractionMetaRef.current.extractedDoctorName
+      );
+    const facilityChanged =
+      Boolean(prevFacilityId && prevFacilityId !== newFacilityId) ||
+      subpoenaDoctorMismatch;
+
+    const next = {
+      ...formDataRef.current,
+      facility: newFacilityId,
+      facilityName: facility.facility || facility.facilityName || "",
+      ...(facilityChanged
+        ? {
+            specificDoctor: "",
+            specificDoctorId: "",
+            specificDoctorIsDefault: false,
+          }
+        : {}),
+    };
+
+    setFormData(next);
+    syncFacilityFromForm(next, { facilityChanged });
   };
 
   const handleFacilityCommit = (typedName = "") => {
@@ -899,7 +1491,7 @@ function NewOrderPageContent() {
       ...prev,
       [name]: nextValue,
       ...(name === "specificDoctor" && nextValue !== prev.specificDoctor
-        ? { specificDoctorIsDefault: false }
+        ? { specificDoctorIsDefault: false, specificDoctorId: "" }
         : {}),
     }));
 
@@ -1013,10 +1605,25 @@ function NewOrderPageContent() {
       return;
     }
 
+    if (resolvedFacility?.doctorResolved?.missingDefaultDoctor) {
+      setSaveError(
+        "Add a default doctor for this facility before saving this order."
+      );
+      return;
+    }
+
     const syncedFormData = {
       ...formDataRef.current,
       facility: resolvedFacility?.facilityId || "",
       facilityName: resolvedFacility?.facilityName || "",
+      specificDoctor:
+        resolvedFacility?.doctorResolved?.specificDoctor ??
+        formDataRef.current.specificDoctor ??
+        "",
+      specificDoctorIsDefault:
+        resolvedFacility?.doctorResolved?.specificDoctorIsDefault ??
+        formDataRef.current.specificDoctorIsDefault ??
+        false,
     };
 
     const currentErrors = {
@@ -1047,13 +1654,16 @@ function NewOrderPageContent() {
         }
 
         await updateOrder(activeOrderId, syncedFormData);
-        clearDraftOrderFacility(activeOrderId);
+        clearDraftOrderSession(draftScope);
+        draftRestoredRef.current = false;
         router.push("/orders");
         return;
       }
 
       const order = await createOrder(syncedFormData);
       if (order?.id) {
+        clearDraftOrderSession(draftScope);
+        draftRestoredRef.current = false;
         router.push("/orders");
         return;
       }
@@ -1181,6 +1791,7 @@ function NewOrderPageContent() {
               onFacilityBlur={handleFacilityBlur}
               onFacilityCommit={handleFacilityCommit}
               returnToOrderPath={returnToOrderPath}
+              onBeforeFacilityProfileNavigate={persistOrderDraft}
             />
           </CollapsibleOrderPanel>
 
@@ -1200,6 +1811,11 @@ function NewOrderPageContent() {
               onProviderSelect={handleProviderSelect}
               onProviderBlur={handleProviderBlur}
               extractionMeta={extractionMeta}
+              missingDefaultDoctor={missingDefaultDoctor}
+              doctorCreated={doctorCreated}
+              resolvingDoctor={resolvingDoctor}
+              returnToOrderPath={returnToOrderPath}
+              onBeforeFacilityProfileNavigate={persistOrderDraft}
             />
           </CollapsibleOrderPanel>
 
@@ -1226,7 +1842,9 @@ function NewOrderPageContent() {
             hasImmediateRequiredErrors ||
             saving ||
             facilityProfileIncomplete ||
-            resolvingFacility
+            missingDefaultDoctor ||
+            resolvingFacility ||
+            resolvingDoctor
           }
           label={
             saving
@@ -1262,6 +1880,7 @@ function OrderDetailsForm({
   onFacilityBlur,
   onFacilityCommit,
   returnToOrderPath = "",
+  onBeforeFacilityProfileNavigate,
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -1297,6 +1916,7 @@ function OrderDetailsForm({
           facilityProfileIncomplete={facilityProfileIncomplete}
           facilityCreated={facilityCreated}
           returnToOrderPath={returnToOrderPath}
+          onBeforeFacilityProfileNavigate={onBeforeFacilityProfileNavigate}
           hint={facilityHint}
           required
           error={
@@ -1595,6 +2215,11 @@ function ServeInfoForm({
   onProviderSelect,
   onProviderBlur,
   extractionMeta = {},
+  missingDefaultDoctor = false,
+  doctorCreated = false,
+  resolvingDoctor = false,
+  returnToOrderPath = "",
+  onBeforeFacilityProfileNavigate,
 }) {
   return (
     <div className="space-y-5">
@@ -1851,15 +2476,21 @@ function ServeInfoForm({
         name="specificDoctor"
         value={formData.specificDoctor}
         facilityId={formData.facility}
+        facilityName={formData.facilityName}
+        specificDoctorIsDefault={formData.specificDoctorIsDefault}
+        extractedDoctorName={extractionMeta.extractedDoctorName}
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Doctor name"
-        error={getError("specificDoctor")}
-        helperText={
-          formData.specificDoctorIsDefault
-            ? "The facility default doctor was selected automatically because no doctor was identified in the subpoena."
-            : ""
+        error={
+          getError("specificDoctor") ||
+          (missingDefaultDoctor ? "Add a default doctor to continue" : "")
         }
+        missingDefaultDoctor={missingDefaultDoctor}
+        doctorCreated={doctorCreated}
+        resolvingDoctor={resolvingDoctor}
+        returnToOrderPath={returnToOrderPath}
+        onBeforeFacilityProfileNavigate={onBeforeFacilityProfileNavigate}
       />
 
       <DoctorAddressSearchField
