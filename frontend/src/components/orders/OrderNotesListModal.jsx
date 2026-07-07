@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
-import { getOrderNotes, updateOrderNote } from "@/lib/orders/orderApi";
+import { getOrderNotesPaginated, updateOrderNote } from "@/lib/orders/orderApi";
 import {
   buildCallbackLine,
   filterNotesByDate,
@@ -23,12 +23,16 @@ const COLLAPSED_NOTE_ROW_HEIGHT_PX = 84;
 const NOTES_LIST_MAX_HEIGHT =
   VISIBLE_NOTE_COUNT * COLLAPSED_NOTE_ROW_HEIGHT_PX +
   (VISIBLE_NOTE_COUNT - 1) * 8;
+const NOTES_PAGE_SIZE = 10;
 
 export default function OrderNotesListModal({ isOpen, order, onClose, onSaved }) {
   const mounted = useIsClient();
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [hasMoreNotes, setHasMoreNotes] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
   const [expandedNoteId, setExpandedNoteId] = useState(null);
   const [noteText, setNoteText] = useState("");
   const [callbackDate, setCallbackDate] = useState("");
@@ -80,10 +84,23 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
     setMarkCalledPending(false);
   };
 
-  const loadNotes = async () => {
-    const data = await getOrderNotes(orderId, { includeCalled: true });
-    return data.map(toHistoryItem);
-  };
+  const loadNotesPage = useCallback(
+    async ({ cursor = null, append = false } = {}) => {
+      const result = await getOrderNotesPaginated(orderId, {
+        includeCalled: true,
+        cursor,
+        pageSize: NOTES_PAGE_SIZE,
+        fromDate: appliedDateFilters.from,
+        toDate: appliedDateFilters.to,
+      });
+      const mapped = (result.notes || []).map(toHistoryItem);
+      setNotes((prev) => (append ? [...prev, ...mapped] : mapped));
+      setHasMoreNotes(Boolean(result.pagination?.hasMore));
+      setNextCursor(result.pagination?.nextCursor ?? null);
+      return mapped;
+    },
+    [orderId, appliedDateFilters.from, appliedDateFilters.to]
+  );
 
   useEffect(() => {
     if (!isOpen || !orderId) return undefined;
@@ -95,10 +112,10 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
     setLoadError("");
     setLoading(true);
 
-    loadNotes()
-      .then((data) => {
-        if (active) setNotes(data);
-      })
+    setHasMoreNotes(false);
+    setNextCursor(null);
+    loadNotesPage()
+      .then(() => {})
       .catch((err) => {
         if (active) {
           setNotes([]);
@@ -112,7 +129,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
     return () => {
       active = false;
     };
-  }, [isOpen, orderId]);
+  }, [isOpen, orderId, loadNotesPage]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -163,6 +180,28 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
     clearError("noteText");
   };
 
+  const handleLoadMore = async () => {
+    if (!hasMoreNotes || !nextCursor || loadingMore || loading) return;
+    setLoadingMore(true);
+    setLoadError("");
+    try {
+      await loadNotesPage({ cursor: nextCursor, append: true });
+    } catch (err) {
+      setLoadError(err.message || "Failed to load more notes");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleListScroll = (event) => {
+    const element = event.currentTarget;
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (distanceFromBottom <= 80) {
+      handleLoadMore();
+    }
+  };
+
   const handleSave = async () => {
     if (!expandedNoteId || isReadOnly) return;
 
@@ -188,8 +227,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
         markCalled: markCalledPending,
       });
 
-      const refreshedNotes = await loadNotes();
-      setNotes(refreshedNotes);
+      const refreshedNotes = await loadNotesPage();
 
       const savedNote = refreshedNotes.find(
         (item) => Number(item.id) === Number(savedNoteId)
@@ -274,8 +312,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
 
           {hasActiveDateFilters && (
             <p className="mt-2 text-[10px] text-[#64748B]">
-              Showing {filteredNotes.length} of {notes.length} note
-              {notes.length === 1 ? "" : "s"}
+              Date filters applied
             </p>
           )}
         </div>
@@ -308,6 +345,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
               <div
                 className="overflow-y-auto overscroll-y-contain pr-1"
                 style={{ maxHeight: NOTES_LIST_MAX_HEIGHT }}
+                onScroll={handleListScroll}
               >
                 <div className="space-y-2">
                   {filteredNotes.map((item) => {
@@ -404,6 +442,11 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
                 );
                   })}
                 </div>
+                {loadingMore ? (
+                  <p className="py-3 text-center text-[10px] text-[#64748B]">
+                    Loading more notes...
+                  </p>
+                ) : null}
               </div>
             </>
           )}

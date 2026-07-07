@@ -35,18 +35,33 @@ const employeeFilters = [
   "Processing",
 ];
 
+function getTodayDateInput() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function ActivityLogPage() {
+  const todayDate = getTodayDateInput();
   const [user, setUser] = useState(() => getStoredUser());
   const ownLogsOnly = usesOwnActivityLogsOnly(user);
   const filters = ownLogsOnly ? employeeFilters : adminFilters;
   const [activityLogs, setActivityLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState("All Modules");
-  const [dateFilters, setDateFilters] = useState({
-    fromDate: "",
-    toDate: "",
+  const [draftActiveFilter, setDraftActiveFilter] = useState("All Modules");
+  const [appliedActiveFilter, setAppliedActiveFilter] = useState("All Modules");
+  const [draftDateFilters, setDraftDateFilters] = useState({
+    fromDate: todayDate,
+    toDate: todayDate,
   });
-  const [performerSearch, setPerformerSearch] = useState("");
+  const [appliedDateFilters, setAppliedDateFilters] = useState({
+    fromDate: todayDate,
+    toDate: todayDate,
+  });
+  const [performerSearchDraft, setPerformerSearchDraft] = useState("");
+  const [appliedPerformerSearch, setAppliedPerformerSearch] = useState("");
   const [milestoneOpen, setMilestoneOpen] = useState(false);
   const showMyMilestone = isEmployee(user);
   const [currentPage, setCurrentPage] = useState(1);
@@ -97,17 +112,20 @@ export default function ActivityLogPage() {
   }, [ownLogsOnly, user?.id, user?.role]);
 
   const filteredLogs = useMemo(() => {
-    const performerQuery = performerSearch.trim().toLowerCase();
+    const performerQuery = appliedPerformerSearch.trim().toLowerCase();
 
     return activityLogs.filter((log) => {
       const matchesFilter =
-        activeFilter === "All Modules" || log.module === activeFilter;
+        appliedActiveFilter === "All Modules" ||
+        log.module === appliedActiveFilter;
 
       const logDate = parseDate(log.date);
-      const fromDate = dateFilters.fromDate
-        ? parseDate(dateFilters.fromDate)
+      const fromDate = appliedDateFilters.fromDate
+        ? parseDate(appliedDateFilters.fromDate)
         : null;
-      const toDate = dateFilters.toDate ? parseDate(dateFilters.toDate) : null;
+      const toDate = appliedDateFilters.toDate
+        ? parseDate(appliedDateFilters.toDate)
+        : null;
 
       const matchesFromDate = fromDate ? logDate >= fromDate : true;
       const matchesToDate = toDate ? logDate <= toDate : true;
@@ -122,11 +140,21 @@ export default function ActivityLogPage() {
         matchesFilter && matchesFromDate && matchesToDate && matchesPerformer
       );
     });
-  }, [activityLogs, activeFilter, dateFilters, performerSearch]);
+  }, [
+    activityLogs,
+    appliedActiveFilter,
+    appliedDateFilters,
+    appliedPerformerSearch,
+  ]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeFilter, dateFilters.fromDate, dateFilters.toDate, performerSearch]);
+  }, [
+    appliedActiveFilter,
+    appliedDateFilters.fromDate,
+    appliedDateFilters.toDate,
+    appliedPerformerSearch,
+  ]);
 
   const pagination = useMemo(
     () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
@@ -136,18 +164,33 @@ export default function ActivityLogPage() {
   const handleDateFilterChange = (e) => {
     const { name, value } = e.target;
 
-    setDateFilters((prev) => ({
+    setDraftDateFilters((prev) => ({
       ...prev,
       [name]: value,
     }));
   };
 
-  const handleResetDateFilters = () => {
-    setDateFilters({
-      fromDate: "",
-      toDate: "",
-    });
-    setPerformerSearch("");
+  const handleApplyFilters = () => {
+    setAppliedDateFilters({ ...draftDateFilters });
+    setAppliedActiveFilter(draftActiveFilter);
+  };
+
+  const handleSearch = () => {
+    setAppliedPerformerSearch(performerSearchDraft.trim());
+  };
+
+  const handleResetFilters = () => {
+    const defaultDates = {
+      fromDate: todayDate,
+      toDate: todayDate,
+    };
+
+    setDraftDateFilters(defaultDates);
+    setAppliedDateFilters(defaultDates);
+    setDraftActiveFilter("All Modules");
+    setAppliedActiveFilter("All Modules");
+    setPerformerSearchDraft("");
+    setAppliedPerformerSearch("");
   };
 
   return (
@@ -187,25 +230,33 @@ export default function ActivityLogPage() {
           </div>
         </div>
 
-        <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[430px_minmax(220px,280px)_auto_1fr]">
-          <div className="grid w-full max-w-[430px] grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto]">
+        <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[minmax(430px,520px)_minmax(220px,320px)_auto_1fr]">
+          <div className="grid w-full max-w-[520px] grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto_auto_auto]">
             <DateFilter
               label="From"
               name="fromDate"
-              value={dateFilters.fromDate}
+              value={draftDateFilters.fromDate}
               onChange={handleDateFilterChange}
             />
 
             <DateFilter
               label="To"
               name="toDate"
-              value={dateFilters.toDate}
+              value={draftDateFilters.toDate}
               onChange={handleDateFilterChange}
             />
 
             <button
               type="button"
-              onClick={handleResetDateFilters}
+              onClick={handleApplyFilters}
+              className="h-[36px] self-end rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+            >
+              Apply Filters
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetFilters}
               className="h-[36px] self-end rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
             >
               Reset
@@ -214,8 +265,9 @@ export default function ActivityLogPage() {
 
           {!ownLogsOnly && (
             <PerformerSearch
-              value={performerSearch}
-              onChange={setPerformerSearch}
+              value={performerSearchDraft}
+              onChange={setPerformerSearchDraft}
+              onSearch={handleSearch}
             />
           )}
 
@@ -229,9 +281,9 @@ export default function ActivityLogPage() {
                 <button
                   key={filter}
                   type="button"
-                  onClick={() => setActiveFilter(filter)}
+                  onClick={() => setDraftActiveFilter(filter)}
                   className={`h-[28px] shrink-0 rounded-[5px] px-4 text-[11px] font-semibold transition ${
-                    activeFilter === filter
+                    draftActiveFilter === filter
                       ? "bg-[#0097B2] text-white shadow-sm"
                       : "text-[#475569] hover:bg-[#F8FAFC] hover:text-[#111827]"
                   }`}
@@ -296,31 +348,40 @@ function DateFilter({ label, name, value, onChange }) {
   );
 }
 
-function PerformerSearch({ value, onChange }) {
+function PerformerSearch({ value, onChange, onSearch }) {
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onSearch?.();
+    }
+  };
+
   return (
-    <div className="w-full max-w-[280px]">
+    <div className="w-full max-w-[320px]">
       <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
         Performed By
       </label>
 
-      <div className="flex h-[36px] items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-white px-3">
-        <SearchIcon />
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Search employee name"
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
-        />
-        {value ? (
-          <button
-            type="button"
-            onClick={() => onChange("")}
-            className="shrink-0 text-[11px] font-semibold text-[#64748B] hover:text-[#334155]"
-          >
-            Clear
-          </button>
-        ) : null}
+      <div className="flex gap-2">
+        <div className="flex h-[36px] min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-white px-3">
+          <SearchIcon />
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Search employee name"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onSearch}
+          className="h-[36px] shrink-0 rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+        >
+          Search
+        </button>
       </div>
     </div>
   );

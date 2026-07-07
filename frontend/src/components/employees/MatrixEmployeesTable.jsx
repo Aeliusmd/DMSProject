@@ -329,11 +329,11 @@ export default function MatrixEmployeesTable({
                       ) : isAdminRole(employee.role) ? (
                         <span className="text-[11px] text-[#94A3B8]">—</span>
                       ) : (
-                        <div className="flex flex-col items-center gap-2">
+                        <div className="mx-auto flex w-[118px] flex-col gap-2">
                           <button
                             type="button"
                             onClick={() => openSuspendModal(employee)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                            className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
                             style={{
                               border: "1px solid #FCD34D",
                               backgroundColor: "#FFFBEB",
@@ -347,7 +347,7 @@ export default function MatrixEmployeesTable({
                           <button
                             type="button"
                             onClick={() => openTerminateModal(employee)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
+                            className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
                             style={{
                               border: "1px solid #FCD34D",
                               backgroundColor: "#FFFBEB",
@@ -361,7 +361,7 @@ export default function MatrixEmployeesTable({
                           <button
                             type="button"
                             onClick={() => openDeleteModal(employee)}
-                            className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                            className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 transition hover:opacity-85"
                           >
                             <TrashIcon />
                             Delete

@@ -124,135 +124,200 @@ const ORDER_DETAIL_SELECT = `
   LEFT JOIN facilities f ON f.id = o.facility_id
   LEFT JOIN providers p ON p.id = o.provider_id`;
 
+function buildFindAllWhere(filters = {}) {
+  const conditions = [];
+  const params = {};
+
+  if (filters.readyFilter) {
+    conditions.push(`(
+      o.status IN ('Ready', 'Ready to Pickup')
+      OR (
+        o.status = 'Active'
+        AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL_ALIAS}) >= :rushReadyMinDays
+      )
+    )`);
+    params.rushReadyMinDays = RUSH_READY_MIN_DAYS;
+  } else if (filters.status) {
+    conditions.push("o.status = :status");
+    params.status = filters.status;
+  } else {
+    conditions.push(NON_DELETED_ORDER_ALIAS);
+  }
+
+  if (filters.facilityId) {
+    conditions.push("o.facility_id = :facilityId");
+    params.facilityId = filters.facilityId;
+  }
+
+  if (filters.company) {
+    conditions.push(`(
+      LOWER(TRIM(o.serve_company_name)) = LOWER(TRIM(:company))
+      OR LOWER(TRIM(p.company_name)) = LOWER(TRIM(:company))
+    )`);
+    params.company = filters.company;
+  }
+
+  if (filters.year) {
+    conditions.push(
+      "YEAR(COALESCE(o.subpoena_date, o.created_at)) = :year"
+    );
+    params.year = Number(filters.year);
+  }
+
+  if (filters.periodFrom) {
+    conditions.push("DATE(o.created_at) >= :periodFrom");
+    params.periodFrom = filters.periodFrom;
+  }
+
+  if (filters.createdFrom) {
+    conditions.push("DATE(o.created_at) >= :createdFrom");
+    params.createdFrom = filters.createdFrom;
+  }
+
+  if (filters.createdTo) {
+    conditions.push("DATE(o.created_at) <= :createdTo");
+    params.createdTo = filters.createdTo;
+  }
+
+  if (filters.search) {
+    conditions.push(`(
+      o.order_number LIKE :search
+      OR o.rec_number LIKE :search
+      OR o.case_number LIKE :search
+      OR o.order_ref LIKE :search
+      OR o.court LIKE :search
+      OR o.applicant_first_name LIKE :search
+      OR o.applicant_middle_name LIKE :search
+      OR o.applicant_last_name LIKE :search
+      OR o.applicant_aka LIKE :search
+      OR o.defendant LIKE :search
+      OR o.serve_company_name LIKE :search
+      OR o.serve_address LIKE :search
+      OR o.serve_city LIKE :search
+      OR o.serve_state LIKE :search
+      OR o.serve_zip LIKE :search
+      OR o.serve_phone LIKE :search
+      OR o.serve_fax LIKE :search
+      OR o.serve_email LIKE :search
+      OR o.contact1_name LIKE :search
+      OR o.contact1_title LIKE :search
+      OR o.contact1_phone LIKE :search
+      OR o.contact1_fax LIKE :search
+      OR o.contact1_email LIKE :search
+      OR o.contact2_name LIKE :search
+      OR o.contact2_title LIKE :search
+      OR o.contact2_phone LIKE :search
+      OR o.contact2_fax LIKE :search
+      OR o.contact2_email LIKE :search
+      OR o.injury_type LIKE :search
+      OR o.cancel_reason LIKE :search
+      OR o.specific_doctor LIKE :search
+      OR o.specific_record LIKE :search
+      OR CAST(o.ssn_last_four AS CHAR) LIKE :search
+      OR CAST(o.status AS CHAR) LIKE :search
+      OR DATE_FORMAT(o.dob, '%m/%d/%Y') LIKE :search
+      OR DATE_FORMAT(o.dob, '%Y-%m-%d') LIKE :search
+      OR DATE_FORMAT(o.injury_date, '%m/%d/%Y') LIKE :search
+      OR DATE_FORMAT(o.injury_date, '%Y-%m-%d') LIKE :search
+      OR DATE_FORMAT(o.injury_date_begin, '%m/%d/%Y') LIKE :search
+      OR DATE_FORMAT(o.injury_date_end, '%m/%d/%Y') LIKE :search
+      OR f.facility_name LIKE :search
+      OR f.address LIKE :search
+      OR f.city LIKE :search
+      OR f.state LIKE :search
+      OR f.zip_code LIKE :search
+      OR p.company_name LIKE :search
+      OR CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name) LIKE :search
+    )`);
+    params.search = `%${filters.search}%`;
+  }
+
+  return {
+    whereClause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    params,
+  };
+}
+
 class Order {
   static async findAll(filters = {}) {
     const pool = getPool();
-
-    const conditions = [];
-    const params = {};
-
-    if (filters.readyFilter) {
-      conditions.push(`(
-        o.status IN ('Ready', 'Ready to Pickup')
-        OR (
-          o.status = 'Active'
-          AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL_ALIAS}) >= :rushReadyMinDays
-        )
-      )`);
-      params.rushReadyMinDays = RUSH_READY_MIN_DAYS;
-    } else if (filters.status) {
-      conditions.push("o.status = :status");
-      params.status = filters.status;
-    } else {
-      conditions.push(NON_DELETED_ORDER_ALIAS);
-    }
-
-    if (filters.facilityId) {
-      conditions.push("o.facility_id = :facilityId");
-      params.facilityId = filters.facilityId;
-    }
-
-    if (filters.company) {
-      conditions.push(`(
-        LOWER(TRIM(o.serve_company_name)) = LOWER(TRIM(:company))
-        OR LOWER(TRIM(p.company_name)) = LOWER(TRIM(:company))
-      )`);
-      params.company = filters.company;
-    }
-
-    if (filters.year) {
-      conditions.push(
-        "YEAR(COALESCE(o.subpoena_date, o.created_at)) = :year"
-      );
-      params.year = Number(filters.year);
-    }
-
-    if (filters.periodFrom) {
-      conditions.push("DATE(o.created_at) >= :periodFrom");
-      params.periodFrom = filters.periodFrom;
-    }
-
-    if (filters.createdFrom) {
-      conditions.push("DATE(o.created_at) >= :createdFrom");
-      params.createdFrom = filters.createdFrom;
-    }
-
-    if (filters.createdTo) {
-      conditions.push("DATE(o.created_at) <= :createdTo");
-      params.createdTo = filters.createdTo;
-    }
-
-    if (filters.search) {
-      conditions.push(`(
-        o.order_number LIKE :search
-        OR o.rec_number LIKE :search
-        OR o.case_number LIKE :search
-        OR o.order_ref LIKE :search
-        OR o.court LIKE :search
-        OR o.applicant_first_name LIKE :search
-        OR o.applicant_middle_name LIKE :search
-        OR o.applicant_last_name LIKE :search
-        OR o.applicant_aka LIKE :search
-        OR o.defendant LIKE :search
-        OR o.serve_company_name LIKE :search
-        OR o.serve_address LIKE :search
-        OR o.serve_city LIKE :search
-        OR o.serve_state LIKE :search
-        OR o.serve_zip LIKE :search
-        OR o.serve_phone LIKE :search
-        OR o.serve_fax LIKE :search
-        OR o.serve_email LIKE :search
-        OR o.contact1_name LIKE :search
-        OR o.contact1_title LIKE :search
-        OR o.contact1_phone LIKE :search
-        OR o.contact1_fax LIKE :search
-        OR o.contact1_email LIKE :search
-        OR o.contact2_name LIKE :search
-        OR o.contact2_title LIKE :search
-        OR o.contact2_phone LIKE :search
-        OR o.contact2_fax LIKE :search
-        OR o.contact2_email LIKE :search
-        OR o.injury_type LIKE :search
-        OR o.cancel_reason LIKE :search
-        OR o.specific_doctor LIKE :search
-        OR o.specific_record LIKE :search
-        OR CAST(o.ssn_last_four AS CHAR) LIKE :search
-        OR CAST(o.status AS CHAR) LIKE :search
-        OR DATE_FORMAT(o.dob, '%m/%d/%Y') LIKE :search
-        OR DATE_FORMAT(o.dob, '%Y-%m-%d') LIKE :search
-        OR DATE_FORMAT(o.injury_date, '%m/%d/%Y') LIKE :search
-        OR DATE_FORMAT(o.injury_date, '%Y-%m-%d') LIKE :search
-        OR DATE_FORMAT(o.injury_date_begin, '%m/%d/%Y') LIKE :search
-        OR DATE_FORMAT(o.injury_date_end, '%m/%d/%Y') LIKE :search
-        OR f.facility_name LIKE :search
-        OR f.address LIKE :search
-        OR f.city LIKE :search
-        OR f.state LIKE :search
-        OR f.zip_code LIKE :search
-        OR p.company_name LIKE :search
-        OR CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name) LIKE :search
-      )`);
-      params.search = `%${filters.search}%`;
-    }
-
-    const whereClause = conditions.length
-      ? `WHERE ${conditions.join(" AND ")}`
-      : "";
+    const { whereClause, params } = buildFindAllWhere(filters);
 
     const limit =
       filters.limit && Number(filters.limit) > 0
         ? Math.min(Number(filters.limit), 500)
         : null;
+    const offset =
+      filters.offset && Number(filters.offset) >= 0
+        ? Number(filters.offset)
+        : null;
+    const limitClause = limit
+      ? offset !== null
+        ? `LIMIT ${offset}, ${limit}`
+        : `LIMIT ${limit}`
+      : "";
 
     const [rows] = await pool.execute(
       `${ORDER_DETAIL_SELECT}
        ${whereClause}
        ORDER BY o.id DESC
-       ${limit ? `LIMIT ${limit}` : ""}`,
+       ${limitClause}`,
       params
     );
 
     return rows;
+  }
+
+  static async findAllKeyset(filters = {}) {
+    const pool = getPool();
+    const { whereClause, params } = buildFindAllWhere(filters);
+    const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 1), 100);
+    const queryLimit = pageSize + 1;
+    const cursorId =
+      Number(filters.cursorId) > 0 ? Number(filters.cursorId) : null;
+    const cursorCondition = cursorId ? "o.id < :cursorId" : "";
+    if (cursorId) {
+      params.cursorId = cursorId;
+    }
+
+    const keysetWhereClause = cursorCondition
+      ? whereClause
+        ? `${whereClause} AND ${cursorCondition}`
+        : `WHERE ${cursorCondition}`
+      : whereClause;
+
+    const [rows] = await pool.execute(
+      `${ORDER_DETAIL_SELECT}
+       ${keysetWhereClause}
+       ORDER BY o.id DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > pageSize;
+    const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
+
+    return {
+      rows: pageRows,
+      pageSize,
+      hasMore,
+      nextCursor,
+    };
+  }
+
+  static async countAll(filters = {}) {
+    const pool = getPool();
+    const { whereClause, params } = buildFindAllWhere(filters);
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) AS total
+       FROM orders o
+       LEFT JOIN facilities f ON f.id = o.facility_id
+       LEFT JOIN providers p ON p.id = o.provider_id
+       ${whereClause}`,
+      params
+    );
+    return Number(rows[0]?.total) || 0;
   }
 
   static async findDistinctCompanyNames() {
@@ -710,6 +775,64 @@ class Order {
     return rows;
   }
 
+  static async findNotesByOrderIdKeyset(
+    orderId,
+    {
+      pendingOnly = false,
+      cursorId = null,
+      limit = 10,
+      fromDate = null,
+      toDate = null,
+    } = {}
+  ) {
+    const pool = getPool();
+    const conditions = ["order_id = :orderId"];
+    const params = { orderId };
+
+    if (pendingOnly) {
+      conditions.push("is_called = 0");
+    }
+
+    if (cursorId && Number(cursorId) > 0) {
+      conditions.push("id < :cursorId");
+      params.cursorId = Number(cursorId);
+    }
+
+    if (fromDate) {
+      conditions.push("DATE(note_date) >= :fromDate");
+      params.fromDate = fromDate;
+    }
+
+    if (toDate) {
+      conditions.push("DATE(note_date) <= :toDate");
+      params.toDate = toDate;
+    }
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+    const queryLimit = safeLimit + 1;
+
+    const [rows] = await pool.execute(
+      `SELECT id, order_id, note_date, created_by, author_name, note,
+              callback_date, attachment_path, is_called
+       FROM order_notes
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY id DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > safeLimit;
+    const pageRows = hasMore ? rows.slice(0, safeLimit) : rows;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
+
+    return {
+      rows: pageRows,
+      pageSize: safeLimit,
+      hasMore,
+      nextCursor,
+    };
+  }
+
   static async findReminders({ createdBy = null, limit = 500 } = {}) {
     const pool = getPool();
     const conditions = ["n.callback_date IS NOT NULL"];
@@ -880,6 +1003,146 @@ class Order {
     );
 
     return rows;
+  }
+
+  static async findMergedActivityLogsKeyset(
+    orderId,
+    {
+      orderNumber = null,
+      cursorSortKey = null,
+      pageSize = 10,
+      search = null,
+    } = {}
+  ) {
+    const pool = getPool();
+    const safeLimit = Math.min(Math.max(Number(pageSize) || 10, 1), 100);
+    const queryLimit = safeLimit + 1;
+    const params = { orderId };
+    const trimmedSearch = `${search || ""}`.trim();
+    const orderSearchClause = trimmedSearch
+      ? `AND (
+          oal.note LIKE :search
+          OR oal.author_name LIKE :search
+        )`
+      : "";
+    const globalSearchClause = trimmedSearch
+      ? `AND (
+          al.details LIKE :search
+          OR al.performer_name LIKE :search
+          OR al.action LIKE :search
+          OR al.module LIKE :search
+        )`
+      : "";
+
+    if (trimmedSearch) {
+      params.search = `%${trimmedSearch}%`;
+    }
+
+    const globalConditions = ["al.details LIKE :orderTag"];
+    params.orderTag = `%order_id:${Number(orderId)}%`;
+
+    if (orderNumber) {
+      globalConditions.push(
+        "(al.module = 'Orders' AND (al.details LIKE :orderNumberTag OR al.details LIKE :orderLabelTag))"
+      );
+      params.orderNumberTag = `%${orderNumber}%`;
+      params.orderLabelTag = `%order ${orderNumber}%`;
+    }
+
+    const cursorClause =
+      cursorSortKey && Number(cursorSortKey) > 0
+        ? "AND merged.sort_key < :cursorSortKey"
+        : "";
+    if (cursorSortKey && Number(cursorSortKey) > 0) {
+      params.cursorSortKey = Number(cursorSortKey);
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT merged.*
+       FROM (
+         SELECT
+           (UNIX_TIMESTAMP(oal.activity_date) * 1000000000 + oal.id) AS sort_key,
+           'order' AS log_source,
+           oal.id,
+           oal.order_id,
+           oal.activity_date,
+           oal.performed_by,
+           oal.author_name,
+           oal.callback_date,
+           oal.note,
+           oal.attachment_path,
+           NULL AS log_date,
+           NULL AS log_time,
+           NULL AS action,
+           NULL AS module,
+           NULL AS company_name,
+           NULL AS facility_id,
+           NULL AS performer_name,
+           NULL AS performer_initials,
+           NULL AS details,
+           oal.activity_date AS created_at
+         FROM order_activity_logs oal
+         WHERE oal.order_id = :orderId
+         ${orderSearchClause}
+
+         UNION ALL
+
+         SELECT
+           (UNIX_TIMESTAMP(
+             COALESCE(
+               al.created_at,
+               STR_TO_DATE(
+                 CONCAT(al.log_date, ' ', COALESCE(al.log_time, '00:00:00')),
+                 '%Y-%m-%d %H:%i:%s'
+               )
+             )
+           ) * 1000000000 + al.id) AS sort_key,
+           'global' AS log_source,
+           al.id,
+           :orderId AS order_id,
+           COALESCE(
+             al.created_at,
+             STR_TO_DATE(
+               CONCAT(al.log_date, ' ', COALESCE(al.log_time, '00:00:00')),
+               '%Y-%m-%d %H:%i:%s'
+             )
+           ) AS activity_date,
+           al.performed_by,
+           al.performer_name AS author_name,
+           NULL AS callback_date,
+           al.details AS note,
+           NULL AS attachment_path,
+           al.log_date,
+           al.log_time,
+           al.action,
+           al.module,
+           al.company_name,
+           al.facility_id,
+           al.performer_name,
+           al.performer_initials,
+           al.details,
+           al.created_at
+         FROM activity_logs al
+         WHERE (${globalConditions.join(" OR ")})
+         ${globalSearchClause}
+       ) AS merged
+       WHERE 1 = 1
+       ${cursorClause}
+       ORDER BY merged.sort_key DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > safeLimit;
+    const pageRows = hasMore ? rows.slice(0, safeLimit) : rows;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.sort_key || null : null;
+
+    return {
+      rows: pageRows,
+      pageSize: safeLimit,
+      hasMore,
+      nextCursor,
+    };
   }
 
   static async findNoteById(id, connection = null) {

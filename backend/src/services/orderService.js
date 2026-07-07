@@ -1305,7 +1305,33 @@ async function getAllOrders(query = {}) {
     }
   }
 
-  const rows = await Order.findAll(filters);
+  const useKeysetPagination =
+    String(query.pagination || "").toLowerCase() === "keyset";
+  const pageSizeRaw = Number(query.pageSize || filters.limit || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursorRaw = Number(query.cursor);
+  const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+
+  let rows = [];
+  let pagination = null;
+  if (useKeysetPagination) {
+    const keysetResult = await Order.findAllKeyset({
+      ...filters,
+      pageSize,
+      cursorId,
+    });
+    rows = keysetResult.rows;
+    pagination = {
+      type: "keyset",
+      pageSize: keysetResult.pageSize,
+      hasMore: keysetResult.hasMore,
+      nextCursor: keysetResult.nextCursor,
+    };
+  } else {
+    rows = await Order.findAll(filters);
+  }
 
   const orderIds = rows.map((row) => row.id);
   const stages = await Order.findWorkflowStagesByOrderIds(orderIds);
@@ -1335,7 +1361,7 @@ async function getAllOrders(query = {}) {
     return acc;
   }, {});
 
-  return rows.map((row) => {
+  const mappedOrders = rows.map((row) => {
     const invoiceRow = invoicesByOrderId[row.id] || null;
     const xrayRow = xrayByOrderId[row.id] || null;
 
@@ -1352,6 +1378,15 @@ async function getAllOrders(query = {}) {
       }
     );
   });
+
+  if (!useKeysetPagination) {
+    return mappedOrders;
+  }
+
+  return {
+    orders: mappedOrders,
+    pagination,
+  };
 }
 
 async function getOrderStats() {
@@ -1405,7 +1440,17 @@ async function resolveAuthorName(actorId) {
 
 async function getOrderNotes(
   orderId,
-  { includeCalled = false, noteId = null, actorId = null, actorRole = null } = {}
+  {
+    includeCalled = false,
+    noteId = null,
+    actorId = null,
+    actorRole = null,
+    pagination = null,
+    cursor = null,
+    pageSize = 10,
+    fromDate = null,
+    toDate = null,
+  } = {}
 ) {
   const order = await Order.findById(orderId);
 
@@ -1432,8 +1477,31 @@ async function getOrderNotes(
     return [mapNote(note)];
   }
 
-  const notes = await Order.findNotesByOrderId(order.id, includeCalled ? false : true);
-  return notes.map(mapNote);
+  const useKeysetPagination = String(pagination || "").toLowerCase() === "keyset";
+  const pendingOnly = includeCalled ? false : true;
+
+  if (!useKeysetPagination) {
+    const notes = await Order.findNotesByOrderId(order.id, pendingOnly);
+    return notes.map(mapNote);
+  }
+
+  const keyset = await Order.findNotesByOrderIdKeyset(order.id, {
+    pendingOnly,
+    cursorId: cursor,
+    limit: pageSize,
+    fromDate,
+    toDate,
+  });
+
+  return {
+    notes: keyset.rows.map(mapNote),
+    pagination: {
+      type: "keyset",
+      pageSize: keyset.pageSize,
+      hasMore: keyset.hasMore,
+      nextCursor: keyset.nextCursor,
+    },
+  };
 }
 
 async function getOrderReminders(user, { scope = "my", limit = 500 } = {}) {
@@ -1588,41 +1656,93 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
   };
 }
 
-async function getOrderActivityLogs(orderId) {
+function mapMergedActivityLogRow(row, notes = []) {
+  if (row.log_source === "global") {
+    return mapGlobalOrderActivityLog(row);
+  }
+
+  let attachmentPath = row.attachment_path;
+
+  if (!attachmentPath) {
+    const match = notes.find(
+      (note) =>
+        note.is_called &&
+        note.attachment_path &&
+        normalizeNoteText(note.note) === normalizeNoteText(row.note)
+    );
+
+    if (match) {
+      attachmentPath = match.attachment_path;
+    }
+  }
+
+  return mapActivityLog({ ...row, attachment_path: attachmentPath });
+}
+
+async function getOrderActivityLogs(orderId, query = {}) {
   const order = await Order.findById(orderId);
 
   if (!order) {
     throw new ApiError(404, "Order not found");
   }
 
-  const logs = await Order.findActivityLogsByOrderId(order.id);
-  const globalLogs = await ActivityLog.findByOrderId(order.id, {
+  const useKeysetPagination =
+    String(query.pagination || "").toLowerCase() === "keyset";
+  const pageSizeRaw = Number(query.pageSize || query.limit || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursorRaw = Number(query.cursor);
+  const cursorSortKey =
+    Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+  const search = `${query.search || ""}`.trim() || null;
+
+  if (!useKeysetPagination) {
+    const logs = await Order.findActivityLogsByOrderId(order.id);
+    const globalLogs = await ActivityLog.findByOrderId(order.id, {
+      orderNumber: order.order_number || null,
+    });
+    const notes = await Order.findNotesByOrderId(order.id, false);
+
+    const mappedOrderLogs = logs.map((log) =>
+      mapMergedActivityLogRow({ ...log, log_source: "order" }, notes)
+    );
+    const mappedGlobalLogs = globalLogs.map(mapGlobalOrderActivityLog);
+
+    return mergeOrderActivityLogs(mappedOrderLogs, mappedGlobalLogs);
+  }
+
+  const keyset = await Order.findMergedActivityLogsKeyset(order.id, {
     orderNumber: order.order_number || null,
-  });
-  const notes = await Order.findNotesByOrderId(order.id, false);
-
-  const mappedOrderLogs = logs.map((log) => {
-    let attachmentPath = log.attachment_path;
-
-    if (!attachmentPath) {
-      const match = notes.find(
-        (note) =>
-          note.is_called &&
-          note.attachment_path &&
-          normalizeNoteText(note.note) === normalizeNoteText(log.note)
-      );
-
-      if (match) {
-        attachmentPath = match.attachment_path;
-      }
-    }
-
-    return mapActivityLog({ ...log, attachment_path: attachmentPath });
+    cursorSortKey,
+    pageSize,
+    search,
   });
 
-  const mappedGlobalLogs = globalLogs.map(mapGlobalOrderActivityLog);
+  const needsNoteLookup = keyset.rows.some(
+    (row) => row.log_source === "order" && !row.attachment_path
+  );
+  const notes = needsNoteLookup
+    ? await Order.findNotesByOrderId(order.id, false)
+    : [];
 
-  return mergeOrderActivityLogs(mappedOrderLogs, mappedGlobalLogs);
+  const mappedOrderLogs = keyset.rows
+    .filter((row) => row.log_source === "order")
+    .map((row) => mapMergedActivityLogRow(row, notes));
+  const mappedGlobalLogs = keyset.rows
+    .filter((row) => row.log_source === "global")
+    .map((row) => mapMergedActivityLogRow(row, notes));
+  const mergedLogs = mergeOrderActivityLogs(mappedOrderLogs, mappedGlobalLogs);
+
+  return {
+    logs: mergedLogs,
+    pagination: {
+      type: "keyset",
+      pageSize: keyset.pageSize,
+      hasMore: keyset.hasMore,
+      nextCursor: keyset.nextCursor,
+    },
+  };
 }
 
 async function addOrderActivityLog({

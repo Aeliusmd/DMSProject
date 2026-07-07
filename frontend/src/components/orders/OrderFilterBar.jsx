@@ -5,7 +5,7 @@ import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getOrderFilterCompanies } from "@/lib/orders/orderApi";
 import { ORDER_PERIOD_OPTIONS } from "@/lib/orders/orderFilterConstants";
 
-const defaultFilters = {
+export const defaultOrderFilters = {
   facility: "",
   company: "",
   year: "",
@@ -15,15 +15,36 @@ const defaultFilters = {
 };
 
 export default function OrderFilterBar({ filters, onFiltersChange }) {
-  const [localFilters, setLocalFilters] = useState(defaultFilters);
+  const [draftFilters, setDraftFilters] = useState(defaultOrderFilters);
+  const [searchDraft, setSearchDraft] = useState("");
   const [facilities, setFacilities] = useState([]);
   const [companies, setCompanies] = useState([]);
+
+  const appliedFilters = filters || defaultOrderFilters;
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
 
     return Array.from({ length: 8 }, (_, index) => String(currentYear - index));
   }, []);
+
+  useEffect(() => {
+    setDraftFilters({
+      facility: appliedFilters.facility || "",
+      company: appliedFilters.company || "",
+      year: appliedFilters.year || "",
+      period: appliedFilters.period || "",
+      status: appliedFilters.status || "",
+    });
+    setSearchDraft(appliedFilters.search || "");
+  }, [
+    appliedFilters.facility,
+    appliedFilters.company,
+    appliedFilters.year,
+    appliedFilters.period,
+    appliedFilters.status,
+    appliedFilters.search,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -49,25 +70,38 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
     };
   }, []);
 
-  const activeFilters = filters || localFilters;
-
-  const updateFilters = (nextFilters) => {
-    if (!filters) {
-      setLocalFilters(nextFilters);
-    }
-
-    onFiltersChange?.(nextFilters);
+  const updateDraftFilter = (name, value) => {
+    setDraftFilters((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
-  const updateFilter = (name, value) => {
-    updateFilters({
-      ...activeFilters,
-      [name]: value,
+  const handleApplyFilters = () => {
+    onFiltersChange?.({
+      ...draftFilters,
+      search: appliedFilters.search || "",
     });
   };
 
+  const handleSearch = () => {
+    onFiltersChange?.({
+      ...appliedFilters,
+      search: searchDraft.trim(),
+    });
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSearch();
+    }
+  };
+
   const handleReset = () => {
-    updateFilters(defaultFilters);
+    setDraftFilters(defaultOrderFilters);
+    setSearchDraft("");
+    onFiltersChange?.(defaultOrderFilters);
   };
 
   return (
@@ -76,10 +110,10 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         Filters
       </h2>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_minmax(220px,1fr)_auto]">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_auto_auto]">
         <select
-          value={activeFilters.facility}
-          onChange={(e) => updateFilter("facility", e.target.value)}
+          value={draftFilters.facility}
+          onChange={(e) => updateDraftFilter("facility", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">All Facility</option>
@@ -91,8 +125,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         </select>
 
         <select
-          value={activeFilters.company}
-          onChange={(e) => updateFilter("company", e.target.value)}
+          value={draftFilters.company}
+          onChange={(e) => updateDraftFilter("company", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">All Company</option>
@@ -104,8 +138,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         </select>
 
         <select
-          value={activeFilters.year}
-          onChange={(e) => updateFilter("year", e.target.value)}
+          value={draftFilters.year}
+          onChange={(e) => updateDraftFilter("year", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">All Year</option>
@@ -117,8 +151,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         </select>
 
         <select
-          value={activeFilters.period || ""}
-          onChange={(e) => updateFilter("period", e.target.value)}
+          value={draftFilters.period || ""}
+          onChange={(e) => updateDraftFilter("period", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           {ORDER_PERIOD_OPTIONS.map((option) => (
@@ -129,8 +163,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         </select>
 
         <select
-          value={activeFilters.status}
-          onChange={(e) => updateFilter("status", e.target.value)}
+          value={draftFilters.status}
+          onChange={(e) => updateDraftFilter("status", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">All Status</option>
@@ -143,11 +177,30 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           <option value="deleted">Deleted</option>
         </select>
 
-        <div className="flex h-[34px] min-w-0 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">
+        <button
+          type="button"
+          onClick={handleApplyFilters}
+          className="h-[34px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+        >
+          Apply Filters
+        </button>
+
+        <button
+          type="button"
+          onClick={handleReset}
+          className="h-[34px] whitespace-nowrap rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+        >
+          Reset
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex h-[34px] min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">
           <SearchIcon />
           <input
-            value={activeFilters.search}
-            onChange={(e) => updateFilter("search", e.target.value)}
+            value={searchDraft}
+            onChange={(e) => setSearchDraft(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
             placeholder="Search order ID, facility, company, case, applicant..."
             className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
           />
@@ -155,10 +208,10 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
 
         <button
           type="button"
-          onClick={handleReset}
-          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+          onClick={handleSearch}
+          className="h-[34px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
         >
-          Reset
+          Search
         </button>
       </div>
     </section>

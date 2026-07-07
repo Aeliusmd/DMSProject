@@ -124,8 +124,11 @@ async function logOrderActivity(
 
 exports.getAll = asyncHandler(async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate");
-  const orders = await orderService.getAllOrders(req.query);
-  return ApiResponse.success(res, { orders });
+  const result = await orderService.getAllOrders(req.query);
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { orders: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.getFilterCompanies = asyncHandler(async (req, res) => {
@@ -447,15 +450,23 @@ exports.restore = asyncHandler(async (req, res) => {
 });
 
 exports.getNotes = asyncHandler(async (req, res) => {
-  const notes = await orderService.getOrderNotes(req.params.id, {
+  const result = await orderService.getOrderNotes(req.params.id, {
     includeCalled:
       String(req.query.includeCalled || "").toLowerCase() === "true" ||
       String(req.query.includeCalled || "") === "1",
     noteId: req.query.noteId || null,
     actorId: req.user.id,
     actorRole: req.user.role,
+    pagination: req.query.pagination || null,
+    cursor: req.query.cursor || null,
+    pageSize: req.query.pageSize || req.query.limit || 10,
+    fromDate: req.query.fromDate || null,
+    toDate: req.query.toDate || null,
   });
-  return ApiResponse.success(res, { notes });
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { notes: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.createNote = asyncHandler(async (req, res) => {
@@ -508,8 +519,14 @@ exports.updateNote = asyncHandler(async (req, res) => {
 });
 
 exports.getActivityLogs = asyncHandler(async (req, res) => {
-  const logs = await orderService.getOrderActivityLogs(req.params.id);
-  return ApiResponse.success(res, { logs });
+  const result = await orderService.getOrderActivityLogs(
+    req.params.id,
+    req.query
+  );
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { logs: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.getWorkflowStages = asyncHandler(async (req, res) => {
