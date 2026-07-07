@@ -20,6 +20,7 @@ router.get(
   employeeController.getMilestoneStats
 );
 router.post("/", authorize("Admin"), employeeController.create);
+router.put("/:id", authorize("Admin"), employeeController.update);
 router.patch("/:id/terminate", authorize("Admin"), employeeController.terminate);
 router.patch("/:id/activate", authorize("Admin"), employeeController.activate);
 router.patch("/:id/suspend", authorize("Admin"), employeeController.suspend);

@@ -11,16 +11,41 @@ const emptyForm = {
   role: "Employee",
 };
 
-export default function EmployeeFormModal({ open, onClose, onCreate }) {
+export default function EmployeeFormModal({
+  open,
+  onClose,
+  onCreate,
+  onUpdate,
+  mode = "create",
+  employee = null,
+}) {
   if (!open) return null;
 
   return (
-    <EmployeeFormModalContent onClose={onClose} onCreate={onCreate} />
+    <EmployeeFormModalContent
+      onClose={onClose}
+      onCreate={onCreate}
+      onUpdate={onUpdate}
+      mode={mode}
+      employee={employee}
+    />
   );
 }
 
-function EmployeeFormModalContent({ onClose, onCreate }) {
-  const [formData, setFormData] = useState(emptyForm);
+function EmployeeFormModalContent({ onClose, onCreate, onUpdate, mode, employee }) {
+  const isEditMode = mode === "edit";
+
+  const [formData, setFormData] = useState(
+    isEditMode && employee
+      ? {
+          name: employee.name || "",
+          userName: employee.logon || "",
+          password: "",
+          email: employee.email || "",
+          role: employee.role || "Employee",
+        }
+      : emptyForm
+  );
   const [errors, setErrors] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -35,7 +60,7 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
     }));
 
     if (submitAttempted) {
-      const fieldError = validateField(name, value);
+      const fieldError = validateField(name, value, isEditMode);
 
       setErrors((prev) => {
         const nextErrors = { ...prev };
@@ -55,22 +80,28 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
     setSubmitAttempted(true);
     setSubmitError("");
 
-    const validationErrors = validateEmployeeForm(formData);
+    const validationErrors = validateEmployeeForm(formData, isEditMode);
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) return;
 
     setIsSubmitting(true);
 
+    const payload = {
+      name: formData.name.trim(),
+      userName: formData.userName.trim(),
+      logon: formData.userName.trim(),
+      email: formData.email.trim(),
+      role: formData.role,
+      ...(formData.password ? { password: formData.password } : {}),
+    };
+
     try {
-      await onCreate({
-        name: formData.name.trim(),
-        userName: formData.userName.trim(),
-        logon: formData.userName.trim(),
-        password: formData.password,
-        email: formData.email.trim(),
-        role: formData.role,
-      });
+      if (isEditMode) {
+        await onUpdate(payload);
+      } else {
+        await onCreate({ ...payload, password: formData.password });
+      }
     } catch (error) {
       if (error instanceof ApiRequestError && error.errors?.length) {
         const apiErrors = {};
@@ -83,7 +114,10 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
         setErrors((prev) => ({ ...prev, ...apiErrors }));
       }
 
-      setSubmitError(error.message || "Unable to create employee");
+      setSubmitError(
+        error.message ||
+          (isEditMode ? "Unable to update employee" : "Unable to create employee")
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -104,7 +138,7 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
       >
         <header className="flex h-[56px] items-center justify-between border-b border-[#E2E8F0] px-5">
           <h2 className="text-[16px] font-semibold text-[#111827]">
-            Employee Information
+            {isEditMode ? "Edit Employee" : "Employee Information"}
           </h2>
 
           <button
@@ -141,13 +175,14 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
               />
 
               <EmployeeInput
-                label="Password"
+                label={isEditMode ? "New Password" : "Password"}
                 name="password"
                 type="password"
                 value={formData.password}
                 onChange={handleChange}
                 error={getError("password")}
-                required
+                placeholder={isEditMode ? "Leave blank to keep current" : ""}
+                required={!isEditMode}
               />
             </div>
 
@@ -197,7 +232,11 @@ function EmployeeFormModalContent({ onClose, onCreate }) {
             disabled={isSubmitting}
             className="h-[34px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isSubmitting ? "Saving..." : "Save"}
+            {isSubmitting
+              ? "Saving..."
+              : isEditMode
+                ? "Edit Employee"
+                : "Save"}
           </button>
         </footer>
       </section>
@@ -274,7 +313,7 @@ function EmployeeSelect({
   );
 }
 
-function validateEmployeeForm(data) {
+function validateEmployeeForm(data, isEditMode = false) {
   const errors = {};
 
   if (!data.name.trim()) {
@@ -286,7 +325,10 @@ function validateEmployeeForm(data) {
   }
 
   if (!data.password.trim()) {
-    errors.password = "Password is required";
+    // Password is optional when editing (blank keeps the current password).
+    if (!isEditMode) {
+      errors.password = "Password is required";
+    }
   } else if (data.password.length < 8) {
     errors.password = "Password must be at least 8 characters";
   }
@@ -302,17 +344,17 @@ function validateEmployeeForm(data) {
   return errors;
 }
 
-function validateField(field, value) {
+function validateField(field, value, isEditMode = false) {
   if (!value.trim()) {
     if (field === "name") return "Name is required";
     if (field === "userName") return "User name is required";
-    if (field === "password") return "Password is required";
+    if (field === "password") return isEditMode ? "" : "Password is required";
     if (field === "email") return "Email is required";
     if (field === "role") return "Role is required";
 
   }
 
-  if (field === "password" && value.length < 8) {
+  if (field === "password" && value && value.length < 8) {
     return "Password must be at least 8 characters";
   }
 

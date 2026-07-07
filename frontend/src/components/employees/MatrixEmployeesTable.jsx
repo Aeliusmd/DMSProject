@@ -15,6 +15,7 @@ function isAdminRole(role) {
 export default function MatrixEmployeesTable({
   employees,
   readOnly = false,
+  onEditEmployee,
   onTerminateEmployee,
   onDeleteEmployee,
   onActivateEmployee,
@@ -360,6 +361,15 @@ export default function MatrixEmployeesTable({
 
                           <button
                             type="button"
+                            onClick={() => onEditEmployee?.(employee)}
+                            className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] transition hover:bg-[#E0F2FE]"
+                          >
+                            <EditIcon />
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => openDeleteModal(employee)}
                             className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 transition hover:opacity-85"
                           >
@@ -480,6 +490,20 @@ function ActivateIcon() {
         d="M5 12l4 4L19 6"
         stroke="currentColor"
         strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"
+        stroke="currentColor"
+        strokeWidth="1.9"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
