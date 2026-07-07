@@ -6,6 +6,10 @@ const {
   normalizeFacilityName,
 } = require("../utils/facilityNameUtils");
 const {
+  findDoctorByNameMatch,
+  parseDoctorName,
+} = require("../utils/doctorNameUtils");
+const {
   validateFacilityPayload,
   validateDoctorsPayload,
 } = require("../lib/facilityValidation");
@@ -606,6 +610,216 @@ async function setDefaultDoctor(facilityId, doctorId) {
   return mapDoctorRow(updated);
 }
 
+async function updateDoctor(facilityId, doctorId, doctorInput = {}) {
+  const doctor = await FacilityDoctor.findById(doctorId, facilityId);
+
+  if (!doctor) {
+    throw new ApiError(404, "Doctor not found");
+  }
+
+  const normalized = {
+    officeName: doctorInput.officeName?.trim() || "",
+    firstName: doctorInput.firstName?.trim() || "",
+    middleName: doctorInput.middleName?.trim() || "",
+    lastName: doctorInput.lastName?.trim() || "",
+    phone: doctorInput.phone?.trim() || "",
+    fax: doctorInput.fax?.trim() || "",
+    email: doctorInput.email?.trim() || "",
+    isDefault: Boolean(doctorInput.isDefault),
+  };
+
+  const validation = validateDoctorsPayload([normalized]);
+
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
+  if (!doctor.is_active && normalized.isDefault) {
+    throw new ApiError(400, "Inactive doctors cannot be set as default");
+  }
+
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const shouldBeDefault = normalized.isDefault && doctor.is_active;
+
+    if (shouldBeDefault) {
+      await FacilityDoctor.clearDefaultForFacility(facilityId, connection);
+    }
+
+    await FacilityDoctor.update(connection, doctorId, facilityId, {
+      ...normalized,
+      isDefault: shouldBeDefault,
+    });
+
+    if (doctor.is_default && !shouldBeDefault) {
+      const nextDoctor = await FacilityDoctor.getNextDefaultCandidate(
+        facilityId,
+        doctorId
+      );
+
+      if (nextDoctor) {
+        await FacilityDoctor.setDefault(nextDoctor.id, facilityId);
+      }
+    }
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+
+  const updated = await FacilityDoctor.findById(doctorId, facilityId);
+  return mapDoctorRow(updated);
+}
+
+async function resolveFacilityDoctor(
+  facilityId,
+  { doctorName, doctorId, useDefaultWhenMissing = true } = {}
+) {
+  const id = Number(facilityId);
+
+  if (!Number.isFinite(id)) {
+    throw new ApiError(400, "Facility id is required");
+  }
+
+  const facility = await Facility.findById(id);
+
+  if (!facility) {
+    throw new ApiError(404, "Facility not found");
+  }
+
+  const existingDoctors = await FacilityDoctor.findByFacilityId(id, {
+    activeOnly: true,
+  });
+  const parsedDoctorId = Number(doctorId);
+
+  if (Number.isFinite(parsedDoctorId) && parsedDoctorId > 0) {
+    const byId =
+      existingDoctors.find((doctor) => Number(doctor.id) === parsedDoctorId) ||
+      (await FacilityDoctor.findById(parsedDoctorId, id));
+
+    if (byId && Number(byId.is_active) !== 0) {
+      return {
+        doctor: mapDoctorRow(byId),
+        doctorName: formatDoctorName(byId),
+        created: false,
+        usedDefault: false,
+        missingDefault: false,
+      };
+    }
+  }
+
+  const trimmedName = `${doctorName || ""}`.trim();
+
+  if (trimmedName) {
+    const match = findDoctorByNameMatch(trimmedName, existingDoctors);
+
+    if (match) {
+      return {
+        doctor: mapDoctorRow(match),
+        doctorName: formatDoctorName(match),
+        created: false,
+        usedDefault: false,
+        missingDefault: false,
+      };
+    }
+
+    const parsed = parseDoctorName(trimmedName);
+    const officeName = facility.facility_name || "Main Office";
+    const hasDefault = existingDoctors.some((doctor) => doctor.is_default);
+    const makeDefault = !hasDefault && existingDoctors.length === 0;
+
+    const pool = getPool();
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      if (makeDefault) {
+        await FacilityDoctor.clearDefaultForFacility(id, connection);
+      }
+
+      const newId = await FacilityDoctor.create(connection, {
+        facilityId: id,
+        officeName,
+        firstName: parsed.firstName,
+        middleName: parsed.middleName,
+        lastName: parsed.lastName,
+        phone: "",
+        fax: "",
+        email: "",
+        isDefault: makeDefault ? 1 : 0,
+      });
+
+      await connection.commit();
+
+      const created = await FacilityDoctor.findById(newId, id);
+
+      return {
+        doctor: mapDoctorRow(created),
+        doctorName: formatDoctorName(created),
+        created: true,
+        usedDefault: false,
+        missingDefault: false,
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  if (!useDefaultWhenMissing) {
+    return {
+      doctor: null,
+      doctorName: "",
+      created: false,
+      usedDefault: false,
+      missingDefault: false,
+    };
+  }
+
+  const defaultDoctor = await FacilityDoctor.findDefaultByFacilityId(id);
+
+  if (!defaultDoctor) {
+    return {
+      doctor: null,
+      doctorName: "",
+      created: false,
+      usedDefault: false,
+      missingDefault: true,
+    };
+  }
+
+  return {
+    doctor: mapDoctorRow(defaultDoctor),
+    doctorName: formatDoctorName(defaultDoctor),
+    created: false,
+    usedDefault: true,
+    missingDefault: false,
+  };
+}
+
+async function resolveDoctorFromExtractHints(facilityId, hints = {}) {
+  const extractedDoctorName = `${hints.specificDoctor || ""}`.trim();
+  const result = await resolveFacilityDoctor(facilityId, {
+    doctorName: extractedDoctorName || undefined,
+    useDefaultWhenMissing: !extractedDoctorName,
+  });
+
+  return {
+    ...result,
+    extractedDoctorName,
+  };
+}
+
 module.exports = {
   getAllFacilities,
   getFacilityById,
@@ -613,6 +827,7 @@ module.exports = {
   updateFacility,
   deleteFacility,
   createDoctors,
+  updateDoctor,
   deactivateDoctor,
   reactivateDoctor,
   setDefaultDoctor,
@@ -620,6 +835,8 @@ module.exports = {
   resolveFacilityByName,
   findOrCreateFacility,
   resolveFacilityFromHints,
+  resolveFacilityDoctor,
+  resolveDoctorFromExtractHints,
   isFacilityProfileIncomplete,
   isPlaceholderFacilityEmail,
 };

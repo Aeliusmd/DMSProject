@@ -1,18 +1,86 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { searchOrderDoctors } from "@/lib/orders/orderApi";
+
+function namesMatch(left = "", right = "") {
+  return (
+    `${left || ""}`.trim().localeCompare(`${right || ""}`.trim(), undefined, {
+      sensitivity: "accent",
+    }) === 0
+  );
+}
+
+function DoctorStatusNote({
+  tone = "info",
+  title,
+  message,
+  linkHref = "",
+  linkLabel = "",
+  onLinkClick,
+}) {
+  const styles = {
+    info: {
+      wrap: "border-[#BAE6FD] bg-[#F0F9FF]",
+      title: "text-[#0369A1]",
+      message: "text-[#0C4A6E]",
+      link: "text-[#007F96]",
+    },
+    success: {
+      wrap: "border-[#BBF7D0] bg-[#F0FDF4]",
+      title: "text-[#047857]",
+      message: "text-[#065F46]",
+      link: "text-[#047857]",
+    },
+    warning: {
+      wrap: "border-[#FDE68A] bg-[#FFFBEB]",
+      title: "text-[#B45309]",
+      message: "text-[#92400E]",
+      link: "text-[#007F96]",
+    },
+  }[tone];
+
+  return (
+    <div className={`mt-2 rounded-[6px] border px-3 py-2 ${styles.wrap}`}>
+      {title ? (
+        <p className={`text-[11px] font-semibold ${styles.title}`}>{title}</p>
+      ) : null}
+      {message ? (
+        <p className={`${title ? "mt-1" : ""} text-[10px] leading-snug ${styles.message}`}>
+          {message}
+        </p>
+      ) : null}
+      {linkHref ? (
+        <Link
+          href={linkHref}
+          onClick={() => onLinkClick?.()}
+          className={`${title || message ? "mt-2" : ""} inline-flex text-[11px] font-semibold underline ${styles.link}`}
+        >
+          {linkLabel}
+        </Link>
+      ) : null}
+    </div>
+  );
+}
 
 export default function DoctorSearchField({
   label = "Specific Doctor",
   name = "specificDoctor",
   value = "",
   facilityId = "",
+  facilityName = "",
+  specificDoctorIsDefault = false,
+  extractedDoctorName = "",
   onChange,
   onBlur,
   placeholder = "Doctor name",
   error = "",
-  helperText = "",
+  missingDefaultDoctor = false,
+  doctorCreated = false,
+  resolvingDoctor = false,
+  returnToOrderPath = "",
+  onBeforeFacilityProfileNavigate,
 }) {
   const listboxId = useId();
   const rootRef = useRef(null);
@@ -20,6 +88,98 @@ export default function DoctorSearchField({
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [searchError, setSearchError] = useState("");
+
+  const facilityDoctorsHref = facilityId
+    ? returnToOrderPath
+      ? `/facilities/${facilityId}/info?returnTo=${encodeURIComponent(returnToOrderPath)}&focus=doctors`
+      : `/facilities/${facilityId}/info?focus=doctors`
+    : "";
+
+  const statusNote = useMemo(() => {
+    if (resolvingDoctor) {
+      return {
+        tone: "info",
+        title: "Updating doctor for this facility",
+        message: "Checking the selected facility and applying its default doctor when available.",
+      };
+    }
+
+    if (!facilityId) {
+      return null;
+    }
+
+    const trimmedValue = `${value || ""}`.trim();
+    const trimmedExtracted = `${extractedDoctorName || ""}`.trim();
+    const facilityLabel = `${facilityName || "this facility"}`.trim();
+
+    if (missingDefaultDoctor) {
+      return {
+        tone: "warning",
+        title: "No doctor available for this facility",
+        message: `This facility has no default doctor. Add a doctor on the facility profile, then return here to continue the order.`,
+        linkHref: facilityDoctorsHref,
+        linkLabel: "Open facility profile to add doctors",
+      };
+    }
+
+    if (!trimmedValue) {
+      return {
+        tone: "warning",
+        title: "No doctor selected",
+        message: `Choose a doctor for ${facilityLabel}, or add one on the facility profile.`,
+        linkHref: facilityDoctorsHref,
+        linkLabel: "Open facility profile to add doctors",
+      };
+    }
+
+    if (doctorCreated && trimmedExtracted) {
+      return {
+        tone: "success",
+        title: "Doctor added from subpoena",
+        message: `${trimmedValue} was created for ${facilityLabel} based on the uploaded subpoena.`,
+      };
+    }
+
+    if (specificDoctorIsDefault) {
+      return {
+        tone: "info",
+        title: "Using facility default doctor",
+        message: `${trimmedValue} is the default doctor for ${facilityLabel}. No doctor was identified on the subpoena.`,
+      };
+    }
+
+    if (trimmedExtracted) {
+      if (namesMatch(trimmedValue, trimmedExtracted)) {
+        return {
+          tone: "info",
+          title: "Matched from subpoena",
+          message: `${trimmedValue} was identified on the uploaded subpoena.`,
+        };
+      }
+
+      return {
+        tone: "info",
+        title: "Doctor updated from facility profile",
+        message: `The subpoena listed ${trimmedExtracted}. The facility profile now shows ${trimmedValue}.`,
+      };
+    }
+
+    return {
+      tone: "info",
+      title: "Doctor selected",
+      message: `${trimmedValue} is linked to ${facilityLabel}.`,
+    };
+  }, [
+    resolvingDoctor,
+    facilityId,
+    facilityName,
+    value,
+    extractedDoctorName,
+    missingDefaultDoctor,
+    doctorCreated,
+    specificDoctorIsDefault,
+    facilityDoctorsHref,
+  ]);
 
   useEffect(() => {
     const query = value.trim();
@@ -108,12 +268,19 @@ export default function DoctorSearchField({
         autoComplete="off"
       />
 
-      {error && (
-        <p className="mt-[5px] text-[11px] font-medium text-red-500">{error}</p>
-      )}
+      {statusNote ? (
+        <DoctorStatusNote
+          tone={statusNote.tone}
+          title={statusNote.title}
+          message={statusNote.message}
+          linkHref={statusNote.linkHref}
+          linkLabel={statusNote.linkLabel}
+          onLinkClick={onBeforeFacilityProfileNavigate}
+        />
+      ) : null}
 
-      {!error && helperText ? (
-        <p className="mt-[5px] text-[11px] font-medium text-[#007F96]">{helperText}</p>
+      {error ? (
+        <p className="mt-[5px] text-[11px] font-medium text-red-500">{error}</p>
       ) : null}
 
       {showSuggestions && (

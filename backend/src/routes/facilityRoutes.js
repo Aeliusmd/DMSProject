@@ -54,7 +54,13 @@ router.get("/:id", facilityController.getById);
 router.put("/:id", employeeWriteGuard, facilityController.update);
 router.delete("/:id", employeeWriteGuard, facilityController.remove);
 
+router.post("/:id/doctors/resolve", facilityController.resolveDoctor);
 router.post("/:id/doctors", employeeWriteGuard, facilityController.createDoctors);
+router.put(
+  "/:id/doctors/:doctorId",
+  employeeWriteGuard,
+  facilityController.updateDoctor
+);
 router.patch(
   "/:id/doctors/:doctorId/deactivate",
   employeeWriteGuard,

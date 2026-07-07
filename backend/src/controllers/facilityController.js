@@ -154,6 +154,15 @@ exports.remove = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, result.message);
 });
 
+exports.resolveDoctor = asyncHandler(async (req, res) => {
+  const result = await facilityService.resolveFacilityDoctor(
+    req.params.id,
+    req.body || {}
+  );
+
+  return ApiResponse.success(res, result);
+});
+
 exports.createDoctors = asyncHandler(async (req, res) => {
   const facility = await facilityService.getFacilityById(req.params.id);
   const doctors = await facilityService.createDoctors(
@@ -175,6 +184,30 @@ exports.createDoctors = asyncHandler(async (req, res) => {
   });
 
   return ApiResponse.created(res, { doctors }, "Doctors created successfully");
+});
+
+exports.updateDoctor = asyncHandler(async (req, res) => {
+  const facility = await facilityService.getFacilityById(req.params.id);
+  const doctor = await facilityService.updateDoctor(
+    req.params.id,
+    req.params.doctorId,
+    req.body || {}
+  );
+
+  await activityLogService.recordFromRequest(req, {
+    ...buildFacilityLogBase(req, facility),
+    context: "facilities",
+    action: "update_doctor",
+    details: `Updated doctor ${doctor.doctor} at ${facility.facilityName}`,
+  });
+
+  await notificationService.notifyFacilityEvent({
+    title: "Doctor Updated",
+    description: `${doctor.doctor} was updated at ${facility.facilityName}`,
+    facilityId: facility.id,
+  });
+
+  return ApiResponse.success(res, { doctor }, "Doctor updated successfully");
 });
 
 exports.deactivateDoctor = asyncHandler(async (req, res) => {
