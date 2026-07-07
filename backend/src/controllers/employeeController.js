@@ -5,7 +5,10 @@ const Employee = require("../models/Employee");
 const employeeService = require("../services/employeeService");
 const activityLogService = require("../services/activityLogService");
 const notificationService = require("../services/notificationService");
-const { validateCreateEmployee } = require("../validators/employeeValidator");
+const {
+  validateCreateEmployee,
+  validateUpdateEmployee,
+} = require("../validators/employeeValidator");
 
 exports.getAll = asyncHandler(async (_req, res) => {
   const employees = await employeeService.getAllEmployees();
@@ -37,6 +40,36 @@ exports.create = asyncHandler(async (req, res) => {
   });
 
   return ApiResponse.created(res, { employee }, "Employee created successfully");
+});
+
+exports.update = asyncHandler(async (req, res) => {
+  const validation = validateUpdateEmployee(req.body);
+
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
+  const employee = await employeeService.updateEmployee(
+    req.params.id,
+    validation.data
+  );
+
+  await activityLogService.recordFromRequest(req, {
+    context: "employees",
+    action: "update",
+    details: `Updated employee ${employee.name}`,
+    targetEmployeeId: employee.id,
+    companyName: "System",
+  });
+
+  await notificationService.notifyActivityEvent({
+    title: "Employee Updated",
+    description: `${employee.name}'s details were updated`,
+    referenceType: "Employee",
+    referenceId: employee.id,
+  });
+
+  return ApiResponse.success(res, { employee }, "Employee updated successfully");
 });
 
 exports.terminate = asyncHandler(async (req, res) => {

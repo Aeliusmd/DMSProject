@@ -43,4 +43,56 @@ function validateCreateEmployee(body = {}) {
   };
 }
 
-module.exports = { validateCreateEmployee };
+function validateUpdateEmployee(body = {}) {
+  const errors = [];
+
+  const name = body.name?.trim();
+  const logon = (body.logon || body.userName)?.trim();
+  const email = body.email?.trim();
+  const password = body.password;
+  const role = body.role;
+
+  if (!name) {
+    errors.push({ field: "name", message: "Name is required" });
+  }
+
+  if (!logon) {
+    errors.push({ field: "logon", message: "Username is required" });
+  }
+
+  if (!email) {
+    errors.push({ field: "email", message: "Email is required" });
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    errors.push({ field: "email", message: "Enter a valid email address" });
+  }
+
+  // Password is optional on update; validate only when provided.
+  if (password != null && `${password}`.length > 0 && `${password}`.length < 8) {
+    errors.push({
+      field: "password",
+      message: "Password must be at least 8 characters",
+    });
+  }
+
+  if (!role) {
+    errors.push({ field: "role", message: "Role is required" });
+  } else if (!["Manager", "Employee"].includes(role)) {
+    errors.push({ field: "role", message: "Role must be Manager or Employee" });
+  }
+
+  const hasPassword = password != null && `${password}`.length > 0;
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    data: {
+      name,
+      logon,
+      email,
+      role,
+      ...(hasPassword ? { password } : {}),
+    },
+  };
+}
+
+module.exports = { validateCreateEmployee, validateUpdateEmployee };

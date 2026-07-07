@@ -21,6 +21,22 @@ export async function createEmployee(payload) {
   return data?.data?.employee;
 }
 
+export async function updateEmployee(id, payload) {
+  const data = await request(`/employees/${id}`, {
+    method: "PUT",
+    auth: true,
+    body: {
+      name: payload.name,
+      logon: payload.logon || payload.userName,
+      email: payload.email,
+      role: payload.role,
+      ...(payload.password ? { password: payload.password } : {}),
+    },
+  });
+
+  return data?.data?.employee;
+}
+
 export async function terminateEmployee(id) {
   const data = await request(`/employees/${id}/terminate`, {
     method: "PATCH",

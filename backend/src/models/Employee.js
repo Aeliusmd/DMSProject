@@ -94,14 +94,16 @@ class Employee {
     return rows[0] || null;
   }
 
-  static async findByLogon(logon) {
+  static async findByLogon(logon, excludeId = null) {
     const pool = getPool();
 
     const [rows] = await pool.execute(
       `SELECT id FROM matrix_employees
-       WHERE logon = :logon AND deleted_at IS NULL
+       WHERE logon = :logon
+         AND deleted_at IS NULL
+         ${excludeId ? "AND id <> :excludeId" : ""}
        LIMIT 1`,
-      { logon }
+      { logon, excludeId }
     );
 
     return rows[0] || null;
@@ -223,6 +225,23 @@ class Employee {
       `UPDATE matrix_employees SET last_login_at = NOW(), updated_at = NOW() WHERE id = :id`,
       { id }
     );
+  }
+
+  static async update(id, { name, logon, email, role }) {
+    const pool = getPool();
+
+    await pool.execute(
+      `UPDATE matrix_employees
+       SET name = :name,
+           logon = :logon,
+           email = :email,
+           role = :role,
+           updated_at = NOW()
+       WHERE id = :id AND deleted_at IS NULL`,
+      { id, name, logon, email, role }
+    );
+
+    return this.findById(id, { includeDeleted: true });
   }
 
   static async updateProfile(id, { name, email }) {

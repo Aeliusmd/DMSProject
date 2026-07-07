@@ -123,6 +123,41 @@ async function createEmployee({ name, logon, email, password, role }) {
   return mapEmployeeRow(employee);
 }
 
+async function updateEmployee(id, { name, logon, email, role, password }) {
+  if (!ALLOWED_CREATE_ROLES.includes(role)) {
+    throw new ApiError(400, "Role must be Manager or Employee");
+  }
+
+  const employee = await Employee.findById(id);
+
+  if (!employee) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  if (isAdminRole(employee.role)) {
+    throw new ApiError(400, "Admin accounts cannot be edited");
+  }
+
+  const existingEmail = await Employee.findByEmail(email, employee.id);
+  if (existingEmail) {
+    throw new ApiError(409, "An employee with this email already exists");
+  }
+
+  const existingLogon = await Employee.findByLogon(logon, employee.id);
+  if (existingLogon) {
+    throw new ApiError(409, "An employee with this username already exists");
+  }
+
+  await Employee.update(employee.id, { name, logon, email, role });
+
+  if (password) {
+    const passwordHash = await bcrypt.hash(password, 10);
+    await Employee.updatePassword(employee.id, passwordHash);
+  }
+
+  return mapEmployeeRow(await Employee.findById(employee.id, { includeDeleted: true }));
+}
+
 async function terminateEmployee(id, actorId) {
   if (Number(id) === Number(actorId)) {
     throw new ApiError(400, "You cannot terminate your own account");
@@ -290,6 +325,7 @@ async function getEmployeeMilestoneStats(
 module.exports = {
   getAllEmployees,
   createEmployee,
+  updateEmployee,
   terminateEmployee,
   activateEmployee,
   suspendEmployee,

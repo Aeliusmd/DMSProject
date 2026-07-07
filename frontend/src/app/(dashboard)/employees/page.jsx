@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
@@ -15,6 +15,7 @@ import {
   getEmployees,
   suspendEmployee,
   terminateEmployee,
+  updateEmployee,
 } from "@/lib/employees/employeeApi";
 
 export default function EmployeesPage() {
@@ -23,6 +24,28 @@ export default function EmployeesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [isNewEmployeeModalOpen, setIsNewEmployeeModalOpen] = useState(false);
+  const [editEmployee, setEditEmployee] = useState(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
+
+  const filteredEmployees = useMemo(() => {
+    const query = appliedSearch.trim().toLowerCase();
+
+    if (!query) {
+      return employees;
+    }
+
+    return employees.filter((employee) =>
+      String(employee.name || "").toLowerCase().includes(query)
+    );
+  }, [employees, appliedSearch]);
+
+  const applySearch = () => setAppliedSearch(searchInput);
+
+  const clearSearch = () => {
+    setSearchInput("");
+    setAppliedSearch("");
+  };
 
   const user = getStoredUser();
   const readOnly = !canManageEmployees(user);
@@ -61,6 +84,16 @@ export default function EmployeesPage() {
     const employee = await createEmployee(newEmployeeData);
     setEmployees((prev) => [employee, ...prev]);
     setIsNewEmployeeModalOpen(false);
+  };
+
+  const handleUpdateEmployee = async (payload) => {
+    if (!editEmployee) return;
+
+    const updated = await updateEmployee(editEmployee.id, payload);
+    setEmployees((prev) =>
+      prev.map((item) => (item.id === updated.id ? updated : item))
+    );
+    setEditEmployee(null);
   };
 
   const handleTerminateEmployee = async (employee) => {
@@ -127,14 +160,33 @@ export default function EmployeesPage() {
           </p>
         )}
 
+        {!isLoading && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <EmployeeSearch
+              value={searchInput}
+              onChange={setSearchInput}
+              onSearch={applySearch}
+              onClear={clearSearch}
+              hasApplied={Boolean(appliedSearch.trim())}
+            />
+
+            <p className="text-[11px] text-[#64748B]">
+              {appliedSearch.trim()
+                ? `Showing ${filteredEmployees.length} of ${employees.length} employees`
+                : `${employees.length} employees`}
+            </p>
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex flex-1 items-center justify-center rounded-[10px] border border-[#E2E8F0] bg-white">
             <p className="text-[13px] text-[#64748B]">Loading employees...</p>
           </div>
         ) : (
           <MatrixEmployeesTable
-            employees={employees}
+            employees={filteredEmployees}
             readOnly={readOnly}
+            onEditEmployee={setEditEmployee}
             onTerminateEmployee={handleTerminateEmployee}
             onDeleteEmployee={handleDeleteEmployee}
             onActivateEmployee={handleActivateEmployee}
@@ -149,8 +201,102 @@ export default function EmployeesPage() {
             onCreate={handleCreateEmployee}
           />
         )}
+
+        {!readOnly && (
+          <EmployeeFormModal
+            open={Boolean(editEmployee)}
+            mode="edit"
+            employee={editEmployee}
+            onClose={() => setEditEmployee(null)}
+            onUpdate={handleUpdateEmployee}
+          />
+        )}
       </div>
     </DashboardShell>
+  );
+}
+
+function EmployeeSearch({ value, onChange, onSearch, onClear, hasApplied }) {
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onSearch?.();
+    }
+  };
+
+  return (
+    <div className="w-full max-w-[360px]">
+      <div className="flex gap-2">
+        <div className="flex h-[36px] min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-white px-3">
+          <SearchIcon />
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Search employee name"
+            className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+          />
+
+          {value && (
+            <button
+              type="button"
+              onClick={onClear}
+              aria-label="Clear search"
+              className="shrink-0 text-[#94A3B8] hover:text-[#475569]"
+            >
+              <CloseIcon />
+            </button>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onSearch}
+          className="h-[36px] shrink-0 rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+        >
+          Filter
+        </button>
+
+        {hasApplied && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="h-[36px] shrink-0 rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] hover:bg-[#F8FAFC]"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      className="shrink-0 text-[#94A3B8]"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.7" />
+      <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M18 6 6 18M6 6l12 12"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
