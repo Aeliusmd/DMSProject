@@ -63,7 +63,7 @@ import {
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
 import { getOrderTypeLabel } from "@/lib/orders/recordTypeUtils";
 
-const ORDERS_PER_PAGE = 6;
+const ORDERS_PER_PAGE = 10;
 
 const defaultOrderFilters = {
   facility: "",

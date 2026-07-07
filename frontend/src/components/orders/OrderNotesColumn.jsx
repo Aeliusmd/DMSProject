@@ -33,7 +33,7 @@ export default function OrderNotesColumn({
     setLoadingPreview(true);
     try {
       const notes = await getOrderNotes(order.dbId, { includeCalled: true });
-      setHoverNotes(notes.slice(0, 2).map(toHistoryItem));
+      setHoverNotes(notes.slice(0, 3).map(toHistoryItem));
     } catch {
       setHoverNotes(fallbackPreview);
     } finally {
