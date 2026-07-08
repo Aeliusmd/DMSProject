@@ -547,7 +547,12 @@ export default function OrdersTable({
     createdTo: filters.createdTo || "",
   };
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}`;
+  const sortDir =
+    createdSortDir === "asc" || createdSortDir === "desc"
+      ? createdSortDir
+      : "";
+
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}|${excludeCompleted ? "1" : "0"}|${sortDir}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
@@ -570,9 +575,12 @@ export default function OrdersTable({
           year: normalizedFilters.year,
           period: normalizedFilters.period,
           status: normalizedFilters.status,
+          rushLevel: normalizedFilters.rushLevel,
           search: normalizedFilters.search,
           createdFrom: normalizedFilters.createdFrom,
           createdTo: normalizedFilters.createdTo,
+          excludeCompleted: Boolean(excludeCompleted),
+          sortDir: sortDir || undefined,
         };
 
         let data = [];
@@ -626,16 +634,19 @@ export default function OrdersTable({
       }
     },
     [
-    normalizedFilters.facility,
-    normalizedFilters.company,
-    normalizedFilters.year,
+      normalizedFilters.facility,
+      normalizedFilters.company,
+      normalizedFilters.year,
       normalizedFilters.period,
-    normalizedFilters.status,
-    normalizedFilters.search,
-    normalizedFilters.createdFrom,
-    normalizedFilters.createdTo,
-    useServerPagination,
-    currentPage,
+      normalizedFilters.status,
+      normalizedFilters.rushLevel,
+      normalizedFilters.search,
+      normalizedFilters.createdFrom,
+      normalizedFilters.createdTo,
+      excludeCompleted,
+      sortDir,
+      useServerPagination,
+      currentPage,
     ]
   );
 
