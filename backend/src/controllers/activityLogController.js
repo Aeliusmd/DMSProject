@@ -4,27 +4,45 @@ const activityLogService = require("../services/activityLogService");
 const { isEmployee, isManager } = require("../utils/roles");
 
 exports.getMyLogs = asyncHandler(async (req, res) => {
-  const logs = await activityLogService.getMyLogs(req.user.id);
-  return ApiResponse.success(res, { logs });
+  const result = await activityLogService.getMyLogs(req.user.id, req.query);
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { logs: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.list = asyncHandler(async (req, res) => {
-  const logs =
-    isEmployee(req.user?.role) || isManager(req.user?.role)
-      ? await activityLogService.getMyLogs(req.user.id)
-      : await activityLogService.getAllLogs();
+  const restrictOwn = isEmployee(req.user?.role) || isManager(req.user?.role);
+  const result = await activityLogService.getAllLogs({
+    ...req.query,
+    performedBy: restrictOwn ? req.user.id : undefined,
+  });
 
-  return ApiResponse.success(res, { logs });
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { logs: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
-exports.getAll = asyncHandler(async (_req, res) => {
-  const logs = await activityLogService.getAllLogs();
-  return ApiResponse.success(res, { logs });
+exports.getAll = asyncHandler(async (req, res) => {
+  const result = await activityLogService.getAllLogs(req.query);
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { logs: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.getEmployeeLogs = asyncHandler(async (req, res) => {
-  const logs = await activityLogService.getEmployeeLogs(req.params.employeeId);
-  return ApiResponse.success(res, { logs });
+  const result = await activityLogService.getEmployeeLogs(
+    req.params.employeeId,
+    req.query
+  );
+
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { logs: result });
+  }
+
+  return ApiResponse.success(res, result);
 });
 
 exports.getById = asyncHandler(async (req, res) => {

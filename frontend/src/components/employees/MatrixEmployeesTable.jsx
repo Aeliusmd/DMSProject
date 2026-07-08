@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import SuspendEmployeeModal from "@/components/employees/SuspendEmployeeModal";
 import EmployeeMilestoneModal from "@/components/employees/EmployeeMilestoneModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
-import { getEmployeeActivityLogs } from "@/lib/activityLog/activityLogApi";
 
 function isAdminRole(role) {
   return String(role || "").trim().toLowerCase() === "admin";
@@ -42,9 +41,6 @@ export default function MatrixEmployeesTable({
 
   const [selectedLogEmployee, setSelectedLogEmployee] = useState(null);
   const [milestoneEmployee, setMilestoneEmployee] = useState(null);
-  const [activityLogs, setActivityLogs] = useState([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
 
@@ -175,45 +171,6 @@ export default function MatrixEmployeesTable({
       employee: null,
     });
   };
-
-  useEffect(() => {
-    if (!selectedLogEmployee?.id) {
-      setActivityLogs([]);
-      setLogsError("");
-      return undefined;
-    }
-
-    let cancelled = false;
-
-    setLogsLoading(true);
-    setLogsError("");
-
-    getEmployeeActivityLogs(selectedLogEmployee.id)
-      .then((logs) => {
-        if (!cancelled) {
-          setActivityLogs(logs);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setActivityLogs([]);
-          setLogsError(
-            error instanceof ApiRequestError
-              ? error.message
-              : "Unable to load activity logs"
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLogsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedLogEmployee?.id]);
 
   const modalTitle =
     confirmModal.action === "delete"
@@ -445,11 +402,9 @@ export default function MatrixEmployeesTable({
 
       <ActivityLogModal
         isOpen={Boolean(selectedLogEmployee)}
+        employeeId={selectedLogEmployee?.id ?? null}
         title="Employee Activity Log"
         reference={selectedLogEmployee?.name}
-        logs={activityLogs}
-        loading={logsLoading}
-        error={logsError}
         onClose={() => setSelectedLogEmployee(null)}
       />
       <EmployeeMilestoneModal

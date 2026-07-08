@@ -3,7 +3,12 @@
  */
 
 const { getPool } = require("../config/database");
-const { RUSH_READY_MIN_DAYS, ORDER_AGE_SQL_ALIAS } = require("../utils/rushUtils");
+const {
+  RUSH_1_MAX_DAYS,
+  RUSH_2_MAX_DAYS,
+  RUSH_READY_MIN_DAYS,
+  ORDER_AGE_SQL_ALIAS,
+} = require("../utils/rushUtils");
 const { toSqlDateOnly, parseDateOnlyParts } = require("../utils/dateUtils");
 
 function toSqlDateTimeStart(value) {
@@ -233,6 +238,72 @@ const ORDER_DETAIL_SELECT = `
   LEFT JOIN facilities f ON f.id = o.facility_id
   LEFT JOIN providers p ON p.id = o.provider_id`;
 
+function appendRushLevelFilter(conditions, params, rushLevel) {
+  const normalized = `${rushLevel || ""}`.trim();
+  if (!normalized) return;
+
+  const ageExpr = `DATEDIFF(CURDATE(), ${ORDER_AGE_SQL_ALIAS})`;
+
+  if (normalized === "Rush 1") {
+    conditions.push(`(${ageExpr} IS NOT NULL AND ${ageExpr} <= :rush1MaxDays)`);
+    params.rush1MaxDays = RUSH_1_MAX_DAYS;
+    return;
+  }
+
+  if (normalized === "Rush 2") {
+    conditions.push(
+      `(${ageExpr} IS NOT NULL AND ${ageExpr} > :rush1MaxDays AND ${ageExpr} <= :rush2MaxDays)`
+    );
+    params.rush1MaxDays = RUSH_1_MAX_DAYS;
+    params.rush2MaxDays = RUSH_2_MAX_DAYS;
+    return;
+  }
+
+  if (normalized === "Rush 3") {
+    conditions.push(`(${ageExpr} IS NOT NULL AND ${ageExpr} > :rush2MaxDays)`);
+    params.rush2MaxDays = RUSH_2_MAX_DAYS;
+  }
+}
+
+function resolveListSort(filters = {}) {
+  const sortDir = `${filters.sortDir || ""}`.trim().toLowerCase();
+  if (sortDir === "asc" || sortDir === "desc") {
+    const direction = sortDir.toUpperCase();
+    return {
+      mode: "created_at",
+      direction,
+      orderByClause: `ORDER BY o.created_at ${direction}, o.id ${direction}`,
+    };
+  }
+
+  return {
+    mode: "id",
+    direction: "DESC",
+    orderByClause: "ORDER BY o.id DESC",
+  };
+}
+
+function encodeCreatedCursor(createdAt, id) {
+  if (!createdAt || !id) return null;
+  const dateValue =
+    createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+  return `${dateValue}|${id}`;
+}
+
+function decodeCreatedCursor(rawCursor) {
+  if (rawCursor == null || rawCursor === "") return null;
+
+  const value = String(rawCursor);
+  const separatorIndex = value.lastIndexOf("|");
+  if (separatorIndex <= 0) return null;
+
+  const createdAt = value.slice(0, separatorIndex);
+  const id = Number(value.slice(separatorIndex + 1));
+  if (!createdAt || !Number.isFinite(id) || id <= 0) return null;
+
+  return { createdAt, id };
+}
+
 function buildFindAllWhere(filters = {}) {
   const conditions = [];
   const params = {};
@@ -251,6 +322,10 @@ function buildFindAllWhere(filters = {}) {
     params.status = filters.status;
   } else {
     conditions.push(NON_DELETED_ORDER_ALIAS);
+  }
+
+  if (filters.excludeCompleted) {
+    conditions.push("o.status <> 'Completed'");
   }
 
   if (filters.facilityId) {
@@ -296,6 +371,10 @@ function buildFindAllWhere(filters = {}) {
     }
   }
 
+  if (filters.rushLevel) {
+    appendRushLevelFilter(conditions, params, filters.rushLevel);
+  }
+
   if (filters.search) {
     appendOrderSearchFilter(conditions, params, filters.search);
   }
@@ -310,6 +389,7 @@ class Order {
   static async findAll(filters = {}) {
     const pool = getPool();
     const { whereClause, params } = buildFindAllWhere(filters);
+    const { orderByClause } = resolveListSort(filters);
 
     const limit =
       filters.limit && Number(filters.limit) > 0
@@ -328,7 +408,7 @@ class Order {
     const [rows] = await pool.execute(
       `${ORDER_DETAIL_SELECT}
        ${whereClause}
-       ORDER BY o.id DESC
+       ${orderByClause}
        ${limitClause}`,
       params
     );
@@ -339,13 +419,45 @@ class Order {
   static async findAllKeyset(filters = {}) {
     const pool = getPool();
     const { whereClause, params } = buildFindAllWhere(filters);
+    const { mode, direction, orderByClause } = resolveListSort(filters);
     const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 1), 100);
     const queryLimit = pageSize + 1;
-    const cursorId =
-      Number(filters.cursorId) > 0 ? Number(filters.cursorId) : null;
-    const cursorCondition = cursorId ? "o.id < :cursorId" : "";
-    if (cursorId) {
-      params.cursorId = cursorId;
+
+    let cursorCondition = "";
+
+    if (mode === "created_at") {
+      const createdCursor =
+        decodeCreatedCursor(filters.cursor) ||
+        (filters.cursorCreatedAt && Number(filters.cursorId) > 0
+          ? {
+              createdAt: filters.cursorCreatedAt,
+              id: Number(filters.cursorId),
+            }
+          : null);
+
+      if (createdCursor) {
+        const operator = direction === "ASC" ? ">" : "<";
+        cursorCondition = `(
+          o.created_at ${operator} :cursorCreatedAt
+          OR (
+            o.created_at = :cursorCreatedAt
+            AND o.id ${operator} :cursorId
+          )
+        )`;
+        params.cursorCreatedAt = createdCursor.createdAt;
+        params.cursorId = createdCursor.id;
+      }
+    } else {
+      const cursorId =
+        Number(filters.cursorId) > 0
+          ? Number(filters.cursorId)
+          : Number(filters.cursor) > 0
+            ? Number(filters.cursor)
+            : null;
+      if (cursorId) {
+        cursorCondition = "o.id < :cursorId";
+        params.cursorId = cursorId;
+      }
     }
 
     const keysetWhereClause = cursorCondition
@@ -357,14 +469,20 @@ class Order {
     const [rows] = await pool.execute(
       `${ORDER_DETAIL_SELECT}
        ${keysetWhereClause}
-       ORDER BY o.id DESC
+       ${orderByClause}
        LIMIT ${queryLimit}`,
       params
     );
 
     const hasMore = rows.length > pageSize;
     const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
-    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
+    const lastRow = pageRows[pageRows.length - 1] || null;
+    const nextCursor =
+      hasMore && lastRow
+        ? mode === "created_at"
+          ? encodeCreatedCursor(lastRow.created_at, lastRow.id)
+          : lastRow.id || null
+        : null;
 
     return {
       rows: pageRows,

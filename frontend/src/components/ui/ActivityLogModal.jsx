@@ -1,37 +1,72 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
-import PaginationBar, {
-  DEFAULT_PAGE_SIZE,
-  paginateItems,
-} from "@/components/ui/PaginationBar";
+import { getEmployeeActivityLogsPaginated } from "@/lib/activityLog/activityLogApi";
+
+const LOGS_PAGE_SIZE = 10;
 
 export default function ActivityLogModal({
   isOpen,
+  employeeId = null,
   title = "Activity Log",
   reference = "",
   countLabel = "entries",
-  logs = [],
-  loading = false,
-  error = "",
   onClose,
 }) {
   const mounted = useIsClient();
   const [searchValue, setSearchValue] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const openSession = isOpen ? "open" : null;
-  const [prevOpenSession, setPrevOpenSession] = useState(null);
+  const [appliedSearch, setAppliedSearch] = useState("");
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [hasMoreLogs, setHasMoreLogs] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
 
-  if (openSession !== prevOpenSession) {
-    setPrevOpenSession(openSession);
+  const loadLogsPage = useCallback(
+    async ({ cursor = null, append = false, search = appliedSearch } = {}) => {
+      const result = await getEmployeeActivityLogsPaginated(employeeId, {
+        cursor,
+        pageSize: LOGS_PAGE_SIZE,
+        search,
+      });
 
-    if (openSession) {
-      setSearchValue("");
-      setCurrentPage(1);
-    }
-  }
+      setLogs((prev) =>
+        append ? [...prev, ...(result.logs || [])] : result.logs || []
+      );
+      setHasMoreLogs(Boolean(result.pagination?.hasMore));
+      setNextCursor(result.pagination?.nextCursor ?? null);
+      return result.logs || [];
+    },
+    [employeeId, appliedSearch]
+  );
+
+  useEffect(() => {
+    if (!isOpen || !employeeId) return undefined;
+
+    let active = true;
+    setLoadError("");
+    setLoading(true);
+    setHasMoreLogs(false);
+    setNextCursor(null);
+
+    loadLogsPage({ search: appliedSearch })
+      .catch((err) => {
+        if (active) {
+          setLogs([]);
+          setLoadError(err.message || "Failed to load activity logs");
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isOpen, employeeId, appliedSearch, loadLogsPage]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -44,30 +79,55 @@ export default function ActivityLogModal({
     };
   }, [isOpen]);
 
-  const filteredLogs = useMemo(() => {
-    const search = searchValue.trim().toLowerCase();
+  useEffect(() => {
+    if (!isOpen) return undefined;
 
-    if (!search) return logs;
+    const timeoutId = window.setTimeout(() => {
+      setAppliedSearch(searchValue.trim());
+    }, 300);
 
-    return logs.filter((log) => {
-      const searchableDate = log.displayDate || log.date || "";
-      return (
-        String(searchableDate).toLowerCase().includes(search) ||
-        String(log.by || "").toLowerCase().includes(search) ||
-        String(log.callback || "").toLowerCase().includes(search) ||
-        String(log.note || "").toLowerCase().includes(search)
-      );
-    });
-  }, [logs, searchValue]);
+    return () => window.clearTimeout(timeoutId);
+  }, [isOpen, searchValue]);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [searchValue, logs]);
+    if (!isOpen) {
+      setSearchValue("");
+      setAppliedSearch("");
+      setLogs([]);
+      setHasMoreLogs(false);
+      setNextCursor(null);
+      setLoadError("");
+    }
+  }, [isOpen]);
 
-  const pagination = useMemo(
-    () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
-    [filteredLogs, currentPage]
-  );
+  const handleLoadMore = async () => {
+    if (!hasMoreLogs || !nextCursor || loadingMore || loading) return;
+
+    setLoadingMore(true);
+    setLoadError("");
+
+    try {
+      await loadLogsPage({
+        cursor: nextCursor,
+        append: true,
+        search: appliedSearch,
+      });
+    } catch (err) {
+      setLoadError(err.message || "Failed to load more activity logs");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleListScroll = (event) => {
+    const element = event.currentTarget;
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+
+    if (distanceFromBottom <= 80) {
+      handleLoadMore();
+    }
+  };
 
   if (!mounted || !isOpen) return null;
 
@@ -93,7 +153,8 @@ export default function ActivityLogModal({
                 )}
 
                 <span className="inline-flex h-[20px] items-center rounded-full bg-[#F1F5F9] px-2 text-[10px] font-semibold text-[#64748B]">
-                  {logs.length} {countLabel}
+                  {logs.length}
+                  {hasMoreLogs ? "+" : ""} {countLabel}
                 </span>
               </div>
             </div>
@@ -123,7 +184,10 @@ export default function ActivityLogModal({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          className="min-h-0 flex-1 overflow-auto"
+          onScroll={handleListScroll}
+        >
           <table className="w-full min-w-[720px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
@@ -146,43 +210,43 @@ export default function ActivityLogModal({
                 </tr>
               )}
 
-              {!loading && error && (
+              {!loading && loadError && (
                 <tr>
                   <td
                     colSpan={4}
                     className="px-5 py-14 text-center text-[13px] text-red-500"
                   >
-                    {error}
+                    {loadError}
                   </td>
                 </tr>
               )}
 
               {!loading &&
-                !error &&
-                pagination.items.map((log) => (
-                <tr
-                  key={log.id || `${log.date}-${log.callback}-${log.note}`}
-                  className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
-                >
-                  <td className="px-5 py-4 align-top text-[#475569]">
-                    {log.displayDate || log.date}
-                  </td>
+                !loadError &&
+                logs.map((log) => (
+                  <tr
+                    key={log.id || `${log.date}-${log.callback}-${log.note}`}
+                    className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
+                  >
+                    <td className="px-5 py-4 align-top text-[#475569]">
+                      {log.displayDate || log.date}
+                    </td>
 
-                  <td className="px-5 py-4 align-top font-semibold text-[#111827]">
-                    {log.by}
-                  </td>
+                    <td className="px-5 py-4 align-top font-semibold text-[#111827]">
+                      {log.by}
+                    </td>
 
-                  <td className="px-5 py-4 align-top text-[#CBD5E1]">
-                    {log.callback || "–"}
-                  </td>
+                    <td className="px-5 py-4 align-top text-[#CBD5E1]">
+                      {log.callback || "–"}
+                    </td>
 
-                  <td className="px-5 py-4 align-top leading-[18px] text-[#334155]">
-                    {renderNote(log.note)}
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-5 py-4 align-top leading-[18px] text-[#334155]">
+                      {renderNote(log.note)}
+                    </td>
+                  </tr>
+                ))}
 
-              {!loading && !error && filteredLogs.length === 0 && (
+              {!loading && !loadError && logs.length === 0 && (
                 <tr>
                   <td
                     colSpan={4}
@@ -194,17 +258,21 @@ export default function ActivityLogModal({
               )}
             </tbody>
           </table>
+
+          {loadingMore ? (
+            <p className="py-3 text-center text-[11px] text-[#64748B]">
+              Loading more activity logs...
+            </p>
+          ) : null}
         </div>
 
-        <PaginationBar
-          currentPage={pagination.currentPage}
-          totalPages={pagination.totalPages}
-          totalItems={pagination.totalItems}
-          startRecord={pagination.startRecord}
-          endRecord={pagination.endRecord}
-          itemLabel="entries"
-          onPageChange={setCurrentPage}
-        />
+        <div className="shrink-0 border-t border-[#F1F5F9] bg-white px-5 py-3">
+          <p className="text-[11px] text-[#64748B]">
+            {hasMoreLogs
+              ? `Showing ${logs.length}+ entries — scroll for older activity`
+              : `Showing ${logs.length} ${logs.length === 1 ? "entry" : "entries"}`}
+          </p>
+        </div>
       </section>
     </div>,
     document.body

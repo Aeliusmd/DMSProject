@@ -25,6 +25,15 @@ const RUSH_LEVEL_OPTIONS = [
   ...RUSH_LEVEL_LEGEND.map(({ label }) => ({ value: label, label })),
 ];
 
+const defaultDraftFilters = {
+  facility: "",
+  status: "",
+  rushLevel: "",
+  fromDate: "",
+  toDate: "",
+  sortDir: "asc",
+};
+
 export default function ReportsPage() {
   const user = getStoredUser();
   const showActivityReportLink = canAccessActivityReport(user);
@@ -33,13 +42,12 @@ export default function ReportsPage() {
   const [facilitiesLoading, setFacilitiesLoading] = useState(true);
   const [facilitiesError, setFacilitiesError] = useState("");
 
-  const [selectedFacility, setSelectedFacility] = useState("");
-  const [status, setStatus] = useState("");
-  const [rushLevel, setRushLevel] = useState("");
-  const [search, setSearch] = useState("");
-  const [sortDir, setSortDir] = useState("asc");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [draftFilters, setDraftFilters] = useState(defaultDraftFilters);
+  const [searchDraft, setSearchDraft] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    ...defaultDraftFilters,
+    search: "",
+  });
   const [summary, setSummary] = useState({
     total: 0,
     startRecord: 0,
@@ -61,7 +69,15 @@ export default function ReportsPage() {
         setFacilitiesError("");
 
         if (list.length > 0) {
-          setSelectedFacility((prev) => prev || String(list[0].id));
+          const defaultFacilityId = String(list[0].id);
+          setDraftFilters((prev) => ({
+            ...prev,
+            facility: prev.facility || defaultFacilityId,
+          }));
+          setAppliedFilters((prev) => ({
+            ...prev,
+            facility: prev.facility || defaultFacilityId,
+          }));
         }
       })
       .catch((err) => {
@@ -78,19 +94,63 @@ export default function ReportsPage() {
     };
   }, []);
 
+  const updateDraftFilter = (name, value) => {
+    setDraftFilters((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedFilters((prev) => ({
+      ...draftFilters,
+      search: prev.search || "",
+    }));
+  };
+
+  const handleSearch = () => {
+    setAppliedFilters((prev) => ({
+      ...prev,
+      search: searchDraft.trim(),
+    }));
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSearch();
+    }
+  };
+
+  const handleReset = () => {
+    const defaultFacilityId =
+      facilities.length > 0 ? String(facilities[0].id) : "";
+    const nextDraft = {
+      ...defaultDraftFilters,
+      facility: defaultFacilityId,
+    };
+
+    setDraftFilters(nextDraft);
+    setSearchDraft("");
+    setAppliedFilters({
+      ...nextDraft,
+      search: "",
+    });
+  };
+
   const tableFilters = useMemo(
     () => ({
-      facility: selectedFacility,
+      facility: appliedFilters.facility,
       company: "",
       year: "",
       period: "",
-      status,
-      rushLevel,
-      search,
-      createdFrom: fromDate,
-      createdTo: toDate,
+      status: appliedFilters.status,
+      rushLevel: appliedFilters.rushLevel,
+      search: appliedFilters.search,
+      createdFrom: appliedFilters.fromDate,
+      createdTo: appliedFilters.toDate,
     }),
-    [selectedFacility, status, rushLevel, search, fromDate, toDate]
+    [appliedFilters]
   );
 
   const handleSummaryChange = useCallback((next) => {
@@ -102,10 +162,10 @@ export default function ReportsPage() {
 
   const selectedFacilityName = useMemo(() => {
     const match = facilities.find(
-      (facility) => String(facility.id) === String(selectedFacility)
+      (facility) => String(facility.id) === String(appliedFilters.facility)
     );
     return match ? facilityLabel(match) : "";
-  }, [facilities, selectedFacility]);
+  }, [facilities, appliedFilters.facility]);
 
   return (
     <DashboardShell>
@@ -166,14 +226,18 @@ export default function ReportsPage() {
         </div>
 
         <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(160px,1fr)_130px_130px_130px_130px_minmax(160px,1fr)_170px_auto]">
+          <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
+            Filters
+          </h2>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(160px,1fr)_130px_130px_130px_130px_170px_auto_auto]">
             <div>
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Facility
               </label>
               <select
-                value={selectedFacility}
-                onChange={(e) => setSelectedFacility(e.target.value)}
+                value={draftFilters.facility}
+                onChange={(e) => updateDraftFilter("facility", e.target.value)}
                 disabled={facilitiesLoading || facilities.length === 0}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:opacity-60"
               >
@@ -194,8 +258,8 @@ export default function ReportsPage() {
                 Status
               </label>
               <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                value={draftFilters.status}
+                onChange={(e) => updateDraftFilter("status", e.target.value)}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               >
                 {STATUS_OPTIONS.map((option) => (
@@ -211,8 +275,8 @@ export default function ReportsPage() {
                 Rush Level
               </label>
               <select
-                value={rushLevel}
-                onChange={(e) => setRushLevel(e.target.value)}
+                value={draftFilters.rushLevel}
+                onChange={(e) => updateDraftFilter("rushLevel", e.target.value)}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               >
                 {RUSH_LEVEL_OPTIONS.map((option) => (
@@ -229,9 +293,9 @@ export default function ReportsPage() {
               </label>
               <input
                 type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(e) => setFromDate(e.target.value)}
+                value={draftFilters.fromDate}
+                max={draftFilters.toDate || undefined}
+                onChange={(e) => updateDraftFilter("fromDate", e.target.value)}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-2 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               />
             </div>
@@ -242,26 +306,11 @@ export default function ReportsPage() {
               </label>
               <input
                 type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(e) => setToDate(e.target.value)}
+                value={draftFilters.toDate}
+                min={draftFilters.fromDate || undefined}
+                onChange={(e) => updateDraftFilter("toDate", e.target.value)}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-2 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
-                Search
-              </label>
-              <div className="flex h-[34px] min-w-0 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">
-                <SearchIcon />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search order ID, case, applicant..."
-                  className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
-                />
-              </div>
             </div>
 
             <div>
@@ -271,12 +320,17 @@ export default function ReportsPage() {
               <button
                 type="button"
                 onClick={() =>
-                  setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))
+                  updateDraftFilter(
+                    "sortDir",
+                    draftFilters.sortDir === "asc" ? "desc" : "asc"
+                  )
                 }
                 className="flex h-[34px] w-full items-center justify-between rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
               >
                 <span>
-                  {sortDir === "asc" ? "Oldest → Newest" : "Newest → Oldest"}
+                  {draftFilters.sortDir === "asc"
+                    ? "Oldest → Newest"
+                    : "Newest → Oldest"}
                 </span>
                 <SortIcon />
               </button>
@@ -285,22 +339,48 @@ export default function ReportsPage() {
             <div className="flex items-end">
               <button
                 type="button"
-                onClick={() => {
-                  setStatus("");
-                  setRushLevel("");
-                  setSearch("");
-                  setSortDir("asc");
-                  setFromDate("");
-                  setToDate("");
-                  if (facilities.length > 0) {
-                    setSelectedFacility(String(facilities[0].id));
-                  }
-                }}
+                onClick={handleApplyFilters}
+                className="h-[34px] w-full whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+              >
+                Apply Filters
+              </button>
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={handleReset}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
               >
                 Reset
               </button>
             </div>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1">
+              <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
+                Search
+              </label>
+              <div className="flex h-[34px] min-w-0 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">
+                <SearchIcon />
+                <input
+                  value={searchDraft}
+                  onChange={(e) => setSearchDraft(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Search order ID, case, applicant..."
+                  className="min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleSearch}
+              className="h-[34px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+            >
+              Search
+            </button>
           </div>
 
           {facilitiesError && (
@@ -318,13 +398,18 @@ export default function ReportsPage() {
           <div className="flex flex-1 items-center justify-center rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-16 text-[13px] text-[#94A3B8]">
             No facilities available to report on.
           </div>
+        ) : !appliedFilters.facility ? (
+          <div className="flex flex-1 items-center justify-center rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-16 text-[13px] text-[#94A3B8]">
+            Select a facility and click Apply Filters.
+          </div>
         ) : (
           <OrdersTable
             filters={tableFilters}
             excludeCompleted
-            createdSortDir={sortDir}
+            createdSortDir={appliedFilters.sortDir}
             fitToWindow
             showDoctorColumn
+            useServerPagination
             onSummaryChange={handleSummaryChange}
           />
         )}

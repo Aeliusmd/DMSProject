@@ -1252,6 +1252,12 @@ function mapOrderDetail(
   return appendOrderCompletenessFields(mapped, row, orderRecords);
 }
 
+function parseExcludeCompleted(value) {
+  if (value === true || value === 1) return true;
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 async function getAllOrders(query = {}) {
   const filters = {};
 
@@ -1267,6 +1273,21 @@ async function getAllOrders(query = {}) {
     filters.readyFilter = true;
   } else if (query.status && STATUS_FILTER_MAP[query.status]) {
     filters.status = STATUS_FILTER_MAP[query.status];
+  }
+
+  if (parseExcludeCompleted(query.excludeCompleted)) {
+    filters.excludeCompleted = true;
+  }
+
+  if (query.rushLevel && `${query.rushLevel}`.trim()) {
+    filters.rushLevel = `${query.rushLevel}`.trim();
+  }
+
+  const sortDir = `${query.sortDir || query.createdSortDir || ""}`
+    .trim()
+    .toLowerCase();
+  if (sortDir === "asc" || sortDir === "desc") {
+    filters.sortDir = sortDir;
   }
 
   if (query.year) {
@@ -1310,7 +1331,11 @@ async function getAllOrders(query = {}) {
   const pageSize = Number.isFinite(pageSizeRaw)
     ? Math.min(Math.max(pageSizeRaw, 1), 100)
     : 10;
-  const cursorRaw = Number(query.cursor);
+  const cursorValue =
+    query.cursor != null && `${query.cursor}`.trim() !== ""
+      ? `${query.cursor}`.trim()
+      : null;
+  const cursorRaw = Number(cursorValue);
   const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
 
   let rows = [];
@@ -1319,6 +1344,7 @@ async function getAllOrders(query = {}) {
     const keysetResult = await Order.findAllKeyset({
       ...filters,
       pageSize,
+      cursor: cursorValue,
       cursorId,
     });
     rows = keysetResult.rows;
