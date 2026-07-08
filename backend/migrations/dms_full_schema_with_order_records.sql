@@ -289,6 +289,11 @@ CREATE TABLE orders (
   KEY idx_orders_status (status),
   KEY idx_orders_case_number (case_number),
   KEY idx_orders_subpoena_date (subpoena_date),
+  KEY idx_orders_created_at (created_at),
+  KEY idx_orders_facility_status_id (facility_id, status, id),
+  KEY idx_orders_status_created_id (status, created_at, id),
+  KEY idx_orders_facility_created_id (facility_id, created_at, id),
+  KEY idx_orders_serve_company (serve_company_name),
   KEY idx_orders_applicant (applicant_last_name, applicant_first_name),
   CONSTRAINT fk_orders_facility
     FOREIGN KEY (facility_id) REFERENCES facilities (id)

@@ -1334,14 +1334,23 @@ async function getAllOrders(query = {}) {
   }
 
   const orderIds = rows.map((row) => row.id);
-  const stages = await Order.findWorkflowStagesByOrderIds(orderIds);
-  const invoicesByOrderId = await invoiceService.getStandardInvoicesByOrderIds(orderIds);
-  const xrayByOrderId = await invoiceService.getXrayDetailsByOrderIds(orderIds);
-  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
-  const orderRecordRows = await OrderRecord.findByOrderIds(orderIds);
-  const recentNotesByOrderId = await Order.findRecentNotesByOrderIds(orderIds, 2);
-  const activeReminderByOrderId =
-    await Order.findActiveReminderFlagsByOrderIds(orderIds);
+  const [
+    stages,
+    invoicesByOrderId,
+    xrayByOrderId,
+    paymentRows,
+    orderRecordRows,
+    recentNotesByOrderId,
+    activeReminderByOrderId,
+  ] = await Promise.all([
+    Order.findWorkflowStagesByOrderIds(orderIds),
+    invoiceService.getStandardInvoicesByOrderIds(orderIds),
+    invoiceService.getXrayDetailsByOrderIds(orderIds),
+    Order.findPaymentsByOrderIds(orderIds),
+    OrderRecord.findByOrderIds(orderIds),
+    Order.findRecentNotesByOrderIds(orderIds, 2),
+    Order.findActiveReminderFlagsByOrderIds(orderIds),
+  ]);
 
   const stagesByOrderId = stages.reduce((acc, stage) => {
     if (!acc[stage.order_id]) acc[stage.order_id] = [];
