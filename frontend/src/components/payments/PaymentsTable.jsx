@@ -27,7 +27,7 @@ function PaymentTypeBadge({ label }) {
   const styles = {
     Regular: "bg-[#E6F7FA] text-[#007F96] border-[#67D8E8]",
     Custodian: "bg-[#F3E8FF] text-[#7C3AED] border-[#DDD6FE]",
-    "X-Ray": "bg-[#FFEDD5] text-[#EA580C] border-[#FDBA74]",
+    "X-Ray": "bg-[#EEF2FF] text-[#4338CA] border-[#C7D2FE]",
   };
 
   return (

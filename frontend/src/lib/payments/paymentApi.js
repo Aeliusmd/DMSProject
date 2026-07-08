@@ -2,6 +2,7 @@ import {
   ORDER_PAYMENT_DETAILS,
   PAYMENT_TYPE_LABELS,
 } from "./paymentMockData";
+import { request } from "@/lib/auth/authApi";
 
 function formatMoney(value) {
   const amount = Number(value);
@@ -196,11 +197,31 @@ export async function getPayments({
   dateTo,
 } = {}) {
   const channel = type === "online" ? "online" : "manual";
+
+  if (channel === "manual") {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+
+    const query = params.toString();
+    const data = await request(`/payments/manual${query ? `?${query}` : ""}`, {
+      auth: true,
+      cache: "no-store",
+    });
+
+    const rows = data?.data?.payments || [];
+
+    return {
+      payments: rows,
+      summary: buildManualSummary(rows),
+      count: rows.length,
+    };
+  }
+
   const rows = [];
 
   Object.values(ORDER_PAYMENT_DETAILS).forEach((order) => {
-    const payments =
-      channel === "online" ? order.onlinePayments : order.manualPayments;
+    const payments = order.onlinePayments;
     const filtered = filterPaymentsByDate(payments, channel, dateFrom, dateTo);
 
     filtered.forEach((payment) => {
@@ -214,11 +235,43 @@ export async function getPayments({
 
   return {
     payments: rows,
-    summary:
-      channel === "online"
-        ? buildOnlineSummary(rows)
-        : buildManualSummary(rows),
+    summary: buildOnlineSummary(rows),
     count: rows.length,
+  };
+}
+
+export async function searchOrderInvoices(orderId) {
+  const params = new URLSearchParams();
+  params.set("orderId", String(orderId).trim());
+
+  const data = await request(
+    `/payments/orders/invoices/search?${params.toString()}`,
+    {
+      auth: true,
+      cache: "no-store",
+    }
+  );
+
+  return data?.data || { order: null, invoices: [] };
+}
+
+export async function recordManualPayment(payload = {}) {
+  const data = await request("/payments/manual", {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+
+  return data?.data || { order: null, invoices: [] };
+}
+
+function mapDetailManualPayment(payment) {
+  return {
+    ...payment,
+    typeLabel: payment.paymentTypeLabel || PAYMENT_TYPE_LABELS[payment.paymentType] || payment.paymentType,
+    amountDisplay: payment.amountDisplay || formatMoney(payment.amount),
+    referenceNo: payment.referenceNo || payment.paymentCheckNumber || "",
+    notes: payment.notes || "",
   };
 }
 
@@ -226,6 +279,26 @@ export async function getPayments({
  * Full order payment detail for the detail page.
  */
 export async function getOrderPaymentDetail(orderId, { channel } = {}) {
+  const activeChannel = channel === "online" ? "online" : "manual";
+
+  if (activeChannel === "manual") {
+    const data = await request(`/payments/orders/${orderId}/detail`, {
+      auth: true,
+      cache: "no-store",
+    });
+
+    const detail = data?.data;
+    if (!detail) return null;
+
+    return {
+      ...detail,
+      activeChannel,
+      channelPayments: (detail.manualPayments || []).map(mapDetailManualPayment),
+      manualPayments: (detail.manualPayments || []).map(mapDetailManualPayment),
+      onlinePayments: detail.onlinePayments || [],
+    };
+  }
+
   const order = ORDER_PAYMENT_DETAILS[String(orderId)];
 
   if (!order) {
@@ -236,11 +309,8 @@ export async function getOrderPaymentDetail(orderId, { channel } = {}) {
 
   return {
     ...enriched,
-    activeChannel: channel === "online" ? "online" : "manual",
-    channelPayments:
-      channel === "online"
-        ? enriched.onlinePayments
-        : enriched.manualPayments,
+    activeChannel,
+    channelPayments: enriched.onlinePayments,
   };
 }
 
