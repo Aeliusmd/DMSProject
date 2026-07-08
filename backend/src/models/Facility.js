@@ -6,17 +6,81 @@ const {
 } = require("../utils/facilityNameUtils");
 
 class Facility {
-  static async findAll(connection = null) {
+  static async findAll(filters = {}, connection = null) {
     const pool = connection || getPool();
+    const conditions = ["is_active = 1"];
+    const params = {};
+
+    if (filters.search) {
+      conditions.push("facility_name LIKE :searchPrefix");
+      params.searchPrefix = `${Facility.escapeLikePrefix(filters.search)}%`;
+    }
+
+    const limit =
+      filters.limit && Number(filters.limit) > 0
+        ? Math.min(Number(filters.limit), 500)
+        : null;
+    const offset =
+      filters.offset && Number(filters.offset) >= 0
+        ? Number(filters.offset)
+        : null;
+    const limitClause = limit
+      ? offset !== null
+        ? `LIMIT ${offset}, ${limit}`
+        : `LIMIT ${limit}`
+      : "";
 
     const [rows] = await pool.execute(
       `SELECT id, facility_name, city, zip_code, state, email, phone, is_active, is_auto_created
        FROM facilities
-       WHERE is_active = 1
-       ORDER BY id DESC`
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY id DESC
+       ${limitClause}`,
+      params
     );
 
     return rows;
+  }
+
+  static async findAllKeyset(filters = {}, connection = null) {
+    const pool = connection || getPool();
+    const conditions = ["is_active = 1"];
+    const params = {};
+
+    if (filters.search) {
+      conditions.push("facility_name LIKE :searchPrefix");
+      params.searchPrefix = `${Facility.escapeLikePrefix(filters.search)}%`;
+    }
+
+    const cursorId =
+      Number(filters.cursorId) > 0 ? Number(filters.cursorId) : null;
+    if (cursorId) {
+      conditions.push("id < :cursorId");
+      params.cursorId = cursorId;
+    }
+
+    const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 1), 100);
+    const queryLimit = pageSize + 1;
+
+    const [rows] = await pool.execute(
+      `SELECT id, facility_name, city, zip_code, state, email, phone, is_active, is_auto_created
+       FROM facilities
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY id DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > pageSize;
+    const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
+
+    return {
+      rows: pageRows,
+      pageSize,
+      hasMore,
+      nextCursor,
+    };
   }
 
   static async findById(id, connection = null) {
@@ -134,10 +198,10 @@ class Facility {
       `SELECT id, facility_name, city, zip_code, state, email, phone, is_active, is_auto_created
        FROM facilities
        WHERE is_active = 1
-         AND LOWER(facility_name) LIKE :query
+         AND facility_name LIKE :queryPrefix
        ORDER BY facility_name ASC
        LIMIT ${safeLimit}`,
-      { query: `%${trimmed.toLowerCase()}%` }
+      { queryPrefix: `${Facility.escapeLikePrefix(trimmed)}%` }
     );
 
     return rows;
@@ -267,6 +331,10 @@ class Facility {
       `UPDATE facilities SET is_active = 0, updated_at = NOW() WHERE id = :id`,
       { id }
     );
+  }
+
+  static escapeLikePrefix(value) {
+    return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
   }
 }
 

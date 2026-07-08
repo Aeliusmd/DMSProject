@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
@@ -12,11 +12,13 @@ import {
   activateEmployee,
   createEmployee,
   deleteEmployee,
-  getEmployees,
+  getEmployeesPaginated,
   suspendEmployee,
   terminateEmployee,
   updateEmployee,
 } from "@/lib/employees/employeeApi";
+
+const EMPLOYEES_PER_PAGE = 10;
 
 export default function EmployeesPage() {
   const router = useRouter();
@@ -27,28 +29,84 @@ export default function EmployeesPage() {
   const [editEmployee, setEditEmployee] = useState(null);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const cursorHistoryRef = useRef([null]);
+  const [pagination, setPagination] = useState({
+    pageSize: EMPLOYEES_PER_PAGE,
+    hasMore: false,
+    nextCursor: null,
+  });
 
-  const filteredEmployees = useMemo(() => {
-    const query = appliedSearch.trim().toLowerCase();
+  const user = getStoredUser();
+  const readOnly = !canManageEmployees(user);
 
-    if (!query) {
-      return employees;
-    }
-
-    return employees.filter((employee) =>
-      String(employee.name || "").toLowerCase().includes(query)
-    );
-  }, [employees, appliedSearch]);
-
-  const applySearch = () => setAppliedSearch(searchInput);
+  const applySearch = () => {
+    setAppliedSearch(searchInput.trim());
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    setPagination({
+      pageSize: EMPLOYEES_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
+    });
+  };
 
   const clearSearch = () => {
     setSearchInput("");
     setAppliedSearch("");
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    setPagination({
+      pageSize: EMPLOYEES_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
+    });
   };
 
-  const user = getStoredUser();
-  const readOnly = !canManageEmployees(user);
+  const loadEmployees = useCallback(async () => {
+    setIsLoading(true);
+    setPageError("");
+
+    try {
+      const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+      const result = await getEmployeesPaginated({
+        search: appliedSearch,
+        pagination: "keyset",
+        cursor,
+        pageSize: EMPLOYEES_PER_PAGE,
+      });
+      const hasMore = Boolean(result.pagination?.hasMore);
+      const nextCursor = result.pagination?.nextCursor ?? null;
+
+      setEmployees(result.employees || []);
+      setPagination({
+        pageSize: Number(result.pagination?.pageSize) || EMPLOYEES_PER_PAGE,
+        hasMore,
+        nextCursor,
+      });
+      setCursorHistory((prev) => {
+        const next = prev.slice(0, currentPage);
+        if (hasMore && nextCursor != null) {
+          next[currentPage] = nextCursor;
+        }
+        if (!hasMore) {
+          next.length = currentPage;
+        }
+        return next;
+      });
+    } catch (error) {
+      if (error.status === 403) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      setPageError(error.message || "Unable to load employees");
+      setEmployees([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [appliedSearch, currentPage, router]);
 
   useEffect(() => {
     const currentUser = getStoredUser();
@@ -58,32 +116,19 @@ export default function EmployeesPage() {
       return;
     }
 
-    async function loadEmployees() {
-      setIsLoading(true);
-      setPageError("");
-
-      try {
-        const data = await getEmployees();
-        setEmployees(data);
-      } catch (error) {
-        if (error.status === 403) {
-          router.replace("/dashboard");
-          return;
-        }
-
-        setPageError(error.message || "Unable to load employees");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-
     loadEmployees();
-  }, [router]);
+  }, [loadEmployees, router]);
+
+  useEffect(() => {
+    cursorHistoryRef.current = cursorHistory;
+  }, [cursorHistory]);
 
   const handleCreateEmployee = async (newEmployeeData) => {
-    const employee = await createEmployee(newEmployeeData);
-    setEmployees((prev) => [employee, ...prev]);
+    await createEmployee(newEmployeeData);
     setIsNewEmployeeModalOpen(false);
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    await loadEmployees();
   };
 
   const handleUpdateEmployee = async (payload) => {
@@ -121,8 +166,14 @@ export default function EmployeesPage() {
 
   const handleDeleteEmployee = async (employee) => {
     await deleteEmployee(employee.id);
-    setEmployees((prev) => prev.filter((item) => item.id !== employee.id));
+    await loadEmployees();
   };
+
+  const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
+  const startRecord = employees.length
+    ? (currentPage - 1) * EMPLOYEES_PER_PAGE + 1
+    : 0;
+  const endRecord = startRecord + employees.length - (employees.length ? 1 : 0);
 
   return (
     <DashboardShell>
@@ -172,8 +223,12 @@ export default function EmployeesPage() {
 
             <p className="text-[11px] text-[#64748B]">
               {appliedSearch.trim()
-                ? `Showing ${filteredEmployees.length} of ${employees.length} employees`
-                : `${employees.length} employees`}
+                ? pagination.hasMore
+                  ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ employees`
+                  : `Showing ${startRecord}-${endRecord} of ${endRecord} employees`
+                : pagination.hasMore
+                  ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ employees`
+                  : `${endRecord} employees`}
             </p>
           </div>
         )}
@@ -184,7 +239,7 @@ export default function EmployeesPage() {
           </div>
         ) : (
           <MatrixEmployeesTable
-            employees={filteredEmployees}
+            employees={employees}
             readOnly={readOnly}
             onEditEmployee={setEditEmployee}
             onTerminateEmployee={handleTerminateEmployee}
@@ -192,6 +247,34 @@ export default function EmployeesPage() {
             onActivateEmployee={handleActivateEmployee}
             onSuspendEmployee={handleSuspendEmployee}
           />
+        )}
+
+        {!isLoading && (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+              disabled={currentPage === 1}
+              className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ‹
+            </button>
+
+            <span className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] bg-[#111827] px-2 text-[12px] font-semibold text-white">
+              {currentPage}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentPage((page) => Math.min(page + 1, totalPages))
+              }
+              disabled={currentPage >= totalPages || employees.length === 0}
+              className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
         )}
 
         {!readOnly && (

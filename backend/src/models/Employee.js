@@ -64,19 +64,77 @@ class Employee {
     return publicEmployee;
   }
 
-  static async findAll() {
+  static async findAll(filters = {}) {
     const pool = getPool();
+    const conditions = ["deleted_at IS NULL"];
+    const params = {};
+
+    if (filters.search) {
+      conditions.push("name LIKE :searchPrefix");
+      params.searchPrefix = `${Employee.escapeLikePrefix(filters.search)}%`;
+    }
+
+    const limit =
+      filters.limit && Number(filters.limit) > 0
+        ? Math.min(Number(filters.limit), 500)
+        : null;
+    const limitClause = limit ? `LIMIT ${limit}` : "";
 
     const [rows] = await pool.execute(
       `SELECT id, name, logon, email, role, last_login_at,
               is_terminated, is_suspended, suspended_by, reactivated_date,
               deleted_at, created_at, updated_at
        FROM matrix_employees
-       WHERE deleted_at IS NULL
-       ORDER BY id DESC`
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY id DESC
+       ${limitClause}`,
+      params
     );
 
     return rows;
+  }
+
+  static async findAllKeyset(filters = {}) {
+    const pool = getPool();
+    const conditions = ["deleted_at IS NULL"];
+    const params = {};
+
+    if (filters.search) {
+      conditions.push("name LIKE :searchPrefix");
+      params.searchPrefix = `${Employee.escapeLikePrefix(filters.search)}%`;
+    }
+
+    const cursorId =
+      Number(filters.cursorId) > 0 ? Number(filters.cursorId) : null;
+    if (cursorId) {
+      conditions.push("id < :cursorId");
+      params.cursorId = cursorId;
+    }
+
+    const pageSize = Math.min(Math.max(Number(filters.pageSize) || 10, 1), 100);
+    const queryLimit = pageSize + 1;
+
+    const [rows] = await pool.execute(
+      `SELECT id, name, logon, email, role, last_login_at,
+              is_terminated, is_suspended, suspended_by, reactivated_date,
+              deleted_at, created_at, updated_at
+       FROM matrix_employees
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY id DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > pageSize;
+    const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
+
+    return {
+      rows: pageRows,
+      pageSize,
+      hasMore,
+      nextCursor,
+    };
   }
 
   static async findByEmail(email, excludeId = null) {
@@ -266,6 +324,10 @@ class Employee {
        WHERE id = :id AND deleted_at IS NULL`,
       { id, passwordHash }
     );
+  }
+
+  static escapeLikePrefix(value) {
+    return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
   }
 }
 

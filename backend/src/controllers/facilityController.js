@@ -65,9 +65,12 @@ async function logOfficeManagerChanges(req, before, after) {
   }
 }
 
-exports.getAll = asyncHandler(async (_req, res) => {
-  const facilities = await facilityService.getAllFacilities();
-  return ApiResponse.success(res, { facilities });
+exports.getAll = asyncHandler(async (req, res) => {
+  const result = await facilityService.getAllFacilities(req.query);
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { facilities: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.search = asyncHandler(async (req, res) => {
