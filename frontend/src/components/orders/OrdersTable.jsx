@@ -77,7 +77,6 @@ const defaultOrderFilters = {
 
 const DEFAULT_ORDER_FORMS = [
   "Send Copy/Letter",
-  "Copy Center",
   "Certification of Records",
   "CNR",
 ];

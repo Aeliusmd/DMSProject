@@ -25,27 +25,38 @@ async function getStandardInvoiceFinancials(pool) {
   const [rows] = await pool.execute(
     `SELECT
       COALESCE(SUM(${invoiceTotalSql}), 0) AS total_invoiced,
-      COALESCE(SUM(COALESCE(payments.paid_total, 0)), 0) AS total_paid,
+      COALESCE(SUM(
+        GREATEST(
+          COALESCE(i.amount_paid, 0),
+          COALESCE(payments.paid_total, 0)
+        )
+      ), 0) AS total_paid,
       COALESCE(SUM(
         CASE
-          WHEN i.status NOT IN ('Paid', 'Needs Resend', 'Written Off')
+          WHEN i.status NOT IN ('Paid', 'Written Off')
             AND GREATEST(
               0,
-              (${invoiceTotalSql}) - COALESCE(payments.paid_total, 0) - COALESCE(i.writeoff_amount, 0)
+              (${invoiceTotalSql})
+                - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+                - COALESCE(i.writeoff_amount, 0)
             ) > 0
           THEN GREATEST(
             0,
-            (${invoiceTotalSql}) - COALESCE(payments.paid_total, 0) - COALESCE(i.writeoff_amount, 0)
+            (${invoiceTotalSql})
+              - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+              - COALESCE(i.writeoff_amount, 0)
           )
           ELSE 0
         END
       ), 0) AS outstanding_total,
       SUM(
         CASE
-          WHEN i.status NOT IN ('Paid', 'Written Off', 'Needs Resend')
+          WHEN i.status NOT IN ('Paid', 'Written Off')
             AND GREATEST(
               0,
-              (${invoiceTotalSql}) - COALESCE(payments.paid_total, 0) - COALESCE(i.writeoff_amount, 0)
+              (${invoiceTotalSql})
+                - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+                - COALESCE(i.writeoff_amount, 0)
             ) > 0
             AND DATEDIFF(
               CURDATE(),
@@ -55,7 +66,23 @@ async function getStandardInvoiceFinancials(pool) {
           ELSE 0
         END
       ) AS overdue_count,
-      SUM(CASE WHEN i.status = 'Needs Resend' THEN 1 ELSE 0 END) AS needs_resend_count
+      SUM(
+        CASE
+          WHEN i.status <> 'Paid'
+            AND GREATEST(
+              0,
+              (${invoiceTotalSql})
+                - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+                - COALESCE(i.writeoff_amount, 0)
+            ) > 0
+            AND (
+              i.status = 'Needs Resend'
+              OR i.sent_date IS NOT NULL
+            )
+          THEN 1
+          ELSE 0
+        END
+      ) AS needs_resend_count
     FROM invoices i
     LEFT JOIN (
       SELECT order_id, SUM(amount) AS paid_total
@@ -73,17 +100,28 @@ async function getXrayInvoiceFinancials(pool) {
   const [rows] = await pool.execute(
     `SELECT
       COALESCE(SUM(x.payment), 0) AS total_invoiced,
-      COALESCE(SUM(COALESCE(op.amount, 0)), 0) AS total_paid,
+      COALESCE(SUM(
+        GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+      ), 0) AS total_paid,
       COALESCE(SUM(
         CASE
-          WHEN GREATEST(0, x.payment - COALESCE(op.amount, 0)) > 0
-          THEN GREATEST(0, x.payment - COALESCE(op.amount, 0))
+          WHEN GREATEST(
+            0,
+            x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+          ) > 0
+          THEN GREATEST(
+            0,
+            x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+          )
           ELSE 0
         END
       ), 0) AS outstanding_total,
       SUM(
         CASE
-          WHEN GREATEST(0, x.payment - COALESCE(op.amount, 0)) > 0
+          WHEN GREATEST(
+            0,
+            x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+          ) > 0
             AND DATEDIFF(
               CURDATE(),
               DATE(COALESCE(x.sent_date, x.xray_invoice_date))
@@ -92,7 +130,17 @@ async function getXrayInvoiceFinancials(pool) {
           ELSE 0
         END
       ) AS overdue_count,
-      SUM(CASE WHEN x.sent_date IS NOT NULL THEN 1 ELSE 0 END) AS needs_resend_count
+      SUM(
+        CASE
+          WHEN x.sent_date IS NOT NULL
+            AND GREATEST(
+              0,
+              x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+            ) > 0
+          THEN 1
+          ELSE 0
+        END
+      ) AS needs_resend_count
     FROM invoice_xray_details x
     INNER JOIN orders o ON o.id = x.order_id
     LEFT JOIN order_payments op

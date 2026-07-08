@@ -141,6 +141,25 @@ function getXrayPayment(xrayRow) {
   return xrayRow ? toNumber(xrayRow.payment) : 0;
 }
 
+function buildStandardInvoiceNumber(order) {
+  const orderRef = trimOrNull(order?.order_number) || String(order?.id || "");
+  return `INV-${orderRef}`;
+}
+
+function buildXrayInvoiceNumber(order) {
+  const orderRef = trimOrNull(order?.order_number) || String(order?.id || "");
+  return `INV-${orderRef}X`;
+}
+
+function resolveXrayInvoiceNumber(xrayRow, order = null) {
+  const stored = trimOrNull(xrayRow?.invoice_number);
+  if (stored) return stored;
+  if (order) return buildXrayInvoiceNumber(order);
+  const orderRef =
+    trimOrNull(xrayRow?.order_number) || String(xrayRow?.order_id || "");
+  return orderRef ? `INV-${orderRef}X` : "";
+}
+
 const ORDER_PAYMENT_TYPES = ["prepayment", "custodian", "xray"];
 const STANDARD_INVOICE_PAYMENT_TYPES = ["prepayment"];
 const DEFAULT_CUSTODIAN_CHARGE = 15;
@@ -175,12 +194,27 @@ function sumStandardInvoicePayments(payments = []) {
 }
 
 function resolveAmountPaid(orderPayments, existing = null) {
-  if (orderPayments !== undefined) {
-    return sumStandardInvoicePayments(orderPayments);
+  const fromOrderPayments =
+    orderPayments !== undefined
+      ? sumStandardInvoicePayments(orderPayments)
+      : null;
+  const fromExisting = existing ? toNumber(existing.amount_paid) : 0;
+
+  // Preserve manually/online recorded full payments when invoice fee fields are edited.
+  if (
+    existing &&
+    (existing.payment_method === "manual" || existing.payment_method === "online") &&
+    existing.status === "Paid"
+  ) {
+    return Math.max(fromExisting, fromOrderPayments ?? 0);
+  }
+
+  if (fromOrderPayments !== null) {
+    return fromOrderPayments;
   }
 
   if (existing) {
-    return toNumber(existing.amount_paid);
+    return fromExisting;
   }
 
   return 0;
@@ -208,7 +242,7 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   const [invoiceRows] = await db.execute(
     `SELECT id, page_count, per_page_amount,
             clerical_time_hours, clerical_hourly_rate, shipping_handling, storage_fee,
-            total_amount, status, writeoff_amount, amount_paid
+            total_amount, status, writeoff_amount, amount_paid, payment_method
      FROM invoices
      WHERE order_id = :orderId
      LIMIT 1`,
@@ -218,6 +252,19 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
 
   if (!invoice) {
     return null;
+  }
+
+  // Manual/online full payments are owned by the Payments page and must not
+  // be overwritten by order_payments sync.
+  if (
+    (invoice.payment_method === "manual" || invoice.payment_method === "online") &&
+    invoice.status === "Paid"
+  ) {
+    return {
+      amountPaid: toNumber(invoice.amount_paid),
+      amountDue: 0,
+      status: "Paid",
+    };
   }
 
   const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
@@ -614,9 +661,16 @@ function resolveRowFinancials(row, orderPayments = []) {
     },
     orderPayments
   );
-  const amountPaid = orderPayments.length
-    ? sumStandardInvoicePayments(orderPayments)
-    : toNumber(row.amount_paid);
+  const fromOrderPayments = sumStandardInvoicePayments(orderPayments);
+  const fromInvoice = toNumber(row.amount_paid);
+  // Keep manual/online recorded payments visible while still respecting
+  // prepayment amounts that already live on order_payments.
+  const amountPaid =
+    row.payment_method === "manual" || row.payment_method === "online"
+      ? Math.max(fromInvoice, fromOrderPayments)
+      : orderPayments.length
+        ? fromOrderPayments
+        : fromInvoice;
   const writeoffAmount = toNumber(row.writeoff_amount);
   const { amountDue } = resolveInvoiceAmounts(
     totals.totalAmount,
@@ -715,6 +769,7 @@ function mapXrayDetail(row, orderPayments = []) {
 
   if (!row) {
     return {
+      invoiceNumber: "",
       xrayInvoiceDate: "",
       examDate: "",
       views: "0",
@@ -731,6 +786,7 @@ function mapXrayDetail(row, orderPayments = []) {
   const payment = getXrayPayment(row);
 
   return {
+    invoiceNumber: resolveXrayInvoiceNumber(row),
     xrayInvoiceDate: toInputDate(row.xray_invoice_date),
     examDate: toInputDate(row.exam_date),
     views: String(row.view_count ?? 0),
@@ -1239,7 +1295,9 @@ function normalizeInvoiceId(value) {
 
 function resolveXrayRowFinancials(xrayRow, orderPayments = []) {
   const totalAmount = getXrayPayment(xrayRow);
-  const amountPaid = getOrderPaymentAmount(orderPayments, "xray");
+  const fromOrderPayments = getOrderPaymentAmount(orderPayments, "xray");
+  const fromInvoice = toNumber(xrayRow?.amount_paid);
+  const amountPaid = Math.max(fromOrderPayments, fromInvoice);
   const amountDue = Math.max(0, totalAmount - amountPaid);
 
   return {
@@ -1266,6 +1324,7 @@ function mapXrayOutstandingRow(row, orderPayments = []) {
   return {
     id: `${row.facility_id}-${row.order_number}-xray-${orderId}`,
     invoiceId: orderId,
+    invoiceNumber: resolveXrayInvoiceNumber(row),
     orderId,
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
@@ -1290,6 +1349,7 @@ function mapXrayResendRow(row, orderPayments = []) {
   return {
     id: orderId || row.order_id,
     invoiceId: orderId,
+    invoiceNumber: resolveXrayInvoiceNumber(row),
     orderId,
     company: getInvoiceCompanyName(row),
     email: getXrayRecipientEmail(row) || "",
@@ -1670,6 +1730,7 @@ async function createOrUpdateXrayInvoice(body, userId) {
     );
 
     await InvoiceXray.upsert(connection, orderId, {
+      invoiceNumber: buildXrayInvoiceNumber(order),
       xrayInvoiceDate,
       examDate,
       viewCount,
@@ -1787,7 +1848,8 @@ async function createInvoice(body, userId) {
     const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
     const invoiceId = await Invoice.create(connection, {
-      invoiceNumber: trimOrNull(body.invoiceNumber) || `INV-${order.order_number}`,
+      invoiceNumber:
+        trimOrNull(body.invoiceNumber) || buildStandardInvoiceNumber(order),
       orderId,
       facilityId: order.facility_id,
       status: invoicePayload.status,
@@ -1938,10 +2000,18 @@ function accumulateCompanyFinancials(
 }
 
 function isStandardNeedsResend(row) {
+  if (row.status === "Paid" || toNumber(row.amount_due) <= 0) {
+    return false;
+  }
+
   return row.status === "Needs Resend" || Boolean(row.sent_date);
 }
 
 function isXrayNeedsResend(row) {
+  if (toNumber(row.amount_paid) >= toNumber(row.payment) && toNumber(row.payment) > 0) {
+    return false;
+  }
+
   return Boolean(row.sent_date);
 }
 
