@@ -345,9 +345,49 @@ async function syncManagers(facilityId, managers, actorId) {
   await OfficeManager.softDeleteMissing(facilityId, keepIds, actorId);
 }
 
-async function getAllFacilities() {
-  const facilities = await Facility.findAll();
-  return facilities.map(mapFacilityListRow);
+async function getAllFacilities(query = {}) {
+  const filters = {};
+
+  if (query.search && `${query.search}`.trim()) {
+    filters.search = `${query.search}`.trim();
+  }
+
+  if (query.limit) {
+    const limit = Number(query.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      filters.limit = limit;
+    }
+  }
+
+  const useKeysetPagination =
+    String(query.pagination || "").toLowerCase() === "keyset";
+  const pageSizeRaw = Number(query.pageSize || filters.limit || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursorRaw = Number(query.cursor);
+  const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+
+  if (!useKeysetPagination) {
+    const facilities = await Facility.findAll(filters);
+    return facilities.map(mapFacilityListRow);
+  }
+
+  const keysetResult = await Facility.findAllKeyset({
+    ...filters,
+    pageSize,
+    cursorId,
+  });
+
+  return {
+    facilities: keysetResult.rows.map(mapFacilityListRow),
+    pagination: {
+      type: "keyset",
+      pageSize: keysetResult.pageSize,
+      hasMore: keysetResult.hasMore,
+      nextCursor: keysetResult.nextCursor,
+    },
+  };
 }
 
 async function getFacilityById(id) {

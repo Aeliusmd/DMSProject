@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import FacilityTable from "@/components/facilities/FacilityTable";
 import {
   deleteFacility,
-  getFacilities,
+  getFacilitiesPaginated,
 } from "@/lib/facilities/facilityApi";
+
+const FACILITIES_PER_PAGE = 10;
 
 export default function FacilitiesPage() {
   const [facilities, setFacilities] = useState([]);
@@ -15,24 +17,36 @@ export default function FacilitiesPage() {
   const [error, setError] = useState("");
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const cursorHistoryRef = useRef([null]);
+  const [pagination, setPagination] = useState({
+    pageSize: FACILITIES_PER_PAGE,
+    hasMore: false,
+    nextCursor: null,
+  });
 
-  const filteredFacilities = useMemo(() => {
-    const query = appliedSearch.trim().toLowerCase();
-
-    if (!query) {
-      return facilities;
-    }
-
-    return facilities.filter((facility) =>
-      String(facility.facility || "").toLowerCase().includes(query)
-    );
-  }, [facilities, appliedSearch]);
-
-  const applySearch = () => setAppliedSearch(searchInput);
+  const applySearch = () => {
+    setAppliedSearch(searchInput.trim());
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    setPagination({
+      pageSize: FACILITIES_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
+    });
+  };
 
   const clearSearch = () => {
     setSearchInput("");
     setAppliedSearch("");
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    setPagination({
+      pageSize: FACILITIES_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
+    });
   };
 
   const loadFacilities = useCallback(async () => {
@@ -40,14 +54,43 @@ export default function FacilitiesPage() {
     setError("");
 
     try {
-      const data = await getFacilities();
-      setFacilities(data);
+      const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+      const result = await getFacilitiesPaginated({
+        search: appliedSearch,
+        pagination: "keyset",
+        cursor,
+        pageSize: FACILITIES_PER_PAGE,
+      });
+      const hasMore = Boolean(result.pagination?.hasMore);
+      const nextCursor = result.pagination?.nextCursor ?? null;
+
+      setFacilities(result.facilities || []);
+      setPagination({
+        pageSize: Number(result.pagination?.pageSize) || FACILITIES_PER_PAGE,
+        hasMore,
+        nextCursor,
+      });
+      setCursorHistory((prev) => {
+        const next = prev.slice(0, currentPage);
+        if (hasMore && nextCursor != null) {
+          next[currentPage] = nextCursor;
+        }
+        if (!hasMore) {
+          next.length = currentPage;
+        }
+        return next;
+      });
     } catch (err) {
       setError(err.message || "Failed to load facilities");
+      setFacilities([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [appliedSearch, currentPage]);
+
+  useEffect(() => {
+    cursorHistoryRef.current = cursorHistory;
+  }, [cursorHistory]);
 
   useEffect(() => {
     loadFacilities();
@@ -56,11 +99,17 @@ export default function FacilitiesPage() {
   const handleDeleteFacility = async (facility) => {
     try {
       await deleteFacility(facility.id);
-      setFacilities((prev) => prev.filter((item) => item.id !== facility.id));
+      await loadFacilities();
     } catch (err) {
       setError(err.message || "Failed to delete facility");
     }
   };
+
+  const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
+  const startRecord = facilities.length
+    ? (currentPage - 1) * FACILITIES_PER_PAGE + 1
+    : 0;
+  const endRecord = startRecord + facilities.length - (facilities.length ? 1 : 0);
 
   return (
     <DashboardShell>
@@ -107,8 +156,12 @@ export default function FacilitiesPage() {
 
             <p className="text-[11px] text-[#64748B]">
               {appliedSearch.trim()
-                ? `Showing ${filteredFacilities.length} of ${facilities.length} facilities`
-                : `${facilities.length} facilities`}
+                ? pagination.hasMore
+                  ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ facilities`
+                  : `Showing ${startRecord}-${endRecord} of ${endRecord} facilities`
+                : pagination.hasMore
+                  ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ facilities`
+                  : `${endRecord} facilities`}
             </p>
           </div>
         )}
@@ -119,9 +172,37 @@ export default function FacilitiesPage() {
           </div>
         ) : (
           <FacilityTable
-            facilities={filteredFacilities}
+            facilities={facilities}
             onDelete={handleDeleteFacility}
           />
+        )}
+
+        {!loading && (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+              disabled={currentPage === 1}
+              className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ‹
+            </button>
+
+            <span className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] bg-[#111827] px-2 text-[12px] font-semibold text-white">
+              {currentPage}
+            </span>
+
+            <button
+              type="button"
+              onClick={() =>
+                setCurrentPage((page) => Math.min(page + 1, totalPages))
+              }
+              disabled={currentPage >= totalPages || facilities.length === 0}
+              className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
         )}
       </div>
     </DashboardShell>

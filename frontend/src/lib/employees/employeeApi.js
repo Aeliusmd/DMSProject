@@ -1,8 +1,36 @@
 import { request } from "@/lib/auth/authApi";
 
-export async function getEmployees() {
-  const data = await request("/employees", { auth: true });
+function buildEmployeesQuery(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+  if (filters.cursor) params.set("cursor", String(filters.cursor));
+  if (filters.pagination) params.set("pagination", String(filters.pagination));
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : "";
+}
+
+export async function getEmployees(filters = {}) {
+  const data = await request(`/employees${buildEmployeesQuery(filters)}`, {
+    auth: true,
+  });
   return data?.data?.employees || [];
+}
+
+export async function getEmployeesPaginated(filters = {}) {
+  const data = await request(`/employees${buildEmployeesQuery(filters)}`, {
+    auth: true,
+  });
+
+  return {
+    employees: data?.data?.employees || [],
+    pagination: data?.data?.pagination || {
+      pageSize: Number(filters.pageSize) || 10,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
 }
 
 export async function createEmployee(payload) {

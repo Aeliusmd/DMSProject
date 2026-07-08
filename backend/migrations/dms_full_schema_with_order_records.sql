@@ -46,6 +46,8 @@ CREATE TABLE matrix_employees (
   KEY idx_matrix_employees_suspended (is_suspended),
   KEY idx_matrix_employees_reactivated_date (reactivated_date),
   KEY idx_matrix_employees_deleted_at (deleted_at),
+  KEY idx_matrix_employees_deleted_id (deleted_at, id),
+  KEY idx_matrix_employees_deleted_name_id (deleted_at, name, id),
   CONSTRAINT fk_matrix_employees_suspended_by
     FOREIGN KEY (suspended_by) REFERENCES matrix_employees (id)
     ON DELETE SET NULL ON UPDATE CASCADE
@@ -79,6 +81,8 @@ CREATE TABLE facilities (
   PRIMARY KEY (id),
   UNIQUE KEY uq_facilities_user_name (user_name),
   UNIQUE KEY uq_facilities_slug (slug),
+  KEY idx_facilities_active_id (is_active, id),
+  KEY idx_facilities_active_name_id (is_active, facility_name, id),
   KEY idx_facilities_name_normalized (name_normalized),
   KEY idx_facilities_city_state (city, state)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

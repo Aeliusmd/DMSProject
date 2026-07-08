@@ -10,9 +10,12 @@ const {
   validateUpdateEmployee,
 } = require("../validators/employeeValidator");
 
-exports.getAll = asyncHandler(async (_req, res) => {
-  const employees = await employeeService.getAllEmployees();
-  return ApiResponse.success(res, { employees });
+exports.getAll = asyncHandler(async (req, res) => {
+  const result = await employeeService.getAllEmployees(req.query);
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { employees: result });
+  }
+  return ApiResponse.success(res, result);
 });
 
 exports.create = asyncHandler(async (req, res) => {

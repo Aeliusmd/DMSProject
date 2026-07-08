@@ -2,9 +2,37 @@ import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
 
 export { ApiRequestError };
 
-export async function getFacilities() {
-  const data = await request("/facilities", { auth: true });
+function buildFacilitiesQuery(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+  if (filters.cursor) params.set("cursor", String(filters.cursor));
+  if (filters.pagination) params.set("pagination", String(filters.pagination));
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : "";
+}
+
+export async function getFacilities(filters = {}) {
+  const data = await request(`/facilities${buildFacilitiesQuery(filters)}`, {
+    auth: true,
+  });
   return data?.data?.facilities || [];
+}
+
+export async function getFacilitiesPaginated(filters = {}) {
+  const data = await request(`/facilities${buildFacilitiesQuery(filters)}`, {
+    auth: true,
+  });
+
+  return {
+    facilities: data?.data?.facilities || [],
+    pagination: data?.data?.pagination || {
+      pageSize: Number(filters.pageSize) || 10,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
 }
 
 export async function searchFacilities(query) {

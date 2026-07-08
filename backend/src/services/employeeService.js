@@ -88,9 +88,49 @@ function mapEmployeeRow(row) {
   });
 }
 
-async function getAllEmployees() {
-  const employees = await Employee.findAll();
-  return employees.map(mapEmployeeRow);
+async function getAllEmployees(query = {}) {
+  const filters = {};
+
+  if (query.search && `${query.search}`.trim()) {
+    filters.search = `${query.search}`.trim();
+  }
+
+  if (query.limit) {
+    const limit = Number(query.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      filters.limit = limit;
+    }
+  }
+
+  const useKeysetPagination =
+    String(query.pagination || "").toLowerCase() === "keyset";
+  const pageSizeRaw = Number(query.pageSize || filters.limit || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursorRaw = Number(query.cursor);
+  const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+
+  if (!useKeysetPagination) {
+    const employees = await Employee.findAll(filters);
+    return employees.map(mapEmployeeRow);
+  }
+
+  const keysetResult = await Employee.findAllKeyset({
+    ...filters,
+    pageSize,
+    cursorId,
+  });
+
+  return {
+    employees: keysetResult.rows.map(mapEmployeeRow),
+    pagination: {
+      type: "keyset",
+      pageSize: keysetResult.pageSize,
+      hasMore: keysetResult.hasMore,
+      nextCursor: keysetResult.nextCursor,
+    },
+  };
 }
 
 async function createEmployee({ name, logon, email, password, role }) {
