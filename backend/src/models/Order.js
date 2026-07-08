@@ -4,6 +4,115 @@
 
 const { getPool } = require("../config/database");
 const { RUSH_READY_MIN_DAYS, ORDER_AGE_SQL_ALIAS } = require("../utils/rushUtils");
+const { toSqlDateOnly, parseDateOnlyParts } = require("../utils/dateUtils");
+
+function toSqlDateTimeStart(value) {
+  const dateOnly = toSqlDateOnly(value);
+  return dateOnly ? `${dateOnly} 00:00:00` : null;
+}
+
+function toSqlDateTimeExclusiveEnd(value) {
+  const parts = parseDateOnlyParts(value);
+  if (!parts) return null;
+
+  const end = new Date(parts.year, parts.month - 1, parts.day);
+  end.setDate(end.getDate() + 1);
+
+  const year = end.getFullYear();
+  const month = String(end.getMonth() + 1).padStart(2, "0");
+  const day = String(end.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day} 00:00:00`;
+}
+
+function appendYearFilter(conditions, params, year) {
+  const normalizedYear = Number(year);
+  if (!Number.isFinite(normalizedYear)) return;
+
+  const yearStart = `${normalizedYear}-01-01`;
+  const yearEnd = `${normalizedYear + 1}-01-01`;
+
+  conditions.push(`(
+    (o.subpoena_date IS NOT NULL AND o.subpoena_date >= :yearStart AND o.subpoena_date < :yearEnd)
+    OR (o.subpoena_date IS NULL AND o.created_at >= :yearStartTs AND o.created_at < :yearEndTs)
+  )`);
+  params.yearStart = yearStart;
+  params.yearEnd = yearEnd;
+  params.yearStartTs = `${yearStart} 00:00:00`;
+  params.yearEndTs = `${yearEnd} 00:00:00`;
+}
+
+function escapeLikePrefix(value) {
+  return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function appendOrderSearchFilter(conditions, params, rawSearch) {
+  const search = `${rawSearch || ""}`.trim();
+  if (!search) return;
+
+  const searchClauses = [
+    "o.order_number LIKE :searchPrefix",
+    "o.rec_number LIKE :searchPrefix",
+    "o.case_number LIKE :searchPrefix",
+    "o.order_ref LIKE :searchPrefix",
+    "o.court LIKE :searchPrefix",
+    "o.applicant_first_name LIKE :searchPrefix",
+    "o.applicant_middle_name LIKE :searchPrefix",
+    "o.applicant_last_name LIKE :searchPrefix",
+    "o.applicant_aka LIKE :searchPrefix",
+    "o.defendant LIKE :searchPrefix",
+    "o.serve_company_name LIKE :searchPrefix",
+    "o.serve_address LIKE :searchPrefix",
+    "o.serve_city LIKE :searchPrefix",
+    "o.serve_state LIKE :searchPrefix",
+    "o.serve_zip LIKE :searchPrefix",
+    "o.serve_phone LIKE :searchPrefix",
+    "o.serve_fax LIKE :searchPrefix",
+    "o.serve_email LIKE :searchPrefix",
+    "o.contact1_name LIKE :searchPrefix",
+    "o.contact1_title LIKE :searchPrefix",
+    "o.contact1_phone LIKE :searchPrefix",
+    "o.contact1_fax LIKE :searchPrefix",
+    "o.contact1_email LIKE :searchPrefix",
+    "o.contact2_name LIKE :searchPrefix",
+    "o.contact2_title LIKE :searchPrefix",
+    "o.contact2_phone LIKE :searchPrefix",
+    "o.contact2_fax LIKE :searchPrefix",
+    "o.contact2_email LIKE :searchPrefix",
+    "o.injury_type LIKE :searchPrefix",
+    "o.cancel_reason LIKE :searchPrefix",
+    "o.specific_doctor LIKE :searchPrefix",
+    "o.specific_record LIKE :searchPrefix",
+    "CAST(o.status AS CHAR) LIKE :searchPrefix",
+    "f.facility_name LIKE :searchPrefix",
+    "f.address LIKE :searchPrefix",
+    "f.city LIKE :searchPrefix",
+    "f.state LIKE :searchPrefix",
+    "f.zip_code LIKE :searchPrefix",
+    "p.company_name LIKE :searchPrefix",
+  ];
+
+  params.searchPrefix = `${escapeLikePrefix(search)}%`;
+
+  const ssnDigits = search.replace(/\D/g, "");
+  if (ssnDigits.length === 4) {
+    searchClauses.push("o.ssn_last_four = :searchSsnLastFour");
+    params.searchSsnLastFour = ssnDigits;
+  }
+
+  const searchDate = toSqlDateOnly(search);
+  if (searchDate) {
+    searchClauses.push(
+      "o.dob = :searchDate",
+      "o.injury_date = :searchDate",
+      "o.injury_date_begin = :searchDate",
+      "o.injury_date_end = :searchDate"
+    );
+    params.searchDate = searchDate;
+  }
+
+  conditions.push(`(${searchClauses.join(" OR ")})`);
+}
 
 const REQUIRED_WORKFLOW_COMPLETION = {
   "Review Records": "complete",
@@ -151,85 +260,44 @@ function buildFindAllWhere(filters = {}) {
 
   if (filters.company) {
     conditions.push(`(
-      LOWER(TRIM(o.serve_company_name)) = LOWER(TRIM(:company))
-      OR LOWER(TRIM(p.company_name)) = LOWER(TRIM(:company))
+      o.serve_company_name = :company
+      OR p.company_name = :company
+      OR TRIM(o.serve_company_name) = :company
+      OR TRIM(p.company_name) = :company
     )`);
     params.company = filters.company;
   }
 
   if (filters.year) {
-    conditions.push(
-      "YEAR(COALESCE(o.subpoena_date, o.created_at)) = :year"
-    );
-    params.year = Number(filters.year);
+    appendYearFilter(conditions, params, filters.year);
   }
 
   if (filters.periodFrom) {
-    conditions.push("DATE(o.created_at) >= :periodFrom");
-    params.periodFrom = filters.periodFrom;
+    const periodFrom = toSqlDateTimeStart(filters.periodFrom);
+    if (periodFrom) {
+      conditions.push("o.created_at >= :periodFrom");
+      params.periodFrom = periodFrom;
+    }
   }
 
   if (filters.createdFrom) {
-    conditions.push("DATE(o.created_at) >= :createdFrom");
-    params.createdFrom = filters.createdFrom;
+    const createdFrom = toSqlDateTimeStart(filters.createdFrom);
+    if (createdFrom) {
+      conditions.push("o.created_at >= :createdFrom");
+      params.createdFrom = createdFrom;
+    }
   }
 
   if (filters.createdTo) {
-    conditions.push("DATE(o.created_at) <= :createdTo");
-    params.createdTo = filters.createdTo;
+    const createdToExclusive = toSqlDateTimeExclusiveEnd(filters.createdTo);
+    if (createdToExclusive) {
+      conditions.push("o.created_at < :createdToExclusive");
+      params.createdToExclusive = createdToExclusive;
+    }
   }
 
   if (filters.search) {
-    conditions.push(`(
-      o.order_number LIKE :search
-      OR o.rec_number LIKE :search
-      OR o.case_number LIKE :search
-      OR o.order_ref LIKE :search
-      OR o.court LIKE :search
-      OR o.applicant_first_name LIKE :search
-      OR o.applicant_middle_name LIKE :search
-      OR o.applicant_last_name LIKE :search
-      OR o.applicant_aka LIKE :search
-      OR o.defendant LIKE :search
-      OR o.serve_company_name LIKE :search
-      OR o.serve_address LIKE :search
-      OR o.serve_city LIKE :search
-      OR o.serve_state LIKE :search
-      OR o.serve_zip LIKE :search
-      OR o.serve_phone LIKE :search
-      OR o.serve_fax LIKE :search
-      OR o.serve_email LIKE :search
-      OR o.contact1_name LIKE :search
-      OR o.contact1_title LIKE :search
-      OR o.contact1_phone LIKE :search
-      OR o.contact1_fax LIKE :search
-      OR o.contact1_email LIKE :search
-      OR o.contact2_name LIKE :search
-      OR o.contact2_title LIKE :search
-      OR o.contact2_phone LIKE :search
-      OR o.contact2_fax LIKE :search
-      OR o.contact2_email LIKE :search
-      OR o.injury_type LIKE :search
-      OR o.cancel_reason LIKE :search
-      OR o.specific_doctor LIKE :search
-      OR o.specific_record LIKE :search
-      OR CAST(o.ssn_last_four AS CHAR) LIKE :search
-      OR CAST(o.status AS CHAR) LIKE :search
-      OR DATE_FORMAT(o.dob, '%m/%d/%Y') LIKE :search
-      OR DATE_FORMAT(o.dob, '%Y-%m-%d') LIKE :search
-      OR DATE_FORMAT(o.injury_date, '%m/%d/%Y') LIKE :search
-      OR DATE_FORMAT(o.injury_date, '%Y-%m-%d') LIKE :search
-      OR DATE_FORMAT(o.injury_date_begin, '%m/%d/%Y') LIKE :search
-      OR DATE_FORMAT(o.injury_date_end, '%m/%d/%Y') LIKE :search
-      OR f.facility_name LIKE :search
-      OR f.address LIKE :search
-      OR f.city LIKE :search
-      OR f.state LIKE :search
-      OR f.zip_code LIKE :search
-      OR p.company_name LIKE :search
-      OR CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name) LIKE :search
-    )`);
-    params.search = `%${filters.search}%`;
+    appendOrderSearchFilter(conditions, params, filters.search);
   }
 
   return {
