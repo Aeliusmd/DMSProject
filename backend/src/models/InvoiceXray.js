@@ -71,7 +71,11 @@ class InvoiceXray {
 
   static async findOutstanding(filters = {}) {
     const pool = getPool();
-    const conditions = [ORDER_VISIBLE, "x.sent_date IS NULL"];
+    const conditions = [
+      ORDER_VISIBLE,
+      "x.sent_date IS NULL",
+      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+    ];
     const params = {};
 
     if (filters.dateFrom) {
@@ -102,6 +106,7 @@ class InvoiceXray {
       ORDER_VISIBLE,
       "o.facility_id = :facilityId",
       "x.sent_date IS NULL",
+      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
     ];
     const params = { facilityId };
 
@@ -133,6 +138,7 @@ class InvoiceXray {
       ORDER_VISIBLE,
       "o.facility_id = :facilityId",
       "x.sent_date IS NOT NULL",
+      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
     ];
     const params = { facilityId };
 
@@ -160,7 +166,11 @@ class InvoiceXray {
 
   static async findByProviderId(providerId, filters = {}) {
     const pool = getPool();
-    const conditions = [ORDER_VISIBLE, "x.sent_date IS NULL"];
+    const conditions = [
+      ORDER_VISIBLE,
+      "x.sent_date IS NULL",
+      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+    ];
     const params = {};
 
     if (providerId) {
@@ -194,7 +204,11 @@ class InvoiceXray {
 
   static async findResendByProviderId(providerId, filters = {}) {
     const pool = getPool();
-    const conditions = [ORDER_VISIBLE, "x.sent_date IS NOT NULL"];
+    const conditions = [
+      ORDER_VISIBLE,
+      "x.sent_date IS NOT NULL",
+      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+    ];
     const params = {};
 
     if (providerId) {
@@ -228,7 +242,11 @@ class InvoiceXray {
 
   static async findResend(filters = {}) {
     const pool = getPool();
-    const conditions = [ORDER_VISIBLE, "x.sent_date IS NOT NULL"];
+    const conditions = [
+      ORDER_VISIBLE,
+      "x.sent_date IS NOT NULL",
+      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+    ];
     const params = {};
 
     if (filters.dateFrom) {
@@ -277,17 +295,18 @@ class InvoiceXray {
 
     await db.execute(
       `INSERT INTO invoice_xray_details (
-         order_id, xray_invoice_date, exam_date,
+         order_id, invoice_number, xray_invoice_date, exam_date,
          view_count, per_view_amount, payment,
          check_number, description, recipient_emails,
          created_at, updated_at
        ) VALUES (
-         :orderId, :xrayInvoiceDate, :examDate,
+         :orderId, :invoiceNumber, :xrayInvoiceDate, :examDate,
          :viewCount, :perViewAmount, :payment,
          :checkNumber, :description, :recipientEmails,
          NOW(), NOW()
        )
        ON DUPLICATE KEY UPDATE
+         invoice_number = COALESCE(invoice_number, VALUES(invoice_number)),
          xray_invoice_date = VALUES(xray_invoice_date),
          exam_date = VALUES(exam_date),
          view_count = VALUES(view_count),
@@ -299,6 +318,7 @@ class InvoiceXray {
          updated_at = NOW()`,
       {
         orderId,
+        invoiceNumber: data.invoiceNumber ?? null,
         xrayInvoiceDate: data.xrayInvoiceDate,
         examDate: data.examDate,
         viewCount: data.viewCount,

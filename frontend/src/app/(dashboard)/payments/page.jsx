@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import PaymentsTable from "@/components/payments/PaymentsTable";
+import ManualPaymentModal from "@/components/payments/ManualPaymentModal";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import {
   buildManualSummary,
@@ -43,6 +44,7 @@ export default function PaymentsPage() {
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [appliedInvoiceSearch, setAppliedInvoiceSearch] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [manualPaymentModalOpen, setManualPaymentModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [manualData, setManualData] = useState({
     payments: [],
@@ -223,10 +225,18 @@ export default function PaymentsPage() {
         </div>
 
         {isManual ? (
-          <ManualPaymentsInfo />
+          <ManualPaymentPrompt
+            onAddPayment={() => setManualPaymentModalOpen(true)}
+          />
         ) : (
           <OnlinePaymentsInfo />
         )}
+
+        <ManualPaymentModal
+          isOpen={manualPaymentModalOpen}
+          onClose={() => setManualPaymentModalOpen(false)}
+          onSaved={() => setRefreshKey((value) => value + 1)}
+        />
 
         <PaymentsTable
           payments={currentPayments}
@@ -490,40 +500,25 @@ function SummaryItem({ label, value, green = false, red = false }) {
   );
 }
 
-function ManualPaymentsInfo() {
+function ManualPaymentPrompt({ onAddPayment }) {
   return (
-    <section className="rounded-[10px] border border-[#E2E8F0] bg-[#F8FAFC] px-5 py-4 shadow-sm">
-      <h2 className="text-[13px] font-semibold text-[#334155]">
-        Manual Payment Details
-      </h2>
-      <p className="mt-2 text-[12px] leading-6 text-[#64748B]">
-        Manual payments are recorded by staff when checks, cash, or wire transfers
-        are received outside of Stripe. Each entry includes the payment method,
-        reference number, amount applied, and the employee who recorded it.
-      </p>
-
-      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-        <InfoCard
-          title="Supported Methods"
-          items={["Check", "Cash", "Wire Transfer", "Money Order"]}
-        />
-        <InfoCard
-          title="Typical Workflow"
-          items={[
-            "Receive payment from client",
-            "Match to invoice / order",
-            "Record payment in DMS",
-            "Mark invoice balance updated",
-          ]}
-        />
-        <InfoCard
-          title="Review Status"
-          items={[
-            "Recorded — confirmed and posted",
-            "Pending Review — awaiting deposit check",
-          ]}
-        />
+    <section className="flex flex-col gap-4 rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h2 className="text-[13px] font-semibold text-[#334155]">
+          Got a manual payment?
+        </h2>
+        <p className="mt-1 text-[12px] text-[#64748B]">
+          Update details by searching the order and recording the check information.
+        </p>
       </div>
+
+      <button
+        type="button"
+        onClick={onAddPayment}
+        className="h-[38px] shrink-0 rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+      >
+        Add New Payment
+      </button>
     </section>
   );
 }

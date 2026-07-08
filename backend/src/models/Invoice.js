@@ -98,8 +98,9 @@ class Invoice {
     const pool = getPool();
     const conditions = [
       ORDER_VISIBLE,
-      "i.status <> 'Needs Resend'",
+      "i.status NOT IN ('Paid', 'Written Off', 'Needs Resend')",
       "i.sent_date IS NULL",
+      "i.amount_due > 0",
     ];
     const params = {};
 
@@ -129,6 +130,8 @@ class Invoice {
     const pool = getPool();
     const conditions = [
       ORDER_VISIBLE,
+      "i.status <> 'Paid'",
+      "i.amount_due > 0",
       `(
         i.status = 'Needs Resend'
         OR (
@@ -166,8 +169,9 @@ class Invoice {
     const conditions = [
       ORDER_VISIBLE,
       "i.facility_id = :facilityId",
-      "i.status <> 'Needs Resend'",
+      "i.status NOT IN ('Paid', 'Written Off', 'Needs Resend')",
       "i.sent_date IS NULL",
+      "i.amount_due > 0",
     ];
     const params = { facilityId };
 
@@ -198,6 +202,8 @@ class Invoice {
     const conditions = [
       ORDER_VISIBLE,
       "i.facility_id = :facilityId",
+      "i.status <> 'Paid'",
+      "i.amount_due > 0",
       `(
         i.status = 'Needs Resend'
         OR (
@@ -234,8 +240,9 @@ class Invoice {
     const pool = getPool();
     const conditions = [
       ORDER_VISIBLE,
-      "i.status <> 'Needs Resend'",
+      "i.status NOT IN ('Paid', 'Written Off', 'Needs Resend')",
       "i.sent_date IS NULL",
+      "i.amount_due > 0",
     ];
     const params = {};
 
@@ -272,6 +279,8 @@ class Invoice {
     const pool = getPool();
     const conditions = [
       ORDER_VISIBLE,
+      "i.status <> 'Paid'",
+      "i.amount_due > 0",
       `(
         i.status = 'Needs Resend'
         OR (
