@@ -367,25 +367,121 @@ async function recordSafe(payload) {
   }
 }
 
-async function getMyLogs(employeeId) {
-  const logs = await ActivityLog.findByPerformerId(employeeId);
-  return logs.map(mapLogRow);
+async function queryLogs(query = {}) {
+  const filters = {};
+
+  if (query.performedBy) {
+    const performedBy = Number(query.performedBy);
+    if (Number.isFinite(performedBy) && performedBy > 0) {
+      filters.performedBy = performedBy;
+    }
+  }
+
+  const module = `${query.module || ""}`.trim();
+  if (module && module !== "All Modules") {
+    filters.module = module;
+  }
+
+  if (query.fromDate && `${query.fromDate}`.trim()) {
+    filters.fromDate = `${query.fromDate}`.trim();
+  }
+
+  if (query.toDate && `${query.toDate}`.trim()) {
+    filters.toDate = `${query.toDate}`.trim();
+  }
+
+  if (query.search && `${query.search}`.trim()) {
+    filters.search = `${query.search}`.trim();
+  }
+
+  if (query.limit) {
+    const limit = Number(query.limit);
+    if (Number.isFinite(limit) && limit > 0) {
+      filters.limit = limit;
+    }
+  }
+
+  const useKeysetPagination =
+    String(query.pagination || "").toLowerCase() === "keyset";
+  const pageSizeRaw = Number(query.pageSize || filters.limit || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursorRaw = Number(query.cursor);
+  const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+
+  if (!useKeysetPagination) {
+    const logs = await ActivityLog.findAll(filters);
+    return logs.map(mapLogRow);
+  }
+
+  const keysetResult = await ActivityLog.findAllKeyset({
+    ...filters,
+    pageSize,
+    cursorId,
+  });
+
+  return {
+    logs: keysetResult.rows.map(mapLogRow),
+    pagination: {
+      type: "keyset",
+      pageSize: keysetResult.pageSize,
+      hasMore: keysetResult.hasMore,
+      nextCursor: keysetResult.nextCursor,
+    },
+  };
 }
 
-async function getEmployeeLogs(employeeId) {
+async function getMyLogs(employeeId, query = {}) {
+  return queryLogs({
+    ...query,
+    performedBy: employeeId,
+  });
+}
+
+async function getEmployeeLogs(employeeId, query = {}) {
   const employee = await Employee.findByIdPublic(employeeId);
 
   if (!employee) {
     throw new ApiError(404, "Employee not found");
   }
 
-  const logs = await ActivityLog.findByEmployeeId(employeeId);
-  return logs.map(mapLogRow);
+  const useKeysetPagination =
+    String(query.pagination || "").toLowerCase() === "keyset";
+  const pageSizeRaw = Number(query.pageSize || query.limit || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursorRaw = Number(query.cursor);
+  const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+  const search = `${query.search || ""}`.trim() || null;
+
+  if (!useKeysetPagination) {
+    const logs = await ActivityLog.findByEmployeeId(employeeId, {
+      limit: pageSizeRaw > 0 ? Math.min(pageSizeRaw, 500) : 200,
+    });
+    return logs.map(mapLogRow);
+  }
+
+  const keysetResult = await ActivityLog.findByEmployeeIdKeyset(employeeId, {
+    pageSize,
+    cursorId,
+    search,
+  });
+
+  return {
+    logs: keysetResult.rows.map(mapLogRow),
+    pagination: {
+      type: "keyset",
+      pageSize: keysetResult.pageSize,
+      hasMore: keysetResult.hasMore,
+      nextCursor: keysetResult.nextCursor,
+    },
+  };
 }
 
-async function getAllLogs({ limit = 500 } = {}) {
-  const logs = await ActivityLog.findAll({ limit });
-  return logs.map(mapLogRow);
+async function getAllLogs(query = {}) {
+  return queryLogs(query);
 }
 
 async function getLogById(id) {
@@ -406,6 +502,7 @@ module.exports = {
   getMyLogs,
   getEmployeeLogs,
   getAllLogs,
+  queryLogs,
   getLogById,
   mapLogRow,
   appendOrderId,

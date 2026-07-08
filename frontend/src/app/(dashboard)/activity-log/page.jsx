@@ -1,21 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
 import EmployeeMilestoneModal from "@/components/employees/EmployeeMilestoneModal";
-import PaginationBar, {
-  DEFAULT_PAGE_SIZE,
-  paginateItems,
-} from "@/components/ui/PaginationBar";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { usesOwnActivityLogsOnly, isEmployee } from "@/lib/auth/roles";
 import {
-  getActivityLogs,
-  getMyActivityLogs,
+  getActivityLogsPaginated,
+  getMyActivityLogsPaginated,
 } from "@/lib/activityLog/activityLogApi";
+
+const ACTIVITY_LOGS_PER_PAGE = 10;
 
 const adminFilters = [
   "All Modules",
@@ -50,6 +48,7 @@ export default function ActivityLogPage() {
   const filters = ownLogsOnly ? employeeFilters : adminFilters;
   const [activityLogs, setActivityLogs] = useState([]);
   const [logsLoading, setLogsLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
   const [draftActiveFilter, setDraftActiveFilter] = useState("All Modules");
   const [appliedActiveFilter, setAppliedActiveFilter] = useState("All Modules");
   const [draftDateFilters, setDraftDateFilters] = useState({
@@ -65,6 +64,13 @@ export default function ActivityLogPage() {
   const [milestoneOpen, setMilestoneOpen] = useState(false);
   const showMyMilestone = isEmployee(user);
   const [currentPage, setCurrentPage] = useState(1);
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const cursorHistoryRef = useRef([null]);
+  const [pagination, setPagination] = useState({
+    pageSize: ACTIVITY_LOGS_PER_PAGE,
+    hasMore: false,
+    nextCursor: null,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -83,83 +89,76 @@ export default function ActivityLogPage() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    cursorHistoryRef.current = cursorHistory;
+  }, [cursorHistory]);
 
-    setLogsLoading(true);
-
-    const loadLogs = ownLogsOnly ? getMyActivityLogs : getActivityLogs;
-
-    loadLogs()
-      .then((logs) => {
-        if (!cancelled) {
-          setActivityLogs(logs);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setActivityLogs([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLogsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ownLogsOnly, user?.id, user?.role]);
-
-  const filteredLogs = useMemo(() => {
-    const performerQuery = appliedPerformerSearch.trim().toLowerCase();
-
-    return activityLogs.filter((log) => {
-      const matchesFilter =
-        appliedActiveFilter === "All Modules" ||
-        log.module === appliedActiveFilter;
-
-      const logDate = parseDate(log.date);
-      const fromDate = appliedDateFilters.fromDate
-        ? parseDate(appliedDateFilters.fromDate)
-        : null;
-      const toDate = appliedDateFilters.toDate
-        ? parseDate(appliedDateFilters.toDate)
-        : null;
-
-      const matchesFromDate = fromDate ? logDate >= fromDate : true;
-      const matchesToDate = toDate ? logDate <= toDate : true;
-
-      const matchesPerformer = performerQuery
-        ? String(log.performedBy || "")
-            .toLowerCase()
-            .includes(performerQuery)
-        : true;
-
-      return (
-        matchesFilter && matchesFromDate && matchesToDate && matchesPerformer
-      );
-    });
-  }, [
-    activityLogs,
-    appliedActiveFilter,
-    appliedDateFilters,
-    appliedPerformerSearch,
-  ]);
-
-  useEffect(() => {
+  const resetPagination = useCallback(() => {
     setCurrentPage(1);
+    setCursorHistory([null]);
+    setPagination({
+      pageSize: ACTIVITY_LOGS_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
+    });
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    setPageError("");
+
+    try {
+      const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+      const requestFilters = {
+        module: appliedActiveFilter,
+        fromDate: appliedDateFilters.fromDate,
+        toDate: appliedDateFilters.toDate,
+        search: appliedPerformerSearch,
+        cursor,
+        pageSize: ACTIVITY_LOGS_PER_PAGE,
+      };
+
+      const result = ownLogsOnly
+        ? await getMyActivityLogsPaginated(requestFilters)
+        : await getActivityLogsPaginated(requestFilters);
+
+      const hasMore = Boolean(result.pagination?.hasMore);
+      const nextCursor = result.pagination?.nextCursor ?? null;
+
+      setActivityLogs(result.logs || []);
+      setPagination({
+        pageSize:
+          Number(result.pagination?.pageSize) || ACTIVITY_LOGS_PER_PAGE,
+        hasMore,
+        nextCursor,
+      });
+      setCursorHistory((prev) => {
+        const next = prev.slice(0, currentPage);
+        if (hasMore && nextCursor != null) {
+          next[currentPage] = nextCursor;
+        }
+        if (!hasMore) {
+          next.length = currentPage;
+        }
+        return next;
+      });
+    } catch (error) {
+      setPageError(error.message || "Failed to load activity logs");
+      setActivityLogs([]);
+    } finally {
+      setLogsLoading(false);
+    }
   }, [
+    ownLogsOnly,
     appliedActiveFilter,
     appliedDateFilters.fromDate,
     appliedDateFilters.toDate,
     appliedPerformerSearch,
+    currentPage,
   ]);
 
-  const pagination = useMemo(
-    () => paginateItems(filteredLogs, currentPage, DEFAULT_PAGE_SIZE),
-    [filteredLogs, currentPage]
-  );
+  useEffect(() => {
+    loadLogs();
+  }, [loadLogs]);
 
   const handleDateFilterChange = (e) => {
     const { name, value } = e.target;
@@ -173,10 +172,12 @@ export default function ActivityLogPage() {
   const handleApplyFilters = () => {
     setAppliedDateFilters({ ...draftDateFilters });
     setAppliedActiveFilter(draftActiveFilter);
+    resetPagination();
   };
 
   const handleSearch = () => {
     setAppliedPerformerSearch(performerSearchDraft.trim());
+    resetPagination();
   };
 
   const handleResetFilters = () => {
@@ -191,7 +192,23 @@ export default function ActivityLogPage() {
     setAppliedActiveFilter("All Modules");
     setPerformerSearchDraft("");
     setAppliedPerformerSearch("");
+    resetPagination();
   };
+
+  const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
+  const startRecord = activityLogs.length
+    ? (currentPage - 1) * ACTIVITY_LOGS_PER_PAGE + 1
+    : 0;
+  const endRecord =
+    startRecord + activityLogs.length - (activityLogs.length ? 1 : 0);
+
+  const summaryLabel = logsLoading
+    ? "Loading activity logs..."
+    : pagination.hasMore
+      ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ entries`
+      : activityLogs.length === 0
+        ? "Showing 0 entries"
+        : `Showing ${startRecord}-${endRecord} of ${endRecord} entries`;
 
   return (
     <DashboardShell>
@@ -230,13 +247,43 @@ export default function ActivityLogPage() {
           </div>
         </div>
 
-        <div className="grid w-full grid-cols-1 items-end gap-4 2xl:grid-cols-[minmax(430px,520px)_minmax(220px,320px)_auto_1fr]">
-          <div className="grid w-full max-w-[520px] grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto_auto_auto]">
+        {pageError ? (
+          <p className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600">
+            {pageError}
+          </p>
+        ) : null}
+
+        <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="shrink-0 text-[10px] font-semibold text-[#64748B]">
+                Filter:
+              </span>
+
+              <div className="flex flex-wrap items-center gap-1 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] p-[3px]">
+                {filters.map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setDraftActiveFilter(filter)}
+                    className={`h-[28px] shrink-0 rounded-[5px] px-3 text-[11px] font-semibold transition ${
+                      draftActiveFilter === filter
+                        ? "bg-[#0097B2] text-white shadow-sm"
+                        : "text-[#475569] hover:bg-white hover:text-[#111827]"
+                    }`}
+                  >
+                    {filter}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <DateFilter
               label="From"
               name="fromDate"
               value={draftDateFilters.fromDate}
               onChange={handleDateFilterChange}
+              className="w-[140px]"
             />
 
             <DateFilter
@@ -244,80 +291,81 @@ export default function ActivityLogPage() {
               name="toDate"
               value={draftDateFilters.toDate}
               onChange={handleDateFilterChange}
+              className="w-[140px]"
             />
 
-            <button
-              type="button"
-              onClick={handleApplyFilters}
-              className="h-[36px] self-end rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
-            >
-              Apply Filters
-            </button>
+            <div className="flex shrink-0 items-end gap-2">
+              <button
+                type="button"
+                onClick={handleApplyFilters}
+                className="h-[34px] rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+              >
+                Apply Filters
+              </button>
 
-            <button
-              type="button"
-              onClick={handleResetFilters}
-              className="h-[36px] self-end rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] shadow-sm hover:bg-[#F8FAFC]"
-            >
-              Reset
-            </button>
-          </div>
-
-          {!ownLogsOnly && (
-            <PerformerSearch
-              value={performerSearchDraft}
-              onChange={setPerformerSearchDraft}
-              onSearch={handleSearch}
-            />
-          )}
-
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="shrink-0 text-[12px] font-medium text-[#64748B]">
-              Filter:
-            </span>
-
-            <div className="flex flex-wrap items-center gap-1 rounded-[6px] border border-[#E2E8F0] bg-white p-[3px]">
-              {filters.map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  onClick={() => setDraftActiveFilter(filter)}
-                  className={`h-[28px] shrink-0 rounded-[5px] px-4 text-[11px] font-semibold transition ${
-                    draftActiveFilter === filter
-                      ? "bg-[#0097B2] text-white shadow-sm"
-                      : "text-[#475569] hover:bg-[#F8FAFC] hover:text-[#111827]"
-                  }`}
-                >
-                  {filter}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+              >
+                Reset
+              </button>
             </div>
           </div>
 
-          <p className="justify-self-start text-[11px] text-[#64748B] 2xl:justify-self-end">
-            {logsLoading
-              ? "Loading activity logs..."
-              : `Showing ${pagination.startRecord}-${pagination.endRecord} of ${filteredLogs.length} entries`}
+          {!ownLogsOnly ? (
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <PerformerSearch
+                value={performerSearchDraft}
+                onChange={setPerformerSearchDraft}
+                onSearch={handleSearch}
+                className="min-w-0 flex-1 sm:max-w-[360px]"
+              />
+            </div>
+          ) : null}
+
+          <p className="mt-2 text-right text-[11px] text-[#64748B]">
+            {summaryLabel}
           </p>
-        </div>
+        </section>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <ActivityLogTable
-            logs={logsLoading ? [] : pagination.items}
-            footer={
-              !logsLoading ? (
-                <PaginationBar
-                  currentPage={pagination.currentPage}
-                  totalPages={pagination.totalPages}
-                  totalItems={pagination.totalItems}
-                  startRecord={pagination.startRecord}
-                  endRecord={pagination.endRecord}
-                  itemLabel="entries"
-                  onPageChange={setCurrentPage}
-                />
-              ) : null
-            }
-          />
+          {logsLoading ? (
+            <div className="flex flex-1 items-center justify-center rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-16 text-[13px] text-[#94A3B8]">
+              Loading activity logs...
+            </div>
+          ) : (
+            <ActivityLogTable
+              logs={activityLogs}
+              footer={
+                <div className="flex items-center justify-end gap-1 border-t border-[#F1F5F9] bg-white px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    ‹
+                  </button>
+
+                  <span className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] bg-[#111827] px-2 text-[12px] font-semibold text-white">
+                    {currentPage}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCurrentPage((page) => Math.min(page + 1, totalPages))
+                    }
+                    disabled={currentPage >= totalPages || activityLogs.length === 0}
+                    className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    ›
+                  </button>
+                </div>
+              }
+            />
+          )}
         </div>
       </div>
 
@@ -330,10 +378,10 @@ export default function ActivityLogPage() {
   );
 }
 
-function DateFilter({ label, name, value, onChange }) {
+function DateFilter({ label, name, value, onChange, className = "" }) {
   return (
-    <div>
-      <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
+    <div className={className}>
+      <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
         {label}
       </label>
 
@@ -342,13 +390,13 @@ function DateFilter({ label, name, value, onChange }) {
         name={name}
         value={value}
         onChange={onChange}
-        className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+        className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-2 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
       />
     </div>
   );
 }
 
-function PerformerSearch({ value, onChange, onSearch }) {
+function PerformerSearch({ value, onChange, onSearch, className = "" }) {
   const handleKeyDown = (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -357,13 +405,13 @@ function PerformerSearch({ value, onChange, onSearch }) {
   };
 
   return (
-    <div className="w-full max-w-[320px]">
-      <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
+    <div className={className}>
+      <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
         Performed By
       </label>
 
       <div className="flex gap-2">
-        <div className="flex h-[36px] min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-white px-3">
+        <div className="flex h-[34px] min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[#94A3B8]">
           <SearchIcon />
           <input
             type="text"
@@ -378,7 +426,7 @@ function PerformerSearch({ value, onChange, onSearch }) {
         <button
           type="button"
           onClick={onSearch}
-          className="h-[36px] shrink-0 rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+          className="h-[34px] shrink-0 rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
         >
           Search
         </button>
@@ -390,7 +438,7 @@ function PerformerSearch({ value, onChange, onSearch }) {
 function SearchIcon() {
   return (
     <svg
-      className="shrink-0 text-[#94A3B8]"
+      className="shrink-0"
       width="13"
       height="13"
       viewBox="0 0 24 24"
@@ -400,10 +448,6 @@ function SearchIcon() {
       <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
-}
-
-function parseDate(dateValue) {
-  return new Date(`${dateValue}T00:00:00`);
 }
 
 function ArrowLeftIcon() {
