@@ -22,7 +22,6 @@ import {
 } from "@/lib/orders/rushUtils";
 import { getOrder } from "@/lib/orders/orderApi";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
-import ConfirmModal from "@/components/ui/ConfirmModal";
 
 const initialFormData = {
   invoiceDate: "",
@@ -56,7 +55,6 @@ export default function CreateInvoiceModal({
   const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
   const [rushLevel, setRushLevel] = useState(null);
   const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
-  const [zeroValueConfirmOpen, setZeroValueConfirmOpen] = useState(false);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -202,6 +200,19 @@ export default function CreateInvoiceModal({
   const modalTitle = isEditMode ? "Edit Invoice" : "Create Invoice";
   const submitLabel = isEditMode ? "Edit Invoice" : "Create Invoice";
 
+  const clearValidationFeedback = (...fields) => {
+    setErrors((prev) => {
+      const next = { ...prev, totalAmount: "" };
+
+      fields.forEach((field) => {
+        next[field] = "";
+      });
+
+      return next;
+    });
+    setSubmitError("");
+  };
+
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
 
@@ -210,10 +221,7 @@ export default function CreateInvoiceModal({
       [name]: type === "checkbox" ? checked : value,
     }));
 
-    setErrors((prev) => ({
-      ...prev,
-      [name]: "",
-    }));
+    clearValidationFeedback(name);
   };
 
   const handleMoneyChange = (e) => {
@@ -229,10 +237,7 @@ export default function CreateInvoiceModal({
       [name]: cleanValue,
     }));
 
-    setErrors((prev) => ({
-      ...prev,
-      [name]: "",
-    }));
+    clearValidationFeedback(name);
   };
 
   const handlePagesChange = (e) => {
@@ -244,10 +249,7 @@ export default function CreateInvoiceModal({
       pages: cleanValue,
     }));
 
-    setErrors((prev) => ({
-      ...prev,
-      pages: "",
-    }));
+    clearValidationFeedback("pages");
   };
 
   const handleClericalHoursChange = (e) => {
@@ -262,10 +264,7 @@ export default function CreateInvoiceModal({
       clericalTimeHours: cleanValue,
     }));
 
-    setErrors((prev) => ({
-      ...prev,
-      clericalTimeHours: "",
-    }));
+    clearValidationFeedback("clericalTimeHours");
   };
 
   const handlePrepaymentChange = (e) => {
@@ -276,6 +275,7 @@ export default function CreateInvoiceModal({
 
     const amount = toNumber(cleanValue);
     setPrepaymentAmount(cleanValue);
+    clearValidationFeedback();
 
     setPaymentLines((prev) => {
       const others = prev.filter((line) => line.type !== "prepayment");
@@ -294,25 +294,19 @@ export default function CreateInvoiceModal({
   };
 
   const handleSubmit = async () => {
-    const validationErrors = validateInvoiceForm(formData);
-    setErrors(validationErrors);
-
-    if (Object.keys(validationErrors).length > 0) return;
-
     const invoiceId = order.invoiceId || order.invoice?.invoiceId;
     const completingXrayOnlyStub =
       !isEditMode && invoiceId && order.invoice?.createOnly;
     const willCreate = !((isEditMode || completingXrayOnlyStub) && invoiceId);
 
-    if (willCreate && totalAmount === 0) {
-      setZeroValueConfirmOpen(true);
-      return;
-    }
+    const validationErrors = validateInvoiceForm(formData, {
+      requirePositiveTotal: willCreate,
+    });
+    setErrors(validationErrors);
+    setSubmitError("");
 
-    await saveInvoice();
-  };
+    if (Object.keys(validationErrors).length > 0) return;
 
-  const saveInvoice = async () => {
     const feePayload = mapDueFormToInvoiceFees(formData);
 
     const payload = {
@@ -329,20 +323,22 @@ export default function CreateInvoiceModal({
     setSubmitError("");
 
     try {
-      const invoiceId = order.invoiceId || order.invoice?.invoiceId;
-      const completingXrayOnlyStub =
-        !isEditMode && invoiceId && order.invoice?.createOnly;
-
       if ((isEditMode || completingXrayOnlyStub) && invoiceId) {
         await updateInvoice(invoiceId, payload);
       } else {
         await createInvoice(payload);
       }
 
-      setZeroValueConfirmOpen(false);
       onSaved?.();
       onClose();
     } catch (error) {
+      if (Array.isArray(error?.errors) && error.errors.length > 0) {
+        const nextErrors = {};
+        error.errors.forEach(({ field, message }) => {
+          if (field) nextErrors[field] = message;
+        });
+        setErrors((prev) => ({ ...prev, ...nextErrors }));
+      }
       setSubmitError(error.message || "Failed to save invoice");
     } finally {
       setSubmitting(false);
@@ -350,8 +346,7 @@ export default function CreateInvoiceModal({
   };
 
   return createPortal(
-    <>
-      <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
       <section className="flex max-h-[100dvh] w-full max-w-[880px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
         <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
@@ -588,6 +583,9 @@ export default function CreateInvoiceModal({
                   {formatMoney(amountDue)}
                 </span>
               </div>
+              {errors.totalAmount && (
+                <p className="mt-2 text-[11px] text-red-500">{errors.totalAmount}</p>
+              )}
             </div>
 
             <div className="mt-auto pt-6">
@@ -619,21 +617,7 @@ export default function CreateInvoiceModal({
           </aside>
         </div>
       </section>
-      </div>
-
-      <ConfirmModal
-        open={zeroValueConfirmOpen}
-        title="Create Zero-Value Invoice?"
-        message="All invoice amounts are $0.00. Are you sure you want to create this invoice?"
-        variant="warning"
-        confirmLabel="Yes, Create"
-        cancelLabel="No"
-        confirmDisabled={submitting}
-        overlayClassName="z-[10050]"
-        onCancel={() => setZeroValueConfirmOpen(false)}
-        onConfirm={saveInvoice}
-      />
-    </>,
+    </div>,
     document.body
   );
 }
@@ -897,7 +881,20 @@ function SummaryRow({ label, value, highlight = false, muted = false }) {
   );
 }
 
-function validateInvoiceForm(data) {
+function calculateInvoiceTotal(data) {
+  const pagesAmount = toNumber(data.pages) * toNumber(data.perPageAmount);
+  const clericalAmount =
+    toNumber(data.clericalTimeHours) * toNumber(data.clericalHourlyRate);
+
+  return (
+    pagesAmount +
+    clericalAmount +
+    toNumber(data.shippingHandling) +
+    toNumber(data.storageFee)
+  );
+}
+
+function validateInvoiceForm(data, { requirePositiveTotal = false } = {}) {
   const errors = {};
 
   if (!data.invoiceDate) {
@@ -929,6 +926,10 @@ function validateInvoiceForm(data) {
     errors.clericalTimeHours = "Required";
   } else if (Number(data.clericalTimeHours) < 0) {
     errors.clericalTimeHours = "Invalid";
+  }
+
+  if (requirePositiveTotal && calculateInvoiceTotal(data) <= 0) {
+    errors.totalAmount = "Invoice total must be greater than zero";
   }
 
   return errors;

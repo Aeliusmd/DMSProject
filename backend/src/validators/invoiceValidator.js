@@ -13,7 +13,25 @@ const {
 
 const ALLOWED_WRITE_OFF_ACTIONS = new Set(["close_order", "keep_write_off"]);
 
-function validateInvoicePayload(body = {}, { requireOrderId = false } = {}) {
+function parseAmount(value) {
+  const number = Number(`${value ?? ""}`.trim());
+  return Number.isFinite(number) ? number : 0;
+}
+
+function calculateInvoiceTotal(body = {}) {
+  const pageCount = Math.max(0, Math.floor(parseAmount(body.pages)));
+  const perPageAmount = parseAmount(body.perPageAmount);
+  const pagesAmount = pageCount * perPageAmount;
+  const clericalTimeHours = Math.max(0, parseAmount(body.clericalTimeHours));
+  const clericalHourlyRate = parseAmount(body.clericalHourlyRate);
+  const clericalAmount = clericalTimeHours * clericalHourlyRate;
+  const shippingHandling = parseAmount(body.shippingHandling);
+  const storageFee = parseAmount(body.storageFee);
+
+  return pagesAmount + clericalAmount + shippingHandling + storageFee;
+}
+
+function validateInvoicePayload(body = {}, { requireOrderId = false, blockZeroTotal = false } = {}) {
   const errors = [];
 
   if (requireOrderId) {
@@ -71,11 +89,21 @@ function validateInvoicePayload(body = {}, { requireOrderId = false } = {}) {
     });
   }
 
+  if (blockZeroTotal && calculateInvoiceTotal(body) <= 0) {
+    errors.push({
+      field: "totalAmount",
+      message: "Invoice total must be greater than zero",
+    });
+  }
+
   return { valid: errors.length === 0, errors };
 }
 
 function validateCreateInvoice(body = {}) {
-  return validateInvoicePayload(body, { requireOrderId: true });
+  return validateInvoicePayload(body, {
+    requireOrderId: true,
+    blockZeroTotal: true,
+  });
 }
 
 function validateUpdateInvoice(body = {}) {
