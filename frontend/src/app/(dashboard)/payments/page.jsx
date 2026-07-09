@@ -229,7 +229,7 @@ export default function PaymentsPage() {
             onAddPayment={() => setManualPaymentModalOpen(true)}
           />
         ) : (
-          <OnlinePaymentsInfo />
+          <StripeIntegratedBadge />
         )}
 
         <ManualPaymentModal
@@ -523,69 +523,28 @@ function ManualPaymentPrompt({ onAddPayment }) {
   );
 }
 
-function OnlinePaymentsInfo() {
+function StripeIntegratedBadge() {
   return (
-    <section className="rounded-[10px] border border-[#E2E8F0] bg-[#F8FAFC] px-5 py-4 shadow-sm">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-[13px] font-semibold text-[#334155]">
-            Online Payment Details
-          </h2>
-          <p className="mt-2 text-[12px] leading-6 text-[#64748B]">
-            Online payments will be processed through Stripe. Customers can pay
-            invoices by card or ACH, and transactions will appear here with Stripe
-            payment IDs, status, and receipt details.
-          </p>
-        </div>
-
-        <div className="shrink-0 rounded-[8px] border border-[#CFFAFE] bg-[#E6F7FA] px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-[#007F96]">
-            Stripe Integration
-          </p>
-          <p className="mt-1 text-[12px] text-[#334155]">
-            Coming soon — connect Stripe to enable live online payments.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-        <InfoCard
-          title="Payment Methods"
-          items={["Credit / Debit Card", "ACH Bank Transfer"]}
-        />
-        <InfoCard
-          title="Transaction Status"
-          items={[
-            "Succeeded — funds captured",
-            "Pending — authorization in progress",
-            "Failed — payment declined or expired",
-          ]}
-        />
-        <InfoCard
-          title="Stripe Fields"
-          items={[
-            "Payment Intent ID",
-            "Customer email",
-            "Card last 4 digits",
-            "Amount and invoice reference",
-          ]}
-        />
-      </div>
-    </section>
+    <div className="flex justify-end">
+      <span className="inline-flex h-[28px] items-center gap-2 rounded-full border border-[#CFFAFE] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96]">
+        <StripeMarkIcon />
+        Stripe Integrated
+      </span>
+    </div>
   );
 }
 
-function InfoCard({ title, items }) {
+function StripeMarkIcon() {
   return (
-    <div className="rounded-[8px] border border-[#E2E8F0] bg-white px-4 py-3">
-      <h3 className="text-[12px] font-semibold text-[#334155]">{title}</h3>
-      <ul className="mt-2 space-y-1">
-        {items.map((item) => (
-          <li key={item} className="text-[11px] text-[#64748B]">
-            • {item}
-          </li>
-        ))}
-      </ul>
-    </div>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 10.2c0-.9.7-1.2 1.9-1.4 1.1-.1 2.5-.1 4.1 0V7.4c0-.2 0-.4-.1-.5H5.9c-1 0-1.8.4-1.8 1.4v8.8c0 .3.2.5.5.5h2.1c.3 0 .5-.2.5-.5v-6.9Z"
+        fill="currentColor"
+      />
+      <path
+        d="M13.2 8.8c1.6-.1 3.2 0 4.3.2 1.2.2 1.9.5 1.9 1.4v6.9c0 .3-.2.5-.5.5h-2.1c-.3 0-.5-.2-.5-.5v-1.6c-.8.6-1.8.9-3 .9-2.1 0-3.5-1.1-3.5-2.8 0-1.8 1.4-2.7 3.8-2.9Zm1.6 4.5c.7 0 1.3-.2 1.8-.5v-1.8c-.5-.2-1.1-.3-1.8-.3-1 0-1.6.4-1.6 1 0 .6.6 1 1.6 1Z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }

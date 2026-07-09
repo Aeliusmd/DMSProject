@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
+import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
 import {
   resendInvoices,
   resendXrayInvoices,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/invoices/invoiceApi";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import {
+  buildOrderForInvoiceEmailModal,
   canResendInvoice,
   canSendInvoice,
   canWriteOffInvoice,
@@ -54,6 +56,58 @@ export default function InvoiceReportTable({
   const [resendingId, setResendingId] = useState(null);
   const [sendError, setSendError] = useState("");
   const [writeOffError, setWriteOffError] = useState("");
+  const [resendEmailModal, setResendEmailModal] = useState({
+    open: false,
+    order: null,
+    invoiceIds: [],
+    orderIds: [],
+    groupCompany: "",
+    rowId: null,
+  });
+
+  const closeResendEmailModal = () => {
+    setResendEmailModal({
+      open: false,
+      order: null,
+      invoiceIds: [],
+      orderIds: [],
+      groupCompany: "",
+      rowId: null,
+    });
+  };
+
+  const openResendEmailModal = (group, rows = []) => {
+    const targetRows = Array.isArray(rows) ? rows : [rows];
+    if (!targetRows.length) return;
+
+    const firstRow = targetRows[0];
+    const invoiceIds = invoiceType === "xray"
+      ? []
+      : targetRows
+          .map((row) => Number(row.invoiceId))
+          .filter((id) => Number.isFinite(id) && id > 0);
+    const orderIds = invoiceType === "xray"
+      ? targetRows
+          .map((row) => Number(row.orderId))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      : [];
+
+    setResendEmailModal({
+      open: true,
+      order: buildOrderForInvoiceEmailModal({
+        orderId: firstRow.orderId,
+        caseNo: firstRow.caseNo,
+        applicant: firstRow.applicant,
+        companyName: group.company,
+        companyEmail: group.emails,
+        invoiceId: firstRow.invoiceId,
+      }),
+      invoiceIds,
+      orderIds,
+      groupCompany: group.company,
+      rowId: targetRows.length === 1 ? firstRow.id : null,
+    });
+  };
 
   const handleToggleRow = (company, rowId) => {
     setSelectedRows((prev) => {
@@ -117,6 +171,11 @@ export default function InvoiceReportTable({
 
     const redirectOrderId = orderIds[0] || selectedInvoiceRows[0]?.orderId;
 
+    if (isResendMode) {
+      openResendEmailModal(group, selectedInvoiceRows);
+      return;
+    }
+
     if (!group.emails?.trim()) {
       handleMissingProviderEmail(redirectOrderId, router);
       return;
@@ -163,7 +222,7 @@ export default function InvoiceReportTable({
     }
   };
 
-  const handleResendSingleInvoice = async (group, row) => {
+  const handleResendSingleInvoice = (group, row) => {
     if (!canResendInvoice(row) || sendingCompany || resendingId) return;
 
     const invoiceId = Number(row.invoiceId);
@@ -175,30 +234,40 @@ export default function InvoiceReportTable({
 
     if (!hasTarget) return;
 
-    if (!group.emails?.trim()) {
-      handleMissingProviderEmail(orderId || row.orderId, router);
-      return;
-    }
+    openResendEmailModal(group, row);
+  };
 
-    setResendingId(row.id);
+  const handleSubmitResendEmail = async (emails) => {
+    const { invoiceIds, orderIds, groupCompany, rowId } = resendEmailModal;
+
     setSendError("");
 
     try {
       if (invoiceType === "xray") {
-        await resendXrayInvoices([orderId]);
+        if (!orderIds.length) {
+          throw new Error("No invoices selected for resend.");
+        }
+
+        setResendingId(rowId || "bulk");
+        await resendXrayInvoices(orderIds, emails);
       } else {
-        await resendInvoices([invoiceId]);
+        if (!invoiceIds.length) {
+          throw new Error("No invoices selected for resend.");
+        }
+
+        setResendingId(rowId || "bulk");
+        await resendInvoices(invoiceIds, emails);
+      }
+
+      if (groupCompany && !rowId) {
+        setSelectedRows((prev) => ({
+          ...prev,
+          [groupCompany]: [],
+        }));
       }
 
       onRefresh?.();
-    } catch (error) {
-      if (isNoProviderEmailError(error)) {
-        handleMissingProviderEmail(orderId || row.orderId, router);
-        return;
-      }
-
-      setSendError(error?.message || "Failed to resend invoice");
-      console.error("Failed to resend invoice:", error);
+      onSent?.();
     } finally {
       setResendingId(null);
     }
@@ -384,6 +453,15 @@ export default function InvoiceReportTable({
           onSubmit={handleSubmitWriteOff}
         />
       )}
+
+      <SendInvoiceEmailModal
+        isOpen={resendEmailModal.open}
+        order={resendEmailModal.order}
+        mode="resend"
+        invoiceKind={invoiceType === "xray" ? "xray" : "standard"}
+        onClose={closeResendEmailModal}
+        onSend={handleSubmitResendEmail}
+      />
     </>
   );
 }

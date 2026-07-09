@@ -2376,6 +2376,9 @@ async function deliverInvoiceEmail(
   const reminderNumber = Number(reminderLevel) || 0;
   const isReminder = reminderNumber > 0;
 
+  const { getPaymentUrlForOrder } = require("./stripePaymentService");
+  const paymentUrl = await getPaymentUrlForOrder(invoice.order_id);
+
   for (const email of recipients) {
     const result = await sendInvoiceEmail({
       to: email,
@@ -2396,6 +2399,7 @@ async function deliverInvoiceEmail(
         ? buildOrderDetailsText(invoice, payments)
         : "",
       attachments,
+      paymentUrl,
       subjectOverride: isReminder
         ? `Reminder ${reminderNumber} - Invoice - Case ${invoice.order_number || ""}`
         : null,
@@ -2473,6 +2477,9 @@ async function deliverXrayInvoiceEmail(
   const reminderNumber = Number(reminderLevel) || 0;
   const isReminder = reminderNumber > 0;
 
+  const { getPaymentUrlForOrder } = require("./stripePaymentService");
+  const paymentUrl = await getPaymentUrlForOrder(order.id);
+
   for (const email of recipients) {
     const result = await sendInvoiceEmail({
       to: email,
@@ -2488,6 +2495,7 @@ async function deliverXrayInvoiceEmail(
       due: formatMoney(financials.amountDue),
       isResend: isResend || isReminder,
       reminderLevel: isReminder ? reminderNumber : null,
+      paymentUrl,
       subjectOverride: isReminder
         ? `Reminder ${reminderNumber} - X-Ray Invoice - Case ${order.order_number || ""}`
         : isResend

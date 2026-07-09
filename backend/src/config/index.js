@@ -54,4 +54,11 @@ module.exports = {
     checkIntervalMs:
       Number(process.env.INVOICE_REMINDER_CHECK_INTERVAL_MS) || 60 * 60 * 1000,
   },
+
+  stripe: {
+    publishableKey: (process.env.STRIPE_PUBLISHABLE_KEY || "").trim(),
+    secretKey: (process.env.STRIPE_SECRET_KEY || "").trim(),
+    webhookSecret: (process.env.STRIPE_WEBHOOK_SECRET || "").trim(),
+    currency: (process.env.STRIPE_CURRENCY || "usd").trim().toLowerCase(),
+  },
 };
