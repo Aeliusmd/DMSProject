@@ -219,6 +219,7 @@ export default function FacilityDetailsPage() {
       ...prev,
       [name]: nextValue,
     }));
+    setSubmitError("");
 
     if (submitAttempted) {
       const fieldError = validateFacilityField(name, nextValue);
@@ -250,6 +251,26 @@ export default function FacilityDetailsPage() {
         manager.id === managerId ? { ...manager, [field]: nextValue } : manager
       ),
     }));
+    setSubmitError("");
+
+    if (submitAttempted && formData) {
+      const managerIndex = (formData.officeManagers || []).findIndex(
+        (manager) => manager.id === managerId
+      );
+      if (managerIndex >= 0) {
+        const errorKey = `managers.${managerIndex}.${field}`;
+        const fieldError = validateManagerField(field, nextValue);
+        setErrors((prev) => {
+          const nextErrors = { ...prev };
+          if (fieldError) {
+            nextErrors[errorKey] = fieldError;
+          } else {
+            delete nextErrors[errorKey];
+          }
+          return nextErrors;
+        });
+      }
+    }
   };
 
   const handleAddManager = () => {
@@ -382,6 +403,35 @@ export default function FacilityDetailsPage() {
         doctor.id === doctorId ? { ...doctor, [field]: nextValue } : doctor
       )
     );
+    setDoctorError("");
+
+    if (doctorSubmitAttempted) {
+      const doctorIndex = doctorInputs.findIndex((doctor) => doctor.id === doctorId);
+      if (doctorIndex >= 0) {
+        const errorKey = `doctors.${doctorIndex}.${field}`;
+        const fieldError = validateDoctorField(field, nextValue, {
+          firstName:
+            field === "firstName"
+              ? nextValue
+              : doctorInputs[doctorIndex].firstName,
+          lastName:
+            field === "lastName" ? nextValue : doctorInputs[doctorIndex].lastName,
+          officeName:
+            field === "officeName"
+              ? nextValue
+              : doctorInputs[doctorIndex].officeName,
+        });
+        setDoctorErrors((prev) => {
+          const nextErrors = { ...prev };
+          if (fieldError) {
+            nextErrors[errorKey] = fieldError;
+          } else {
+            delete nextErrors[errorKey];
+          }
+          return nextErrors;
+        });
+      }
+    }
   };
 
   const handleDoctorCheckboxChange = (doctorId, checked) => {
@@ -447,6 +497,25 @@ export default function FacilityDetailsPage() {
       ...prev,
       [field]: nextValue,
     }));
+    setEditDoctorError("");
+
+    if (editDoctorSubmitAttempted && editDoctorForm) {
+      const candidate = {
+        ...editDoctorForm,
+        [field]: nextValue,
+      };
+      const fieldError = validateDoctorField(field, nextValue, candidate);
+      setEditDoctorErrors((prev) => {
+        const nextErrors = { ...prev };
+        const key = `doctors.0.${field}`;
+        if (fieldError) {
+          nextErrors[key] = fieldError;
+        } else {
+          delete nextErrors[key];
+        }
+        return nextErrors;
+      });
+    }
   };
 
   const handleEditDoctorDefaultChange = (checked) => {
@@ -484,10 +553,15 @@ export default function FacilityDetailsPage() {
       setDoctors(refreshed.doctors || []);
       closeEditDoctorModal();
     } catch (err) {
+      let mappedErrors = {};
       if (err instanceof ApiRequestError && err.errors) {
-        setEditDoctorErrors(mapApiErrors(err.errors));
+        mappedErrors = mapApiErrors(err.errors);
+        setEditDoctorErrors((prev) => ({ ...prev, ...mappedErrors }));
       }
-      setEditDoctorError(err.message || "Failed to update doctor");
+      const fallbackMessage = err.message || "Failed to update doctor";
+      setEditDoctorError(
+        shouldShowSubmitError(fallbackMessage, mappedErrors) ? fallbackMessage : ""
+      );
     } finally {
       setSavingDoctor(false);
     }
@@ -583,10 +657,15 @@ export default function FacilityDetailsPage() {
         router.push("/facilities");
       }
     } catch (err) {
+      let mappedErrors = {};
       if (err instanceof ApiRequestError && err.errors) {
-        setErrors(mapApiErrors(err.errors));
+        mappedErrors = mapApiErrors(err.errors);
+        setErrors((prev) => ({ ...prev, ...mappedErrors }));
       }
-      setSubmitError(err.message || "Failed to update facility");
+      const fallbackMessage = err.message || "Failed to update facility";
+      setSubmitError(
+        shouldShowSubmitError(fallbackMessage, mappedErrors) ? fallbackMessage : ""
+      );
     } finally {
       setSaving(false);
     }
@@ -645,10 +724,15 @@ export default function FacilityDetailsPage() {
         setReturnToOrderModal({ open: true });
       }
     } catch (err) {
+      let mappedErrors = {};
       if (err instanceof ApiRequestError && err.errors) {
-        setDoctorErrors(mapApiErrors(err.errors));
+        mappedErrors = mapApiErrors(err.errors);
+        setDoctorErrors((prev) => ({ ...prev, ...mappedErrors }));
       }
-      setDoctorError(err.message || "Failed to create doctors");
+      const fallbackMessage = err.message || "Failed to create doctors";
+      setDoctorError(
+        shouldShowSubmitError(fallbackMessage, mappedErrors) ? fallbackMessage : ""
+      );
     } finally {
       setCreatingDoctors(false);
     }
@@ -1932,6 +2016,23 @@ function mapApiErrors(errors) {
   return mapped;
 }
 
+function shouldShowSubmitError(message, fieldErrors = {}) {
+  const normalized = `${message || ""}`.trim().toLowerCase();
+  if (!normalized) return false;
+  const hasFieldErrors = Object.keys(fieldErrors).length > 0;
+
+  if (
+    hasFieldErrors &&
+    ["validation failed", "invalid data", "request failed"].includes(normalized)
+  ) {
+    return false;
+  }
+
+  return !Object.values(fieldErrors).some(
+    (value) => `${value || ""}`.trim().toLowerCase() === normalized
+  );
+}
+
 function normalizeFacilityFormData(data) {
   return {
     facilityName: data.facilityName?.trim() || "",
@@ -2039,6 +2140,42 @@ function validateFacilityField(field, value) {
 
   if ((field === "phone" || field === "fax") && value) {
     if (getDigits(value).length !== 10) return "Enter a valid 10 digit number";
+  }
+
+  return "";
+}
+
+function validateManagerField(field, value) {
+  if (field === "email" && value && !isValidEmail(value)) {
+    return "Enter a valid email address";
+  }
+
+  if (field === "phone" && value && getDigits(value).length !== 10) {
+    return "Enter a valid 10 digit number";
+  }
+
+  return "";
+}
+
+function validateDoctorField(field, value, candidate = {}) {
+  if (field === "officeName" && !`${value || ""}`.trim()) {
+    return "Office name is required";
+  }
+
+  if (
+    (field === "firstName" || field === "lastName") &&
+    !`${candidate.firstName || ""}`.trim() &&
+    !`${candidate.lastName || ""}`.trim()
+  ) {
+    return "Doctor first or last name is required";
+  }
+
+  if ((field === "phone" || field === "fax") && value && getDigits(value).length !== 10) {
+    return "Enter a valid 10 digit number";
+  }
+
+  if (field === "email" && value && !isValidEmail(value)) {
+    return "Enter a valid email address";
   }
 
   return "";

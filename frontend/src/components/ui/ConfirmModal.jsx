@@ -8,6 +8,7 @@ export default function ConfirmModal({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   confirmDisabled = false,
+  overlayClassName = "z-50",
   onCancel,
   onConfirm,
 }) {
@@ -16,7 +17,9 @@ export default function ConfirmModal({
   const isDanger = variant === "danger";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4 py-6 backdrop-blur-[2px]">
+    <div
+      className={`fixed inset-0 flex items-center justify-center bg-black/35 px-4 py-6 backdrop-blur-[2px] ${overlayClassName}`}
+    >
       <section
         className="rounded-[9px] bg-white px-5 py-5 shadow-2xl"
         style={{
