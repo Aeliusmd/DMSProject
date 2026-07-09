@@ -845,7 +845,12 @@ function NewOrderPageContent() {
   }, [isEditMode, orderId, formData.subpoenaStoragePath, formData.subpoenaFile, formData.subpoenaUrl]);
 
   useEffect(() => {
-    if (isEditMode || !subpoenaId || facilityRefresh === "1") {
+    if (
+      isEditMode ||
+      !subpoenaId ||
+      facilityRefresh === "1" ||
+      draftRestoredRef.current
+    ) {
       return undefined;
     }
 

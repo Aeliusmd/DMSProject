@@ -2738,7 +2738,7 @@ async function getOrderMedicalRecordsFile(orderId, { recordType = "medical" } = 
   const absolutePath = resolveOrderSubpoenaAbsolutePath(targetRecord.storage_path);
 
   if (!absolutePath || !fs.existsSync(absolutePath)) {
-    throw new ApiError(404, "Records PDF file not found on disk");
+    throw new ApiError(404, "Records PDF file not found");
   }
 
   const orderRecords = await OrderRecord.findByOrderId(orderId);

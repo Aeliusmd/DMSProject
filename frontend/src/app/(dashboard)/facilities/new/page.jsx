@@ -62,6 +62,7 @@ export default function NewFacilityPage() {
       ...prev,
       [name]: nextValue,
     }));
+    setSubmitError("");
 
     if (submitAttempted) {
       const fieldError = validateFacilityField(name, nextValue);
@@ -97,6 +98,7 @@ export default function NewFacilityPage() {
           : manager
       )
     );
+    setSubmitError("");
 
     if (submitAttempted) {
       const errorKey = `managers.${index}.${field}`;
@@ -168,10 +170,13 @@ export default function NewFacilityPage() {
 
       router.push("/facilities");
     } catch (err) {
+      let mappedErrors = {};
       if (err instanceof ApiRequestError && err.errors) {
-        setErrors(mapApiErrors(err.errors));
+        mappedErrors = mapApiErrors(err.errors);
+        setErrors((prev) => ({ ...prev, ...mappedErrors }));
       }
-      setSubmitError(err.message || "Failed to create facility");
+      const fallbackMessage = err.message || "Failed to create facility";
+      setSubmitError(shouldShowSubmitError(fallbackMessage, mappedErrors) ? fallbackMessage : "");
     } finally {
       setSaving(false);
     }
@@ -560,6 +565,23 @@ function mapApiErrors(errors) {
   });
 
   return mapped;
+}
+
+function shouldShowSubmitError(message, fieldErrors = {}) {
+  const normalized = `${message || ""}`.trim().toLowerCase();
+  if (!normalized) return false;
+  const hasFieldErrors = Object.keys(fieldErrors).length > 0;
+
+  if (
+    hasFieldErrors &&
+    ["validation failed", "invalid data", "request failed"].includes(normalized)
+  ) {
+    return false;
+  }
+
+  return !Object.values(fieldErrors).some(
+    (value) => `${value || ""}`.trim().toLowerCase() === normalized
+  );
 }
 
 function validateFacilityForm(data, managers) {
