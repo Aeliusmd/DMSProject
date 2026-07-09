@@ -1,8 +1,13 @@
+const multer = require("multer");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
-const multer = require("multer");
+const { normalizeError } = require("../utils/errorMapper");
 
-function errorHandler(err, _req, res, _next) {
+function errorHandler(err, req, res, next) {
+  if (res.headersSent) {
+    return next(err);
+  }
+
   if (err instanceof multer.MulterError || err?.name === "MulterError") {
     const message =
       err.code === "LIMIT_FILE_SIZE"
@@ -24,17 +29,32 @@ function errorHandler(err, _req, res, _next) {
     });
   }
 
-  const statusCode = err.statusCode || 500;
-  const message = err.isOperational ? err.message : "Internal server error";
+  const normalized = normalizeError(err);
+  const statusCode = normalized.statusCode || 500;
+  const message = normalized.isOperational
+    ? normalized.message
+    : "Internal server error";
 
-  if (!err.isOperational) {
-    logger.error(err.message, { stack: err.stack });
+  if (!normalized.isOperational) {
+    logger.error(normalized.cause?.message || err?.message || "Unhandled error", {
+      path: req.originalUrl,
+      method: req.method,
+      stack: normalized.cause?.stack || err?.stack,
+      code: normalized.cause?.code || err?.code,
+    });
+  } else if (normalized.cause && statusCode >= 500) {
+    logger.error(normalized.cause.message, {
+      path: req.originalUrl,
+      method: req.method,
+      stack: normalized.cause.stack,
+      code: normalized.cause.code,
+    });
   }
 
   res.status(statusCode).json({
     success: false,
     message,
-    errors: err.errors || null,
+    errors: normalized.errors || null,
   });
 }
 

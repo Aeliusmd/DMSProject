@@ -35,9 +35,26 @@ async function startServer() {
       startInvoiceReminderJob();
     });
   } catch (error) {
-    logger.error("Failed to start server", { error: error.message });
+    logger.error("Failed to start server", {
+      error: error.message,
+      code: error.code,
+    });
     process.exit(1);
   }
 }
+
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled promise rejection", {
+    error: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught exception", {
+    error: error.message,
+    stack: error.stack,
+  });
+});
 
 startServer();
