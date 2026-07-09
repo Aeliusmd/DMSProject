@@ -267,11 +267,14 @@ async function getTopProviders(limit = 5) {
         'Unknown Provider'
       ) AS provider_name,
       COUNT(DISTINCT o.id) AS case_count,
-      COALESCE(SUM(${STANDARD_INVOICE_TOTAL_SQL.trim()}), 0) AS invoiced_total,
-      COALESCE(SUM(COALESCE(i.amount_paid, 0)), 0) AS paid_total
+      COALESCE(SUM(${STANDARD_INVOICE_TOTAL_SQL.trim()}), 0)
+        + COALESCE(SUM(COALESCE(x.payment, 0)), 0) AS invoiced_total,
+      COALESCE(SUM(COALESCE(i.amount_paid, 0)), 0)
+        + COALESCE(SUM(COALESCE(x.amount_paid, 0)), 0) AS paid_total
     FROM orders o
     LEFT JOIN providers p ON p.id = o.provider_id
     LEFT JOIN invoices i ON i.order_id = o.id
+    LEFT JOIN invoice_xray_details x ON x.order_id = o.id
     WHERE o.status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
     GROUP BY provider_name
     ORDER BY case_count DESC, invoiced_total DESC, provider_name ASC

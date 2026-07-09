@@ -69,6 +69,30 @@ function buildAddress(row) {
   return address || row.full_address || "";
 }
 
+function resolveCombinedFinancials(row) {
+  const standardTotal = toNumber(row.total_amount);
+  const standardPaid = toNumber(row.amount_paid);
+  const standardDue = toNumber(row.amount_due);
+  const xrayTotal = toNumber(row.xray_total_amount);
+  const xrayPaid = toNumber(row.xray_amount_paid);
+  const xrayDue = Math.max(0, xrayTotal - xrayPaid);
+
+  return {
+    standardTotal,
+    standardPaid,
+    standardDue,
+    xrayTotal,
+    xrayPaid,
+    xrayDue,
+    totalInvoiced: standardTotal + xrayTotal,
+    totalPaid: standardPaid + xrayPaid,
+    totalDue: Math.max(0, standardDue) + xrayDue,
+    hasAnyInvoice:
+      (Boolean(row.invoice_id) && standardTotal > 0) ||
+      (Boolean(row.xray_invoice_id) && xrayTotal > 0),
+  };
+}
+
 function mapReportOrderRow(row) {
   const totalAmount = toNumber(row.total_amount);
   const invoiced = Boolean(row.invoice_id && totalAmount > 0);
@@ -160,12 +184,10 @@ async function getOrdersReport({
 
 function deriveCaseActivities(row) {
   const activities = new Set();
-  const totalAmount = toNumber(row.total_amount);
-  const amountPaid = toNumber(row.amount_paid);
-  const amountDue = toNumber(row.amount_due);
+  const financials = resolveCombinedFinancials(row);
   const invoiceStatus = String(row.invoice_status || "");
 
-  if (row.invoice_id && totalAmount > 0) {
+  if (financials.hasAnyInvoice) {
     activities.add("Invoiced");
   }
 
@@ -173,20 +195,11 @@ function deriveCaseActivities(row) {
     activities.add("Written Off");
   }
 
-  if (
-    row.invoice_id &&
-    (invoiceStatus === "Paid" || amountPaid >= totalAmount) &&
-    invoiceStatus !== "Written Off"
-  ) {
+  if (financials.totalInvoiced > 0 && financials.totalPaid >= financials.totalInvoiced) {
     activities.add("Paid");
   }
 
-  if (
-    row.invoice_id &&
-    amountDue > 0 &&
-    invoiceStatus !== "Paid" &&
-    invoiceStatus !== "Written Off"
-  ) {
+  if (financials.totalInvoiced > 0 && financials.totalDue > 0 && invoiceStatus !== "Written Off") {
     activities.add("Unpaid");
   }
 
@@ -207,8 +220,10 @@ function getPrimaryActivity(activities = []) {
 }
 
 function getCaseAmount(row, activity) {
+  const financials = resolveCombinedFinancials(row);
+
   if (activity === "Paid") {
-    return toNumber(row.amount_paid);
+    return financials.totalPaid;
   }
 
   if (activity === "Written Off") {
@@ -216,10 +231,10 @@ function getCaseAmount(row, activity) {
   }
 
   if (activity === "Unpaid") {
-    return toNumber(row.amount_due);
+    return financials.totalDue;
   }
 
-  return toNumber(row.total_amount);
+  return financials.totalInvoiced;
 }
 
 function companyMatchesActivity(activities, filter) {
@@ -256,14 +271,14 @@ async function getActivityReport({
 
   if (dateFrom) {
     conditions.push(
-      "DATE(COALESCE(i.invoice_date, o.created_at)) >= :dateFrom"
+      "DATE(COALESCE(i.invoice_date, x.xray_invoice_date, o.created_at)) >= :dateFrom"
     );
     params.dateFrom = dateFrom;
   }
 
   if (dateTo) {
     conditions.push(
-      "DATE(COALESCE(i.invoice_date, o.created_at)) <= :dateTo"
+      "DATE(COALESCE(i.invoice_date, x.xray_invoice_date, o.created_at)) <= :dateTo"
     );
     params.dateTo = dateTo;
   }
@@ -290,7 +305,11 @@ async function getActivityReport({
       i.amount_due,
       i.writeoff_amount,
       i.status AS invoice_status,
-      i.invoice_date
+      i.invoice_date,
+      x.id AS xray_invoice_id,
+      x.payment AS xray_total_amount,
+      x.amount_paid AS xray_amount_paid,
+      x.xray_invoice_date
     FROM orders o
     INNER JOIN facilities f ON f.id = o.facility_id
     LEFT JOIN invoices i ON i.id = (
@@ -298,6 +317,13 @@ async function getActivityReport({
       FROM invoices i2
       WHERE i2.order_id = o.id
       ORDER BY i2.id DESC
+      LIMIT 1
+    )
+    LEFT JOIN invoice_xray_details x ON x.id = (
+      SELECT x2.id
+      FROM invoice_xray_details x2
+      WHERE x2.order_id = o.id
+      ORDER BY x2.id DESC
       LIMIT 1
     )
     WHERE ${conditions.join(" AND ")}
@@ -325,6 +351,7 @@ async function getActivityReport({
     const caseActivities = deriveCaseActivities(row);
     const primaryActivity = getPrimaryActivity(caseActivities);
     const amount = getCaseAmount(row, primaryActivity);
+    const financials = resolveCombinedFinancials(row);
 
     caseActivities.forEach((item) => company.activities.add(item));
 
@@ -344,8 +371,8 @@ async function getActivityReport({
       invoiceDate: normalizeDate(row.invoice_date || row.order_created_at),
     });
 
-    company.invoiced += toNumber(row.total_amount);
-    company.paid += toNumber(row.amount_paid);
+    company.invoiced += financials.totalInvoiced;
+    company.paid += financials.totalPaid;
   });
 
   let companies = Array.from(companiesMap.values()).map((company) => {
