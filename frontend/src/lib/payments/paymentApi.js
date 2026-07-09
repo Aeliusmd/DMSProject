@@ -1,7 +1,4 @@
-import {
-  ORDER_PAYMENT_DETAILS,
-  PAYMENT_TYPE_LABELS,
-} from "./paymentMockData";
+import { PAYMENT_TYPE_LABELS } from "./paymentMockData";
 import { request } from "@/lib/auth/authApi";
 
 function formatMoney(value) {
@@ -218,20 +215,17 @@ export async function getPayments({
     };
   }
 
-  const rows = [];
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("dateFrom", dateFrom);
+  if (dateTo) params.set("dateTo", dateTo);
 
-  Object.values(ORDER_PAYMENT_DETAILS).forEach((order) => {
-    const payments = order.onlinePayments;
-    const filtered = filterPaymentsByDate(payments, channel, dateFrom, dateTo);
-
-    filtered.forEach((payment) => {
-      rows.push(buildPaymentListRow(order, payment, channel));
-    });
+  const query = params.toString();
+  const data = await request(`/payments/online${query ? `?${query}` : ""}`, {
+    auth: true,
+    cache: "no-store",
   });
 
-  rows.sort((a, b) =>
-    String(b.paymentDate || "").localeCompare(String(a.paymentDate || ""))
-  );
+  const rows = data?.data?.payments || [];
 
   return {
     payments: rows,
@@ -281,36 +275,34 @@ function mapDetailManualPayment(payment) {
 export async function getOrderPaymentDetail(orderId, { channel } = {}) {
   const activeChannel = channel === "online" ? "online" : "manual";
 
-  if (activeChannel === "manual") {
-    const data = await request(`/payments/orders/${orderId}/detail`, {
-      auth: true,
-      cache: "no-store",
-    });
+  const data = await request(`/payments/orders/${orderId}/detail`, {
+    auth: true,
+    cache: "no-store",
+  });
 
-    const detail = data?.data;
-    if (!detail) return null;
+  const detail = data?.data;
+  if (!detail) return null;
 
-    return {
-      ...detail,
-      activeChannel,
-      channelPayments: (detail.manualPayments || []).map(mapDetailManualPayment),
-      manualPayments: (detail.manualPayments || []).map(mapDetailManualPayment),
-      onlinePayments: detail.onlinePayments || [],
-    };
-  }
-
-  const order = ORDER_PAYMENT_DETAILS[String(orderId)];
-
-  if (!order) {
-    return null;
-  }
-
-  const enriched = enrichOrder(order);
+  const manualPayments = (detail.manualPayments || []).map(mapDetailManualPayment);
+  const onlinePayments = (detail.onlinePayments || []).map((payment) => ({
+    ...payment,
+    typeLabel:
+      payment.paymentTypeLabel ||
+      PAYMENT_TYPE_LABELS[payment.paymentType] ||
+      payment.paymentType,
+    amountDisplay: payment.amountDisplay || formatMoney(payment.amount),
+    processingFeeDisplay:
+      payment.processingFeeDisplay || formatMoney(payment.processingFee),
+    netAmountDisplay:
+      payment.netAmountDisplay || formatMoney(payment.netAmount),
+  }));
 
   return {
-    ...enriched,
+    ...detail,
     activeChannel,
-    channelPayments: enriched.onlinePayments,
+    channelPayments: activeChannel === "online" ? onlinePayments : manualPayments,
+    manualPayments,
+    onlinePayments,
   };
 }
 

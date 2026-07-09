@@ -7,12 +7,20 @@ const routes = require("./routes");
 const notFound = require("./middleware/notFound");
 const errorHandler = require("./middleware/errorHandler");
 const { uploadsRoot } = require("./config/uploads");
+const stripeWebhookController = require("./controllers/stripeWebhookController");
 
 const app = express();
 
 app.set("trust proxy", 1);
 
 app.use(cors({ origin: config.clientUrl, credentials: true }));
+
+app.post(
+  "/api/webhooks/stripe",
+  express.raw({ type: "application/json" }),
+  stripeWebhookController.handleStripeWebhook
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

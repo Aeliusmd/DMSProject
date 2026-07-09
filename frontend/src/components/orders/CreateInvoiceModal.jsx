@@ -22,6 +22,7 @@ import {
 } from "@/lib/orders/rushUtils";
 import { getOrder } from "@/lib/orders/orderApi";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 
 const initialFormData = {
   invoiceDate: "",
@@ -55,6 +56,7 @@ export default function CreateInvoiceModal({
   const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
   const [rushLevel, setRushLevel] = useState(null);
   const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
+  const [zeroValueConfirmOpen, setZeroValueConfirmOpen] = useState(false);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -297,6 +299,20 @@ export default function CreateInvoiceModal({
 
     if (Object.keys(validationErrors).length > 0) return;
 
+    const invoiceId = order.invoiceId || order.invoice?.invoiceId;
+    const completingXrayOnlyStub =
+      !isEditMode && invoiceId && order.invoice?.createOnly;
+    const willCreate = !((isEditMode || completingXrayOnlyStub) && invoiceId);
+
+    if (willCreate && totalAmount === 0) {
+      setZeroValueConfirmOpen(true);
+      return;
+    }
+
+    await saveInvoice();
+  };
+
+  const saveInvoice = async () => {
     const feePayload = mapDueFormToInvoiceFees(formData);
 
     const payload = {
@@ -323,6 +339,7 @@ export default function CreateInvoiceModal({
         await createInvoice(payload);
       }
 
+      setZeroValueConfirmOpen(false);
       onSaved?.();
       onClose();
     } catch (error) {
@@ -333,7 +350,8 @@ export default function CreateInvoiceModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+    <>
+      <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
       <section className="flex max-h-[100dvh] w-full max-w-[880px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
         <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
@@ -601,7 +619,21 @@ export default function CreateInvoiceModal({
           </aside>
         </div>
       </section>
-    </div>,
+      </div>
+
+      <ConfirmModal
+        open={zeroValueConfirmOpen}
+        title="Create Zero-Value Invoice?"
+        message="All invoice amounts are $0.00. Are you sure you want to create this invoice?"
+        variant="warning"
+        confirmLabel="Yes, Create"
+        cancelLabel="No"
+        confirmDisabled={submitting}
+        overlayClassName="z-[10050]"
+        onCancel={() => setZeroValueConfirmOpen(false)}
+        onConfirm={saveInvoice}
+      />
+    </>,
     document.body
   );
 }

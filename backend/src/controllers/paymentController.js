@@ -56,6 +56,11 @@ exports.getManualPayments = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { payments });
 });
 
+exports.getOnlinePayments = asyncHandler(async (req, res) => {
+  const payments = await paymentService.getOnlinePayments(req.query);
+  return ApiResponse.success(res, { payments });
+});
+
 exports.getOrderPaymentDetail = asyncHandler(async (req, res) => {
   const detail = await paymentService.getOrderPaymentDetail(req.params.orderId);
   return ApiResponse.success(res, detail);

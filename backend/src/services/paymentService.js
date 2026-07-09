@@ -479,11 +479,13 @@ function mapDetailInvoice(type, row, order) {
 }
 
 async function getOrderPaymentDetail(orderRef) {
+  const stripePaymentService = require("./stripePaymentService");
   const order = await resolveOrderByReference(orderRef);
-  const [invoice, xray, manualRows] = await Promise.all([
+  const [invoice, xray, manualRows, onlineRows] = await Promise.all([
     Invoice.findByOrderId(order.id),
     InvoiceXray.findByOrderId(order.id),
     getManualPayments({ orderId: order.id }),
+    stripePaymentService.getOnlinePaymentsForOrder(order.id),
   ]);
 
   const invoices = [];
@@ -512,7 +514,7 @@ async function getOrderPaymentDetail(orderRef) {
     caseNo: order.case_number || "",
     invoices,
     manualPayments: manualRows,
-    onlinePayments: [],
+    onlinePayments: onlineRows,
     totals: {
       ...totals,
       invoicedDisplay: formatMoney(totals.invoiced),
@@ -522,9 +524,15 @@ async function getOrderPaymentDetail(orderRef) {
   };
 }
 
+async function getOnlinePayments(query = {}) {
+  const stripePaymentService = require("./stripePaymentService");
+  return stripePaymentService.getOnlinePayments(query);
+}
+
 module.exports = {
   searchOrderInvoices,
   recordManualInvoicePayment,
   getManualPayments,
+  getOnlinePayments,
   getOrderPaymentDetail,
 };

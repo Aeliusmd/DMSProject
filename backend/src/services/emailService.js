@@ -149,6 +149,7 @@ async function sendInvoiceEmail({
   orderDetailsText = "",
   attachments = [],
   subjectOverride = null,
+  paymentUrl = null,
 }) {
   const reminderNumber = Number(reminderLevel) || 0;
   const isReminder = reminderNumber > 0;
@@ -176,6 +177,7 @@ async function sendInvoiceEmail({
     isRushOrder,
     rushLevel,
     orderDetailsText,
+    paymentUrl,
   };
 
   const { text, html } = renderInvoiceEmail(templateData);
@@ -751,9 +753,83 @@ async function sendCertificateOfRecordsEmail({
   }
 }
 
+async function sendPaymentResultEmail({
+  to,
+  outcome = "success",
+  companyName,
+  orderNumber,
+  invoiceNumber,
+  amount,
+  failureMessage = "",
+  receiptUrl = "",
+}) {
+  if (!to) {
+    return { delivered: false, devLogged: false };
+  }
+
+  const {
+    renderPaymentResultText,
+    renderPaymentResultHtml,
+  } = require("../views/emails/paymentResultEmail");
+
+  const templateData = {
+    outcome,
+    companyName,
+    orderNumber,
+    invoiceNumber,
+    amount,
+    failureMessage,
+    receiptUrl,
+  };
+
+  const text = renderPaymentResultText(templateData);
+  const html = renderPaymentResultHtml(templateData);
+  const isSuccess = outcome === "success";
+  const subject = isSuccess
+    ? `Payment Received - Order ${orderNumber || ""}`
+    : `Payment Failed - Order ${orderNumber || ""}`;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Payment result email", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw new Error("SMTP is not configured");
+  }
+
+  const mailOptions = buildMailOptions({
+    to,
+    subject,
+    text,
+    html,
+  });
+
+  try {
+    await mailTransporter.sendMail(mailOptions);
+    logger.info("Payment result email sent", { to, outcome, orderNumber });
+    return { delivered: true, devLogged: false };
+  } catch (error) {
+    logger.error("Failed to send payment result email", {
+      to,
+      error: error.message,
+    });
+
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Payment result email fallback", { to, subject, text });
+      return { delivered: false, devLogged: true };
+    }
+
+    throw error;
+  }
+}
+
 module.exports = {
   sendTwoFactorCode,
   sendInvoiceEmail,
+  sendPaymentResultEmail,
   sendOrderCompletedMail,
   sendCopyServiceLetterEmail,
   sendCnrRecordEmail,

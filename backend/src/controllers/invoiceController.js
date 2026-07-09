@@ -1,9 +1,33 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const ApiError = require("../utils/ApiError");
 const invoiceService = require("../services/invoiceService");
+const {
+  validateCreateInvoice,
+  validateUpdateInvoice,
+  validateXrayInvoice,
+  validateInvoiceIds,
+  validateOrderIds,
+  validateRecipientEmails,
+  validateWriteOffInvoices,
+} = require("../validators/invoiceValidator");
 const activityLogService = require("../services/activityLogService");
 const notificationService = require("../services/notificationService");
 const Order = require("../models/Order");
+
+function throwIfInvalid(validation) {
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+}
+
+function validateOptionalEmails(body) {
+  if (body.emails === undefined || body.emails === null) {
+    return { valid: true, errors: [] };
+  }
+
+  return validateRecipientEmails(body);
+}
 
 function formatCurrency(amount) {
   const num = Number(amount);
@@ -68,6 +92,8 @@ exports.getById = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateCreateInvoice(req.body));
+
   const invoice = await invoiceService.createInvoice(req.body, req.user?.id);
 
   await logBillingActivity(req, {
@@ -89,6 +115,8 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateUpdateInvoice(req.body));
+
   const invoice = await invoiceService.updateInvoice(req.params.id, req.body);
 
   await logBillingActivity(req, {
@@ -110,6 +138,9 @@ exports.update = asyncHandler(async (req, res) => {
 });
 
 exports.send = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateInvoiceIds(req.body));
+  throwIfInvalid(validateOptionalEmails(req.body));
+
   const result = await invoiceService.sendInvoices(req.body.invoiceIds, {
     emails: req.body.emails,
   });
@@ -128,6 +159,9 @@ exports.send = asyncHandler(async (req, res) => {
 });
 
 exports.resend = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateInvoiceIds(req.body));
+  throwIfInvalid(validateOptionalEmails(req.body));
+
   const result = await invoiceService.resendInvoices(req.body.invoiceIds, {
     emails: req.body.emails,
   });
@@ -146,6 +180,9 @@ exports.resend = asyncHandler(async (req, res) => {
 });
 
 exports.sendXray = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateOrderIds(req.body));
+  throwIfInvalid(validateOptionalEmails(req.body));
+
   const result = await invoiceService.sendXrayInvoices(req.body.orderIds, {
     emails: req.body.emails,
   });
@@ -159,6 +196,9 @@ exports.sendXray = asyncHandler(async (req, res) => {
 });
 
 exports.resendXray = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateOrderIds(req.body));
+  throwIfInvalid(validateOptionalEmails(req.body));
+
   const result = await invoiceService.resendXrayInvoices(req.body.orderIds, {
     emails: req.body.emails,
   });
@@ -195,6 +235,8 @@ exports.emailByOrder = asyncHandler(async (req, res) => {
 });
 
 exports.emailXrayByOrder = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateOptionalEmails(req.body));
+
   const result = await invoiceService.emailXrayInvoiceByOrderId(
     req.params.orderId,
     { emails: req.body.emails }
@@ -221,6 +263,8 @@ exports.emailXrayByOrder = asyncHandler(async (req, res) => {
 });
 
 exports.createXray = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateXrayInvoice(req.body));
+
   const xray = await invoiceService.createOrUpdateXrayInvoice(req.body, req.user?.id);
   const orderId = Number(req.body.orderId);
   const context = await resolveOrderBillingContext(orderId);
@@ -249,6 +293,8 @@ exports.getXrayByOrder = asyncHandler(async (req, res) => {
 });
 
 exports.writeOff = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateWriteOffInvoices(req.body));
+
   const result = await invoiceService.writeOffInvoices(req.body, req.user?.id);
 
   for (const item of result.invoices || []) {

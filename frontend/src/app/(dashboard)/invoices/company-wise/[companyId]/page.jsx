@@ -7,12 +7,20 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
+
+import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
 import {
   getCompanyInvoicesPaginated,
   resendInvoiceSelection,
   writeOffInvoices as submitWriteOffInvoices,
 } from "@/lib/invoices/invoiceApi";
-import { canResendInvoice, canWriteOffInvoice } from "@/lib/invoices/invoiceUtils";
+
+import {
+  buildOrderForInvoiceEmailModal,
+  canResendInvoice,
+  canWriteOffInvoice,
+  resolveInvoiceEmailModalKind,
+} from "@/lib/invoices/invoiceUtils";
 
 const COMPANY_INVOICES_PER_PAGE = 10;
 
@@ -61,6 +69,12 @@ export default function CompanyInvoiceDetailsPage() {
   const [resending, setResending] = useState(false);
   const [resendingId, setResendingId] = useState(null);
   const [resendError, setResendError] = useState("");
+  const [resendEmailModal, setResendEmailModal] = useState({
+    open: false,
+    order: null,
+    invoices: [],
+    rowId: null,
+  });
 
   const [filters, setFilters] = useState({
     search: "",
@@ -239,37 +253,69 @@ export default function CompanyInvoiceDetailsPage() {
     );
   };
 
-  const handleResendSelected = async () => {
-    if (!resendableSelectedInvoices.length || resending) return;
+  const openResendEmailModal = (invoiceList, rowId = null) => {
+    if (!invoiceList.length) return;
 
-    setResending(true);
+    const firstInvoice = invoiceList[0];
+
+    setResendEmailModal({
+      open: true,
+      order: buildOrderForInvoiceEmailModal({
+        orderId: firstInvoice.orderId,
+        caseNo: firstInvoice.invoiceId,
+        applicant: firstInvoice.invoiceId,
+        companyName: company.name,
+        companyEmail: company.email,
+        invoiceId: firstInvoice.invoiceDbId || firstInvoice.id,
+      }),
+      invoices: invoiceList,
+      rowId,
+    });
+  };
+
+  const closeResendEmailModal = () => {
+    setResendEmailModal({
+      open: false,
+      order: null,
+      invoices: [],
+      rowId: null,
+    });
+  };
+
+  const handleResendSelected = () => {
+    if (!resendableSelectedInvoices.length || resending) return;
+    openResendEmailModal(resendableSelectedInvoices);
+  };
+
+  const handleResendSingle = (invoice) => {
+    if (!canResendInvoice(invoice) || resendingId || resending) return;
+    openResendEmailModal([invoice], invoice.id);
+  };
+
+  const handleSubmitResendEmail = async (emails) => {
+    const { invoices, rowId } = resendEmailModal;
+
     setResendError("");
 
     try {
-      await resendInvoiceSelection(resendableSelectedInvoices);
-      setSelectedIds([]);
+      if (rowId) {
+        setResendingId(rowId);
+      } else {
+        setResending(true);
+      }
+
+      await resendInvoiceSelection(invoices, emails);
+
+      if (!rowId) {
+        setSelectedIds([]);
+      }
+
       await reloadCompanyInvoices();
     } catch (error) {
       setResendError(error?.message || "Failed to resend invoices");
-      console.error("Failed to resend invoices:", error);
+      throw error;
     } finally {
       setResending(false);
-    }
-  };
-
-  const handleResendSingle = async (invoice) => {
-    if (!canResendInvoice(invoice) || resendingId || resending) return;
-
-    setResendingId(invoice.id);
-    setResendError("");
-
-    try {
-      await resendInvoiceSelection([invoice]);
-      await reloadCompanyInvoices();
-    } catch (error) {
-      setResendError(error?.message || "Failed to resend invoice");
-      console.error("Failed to resend invoice:", error);
-    } finally {
       setResendingId(null);
     }
   };
@@ -510,6 +556,15 @@ export default function CompanyInvoiceDetailsPage() {
         invoices={writeOffInvoices}
         onClose={() => setWriteOffInvoices([])}
         onSubmit={handleSubmitWriteOff}
+      />
+
+      <SendInvoiceEmailModal
+        isOpen={resendEmailModal.open}
+        order={resendEmailModal.order}
+        mode="resend"
+        invoiceKind={resolveInvoiceEmailModalKind(resendEmailModal.invoices)}
+        onClose={closeResendEmailModal}
+        onSend={handleSubmitResendEmail}
       />
     </DashboardShell>
   );
