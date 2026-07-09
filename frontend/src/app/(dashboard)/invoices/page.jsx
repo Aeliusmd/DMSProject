@@ -28,7 +28,11 @@ export default function InvoicesPage() {
     through: "",
     orderId: "",
   });
-  const [appliedOrderId, setAppliedOrderId] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    from: "",
+    through: "",
+    orderId: "",
+  });
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [summariesLoading, setSummariesLoading] = useState(true);
@@ -55,12 +59,12 @@ export default function InvoicesPage() {
 
   const dateFilters = useMemo(
     () => ({
-      dateFrom: filters.from || undefined,
-      dateTo: filters.through || undefined,
-      search: appliedOrderId || undefined,
+      dateFrom: appliedFilters.from || undefined,
+      dateTo: appliedFilters.through || undefined,
+      search: appliedFilters.orderId || undefined,
       pageSize: REPORT_INVOICES_PER_PAGE,
     }),
-    [filters.from, filters.through, appliedOrderId]
+    [appliedFilters.from, appliedFilters.through, appliedFilters.orderId]
   );
 
   const loadSummaries = useCallback(async () => {
@@ -199,17 +203,23 @@ export default function InvoicesPage() {
   };
 
   const handleApplyFilters = () => {
-    setAppliedOrderId(filters.orderId.trim());
+    setAppliedFilters({
+      from: filters.from,
+      through: filters.through,
+      orderId: filters.orderId.trim(),
+    });
     setRefreshKey((value) => value + 1);
   };
 
   const handleReset = () => {
-    setFilters({
+    const emptyFilters = {
       from: "",
       through: "",
       orderId: "",
-    });
-    setAppliedOrderId("");
+    };
+
+    setFilters(emptyFilters);
+    setAppliedFilters(emptyFilters);
     setRefreshKey((value) => value + 1);
   };
 

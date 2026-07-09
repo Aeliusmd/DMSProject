@@ -1,11 +1,8 @@
 const { getPool } = require("../config/database");
+const { likeContains, likePrefix } = require("../utils/sqlSafety");
 
 const ACTIVITY_LOG_SELECT = `id, log_date, log_time, action, module, company_name, facility_id,
               performed_by, performer_name, performer_initials, details, created_at`;
-
-function escapeLike(value) {
-  return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
-}
 
 function buildFindByEmployeeWhere(employeeId, filters = {}) {
   const params = {
@@ -23,7 +20,7 @@ function buildFindByEmployeeWhere(employeeId, filters = {}) {
         OR details LIKE :search
         OR module LIKE :search
       )`);
-      params.search = `%${escapeLike(trimmedSearch)}%`;
+      params.search = likeContains(trimmedSearch);
     }
   }
 
@@ -59,7 +56,7 @@ function buildFindAllWhere(filters = {}) {
 
   if (filters.search) {
     conditions.push("performer_name LIKE :searchPrefix");
-    params.searchPrefix = `${escapeLike(filters.search)}%`;
+    params.searchPrefix = likePrefix(filters.search);
   }
 
   return {
@@ -261,8 +258,8 @@ class ActivityLog {
       conditions.push(
         "(module = 'Orders' AND (details LIKE :orderNumberTag OR details LIKE :orderLabelTag))"
       );
-      params.orderNumberTag = `%${orderNumber}%`;
-      params.orderLabelTag = `%order ${orderNumber}%`;
+      params.orderNumberTag = likeContains(orderNumber);
+      params.orderLabelTag = likeContains(`order ${orderNumber}`);
     }
 
     const [rows] = await pool.execute(

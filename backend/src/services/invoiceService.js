@@ -9,6 +9,12 @@ const config = require("../config");
 const { getPool } = require("../config/database");
 const { calculateOrderRushLevel } = require("../utils/rushUtils");
 const { formatDobDisplay } = require("../utils/dateUtils");
+const {
+  sanitizeTrimOrNull,
+  sanitizeSearchText,
+} = require("../utils/sanitize");
+const { parseOptionalIsoDate } = require("../utils/sqlSafety");
+const { FIELD_LIMITS } = require("../utils/fieldLimits");
 
 const ORDER_TYPE_LABELS = {
   medical: "Medical Records",
@@ -18,10 +24,22 @@ const ORDER_TYPE_LABELS = {
   other: "Other",
 };
 
-function trimOrNull(value) {
-  if (value === undefined || value === null) return null;
-  const trimmed = `${value}`.trim();
-  return trimmed === "" ? null : trimmed;
+function trimOrNull(value, options = {}) {
+  return sanitizeTrimOrNull(value, options);
+}
+
+function parseInvoiceDateFilters(query = {}) {
+  return {
+    dateFrom: parseOptionalIsoDate(query.dateFrom, "dateFrom"),
+    dateTo: parseOptionalIsoDate(query.dateTo, "dateTo"),
+  };
+}
+
+function parseInvoiceListFilters(query = {}) {
+  return {
+    ...parseInvoiceDateFilters(query),
+    search: sanitizeSearchText(query.search, { maxLength: 100 }) || null,
+  };
 }
 
 function getInvoiceRecipientEmail(row) {
@@ -1564,7 +1582,7 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     totalAmount: totals.totalAmount,
     amountPaid,
     amountDue,
-    notes: trimOrNull(body.notes),
+    notes: trimOrNull(body.notes, { maxLength: FIELD_LIMITS.TEXT }),
     sendOrderDetails: boolToInt(body.sendOrderDetails),
     isRushOrder: boolToInt(body.rushOrder),
   };
@@ -1668,15 +1686,16 @@ function hasCompanyGroupKey(query = {}) {
 
 function parseReportFilters(query = {}) {
   const filters = {
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-    search: trimOrNull(query.search),
+    ...parseInvoiceListFilters(query),
     cursor: trimOrNull(query.cursor),
     pageSize: Number(query.pageSize) || 10,
   };
 
   if (hasCompanyGroupKey(query)) {
-    filters.companyGroupKey = Number(query.companyGroupKey);
+    const key = Number(query.companyGroupKey);
+    if (Number.isFinite(key) && key > 0) {
+      filters.companyGroupKey = key;
+    }
   }
 
   return filters;
@@ -2241,10 +2260,7 @@ async function getOutstandingInvoices(query = {}) {
     return getOutstandingInvoicesKeyset(query);
   }
 
-  const rows = await Invoice.findOutstanding({
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-  });
+  const rows = await Invoice.findOutstanding(parseInvoiceDateFilters(query));
   const orderIds = [...new Set(rows.map((row) => row.order_id))];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
@@ -2265,10 +2281,7 @@ async function getResendInvoices(query = {}) {
     return getResendInvoicesKeyset(query);
   }
 
-  const rows = await Invoice.findResend({
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-  });
+  const rows = await Invoice.findResend(parseInvoiceDateFilters(query));
   const orderIds = [...new Set(rows.map((row) => row.order_id))];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
@@ -2289,10 +2302,7 @@ async function getXrayOutstandingInvoices(query = {}) {
     return getXrayOutstandingInvoicesKeyset(query);
   }
 
-  const rows = await InvoiceXray.findOutstanding({
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-  });
+  const rows = await InvoiceXray.findOutstanding(parseInvoiceDateFilters(query));
   const orderIds = [...new Set(rows.map((row) => row.order_id))];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
@@ -2313,10 +2323,7 @@ async function getXrayResendInvoices(query = {}) {
     return getXrayResendInvoicesKeyset(query);
   }
 
-  const rows = await InvoiceXray.findResend({
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-  });
+  const rows = await InvoiceXray.findResend(parseInvoiceDateFilters(query));
   const orderIds = [...new Set(rows.map((row) => row.order_id))];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
@@ -2387,7 +2394,7 @@ async function createOrUpdateXrayInvoice(body, userId) {
   const xrayInvoiceDate = trimOrNull(body.xrayInvoiceDate);
   const examDate = trimOrNull(body.examDate);
   const checkNumber = trimOrNull(body.checkNumber);
-  const description = trimOrNull(body.description);
+  const description = trimOrNull(body.description, { maxLength: FIELD_LIMITS.TEXT });
 
   if (!Number.isFinite(orderId)) {
     throw new ApiError(400, "orderId is required");
@@ -2990,11 +2997,7 @@ async function hydrateCompanyInvoicePage(pageRows = []) {
 }
 
 async function getByCompanyKeyset(companyId, query = {}) {
-  const dateFilters = {
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-    search: trimOrNull(query.search),
-  };
+  const dateFilters = parseInvoiceListFilters(query);
   const pageSizeRaw = Number(query.pageSize || 10);
   const pageSize = Number.isFinite(pageSizeRaw)
     ? Math.min(Math.max(pageSizeRaw, 1), 100)
@@ -3043,11 +3046,7 @@ async function getByCompany(providerId, query = {}) {
     return getByCompanyKeyset(companyId, query);
   }
 
-  const dateFilters = {
-    dateFrom: trimOrNull(query.dateFrom),
-    dateTo: trimOrNull(query.dateTo),
-    search: trimOrNull(query.search),
-  };
+  const dateFilters = parseInvoiceListFilters(query);
 
   const [
     standardOutstanding,
