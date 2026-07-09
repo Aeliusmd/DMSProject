@@ -205,6 +205,10 @@ function readHasSubpoena(row = {}) {
   return Boolean(Number(row.has_subpoena ?? row.is_subpoena));
 }
 
+function readIsWriteOffs(row = {}) {
+  return row.status === "Write Offs";
+}
+
 function resolveOrderFlags(data, hasSubpoenaFile) {
   return {
     hasSubpoena: hasSubpoenaFile ? 1 : 0,
@@ -928,7 +932,7 @@ function mapOrderListRow(
     hasSubpoenaFile: Boolean(row.subpoena_storage_path),
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
     isRecords: hasAnyRecordsRequested(orderRecords),
-    isWriteOffs: Boolean(Number(row.is_write_offs)),
+    isWriteOffs: readIsWriteOffs(row),
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -1145,7 +1149,7 @@ function mapOrderDetail(
     status: row.status || "",
     isSubpoena: readHasSubpoena(row),
     isRecords: hasAnyRecordsRequested(orderRecords),
-    isWriteOffs: Boolean(Number(row.is_write_offs)),
+    isWriteOffs: readIsWriteOffs(row),
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",

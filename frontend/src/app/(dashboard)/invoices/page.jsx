@@ -6,14 +6,11 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import InvoiceReportTable from "@/components/invoices/InvoiceReportTable";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import {
-  buildSummaryFromOutstandingGroups,
-  buildSummaryFromRows,
-  countOutstandingRows,
-  filterInvoiceGroups,
-  filterResendInvoices,
-  groupResendInvoices,
-} from "@/lib/invoices/invoiceFilters";
-import { getInvoices } from "@/lib/invoices/invoiceApi";
+  getInvoiceReportSummary,
+  getInvoicesPaginated,
+} from "@/lib/invoices/invoiceApi";
+
+const REPORT_INVOICES_PER_PAGE = 10;
 
 const EMPTY_SUMMARY = {
   companies: 0,
@@ -34,13 +31,14 @@ export default function InvoicesPage() {
   const [appliedOrderId, setAppliedOrderId] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [summariesLoading, setSummariesLoading] = useState(true);
   const [outstanding, setOutstanding] = useState({
     groups: [],
     summary: EMPTY_SUMMARY,
     count: 0,
   });
   const [resend, setResend] = useState({
-    invoices: [],
+    groups: [],
     summary: EMPTY_SUMMARY,
     count: 0,
   });
@@ -50,18 +48,23 @@ export default function InvoicesPage() {
     count: 0,
   });
   const [xrayResend, setXrayResend] = useState({
-    invoices: [],
+    groups: [],
     summary: EMPTY_SUMMARY,
     count: 0,
   });
 
-  const loadInvoices = useCallback(async () => {
-    setLoading(true);
-
-    const dateFilters = {
+  const dateFilters = useMemo(
+    () => ({
       dateFrom: filters.from || undefined,
       dateTo: filters.through || undefined,
-    };
+      search: appliedOrderId || undefined,
+      pageSize: REPORT_INVOICES_PER_PAGE,
+    }),
+    [filters.from, filters.through, appliedOrderId]
+  );
+
+  const loadSummaries = useCallback(async () => {
+    setSummariesLoading(true);
 
     try {
       const [
@@ -70,29 +73,121 @@ export default function InvoicesPage() {
         xrayOutstandingData,
         xrayResendData,
       ] = await Promise.all([
-        getInvoices({ ...dateFilters, tab: "outstanding", type: "invoice" }),
-        getInvoices({ ...dateFilters, tab: "resend", type: "invoice" }),
-        getInvoices({ ...dateFilters, tab: "outstanding", type: "xray" }),
-        getInvoices({ ...dateFilters, tab: "resend", type: "xray" }),
+        getInvoiceReportSummary({ ...dateFilters, tab: "outstanding", type: "invoice" }),
+        getInvoiceReportSummary({ ...dateFilters, tab: "resend", type: "invoice" }),
+        getInvoiceReportSummary({ ...dateFilters, tab: "outstanding", type: "xray" }),
+        getInvoiceReportSummary({ ...dateFilters, tab: "resend", type: "xray" }),
       ]);
 
-      setOutstanding(outstandingData);
-      setResend(resendData);
-      setXrayOutstanding(xrayOutstandingData);
-      setXrayResend(xrayResendData);
+      setOutstanding((prev) => ({
+        ...prev,
+        summary: outstandingData.summary,
+        count: outstandingData.count,
+      }));
+      setResend((prev) => ({
+        ...prev,
+        summary: resendData.summary,
+        count: resendData.count,
+      }));
+      setXrayOutstanding((prev) => ({
+        ...prev,
+        summary: xrayOutstandingData.summary,
+        count: xrayOutstandingData.count,
+      }));
+      setXrayResend((prev) => ({
+        ...prev,
+        summary: xrayResendData.summary,
+        count: xrayResendData.count,
+      }));
     } catch {
-      setOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
-      setResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
-      setXrayOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
-      setXrayResend({ invoices: [], summary: EMPTY_SUMMARY, count: 0 });
+      setOutstanding((prev) => ({ ...prev, summary: EMPTY_SUMMARY, count: 0 }));
+      setResend((prev) => ({ ...prev, summary: EMPTY_SUMMARY, count: 0 }));
+      setXrayOutstanding((prev) => ({ ...prev, summary: EMPTY_SUMMARY, count: 0 }));
+      setXrayResend((prev) => ({ ...prev, summary: EMPTY_SUMMARY, count: 0 }));
+    } finally {
+      setSummariesLoading(false);
+    }
+  }, [dateFilters]);
+
+  const loadActiveTab = useCallback(async () => {
+    setLoading(true);
+
+    const requestFilters = {
+      ...dateFilters,
+    };
+
+    try {
+      let data;
+
+      if (invoiceCategory === "xray") {
+        data = await getInvoicesPaginated({
+          ...requestFilters,
+          tab: activeTab === "resend" ? "resend" : "outstanding",
+          type: "xray",
+        });
+
+        if (activeTab === "resend") {
+          setXrayResend({
+            groups: data.groups,
+            summary: data.summary,
+            count: data.count,
+          });
+        } else {
+          setXrayOutstanding({
+            groups: data.groups,
+            summary: data.summary,
+            count: data.count,
+          });
+        }
+      } else {
+        data = await getInvoicesPaginated({
+          ...requestFilters,
+          tab: activeTab === "resend" ? "resend" : "outstanding",
+          type: "invoice",
+        });
+
+        if (activeTab === "resend") {
+          setResend({
+            groups: data.groups,
+            summary: data.summary,
+            count: data.count,
+          });
+        } else {
+          setOutstanding({
+            groups: data.groups,
+            summary: data.summary,
+            count: data.count,
+          });
+        }
+      }
+    } catch {
+      if (invoiceCategory === "xray") {
+        if (activeTab === "resend") {
+          setXrayResend({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+        } else {
+          setXrayOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+        }
+      } else if (activeTab === "resend") {
+        setResend({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+      } else {
+        setOutstanding({ groups: [], summary: EMPTY_SUMMARY, count: 0 });
+      }
     } finally {
       setLoading(false);
     }
-  }, [filters.from, filters.through]);
+  }, [activeTab, dateFilters, invoiceCategory]);
 
   useEffect(() => {
-    loadInvoices();
-  }, [loadInvoices, refreshKey]);
+    loadSummaries();
+  }, [loadSummaries, refreshKey]);
+
+  useEffect(() => {
+    loadActiveTab();
+  }, [loadActiveTab, refreshKey]);
+
+  const reloadInvoices = useCallback(async () => {
+    await Promise.all([loadSummaries(), loadActiveTab()]);
+  }, [loadSummaries, loadActiveTab]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -118,47 +213,19 @@ export default function InvoicesPage() {
     setRefreshKey((value) => value + 1);
   };
 
-  const filteredOutstanding = useMemo(
-    () => filterInvoiceGroups(outstanding.groups, appliedOrderId),
-    [outstanding.groups, appliedOrderId]
-  );
-  const filteredResend = useMemo(
-    () => filterResendInvoices(resend.invoices, appliedOrderId),
-    [resend.invoices, appliedOrderId]
-  );
-  const filteredXrayOutstanding = useMemo(
-    () => filterInvoiceGroups(xrayOutstanding.groups, appliedOrderId),
-    [xrayOutstanding.groups, appliedOrderId]
-  );
-  const filteredXrayResend = useMemo(
-    () => filterResendInvoices(xrayResend.invoices, appliedOrderId),
-    [xrayResend.invoices, appliedOrderId]
-  );
-  const filteredResendGroups = useMemo(
-    () => groupResendInvoices(filteredResend),
-    [filteredResend]
-  );
-  const filteredXrayResendGroups = useMemo(
-    () => groupResendInvoices(filteredXrayResend),
-    [filteredXrayResend]
-  );
-
   const isXray = invoiceCategory === "xray";
   const currentOutstandingGroups = isXray
-    ? filteredXrayOutstanding
-    : filteredOutstanding;
-  const currentResendGroups = isXray
-    ? filteredXrayResendGroups
-    : filteredResendGroups;
-  const currentResendInvoices = isXray ? filteredXrayResend : filteredResend;
+    ? xrayOutstanding.groups
+    : outstanding.groups;
+  const currentResendGroups = isXray ? xrayResend.groups : resend.groups;
 
   const currentOutstandingCount = isXray
-    ? countOutstandingRows(filteredXrayOutstanding)
-    : countOutstandingRows(filteredOutstanding);
-  const currentResendCount = currentResendInvoices.length;
+    ? xrayOutstanding.count
+    : outstanding.count;
+  const currentResendCount = isXray ? xrayResend.count : resend.count;
 
   const activeSummary = useMemo(() => {
-    if (loading) {
+    if (loading || summariesLoading) {
       return activeTab === "resend"
         ? isXray
           ? xrayResend.summary
@@ -169,16 +236,15 @@ export default function InvoicesPage() {
     }
 
     if (activeTab === "resend") {
-      return buildSummaryFromRows(currentResendInvoices);
+      return isXray ? xrayResend.summary : resend.summary;
     }
 
-    return buildSummaryFromOutstandingGroups(currentOutstandingGroups);
+    return isXray ? xrayOutstanding.summary : outstanding.summary;
   }, [
     activeTab,
-    currentOutstandingGroups,
-    currentResendInvoices,
     isXray,
     loading,
+    summariesLoading,
     outstanding.summary,
     resend.summary,
     xrayOutstanding.summary,
@@ -208,20 +274,10 @@ export default function InvoicesPage() {
                 setInvoiceCategory(category);
                 setActiveTab("outstanding");
               }}
-              invoiceOutstandingCount={countOutstandingRows(
-                filterInvoiceGroups(outstanding.groups, appliedOrderId)
-              )}
-              invoiceResendCount={filterResendInvoices(
-                resend.invoices,
-                appliedOrderId
-              ).length}
-              xrayOutstandingCount={countOutstandingRows(
-                filterInvoiceGroups(xrayOutstanding.groups, appliedOrderId)
-              )}
-              xrayResendCount={filterResendInvoices(
-                xrayResend.invoices,
-                appliedOrderId
-              ).length}
+              invoiceOutstandingCount={outstanding.count}
+              invoiceResendCount={resend.count}
+              xrayOutstandingCount={xrayOutstanding.count}
+              xrayResendCount={xrayResend.count}
             />
 
             <Link
@@ -257,19 +313,23 @@ export default function InvoicesPage() {
           <InvoiceReportTable
             invoiceGroups={currentOutstandingGroups}
             loading={loading}
-            onRefresh={loadInvoices}
+            onRefresh={reloadInvoices}
             onSent={() => setActiveTab("resend")}
             invoiceType={isXray ? "xray" : "invoice"}
             enableWriteOff={!isXray}
+            reportTab="outstanding"
+            reportFilters={dateFilters}
           />
         ) : (
           <InvoiceReportTable
             invoiceGroups={currentResendGroups}
             loading={loading}
-            onRefresh={loadInvoices}
+            onRefresh={reloadInvoices}
             invoiceType={isXray ? "xray" : "invoice"}
             enableWriteOff={false}
             mode="resend"
+            reportTab="resend"
+            reportFilters={dateFilters}
           />
         )}
       </div>

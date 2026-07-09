@@ -15,6 +15,16 @@ function buildInvoiceQuery(filters = {}) {
   if (filters.tab) params.set("tab", filters.tab);
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.pagination) params.set("pagination", String(filters.pagination));
+  if (filters.summaryOnly) params.set("summaryOnly", "1");
+  if (filters.cursor != null && `${filters.cursor}`.trim() !== "") {
+    params.set("cursor", String(filters.cursor));
+  }
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
+  if (filters.companyGroupKey != null && `${filters.companyGroupKey}`.trim() !== "") {
+    params.set("companyGroupKey", String(filters.companyGroupKey));
+  }
 
   const queryString = params.toString();
   return queryString ? `?${queryString}` : "";
@@ -23,14 +33,36 @@ function buildInvoiceQuery(filters = {}) {
 export async function getInvoices(filters = {}) {
   const data = await request(`/invoices${buildInvoiceQuery(filters)}`, {
     auth: true,
+    cache: "no-store",
   });
 
   return {
     groups: data?.data?.groups || [],
+    group: data?.data?.group || null,
     invoices: data?.data?.invoices || [],
     summary: data?.data?.summary || EMPTY_SUMMARY,
     count: data?.data?.count || 0,
+    pagination: data?.data?.pagination || null,
+    companyGroupKey: data?.data?.companyGroupKey ?? null,
   };
+}
+
+export async function getInvoicesPaginated(filters = {}) {
+  return getInvoices({
+    ...filters,
+    pagination: "keyset",
+  });
+}
+
+export async function getInvoiceReportSummary(filters = {}) {
+  return getInvoices({
+    ...filters,
+    summaryOnly: true,
+  });
+}
+
+export async function getInvoiceCompanyGroupPage(filters = {}) {
+  return getInvoicesPaginated(filters);
 }
 
 export async function getOutstandingInvoices(filters = {}) {
@@ -101,11 +133,17 @@ export async function getCompanyInvoices(companyId, filters = {}) {
   const params = new URLSearchParams();
   if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) params.set("dateTo", filters.dateTo);
+  if (filters.search?.trim()) params.set("search", filters.search.trim());
+  if (filters.pagination) params.set("pagination", String(filters.pagination));
+  if (filters.cursor != null && `${filters.cursor}`.trim() !== "") {
+    params.set("cursor", String(filters.cursor));
+  }
+  if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
 
   const queryString = params.toString();
   const data = await request(
     `/invoices/company-wise/${companyId}${queryString ? `?${queryString}` : ""}`,
-    { auth: true }
+    { auth: true, cache: "no-store" }
   );
 
   return {
@@ -118,7 +156,15 @@ export async function getCompanyInvoices(companyId, filters = {}) {
       totalPaid: "$0.00",
       totalDue: "$0.00",
     },
+    pagination: data?.data?.pagination || null,
   };
+}
+
+export async function getCompanyInvoicesPaginated(companyId, filters = {}) {
+  return getCompanyInvoices(companyId, {
+    ...filters,
+    pagination: "keyset",
+  });
 }
 
 export async function getXrayInvoiceByOrderId(orderId) {

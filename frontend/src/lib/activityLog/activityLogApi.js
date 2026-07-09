@@ -19,24 +19,56 @@ function buildActivityLogQuery(filters = {}) {
   return query ? `?${query}` : "";
 }
 
+function normalizeActivityLogResponse(data, filters = {}) {
+  const payload = data?.data;
+
+  if (payload?.pagination) {
+    return {
+      logs: payload.logs || [],
+      pagination: payload.pagination,
+    };
+  }
+
+  if (Array.isArray(payload?.logs)) {
+    return payload.logs;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  return {
+    logs: payload?.logs || [],
+    pagination: {
+      pageSize: Number(filters.pageSize) || 10,
+      hasMore: false,
+      nextCursor: null,
+    },
+  };
+}
+
+function normalizePaginatedResult(result, filters = {}) {
+  if (Array.isArray(result)) {
+    return {
+      logs: result,
+      pagination: {
+        pageSize: Number(filters.pageSize) || 10,
+        hasMore: false,
+        nextCursor: null,
+      },
+    };
+  }
+
+  return result;
+}
+
 export async function getMyActivityLogs(filters = {}) {
   const data = await request(`/activity-log/me${buildActivityLogQuery(filters)}`, {
     auth: true,
     cache: "no-store",
   });
 
-  if (Array.isArray(data?.data?.logs)) {
-    return data.data.logs;
-  }
-
-  return {
-    logs: data?.data?.logs || [],
-    pagination: data?.data?.pagination || {
-      pageSize: Number(filters.pageSize) || 10,
-      hasMore: false,
-      nextCursor: null,
-    },
-  };
+  return normalizeActivityLogResponse(data, filters);
 }
 
 export async function getActivityLogs(filters = {}) {
@@ -45,18 +77,7 @@ export async function getActivityLogs(filters = {}) {
     cache: "no-store",
   });
 
-  if (Array.isArray(data?.data?.logs)) {
-    return data.data.logs;
-  }
-
-  return {
-    logs: data?.data?.logs || [],
-    pagination: data?.data?.pagination || {
-      pageSize: Number(filters.pageSize) || 10,
-      hasMore: false,
-      nextCursor: null,
-    },
-  };
+  return normalizeActivityLogResponse(data, filters);
 }
 
 export async function getMyActivityLogsPaginated(filters = {}) {
@@ -65,18 +86,7 @@ export async function getMyActivityLogsPaginated(filters = {}) {
     pagination: "keyset",
   });
 
-  if (Array.isArray(result)) {
-    return {
-      logs: result,
-      pagination: {
-        pageSize: Number(filters.pageSize) || 10,
-        hasMore: false,
-        nextCursor: null,
-      },
-    };
-  }
-
-  return result;
+  return normalizePaginatedResult(result, filters);
 }
 
 export async function getActivityLogsPaginated(filters = {}) {
@@ -85,18 +95,7 @@ export async function getActivityLogsPaginated(filters = {}) {
     pagination: "keyset",
   });
 
-  if (Array.isArray(result)) {
-    return {
-      logs: result,
-      pagination: {
-        pageSize: Number(filters.pageSize) || 10,
-        hasMore: false,
-        nextCursor: null,
-      },
-    };
-  }
-
-  return result;
+  return normalizePaginatedResult(result, filters);
 }
 
 export async function getEmployeeActivityLogs(employeeId, filters = {}) {
@@ -108,18 +107,7 @@ export async function getEmployeeActivityLogs(employeeId, filters = {}) {
     }
   );
 
-  if (Array.isArray(data?.data?.logs)) {
-    return data.data.logs;
-  }
-
-  return {
-    logs: data?.data?.logs || [],
-    pagination: data?.data?.pagination || {
-      pageSize: Number(filters.pageSize) || 10,
-      hasMore: false,
-      nextCursor: null,
-    },
-  };
+  return normalizeActivityLogResponse(data, filters);
 }
 
 export async function getEmployeeActivityLogsPaginated(
@@ -133,16 +121,5 @@ export async function getEmployeeActivityLogsPaginated(
     search,
   });
 
-  if (Array.isArray(result)) {
-    return {
-      logs: result,
-      pagination: {
-        pageSize: Number(pageSize) || 10,
-        hasMore: false,
-        nextCursor: null,
-      },
-    };
-  }
-
-  return result;
+  return normalizePaginatedResult(result, { pageSize });
 }

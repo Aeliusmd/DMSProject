@@ -1,6 +1,8 @@
 const ApiError = require("../utils/ApiError");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
+const CompanyInvoice = require("../models/CompanyInvoice");
+const InvoiceReport = require("../models/InvoiceReport");
 const Order = require("../models/Order");
 const Provider = require("../models/Provider");
 const config = require("../config");
@@ -1578,7 +1580,667 @@ async function getInvoiceById(id) {
   return mapInvoiceDetail(invoice);
 }
 
+function mapReportSummary(summary) {
+  return {
+    companies: summary.totalCompanies,
+    cases: summary.totalCases,
+    invoiced: formatMoney(summary.totalInvoiced),
+    paid: formatMoney(summary.totalPaid),
+    due: formatMoney(summary.totalDue),
+  };
+}
+
+function buildReportPagination(keysetResult, totalCases = null) {
+  return {
+    type: "keyset",
+    pageSize: keysetResult.pageSize,
+    hasMore: keysetResult.hasMore,
+    nextCursor: keysetResult.nextCursor,
+    totalCases: totalCases ?? null,
+  };
+}
+
+function buildReportGroupPagination(meta = {}, keysetResult = null) {
+  if (keysetResult) {
+    return buildReportPagination(keysetResult, meta.totalCases);
+  }
+
+  return {
+    type: "keyset",
+    pageSize: Number(meta.pageSize) || 10,
+    hasMore: Boolean(meta.hasMore),
+    nextCursor: meta.nextCursor || null,
+    totalCases: Number(meta.company_case_count) || 0,
+  };
+}
+
+function formatReportGroupTotals(meta = {}) {
+  return {
+    invoiced: formatMoney(meta.company_invoiced ?? meta.totalInvoiced ?? 0),
+    paid: formatMoney(meta.company_paid ?? meta.totalPaid ?? 0),
+    due: formatMoney(meta.company_due ?? meta.totalDue ?? 0),
+  };
+}
+
+function mapResendRowForGroup(row) {
+  return {
+    id: String(row.id),
+    invoiceId: row.invoiceId,
+    orderId: row.orderId,
+    caseNo: row.caseNo,
+    applicant: row.applicant,
+    isSent: row.isSent,
+    sentDate: row.sentDate,
+    days: row.days,
+    invDate: row.invoiceDate,
+    invoiced: row.invoiced,
+    paid: row.paid,
+    due: row.due,
+    reminder1: row.reminder1 || null,
+    reminder2: row.reminder2 || null,
+    reminder3: row.reminder3 || null,
+  };
+}
+
+function buildReportGroup(meta, rows, keysetResult = null) {
+  return {
+    companyGroupKey: Number(meta.company_partition),
+    company: meta.company_name || meta.companyName || "Unknown Company",
+    emails: meta.company_email || meta.companyEmail || "",
+    rows,
+    total: formatReportGroupTotals(meta),
+    pagination: buildReportGroupPagination(
+      {
+        hasMore: meta.hasMore,
+        nextCursor: meta.nextCursor,
+        company_case_count: meta.company_case_count || meta.totalCases,
+        totalCases: meta.totalCases,
+      },
+      keysetResult
+    ),
+  };
+}
+
+function hasCompanyGroupKey(query = {}) {
+  const raw = query.companyGroupKey;
+  return raw !== undefined && raw !== null && `${raw}`.trim() !== "";
+}
+
+function parseReportFilters(query = {}) {
+  const filters = {
+    dateFrom: trimOrNull(query.dateFrom),
+    dateTo: trimOrNull(query.dateTo),
+    search: trimOrNull(query.search),
+    cursor: trimOrNull(query.cursor),
+    pageSize: Number(query.pageSize) || 10,
+  };
+
+  if (hasCompanyGroupKey(query)) {
+    filters.companyGroupKey = Number(query.companyGroupKey);
+  }
+
+  return filters;
+}
+
+function isKeysetQuery(query = {}) {
+  return String(query.pagination || "").toLowerCase() === "keyset";
+}
+
+function isSummaryOnlyQuery(query = {}) {
+  return ["1", "true", "yes"].includes(
+    String(query.summaryOnly || "").toLowerCase()
+  );
+}
+
+async function hydrateStandardReportRows(pageRows = []) {
+  if (!pageRows.length) return [];
+
+  const ids = pageRows.map((row) => Number(row.source_id)).filter(Boolean);
+  const rows = await Invoice.findDetailsByIds(ids);
+  const rowsById = new Map(rows.map((row) => [Number(row.id), row]));
+
+  return pageRows
+    .map((pageRow) => rowsById.get(Number(pageRow.source_id)))
+    .filter(Boolean);
+}
+
+async function hydrateXrayReportRows(pageRows = []) {
+  if (!pageRows.length) return [];
+
+  const orderIds = pageRows.map((row) => Number(row.source_id)).filter(Boolean);
+  const rows = await InvoiceXray.findByOrderIdsWithDetails(orderIds);
+  const rowsByOrderId = new Map(rows.map((row) => [Number(row.order_id), row]));
+
+  return pageRows
+    .map((pageRow) => rowsByOrderId.get(Number(pageRow.source_id)))
+    .filter(Boolean);
+}
+
+function groupFirstPerCompanyPageRows(perCompanyRows = [], pageSize = 10) {
+  const byCompany = new Map();
+
+  for (const row of perCompanyRows) {
+    const key = String(row.company_partition);
+    if (!byCompany.has(key)) {
+      byCompany.set(key, []);
+    }
+    byCompany.get(key).push(row);
+  }
+
+  return Array.from(byCompany.values()).map((companyRows) => {
+    const ordered = [...companyRows].sort(
+      (left, right) => Number(left.row_num) - Number(right.row_num)
+    );
+    const first = ordered[0];
+    const last = ordered[ordered.length - 1];
+    const totalCases = Number(first.company_case_count) || 0;
+    const hasMore = totalCases > ordered.length;
+
+    return {
+      meta: {
+        company_partition: first.company_partition,
+        company_name: first.company_name,
+        company_email: first.company_email,
+        company_invoiced: first.company_invoiced,
+        company_paid: first.company_paid,
+        company_due: first.company_due,
+        company_case_count: totalCases,
+        totalCases,
+        pageSize,
+        hasMore,
+        nextCursor: hasMore ? last.nextCursor || null : null,
+      },
+      pageRows: ordered,
+    };
+  });
+}
+
+async function buildOutstandingGroupsFromFirstPerCompany(
+  perCompanyRows = [],
+  paymentsByOrderId = {},
+  pageSize = 10
+) {
+  if (!perCompanyRows.length) return [];
+
+  const groupedCompanies = groupFirstPerCompanyPageRows(perCompanyRows, pageSize);
+  const hydratedRows = await hydrateStandardReportRows(
+    perCompanyRows.map((row) => ({ source_id: row.source_id }))
+  );
+  const hydratedById = new Map(hydratedRows.map((row) => [Number(row.id), row]));
+
+  return groupedCompanies
+    .map(({ meta, pageRows }) => {
+      const mappedRows = pageRows
+        .map((pageRow) => {
+          const sourceRow = hydratedById.get(Number(pageRow.source_id));
+          if (!sourceRow) return null;
+
+          return mapOutstandingRow(
+            sourceRow,
+            paymentsByOrderId[sourceRow.order_id] || []
+          );
+        })
+        .filter(Boolean);
+
+      if (!mappedRows.length) return null;
+
+      return buildReportGroup(meta, mappedRows);
+    })
+    .filter(Boolean);
+}
+
+async function buildXrayOutstandingGroupsFromFirstPerCompany(
+  perCompanyRows = [],
+  paymentsByOrderId = {},
+  pageSize = 10
+) {
+  if (!perCompanyRows.length) return [];
+
+  const groupedCompanies = groupFirstPerCompanyPageRows(perCompanyRows, pageSize);
+  const hydratedRows = await hydrateXrayReportRows(
+    perCompanyRows.map((row) => ({ source_id: row.source_id }))
+  );
+  const hydratedByOrderId = new Map(
+    hydratedRows.map((row) => [Number(row.order_id), row])
+  );
+
+  return groupedCompanies
+    .map(({ meta, pageRows }) => {
+      const mappedRows = pageRows
+        .map((pageRow) => {
+          const sourceRow = hydratedByOrderId.get(Number(pageRow.source_id));
+          if (!sourceRow) return null;
+
+          return mapXrayOutstandingRow(
+            sourceRow,
+            paymentsByOrderId[sourceRow.order_id] || []
+          );
+        })
+        .filter(Boolean);
+
+      if (!mappedRows.length) return null;
+
+      return buildReportGroup(meta, mappedRows);
+    })
+    .filter(Boolean);
+}
+
+async function buildResendGroupsFromFirstPerCompany(
+  perCompanyRows = [],
+  paymentsByOrderId = {},
+  pageSize = 10
+) {
+  if (!perCompanyRows.length) return [];
+
+  const groupedCompanies = groupFirstPerCompanyPageRows(perCompanyRows, pageSize);
+  const hydratedRows = await hydrateStandardReportRows(
+    perCompanyRows.map((row) => ({ source_id: row.source_id }))
+  );
+  const hydratedById = new Map(hydratedRows.map((row) => [Number(row.id), row]));
+
+  return groupedCompanies
+    .map(({ meta, pageRows }) => {
+      const mappedRows = pageRows
+        .map((pageRow) => {
+          const sourceRow = hydratedById.get(Number(pageRow.source_id));
+          if (!sourceRow) return null;
+
+          return mapResendRowForGroup(
+            mapResendRow(sourceRow, paymentsByOrderId[sourceRow.order_id] || [])
+          );
+        })
+        .filter(Boolean);
+
+      if (!mappedRows.length) return null;
+
+      return buildReportGroup(meta, mappedRows);
+    })
+    .filter(Boolean);
+}
+
+async function buildXrayResendGroupsFromFirstPerCompany(
+  perCompanyRows = [],
+  paymentsByOrderId = {},
+  pageSize = 10
+) {
+  if (!perCompanyRows.length) return [];
+
+  const groupedCompanies = groupFirstPerCompanyPageRows(perCompanyRows, pageSize);
+  const hydratedRows = await hydrateXrayReportRows(
+    perCompanyRows.map((row) => ({ source_id: row.source_id }))
+  );
+  const hydratedByOrderId = new Map(
+    hydratedRows.map((row) => [Number(row.order_id), row])
+  );
+
+  return groupedCompanies
+    .map(({ meta, pageRows }) => {
+      const mappedRows = pageRows
+        .map((pageRow) => {
+          const sourceRow = hydratedByOrderId.get(Number(pageRow.source_id));
+          if (!sourceRow) return null;
+
+          return mapResendRowForGroup(
+            mapXrayResendRow(
+              sourceRow,
+              paymentsByOrderId[sourceRow.order_id] || []
+            )
+          );
+        })
+        .filter(Boolean);
+
+      if (!mappedRows.length) return null;
+
+      return buildReportGroup(meta, mappedRows);
+    })
+    .filter(Boolean);
+}
+
+function clearKeysetWhenEmpty(keysetResult, filters, mappedRows) {
+  if (filters.cursor && !mappedRows.length) {
+    keysetResult.hasMore = false;
+    keysetResult.nextCursor = null;
+  }
+}
+
+async function getOutstandingInvoicesCompanyGroupPage(query = {}) {
+  const filters = parseReportFilters(query);
+  const [keysetResult, companyTotals] = await Promise.all([
+    InvoiceReport.findStandardOutstandingKeyset(filters),
+    InvoiceReport.getStandardOutstandingCompanyTotals(
+      filters,
+      filters.companyGroupKey
+    ),
+  ]);
+
+  const rows = await hydrateStandardReportRows(keysetResult.rows);
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const mappedRows = rows.map((row) =>
+    mapOutstandingRow(row, paymentsByOrderId[row.order_id] || [])
+  );
+
+  clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
+
+  return {
+    companyGroupKey: filters.companyGroupKey,
+    group: buildReportGroup(
+      {
+        company_partition: filters.companyGroupKey,
+        company_name: companyTotals.companyName,
+        company_email: companyTotals.companyEmail,
+        company_invoiced: companyTotals.totalInvoiced,
+        company_paid: companyTotals.totalPaid,
+        company_due: companyTotals.totalDue,
+        totalCases: companyTotals.totalCases,
+      },
+      mappedRows,
+      keysetResult
+    ),
+  };
+}
+
+async function getResendInvoicesCompanyGroupPage(query = {}) {
+  const filters = parseReportFilters(query);
+  const [keysetResult, companyTotals] = await Promise.all([
+    InvoiceReport.findStandardResendKeyset(filters),
+    InvoiceReport.getStandardResendCompanyTotals(filters, filters.companyGroupKey),
+  ]);
+
+  const rows = await hydrateStandardReportRows(keysetResult.rows);
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const mappedRows = rows
+    .map((row) => mapResendRow(row, paymentsByOrderId[row.order_id] || []))
+    .map(mapResendRowForGroup);
+
+  clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
+
+  return {
+    companyGroupKey: filters.companyGroupKey,
+    group: buildReportGroup(
+      {
+        company_partition: filters.companyGroupKey,
+        company_name: companyTotals.companyName,
+        company_email: companyTotals.companyEmail,
+        company_invoiced: companyTotals.totalInvoiced,
+        company_paid: companyTotals.totalPaid,
+        company_due: companyTotals.totalDue,
+        totalCases: companyTotals.totalCases,
+      },
+      mappedRows,
+      keysetResult
+    ),
+  };
+}
+
+async function getXrayOutstandingInvoicesCompanyGroupPage(query = {}) {
+  const filters = parseReportFilters(query);
+  const [keysetResult, companyTotals] = await Promise.all([
+    InvoiceReport.findXrayOutstandingKeyset(filters),
+    InvoiceReport.getXrayOutstandingCompanyTotals(filters, filters.companyGroupKey),
+  ]);
+
+  const rows = await hydrateXrayReportRows(keysetResult.rows);
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const mappedRows = rows.map((row) =>
+    mapXrayOutstandingRow(row, paymentsByOrderId[row.order_id] || [])
+  );
+
+  clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
+
+  return {
+    companyGroupKey: filters.companyGroupKey,
+    group: buildReportGroup(
+      {
+        company_partition: filters.companyGroupKey,
+        company_name: companyTotals.companyName,
+        company_email: companyTotals.companyEmail,
+        company_invoiced: companyTotals.totalInvoiced,
+        company_paid: companyTotals.totalPaid,
+        company_due: companyTotals.totalDue,
+        totalCases: companyTotals.totalCases,
+      },
+      mappedRows,
+      keysetResult
+    ),
+  };
+}
+
+async function getXrayResendInvoicesCompanyGroupPage(query = {}) {
+  const filters = parseReportFilters(query);
+  const [keysetResult, companyTotals] = await Promise.all([
+    InvoiceReport.findXrayResendKeyset(filters),
+    InvoiceReport.getXrayResendCompanyTotals(filters, filters.companyGroupKey),
+  ]);
+
+  const rows = await hydrateXrayReportRows(keysetResult.rows);
+  const orderIds = [...new Set(rows.map((row) => row.order_id))];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const mappedRows = rows
+    .map((row) => mapXrayResendRow(row, paymentsByOrderId[row.order_id] || []))
+    .map(mapResendRowForGroup);
+
+  clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
+
+  return {
+    companyGroupKey: filters.companyGroupKey,
+    group: buildReportGroup(
+      {
+        company_partition: filters.companyGroupKey,
+        company_name: companyTotals.companyName,
+        company_email: companyTotals.companyEmail,
+        company_invoiced: companyTotals.totalInvoiced,
+        company_paid: companyTotals.totalPaid,
+        company_due: companyTotals.totalDue,
+        totalCases: companyTotals.totalCases,
+      },
+      mappedRows,
+      keysetResult
+    ),
+  };
+}
+
+async function getOutstandingInvoicesKeyset(query = {}) {
+  if (hasCompanyGroupKey(query)) {
+    return getOutstandingInvoicesCompanyGroupPage(query);
+  }
+
+  const filters = parseReportFilters(query);
+  const [perCompanyRows, summary] = await Promise.all([
+    InvoiceReport.findStandardOutstandingFirstPerCompany(filters),
+    InvoiceReport.getStandardOutstandingSummary(filters),
+  ]);
+
+  const orderIds = [
+    ...new Set(
+      (
+        await hydrateStandardReportRows(
+          perCompanyRows.map((row) => ({ source_id: row.source_id }))
+        )
+      ).map((row) => row.order_id)
+    ),
+  ];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const groups = await buildOutstandingGroupsFromFirstPerCompany(
+    perCompanyRows,
+    paymentsByOrderId,
+    filters.pageSize
+  );
+
+  return {
+    groups,
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getResendInvoicesKeyset(query = {}) {
+  if (hasCompanyGroupKey(query)) {
+    return getResendInvoicesCompanyGroupPage(query);
+  }
+
+  const filters = parseReportFilters(query);
+  const [perCompanyRows, summary] = await Promise.all([
+    InvoiceReport.findStandardResendFirstPerCompany(filters),
+    InvoiceReport.getStandardResendSummary(filters),
+  ]);
+
+  const orderIds = [
+    ...new Set(
+      (
+        await hydrateStandardReportRows(
+          perCompanyRows.map((row) => ({ source_id: row.source_id }))
+        )
+      ).map((row) => row.order_id)
+    ),
+  ];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const groups = await buildResendGroupsFromFirstPerCompany(
+    perCompanyRows,
+    paymentsByOrderId,
+    filters.pageSize
+  );
+
+  return {
+    groups,
+    invoices: groups.flatMap((group) => group.rows),
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getXrayOutstandingInvoicesKeyset(query = {}) {
+  if (hasCompanyGroupKey(query)) {
+    return getXrayOutstandingInvoicesCompanyGroupPage(query);
+  }
+
+  const filters = parseReportFilters(query);
+  const [perCompanyRows, summary] = await Promise.all([
+    InvoiceReport.findXrayOutstandingFirstPerCompany(filters),
+    InvoiceReport.getXrayOutstandingSummary(filters),
+  ]);
+
+  const orderIds = [
+    ...new Set(
+      (
+        await hydrateXrayReportRows(
+          perCompanyRows.map((row) => ({ source_id: row.source_id }))
+        )
+      ).map((row) => row.order_id)
+    ),
+  ];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const groups = await buildXrayOutstandingGroupsFromFirstPerCompany(
+    perCompanyRows,
+    paymentsByOrderId,
+    filters.pageSize
+  );
+
+  return {
+    groups,
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getXrayResendInvoicesKeyset(query = {}) {
+  if (hasCompanyGroupKey(query)) {
+    return getXrayResendInvoicesCompanyGroupPage(query);
+  }
+
+  const filters = parseReportFilters(query);
+  const [perCompanyRows, summary] = await Promise.all([
+    InvoiceReport.findXrayResendFirstPerCompany(filters),
+    InvoiceReport.getXrayResendSummary(filters),
+  ]);
+
+  const orderIds = [
+    ...new Set(
+      (
+        await hydrateXrayReportRows(
+          perCompanyRows.map((row) => ({ source_id: row.source_id }))
+        )
+      ).map((row) => row.order_id)
+    ),
+  ];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const groups = await buildXrayResendGroupsFromFirstPerCompany(
+    perCompanyRows,
+    paymentsByOrderId,
+    filters.pageSize
+  );
+
+  return {
+    groups,
+    invoices: groups.flatMap((group) => group.rows),
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getOutstandingInvoicesSummaryOnly(query = {}) {
+  const filters = parseReportFilters(query);
+  const summary = await InvoiceReport.getStandardOutstandingSummary(filters);
+
+  return {
+    groups: [],
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getResendInvoicesSummaryOnly(query = {}) {
+  const filters = parseReportFilters(query);
+  const summary = await InvoiceReport.getStandardResendSummary(filters);
+
+  return {
+    invoices: [],
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getXrayOutstandingInvoicesSummaryOnly(query = {}) {
+  const filters = parseReportFilters(query);
+  const summary = await InvoiceReport.getXrayOutstandingSummary(filters);
+
+  return {
+    groups: [],
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
+async function getXrayResendInvoicesSummaryOnly(query = {}) {
+  const filters = parseReportFilters(query);
+  const summary = await InvoiceReport.getXrayResendSummary(filters);
+
+  return {
+    invoices: [],
+    summary: mapReportSummary(summary),
+    count: summary.totalCases,
+  };
+}
+
 async function getOutstandingInvoices(query = {}) {
+  if (isSummaryOnlyQuery(query)) {
+    return getOutstandingInvoicesSummaryOnly(query);
+  }
+
+  if (isKeysetQuery(query)) {
+    return getOutstandingInvoicesKeyset(query);
+  }
+
   const rows = await Invoice.findOutstanding({
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
@@ -1595,6 +2257,14 @@ async function getOutstandingInvoices(query = {}) {
 }
 
 async function getResendInvoices(query = {}) {
+  if (isSummaryOnlyQuery(query)) {
+    return getResendInvoicesSummaryOnly(query);
+  }
+
+  if (isKeysetQuery(query)) {
+    return getResendInvoicesKeyset(query);
+  }
+
   const rows = await Invoice.findResend({
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
@@ -1611,6 +2281,14 @@ async function getResendInvoices(query = {}) {
 }
 
 async function getXrayOutstandingInvoices(query = {}) {
+  if (isSummaryOnlyQuery(query)) {
+    return getXrayOutstandingInvoicesSummaryOnly(query);
+  }
+
+  if (isKeysetQuery(query)) {
+    return getXrayOutstandingInvoicesKeyset(query);
+  }
+
   const rows = await InvoiceXray.findOutstanding({
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
@@ -1627,6 +2305,14 @@ async function getXrayOutstandingInvoices(query = {}) {
 }
 
 async function getXrayResendInvoices(query = {}) {
+  if (isSummaryOnlyQuery(query)) {
+    return getXrayResendInvoicesSummaryOnly(query);
+  }
+
+  if (isKeysetQuery(query)) {
+    return getXrayResendInvoicesKeyset(query);
+  }
+
   const rows = await InvoiceXray.findResend({
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
@@ -2229,6 +2915,123 @@ function buildCompanyInvoiceList(standardRows = [], xrayRows = [], paymentsByOrd
     .map((entry) => entry.invoice);
 }
 
+function buildCompanyResponse(companyId, referenceRow, invoices, summary, pagination = null) {
+  const response = {
+    company: {
+      id: companyId,
+      name: referenceRow ? getInvoiceCompanyName(referenceRow) : "Company",
+      email:
+        (referenceRow && getInvoiceDisplayEmail(referenceRow)) ||
+        (referenceRow && getXrayRecipientEmail(referenceRow)) ||
+        "",
+    },
+    invoices,
+    summary: {
+      totalCases: summary.totalCases,
+      needsResend: summary.needsResend,
+      totalInvoiced: formatMoney(summary.totalInvoiced),
+      totalPaid: formatMoney(summary.totalPaid),
+      totalDue: formatMoney(summary.totalDue),
+    },
+  };
+
+  if (pagination) {
+    response.pagination = pagination;
+  }
+
+  return response;
+}
+
+async function hydrateCompanyInvoicePage(pageRows = []) {
+  if (!pageRows.length) {
+    return [];
+  }
+
+  const standardIds = pageRows
+    .filter((row) => row.source_type === "standard")
+    .map((row) => Number(row.source_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const xrayOrderIds = pageRows
+    .filter((row) => row.source_type === "xray")
+    .map((row) => Number(row.source_id))
+    .filter((id) => Number.isFinite(id) && id > 0);
+
+  const [standardRows, xrayRows] = await Promise.all([
+    Invoice.findDetailsByIds(standardIds),
+    InvoiceXray.findByOrderIdsWithDetails(xrayOrderIds),
+  ]);
+
+  const standardById = new Map(standardRows.map((row) => [Number(row.id), row]));
+  const xrayByOrderId = new Map(
+    xrayRows.map((row) => [Number(row.order_id), row])
+  );
+  const orderIds = [
+    ...new Set([
+      ...standardRows.map((row) => row.order_id),
+      ...xrayRows.map((row) => row.order_id),
+    ]),
+  ];
+  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
+  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+
+  return pageRows.map((pageRow) => {
+    if (pageRow.source_type === "xray") {
+      const row = xrayByOrderId.get(Number(pageRow.source_id));
+      return row
+        ? mapCompanyXrayInvoiceRow(row, paymentsByOrderId[row.order_id] || [])
+        : null;
+    }
+
+    const row = standardById.get(Number(pageRow.source_id));
+    return row
+      ? mapCompanyInvoiceRow(row, paymentsByOrderId[row.order_id] || [])
+      : null;
+  }).filter(Boolean);
+}
+
+async function getByCompanyKeyset(companyId, query = {}) {
+  const dateFilters = {
+    dateFrom: trimOrNull(query.dateFrom),
+    dateTo: trimOrNull(query.dateTo),
+    search: trimOrNull(query.search),
+  };
+  const pageSizeRaw = Number(query.pageSize || 10);
+  const pageSize = Number.isFinite(pageSizeRaw)
+    ? Math.min(Math.max(pageSizeRaw, 1), 100)
+    : 10;
+  const cursor = trimOrNull(query.cursor);
+
+  const [keysetResult, summary, referenceRow] = await Promise.all([
+    CompanyInvoice.findByProviderKeyset(companyId, {
+      ...dateFilters,
+      pageSize,
+      cursor,
+    }),
+    CompanyInvoice.getSummaryByProvider(companyId, dateFilters),
+    CompanyInvoice.findCompanyReference(companyId),
+  ]);
+
+  const invoices = await hydrateCompanyInvoicePage(keysetResult.rows);
+
+  if (cursor && !invoices.length) {
+    keysetResult.hasMore = false;
+    keysetResult.nextCursor = null;
+  }
+
+  return buildCompanyResponse(
+    companyId,
+    referenceRow,
+    invoices,
+    summary,
+    {
+      type: "keyset",
+      pageSize: keysetResult.pageSize,
+      hasMore: keysetResult.hasMore,
+      nextCursor: keysetResult.nextCursor,
+    }
+  );
+}
+
 async function getByCompany(providerId, query = {}) {
   const companyId = Number(providerId);
 
@@ -2236,9 +3039,14 @@ async function getByCompany(providerId, query = {}) {
     throw new ApiError(400, "Invalid company id");
   }
 
+  if (String(query.pagination || "").toLowerCase() === "keyset") {
+    return getByCompanyKeyset(companyId, query);
+  }
+
   const dateFilters = {
     dateFrom: trimOrNull(query.dateFrom),
     dateTo: trimOrNull(query.dateTo),
+    search: trimOrNull(query.search),
   };
 
   const [
@@ -2257,21 +3065,18 @@ async function getByCompany(providerId, query = {}) {
   const xrayRows = [...xrayOutstanding, ...xrayResend];
 
   if (!standardRows.length && !xrayRows.length) {
-    return {
-      company: {
-        id: companyId,
-        name: "Company",
-        email: "",
-      },
-      invoices: [],
-      summary: {
+    return buildCompanyResponse(
+      companyId,
+      null,
+      [],
+      {
         totalCases: 0,
         needsResend: 0,
-        totalInvoiced: "$0.00",
-        totalPaid: "$0.00",
-        totalDue: "$0.00",
-      },
-    };
+        totalInvoiced: 0,
+        totalPaid: 0,
+        totalDue: 0,
+      }
+    );
   }
 
   const referenceRow = standardRows[0] || xrayRows[0];
@@ -2289,34 +3094,21 @@ async function getByCompany(providerId, query = {}) {
     paymentsByOrderId
   );
 
-  let totalInvoiced = 0;
-  let totalPaid = 0;
-  let totalDue = 0;
-
   const standardTotals = sumStandardFinancials(standardRows, paymentsByOrderId);
   const xrayTotals = sumXrayFinancials(xrayRows, paymentsByOrderId);
-  totalInvoiced = standardTotals.invoiced + xrayTotals.invoiced;
-  totalPaid = standardTotals.paid + xrayTotals.paid;
-  totalDue = standardTotals.due + xrayTotals.due;
 
-  return {
-    company: {
-      id: companyId,
-      name: getInvoiceCompanyName(referenceRow),
-      email:
-        getInvoiceDisplayEmail(referenceRow) ||
-        getXrayRecipientEmail(referenceRow) ||
-        "",
-    },
+  return buildCompanyResponse(
+    companyId,
+    referenceRow,
     invoices,
-    summary: {
+    {
       totalCases: invoices.length,
       needsResend: invoices.filter((invoice) => invoice.needsResend).length,
-      totalInvoiced: formatMoney(totalInvoiced),
-      totalPaid: formatMoney(totalPaid),
-      totalDue: formatMoney(totalDue),
-    },
-  };
+      totalInvoiced: standardTotals.invoiced + xrayTotals.invoiced,
+      totalPaid: standardTotals.paid + xrayTotals.paid,
+      totalDue: standardTotals.due + xrayTotals.due,
+    }
+  );
 }
 
 async function deliverInvoiceEmail(
@@ -2967,15 +3759,13 @@ async function writeOffInvoices(body = {}, userId) {
       if (currentDue <= 0 || body.isZeroDue) {
         const newOrderStatus =
           orderAction === "close_order" ? "Completed" : "Write Offs";
-        const isWriteOffs = orderAction === "keep_write_off" ? 1 : 0;
 
         await connection.execute(
           `UPDATE orders
-           SET status = :status, is_write_offs = :isWriteOffs, updated_at = NOW()
+           SET status = :status, updated_at = NOW()
            WHERE id = :orderId`,
           {
             status: newOrderStatus,
-            isWriteOffs,
             orderId: invoice.order_id,
           }
         );
@@ -3038,15 +3828,13 @@ async function writeOffInvoices(body = {}, userId) {
       if (newDue <= 0) {
         const newOrderStatus =
           orderAction === "close_order" ? "Completed" : "Write Offs";
-        const isWriteOffs = orderAction === "keep_write_off" ? 1 : 0;
 
         await connection.execute(
           `UPDATE orders
-           SET status = :status, is_write_offs = :isWriteOffs, updated_at = NOW()
+           SET status = :status, updated_at = NOW()
            WHERE id = :orderId`,
           {
             status: newOrderStatus,
-            isWriteOffs,
             orderId: invoice.order_id,
           }
         );

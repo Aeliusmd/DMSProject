@@ -66,6 +66,7 @@ export default function ActivityLogPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
+  const nextCursorRef = useRef(null);
   const [pagination, setPagination] = useState({
     pageSize: ACTIVITY_LOGS_PER_PAGE,
     hasMore: false,
@@ -93,13 +94,16 @@ export default function ActivityLogPage() {
   }, [cursorHistory]);
 
   const resetPagination = useCallback(() => {
+    const nextHistory = [null];
+    cursorHistoryRef.current = nextHistory;
     setCurrentPage(1);
-    setCursorHistory([null]);
+    setCursorHistory(nextHistory);
     setPagination({
       pageSize: ACTIVITY_LOGS_PER_PAGE,
       hasMore: false,
       nextCursor: null,
     });
+    nextCursorRef.current = null;
   }, []);
 
   const loadLogs = useCallback(async () => {
@@ -107,7 +111,11 @@ export default function ActivityLogPage() {
     setPageError("");
 
     try {
-      const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+      let cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+      if (cursor == null && currentPage === 2 && nextCursorRef.current != null) {
+        cursor = nextCursorRef.current;
+      }
+
       const requestFilters = {
         module: appliedActiveFilter,
         fromDate: appliedDateFilters.fromDate,
@@ -123,14 +131,29 @@ export default function ActivityLogPage() {
 
       const hasMore = Boolean(result.pagination?.hasMore);
       const nextCursor = result.pagination?.nextCursor ?? null;
+      const logs = result.logs || [];
 
-      setActivityLogs(result.logs || []);
+      if (!logs.length && currentPage > 1) {
+        setPagination((prev) => ({
+          ...prev,
+          hasMore: false,
+          nextCursor: null,
+        }));
+        const trimmedHistory = cursorHistoryRef.current.slice(0, currentPage - 1);
+        cursorHistoryRef.current = trimmedHistory;
+        setCursorHistory(trimmedHistory);
+        setCurrentPage((page) => Math.max(page - 1, 1));
+        return;
+      }
+
+      setActivityLogs(logs);
       setPagination({
         pageSize:
           Number(result.pagination?.pageSize) || ACTIVITY_LOGS_PER_PAGE,
         hasMore,
         nextCursor,
       });
+      nextCursorRef.current = nextCursor;
       setCursorHistory((prev) => {
         const next = prev.slice(0, currentPage);
         if (hasMore && nextCursor != null) {
@@ -139,6 +162,7 @@ export default function ActivityLogPage() {
         if (!hasMore) {
           next.length = currentPage;
         }
+        cursorHistoryRef.current = next;
         return next;
       });
     } catch (error) {
@@ -196,11 +220,16 @@ export default function ActivityLogPage() {
   };
 
   const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
+  const safeCurrentPage = Math.min(currentPage, totalPages);
   const startRecord = activityLogs.length
-    ? (currentPage - 1) * ACTIVITY_LOGS_PER_PAGE + 1
+    ? (safeCurrentPage - 1) * ACTIVITY_LOGS_PER_PAGE + 1
     : 0;
   const endRecord =
     startRecord + activityLogs.length - (activityLogs.length ? 1 : 0);
+
+  if (currentPage !== safeCurrentPage) {
+    setCurrentPage(safeCurrentPage);
+  }
 
   const summaryLabel = logsLoading
     ? "Loading activity logs..."
@@ -342,22 +371,35 @@ export default function ActivityLogPage() {
                   <button
                     type="button"
                     onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
-                    disabled={currentPage === 1}
+                    disabled={logsLoading || safeCurrentPage === 1}
                     className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ‹
                   </button>
 
                   <span className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] bg-[#111827] px-2 text-[12px] font-semibold text-white">
-                    {currentPage}
+                    {safeCurrentPage}
                   </span>
 
                   <button
                     type="button"
-                    onClick={() =>
-                      setCurrentPage((page) => Math.min(page + 1, totalPages))
+                    onClick={() => {
+                      if (
+                        logsLoading ||
+                        !pagination.hasMore ||
+                        safeCurrentPage >= totalPages ||
+                        activityLogs.length === 0
+                      ) {
+                        return;
+                      }
+                      setCurrentPage((page) => Math.min(page + 1, totalPages));
+                    }}
+                    disabled={
+                      logsLoading ||
+                      !pagination.hasMore ||
+                      safeCurrentPage >= totalPages ||
+                      activityLogs.length === 0
                     }
-                    disabled={currentPage >= totalPages || activityLogs.length === 0}
                     className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     ›

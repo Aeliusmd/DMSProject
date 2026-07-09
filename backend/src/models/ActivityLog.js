@@ -146,6 +146,16 @@ class ActivityLog {
 
     const hasMore = rows.length > pageSize;
     const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+    if (cursorId && !pageRows.length) {
+      return {
+        rows: pageRows,
+        pageSize,
+        hasMore: false,
+        nextCursor: null,
+      };
+    }
+
     const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
 
     return {
@@ -206,6 +216,16 @@ class ActivityLog {
 
     const hasMore = rows.length > pageSize;
     const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+    if (cursorId && !pageRows.length) {
+      return {
+        rows: pageRows,
+        pageSize,
+        hasMore: false,
+        nextCursor: null,
+      };
+    }
+
     const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id || null : null;
 
     return {
