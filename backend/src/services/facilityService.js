@@ -17,6 +17,7 @@ const Facility = require("../models/Facility");
 const OfficeManager = require("../models/OfficeManager");
 const FacilityDoctor = require("../models/FacilityDoctor");
 const { getPool } = require("../config/database");
+const { sanitizeSearchText } = require("../utils/sanitize");
 
 function formatDoctorName(doctor) {
   return [doctor.first_name, doctor.middle_name, doctor.last_name]
@@ -349,7 +350,7 @@ async function getAllFacilities(query = {}) {
   const filters = {};
 
   if (query.search && `${query.search}`.trim()) {
-    filters.search = `${query.search}`.trim();
+    filters.search = sanitizeSearchText(query.search);
   }
 
   if (query.limit) {

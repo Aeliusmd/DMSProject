@@ -23,15 +23,23 @@ async function connectDatabase() {
     return pool;
   }
 
-  pool = createPool();
+  try {
+    pool = createPool();
 
-  const connection = await pool.getConnection();
-  await connection.ping();
-  connection.release();
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
 
-  logger.info("MySQL database connected", { database: config.db.database });
+    logger.info("MySQL database connected", { database: config.db.database });
 
-  return pool;
+    return pool;
+  } catch (error) {
+    logger.error("MySQL database connection failed", {
+      error: error.message,
+      code: error.code,
+    });
+    throw error;
+  }
 }
 
 function getPool() {
@@ -43,8 +51,13 @@ function getPool() {
 }
 
 async function query(sql, params = {}) {
-  const [rows] = await getPool().execute(sql, params);
-  return rows;
+  try {
+    const [rows] = await getPool().execute(sql, params);
+    return rows;
+  } catch (error) {
+    error.sql = sql;
+    throw error;
+  }
 }
 
 async function withTransaction(callback) {

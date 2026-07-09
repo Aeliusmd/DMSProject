@@ -40,7 +40,11 @@ export default function PaymentsPage() {
     through: "",
     orderId: "",
   });
-  const [appliedOrderId, setAppliedOrderId] = useState("");
+  const [appliedFilters, setAppliedFilters] = useState({
+    from: "",
+    through: "",
+    orderId: "",
+  });
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [appliedInvoiceSearch, setAppliedInvoiceSearch] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -61,8 +65,8 @@ export default function PaymentsPage() {
     setLoading(true);
 
     const dateFilters = {
-      dateFrom: filters.from || undefined,
-      dateTo: filters.through || undefined,
+      dateFrom: appliedFilters.from || undefined,
+      dateTo: appliedFilters.through || undefined,
     };
 
     try {
@@ -87,19 +91,11 @@ export default function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters.from, filters.through]);
+  }, [appliedFilters.from, appliedFilters.through]);
 
   useEffect(() => {
     loadPayments();
   }, [loadPayments, refreshKey]);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      setAppliedInvoiceSearch(invoiceSearch.trim());
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [invoiceSearch]);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -111,25 +107,31 @@ export default function PaymentsPage() {
   };
 
   const handleApplyFilters = () => {
-    setAppliedOrderId(filters.orderId.trim());
+    setAppliedFilters({
+      from: filters.from,
+      through: filters.through,
+      orderId: filters.orderId.trim(),
+    });
     setRefreshKey((value) => value + 1);
   };
 
   const handleReset = () => {
-    setFilters({
+    const emptyFilters = {
       from: "",
       through: "",
       orderId: "",
-    });
-    setAppliedOrderId("");
+    };
+
+    setFilters(emptyFilters);
+    setAppliedFilters(emptyFilters);
     setInvoiceSearch("");
     setAppliedInvoiceSearch("");
     setRefreshKey((value) => value + 1);
   };
 
   const filterByOrderId = useCallback(
-    (rows) => filterPaymentsByOrderId(rows, appliedOrderId),
-    [appliedOrderId]
+    (rows) => filterPaymentsByOrderId(rows, appliedFilters.orderId),
+    [appliedFilters.orderId]
   );
 
   const filterByInvoiceId = useCallback(
@@ -194,6 +196,7 @@ export default function PaymentsPage() {
         <GlobalInvoiceSearch
           value={invoiceSearch}
           onChange={setInvoiceSearch}
+          onSearch={() => setAppliedInvoiceSearch(invoiceSearch.trim())}
           onClear={() => {
             setInvoiceSearch("");
             setAppliedInvoiceSearch("");
@@ -248,7 +251,14 @@ export default function PaymentsPage() {
   );
 }
 
-function GlobalInvoiceSearch({ value, onChange, onClear }) {
+function GlobalInvoiceSearch({ value, onChange, onSearch, onClear }) {
+  const handleKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onSearch?.();
+    }
+  };
+
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -259,25 +269,36 @@ function GlobalInvoiceSearch({ value, onChange, onClear }) {
           Search by Invoice ID
         </label>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3">
-          <SearchIcon />
-          <input
-            id="global-invoice-search"
-            type="text"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="Enter invoice number or ID (e.g. INV-24018)"
-            className="h-[38px] min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
-          />
-          {value ? (
-            <button
-              type="button"
-              onClick={onClear}
-              className="shrink-0 text-[11px] font-semibold text-[#64748B] hover:text-[#334155]"
-            >
-              Clear
-            </button>
-          ) : null}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3">
+            <SearchIcon />
+            <input
+              id="global-invoice-search"
+              type="text"
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Enter invoice number or ID (e.g. INV-24018)"
+              className="h-[38px] min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+            />
+            {value ? (
+              <button
+                type="button"
+                onClick={onClear}
+                className="shrink-0 text-[11px] font-semibold text-[#64748B] hover:text-[#334155]"
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={onSearch}
+            className="h-[38px] shrink-0 rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+          >
+            Search
+          </button>
         </div>
       </div>
     </section>

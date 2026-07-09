@@ -9,6 +9,12 @@ const Order = require("../models/Order");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const { toSqlDateOnly } = require("../utils/dateUtils");
+const { sanitizeTrimOrNull } = require("../utils/sanitize");
+const { FIELD_LIMITS } = require("../utils/fieldLimits");
+const {
+  parseOptionalIsoDate,
+  assertPositiveInt,
+} = require("../utils/sqlSafety");
 
 function toNumber(value) {
   const number = Number(value);
@@ -22,10 +28,8 @@ function formatMoney(value) {
   })}`;
 }
 
-function trimOrNull(value) {
-  if (value === undefined || value === null) return null;
-  const trimmed = `${value}`.trim();
-  return trimmed === "" ? null : trimmed;
+function trimOrNull(value, options = {}) {
+  return sanitizeTrimOrNull(value, options);
 }
 
 function buildApplicantName(row = {}) {
@@ -175,7 +179,7 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
   const invoiceType = `${body.invoiceType || ""}`.trim().toLowerCase();
   const checkNumber = trimOrNull(body.checkNumber);
   const paymentDate = trimOrNull(body.paymentDate);
-  const note = trimOrNull(body.note);
+  const note = trimOrNull(body.note, { maxLength: FIELD_LIMITS.TEXT });
 
   if (!Number.isFinite(orderId)) {
     throw new ApiError(400, "orderId is required");
@@ -332,17 +336,19 @@ async function getManualPayments(query = {}) {
 
   if (query.orderId) {
     conditions.push("o.id = :orderId");
-    params.orderId = Number(query.orderId);
+    params.orderId = assertPositiveInt(query.orderId, "orderId");
   }
 
-  if (query.dateFrom) {
+  const dateFrom = parseOptionalIsoDate(query.dateFrom, "dateFrom");
+  if (dateFrom) {
     conditions.push("i.payment_date >= :dateFrom");
-    params.dateFrom = query.dateFrom;
+    params.dateFrom = dateFrom;
   }
 
-  if (query.dateTo) {
+  const dateTo = parseOptionalIsoDate(query.dateTo, "dateTo");
+  if (dateTo) {
     conditions.push("i.payment_date <= :dateTo");
-    params.dateTo = query.dateTo;
+    params.dateTo = dateTo;
   }
 
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
@@ -378,17 +384,17 @@ async function getManualPayments(query = {}) {
 
   if (query.orderId) {
     xrayConditions.push("o.id = :orderId");
-    xrayParams.orderId = Number(query.orderId);
+    xrayParams.orderId = assertPositiveInt(query.orderId, "orderId");
   }
 
-  if (query.dateFrom) {
+  if (dateFrom) {
     xrayConditions.push("x.payment_date >= :dateFrom");
-    xrayParams.dateFrom = query.dateFrom;
+    xrayParams.dateFrom = dateFrom;
   }
 
-  if (query.dateTo) {
+  if (dateTo) {
     xrayConditions.push("x.payment_date <= :dateTo");
-    xrayParams.dateTo = query.dateTo;
+    xrayParams.dateTo = dateTo;
   }
 
   const xrayWhereClause = `WHERE ${xrayConditions.join(" AND ")}`;

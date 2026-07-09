@@ -1,20 +1,28 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import CreateXrayInvoiceModal from "@/components/orders/CreateXrayInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
+
 import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
-import { getCompanyInvoices, resendInvoiceSelection, writeOffInvoices as submitWriteOffInvoices } from "@/lib/invoices/invoiceApi";
+import {
+  getCompanyInvoicesPaginated,
+  resendInvoiceSelection,
+  writeOffInvoices as submitWriteOffInvoices,
+} from "@/lib/invoices/invoiceApi";
+
 import {
   buildOrderForInvoiceEmailModal,
   canResendInvoice,
   canWriteOffInvoice,
   resolveInvoiceEmailModalKind,
 } from "@/lib/invoices/invoiceUtils";
+
+const COMPANY_INVOICES_PER_PAGE = 10;
 
 const EMPTY_SUMMARY = {
   totalCases: 0,
@@ -73,63 +81,100 @@ export default function CompanyInvoiceDetailsPage() {
     fromDate: "",
     toDate: "",
   });
+  const [appliedFilters, setAppliedFilters] = useState({
+    search: "",
+    fromDate: "",
+    toDate: "",
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const cursorHistoryRef = useRef([null]);
+  const [pagination, setPagination] = useState({
+    pageSize: COMPANY_INVOICES_PER_PAGE,
+    hasMore: false,
+    nextCursor: null,
+  });
 
   useEffect(() => {
-    let cancelled = false;
+    cursorHistoryRef.current = cursorHistory;
+  }, [cursorHistory]);
 
-    async function loadCompanyInvoices() {
-      setLoading(true);
-
-      try {
-        const data = await getCompanyInvoices(companyId, {
-          dateFrom: filters.fromDate || undefined,
-          dateTo: filters.toDate || undefined,
-        });
-
-        if (cancelled) return;
-
-        setCompany(data.company);
-        setInvoices(data.invoices);
-        setSummary(data.summary);
-        setSelectedIds([]);
-      } catch {
-        if (!cancelled) {
-          setCompany({ id: companyId, name: "Company", email: "" });
-          setInvoices([]);
-          setSummary(EMPTY_SUMMARY);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadCompanyInvoices();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, filters.fromDate, filters.toDate]);
-
-  const filteredInvoices = useMemo(() => {
-    const searchValue = filters.search.trim().toLowerCase();
-    const fromDate = filters.fromDate ? new Date(filters.fromDate) : null;
-    const toDate = filters.toDate ? new Date(filters.toDate) : null;
-
-    return invoices.filter((invoice) => {
-      const matchesInvoiceId = invoice.invoiceId
-        .toLowerCase()
-        .includes(searchValue);
-
-      const invoiceDate = parseInvoiceDate(invoice.invoiceDate);
-
-      const matchesFromDate = fromDate ? invoiceDate >= fromDate : true;
-      const matchesToDate = toDate ? invoiceDate <= toDate : true;
-
-      return matchesInvoiceId && matchesFromDate && matchesToDate;
+  const resetPagination = useCallback(() => {
+    setCurrentPage(1);
+    setCursorHistory([null]);
+    setPagination({
+      pageSize: COMPANY_INVOICES_PER_PAGE,
+      hasMore: false,
+      nextCursor: null,
     });
-  }, [invoices, filters]);
+  }, []);
+
+  const loadCompanyInvoices = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+      const data = await getCompanyInvoicesPaginated(companyId, {
+        dateFrom: appliedFilters.fromDate || undefined,
+        dateTo: appliedFilters.toDate || undefined,
+        search: appliedFilters.search || undefined,
+        cursor,
+        pageSize: COMPANY_INVOICES_PER_PAGE,
+      });
+
+      const hasMore = Boolean(data.pagination?.hasMore);
+      const nextCursor = data.pagination?.nextCursor ?? null;
+
+      if (!data.invoices?.length && currentPage > 1) {
+        setPagination((prev) => ({
+          ...prev,
+          hasMore: false,
+          nextCursor: null,
+        }));
+        setCursorHistory((prev) => prev.slice(0, currentPage - 1));
+        setCurrentPage((page) => Math.max(page - 1, 1));
+        return;
+      }
+
+      setCompany(data.company);
+      setInvoices(data.invoices);
+      setSummary(data.summary);
+      setPagination({
+        pageSize:
+          Number(data.pagination?.pageSize) || COMPANY_INVOICES_PER_PAGE,
+        hasMore,
+        nextCursor,
+      });
+      setCursorHistory((prev) => {
+        const next = prev.slice(0, currentPage);
+        if (hasMore && nextCursor != null) {
+          next[currentPage] = nextCursor;
+        }
+        if (!hasMore) {
+          next.length = currentPage;
+        }
+        cursorHistoryRef.current = next;
+        return next;
+      });
+      setSelectedIds([]);
+    } catch {
+      setCompany({ id: companyId, name: "Company", email: "" });
+      setInvoices([]);
+      setSummary(EMPTY_SUMMARY);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    companyId,
+    appliedFilters.fromDate,
+    appliedFilters.toDate,
+    appliedFilters.search,
+    currentPage,
+  ]);
+
+  useEffect(() => {
+    loadCompanyInvoices();
+  }, [loadCompanyInvoices]);
 
   const selectedInvoices = useMemo(() => {
     return invoices.filter((invoice) => selectedIds.includes(invoice.id));
@@ -143,10 +188,10 @@ export default function CompanyInvoiceDetailsPage() {
     return selectedInvoices.filter((invoice) => canResendInvoice(invoice));
   }, [selectedInvoices]);
 
-  const filteredInvoiceIds = filteredInvoices.map((invoice) => invoice.id);
+  const filteredInvoiceIds = invoices.map((invoice) => invoice.id);
 
   const allSelected =
-    filteredInvoices.length > 0 &&
+    invoices.length > 0 &&
     filteredInvoiceIds.every((id) => selectedIds.includes(id));
 
   const selectedCount = selectedIds.length;
@@ -164,12 +209,21 @@ export default function CompanyInvoiceDetailsPage() {
     }));
   };
 
+  const handleApplyFilters = () => {
+    setAppliedFilters({ ...filters });
+    resetPagination();
+  };
+
   const handleResetFilters = () => {
-    setFilters({
+    const clearedFilters = {
       search: "",
       fromDate: "",
       toDate: "",
-    });
+    };
+
+    setFilters(clearedFilters);
+    setAppliedFilters(clearedFilters);
+    resetPagination();
   };
 
   const handleToggleAll = () => {
@@ -283,15 +337,27 @@ export default function CompanyInvoiceDetailsPage() {
   };
 
   const reloadCompanyInvoices = async () => {
-    const data = await getCompanyInvoices(companyId, {
-      dateFrom: filters.fromDate || undefined,
-      dateTo: filters.toDate || undefined,
-    });
-
-    setCompany(data.company);
-    setInvoices(data.invoices);
-    setSummary(data.summary);
+    await loadCompanyInvoices();
   };
+
+  const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startRecord = invoices.length
+    ? (safeCurrentPage - 1) * COMPANY_INVOICES_PER_PAGE + 1
+    : 0;
+  const endRecord =
+    startRecord + invoices.length - (invoices.length ? 1 : 0);
+  const resultSummaryLabel = loading
+    ? "Loading invoices..."
+    : pagination.hasMore
+      ? `Showing ${startRecord}-${endRecord} of ${endRecord}+ invoices`
+      : invoices.length === 0
+        ? "Showing 0 invoices"
+        : `Showing ${startRecord}-${endRecord} of ${endRecord} invoices`;
+
+  if (currentPage !== safeCurrentPage) {
+    setCurrentPage(safeCurrentPage);
+  }
 
   const handleSubmitWriteOff = async (payload) => {
     setWriteOffError("");
@@ -430,12 +496,14 @@ export default function CompanyInvoiceDetailsPage() {
         <InvoiceFilters
           filters={filters}
           onChange={handleFilterChange}
+          onApply={handleApplyFilters}
           onReset={handleResetFilters}
-          resultCount={filteredInvoices.length}
+          resultCount={summary.totalCases}
+          resultSummaryLabel={resultSummaryLabel}
         />
 
         <CompanyInvoiceTable
-          invoices={filteredInvoices}
+          invoices={invoices}
           selectedIds={selectedIds}
           allSelected={allSelected}
           loading={loading}
@@ -446,6 +514,25 @@ export default function CompanyInvoiceDetailsPage() {
           onResendSingle={handleResendSingle}
           onWriteOffSingle={handleWriteOffSingle}
           onOpenEditInvoice={handleOpenEditInvoice}
+        />
+
+        <PaginationBar
+          currentPage={safeCurrentPage}
+          totalPages={totalPages}
+          hasMore={pagination.hasMore}
+          loading={loading}
+          onPrevious={() => setCurrentPage((page) => Math.max(page - 1, 1))}
+          onNext={() => {
+            if (
+              loading ||
+              !pagination.hasMore ||
+              safeCurrentPage >= totalPages ||
+              invoices.length === 0
+            ) {
+              return;
+            }
+            setCurrentPage((page) => Math.min(page + 1, totalPages));
+          }}
         />
       </div>
 
@@ -483,11 +570,18 @@ export default function CompanyInvoiceDetailsPage() {
   );
 }
 
-function InvoiceFilters({ filters, onChange, onReset, resultCount }) {
+function InvoiceFilters({
+  filters,
+  onChange,
+  onApply,
+  onReset,
+  resultCount,
+  resultSummaryLabel,
+}) {
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-4 shadow-sm">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[minmax(220px,1fr)_180px_180px_auto]">
+        <div className="grid min-w-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[minmax(220px,1fr)_180px_180px_auto_auto]">
           <div>
             <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
               Search Invoice ID
@@ -501,7 +595,12 @@ function InvoiceFilters({ filters, onChange, onReset, resultCount }) {
                 name="search"
                 value={filters.search}
                 onChange={onChange}
-                placeholder="Search by invoice ID..."
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    onApply();
+                  }
+                }}
+                placeholder="Search invoice ID (starts with)..."
                 className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white pl-9 pr-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               />
             </div>
@@ -523,6 +622,14 @@ function InvoiceFilters({ filters, onChange, onReset, resultCount }) {
 
           <button
             type="button"
+            onClick={onApply}
+            className="h-[38px] self-end whitespace-nowrap rounded-[6px] border border-[#0097B2] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+          >
+            Apply
+          </button>
+
+          <button
+            type="button"
             onClick={onReset}
             className="h-[38px] self-end whitespace-nowrap rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#475569] hover:bg-[#F1F5F9]"
           >
@@ -531,7 +638,7 @@ function InvoiceFilters({ filters, onChange, onReset, resultCount }) {
         </div>
 
         <p className="whitespace-nowrap text-[12px] text-[#94A3B8]">
-          Showing {resultCount} invoice{resultCount === 1 ? "" : "s"}
+          {resultSummaryLabel || `Showing ${resultCount} invoice${resultCount === 1 ? "" : "s"}`}
         </p>
       </div>
     </section>
@@ -782,6 +889,43 @@ function CompanyInvoiceTable({
   );
 }
 
+function PaginationBar({
+  currentPage,
+  totalPages,
+  hasMore,
+  loading,
+  onPrevious,
+  onNext,
+}) {
+  return (
+    <section className="flex items-center justify-between rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-3 shadow-sm">
+      <p className="text-[12px] text-[#64748B]">
+        Page {currentPage} of {totalPages}
+      </p>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onPrevious}
+          disabled={loading || currentPage <= 1}
+          className="inline-flex h-[32px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#475569] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Previous
+        </button>
+
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={loading || !hasMore}
+          className="inline-flex h-[32px] items-center justify-center rounded-[6px] border border-[#0097B2] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Next
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function StatusBadge({ status }) {
   const styles = {
     Partial: "bg-[#DBEAFE] text-[#2563EB]",
@@ -800,11 +944,6 @@ function StatusBadge({ status }) {
       {status}
     </span>
   );
-}
-
-function parseInvoiceDate(dateString) {
-  const [month, day, year] = dateString.split("/");
-  return new Date(Number(year), Number(month) - 1, Number(day));
 }
 
 function ArrowLeftIcon() {

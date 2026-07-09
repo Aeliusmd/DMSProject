@@ -1,4 +1,5 @@
 const { getPool } = require("../config/database");
+const { likeContains } = require("../utils/sqlSafety");
 
 class FacilityDoctor {
   static async findByFacilityId(facilityId, { activeOnly = false } = {}) {
@@ -183,7 +184,7 @@ class FacilityDoctor {
                 first_name ASC,
                 middle_name ASC
        LIMIT ${safeLimit}`,
-      { facilityId, query: `%${trimmed}%` }
+      { facilityId, query: likeContains(trimmed) }
     );
 
     return rows

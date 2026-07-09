@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import WriteOffInvoiceModal from "@/components/invoices/WriteOffInvoiceModal";
 import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
 import {
+  getInvoiceCompanyGroupPage,
   resendInvoices,
   resendXrayInvoices,
   sendInvoices,
@@ -38,6 +39,27 @@ function buildWriteOffInvoice(group, row) {
   };
 }
 
+function buildInitialCursorHistory(group) {
+  const history = [null];
+  const nextCursor = group?.pagination?.nextCursor;
+
+  if (group?.pagination?.hasMore && nextCursor != null) {
+    history[1] = nextCursor;
+  }
+
+  return history;
+}
+
+function resolveCompanyPageState(prev, companyGroupKey, group) {
+  return (
+    prev[companyGroupKey] || {
+      currentPage: 1,
+      cursorHistory: buildInitialCursorHistory(group),
+      loading: false,
+    }
+  );
+}
+
 export default function InvoiceReportTable({
   invoiceGroups = [],
   loading = false,
@@ -46,9 +68,13 @@ export default function InvoiceReportTable({
   invoiceType = "invoice",
   enableWriteOff = true,
   mode = "send",
+  reportTab = "outstanding",
+  reportFilters = {},
 }) {
   const isResendMode = mode === "resend";
   const router = useRouter();
+  const [groups, setGroups] = useState(invoiceGroups);
+  const [companyPageState, setCompanyPageState] = useState({});
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
@@ -107,6 +133,184 @@ export default function InvoiceReportTable({
       groupCompany: group.company,
       rowId: targetRows.length === 1 ? firstRow.id : null,
     });
+  };
+
+  useEffect(() => {
+    setGroups(invoiceGroups);
+    setCompanyPageState({});
+    setSelectedRows({});
+  }, [invoiceGroups]);
+
+  const loadCompanyGroupPage = useCallback(
+    async (group, targetPage) => {
+      const companyGroupKey = group.companyGroupKey;
+      if (companyGroupKey == null) return;
+
+      let cursor = null;
+
+      setCompanyPageState((prev) => {
+        const currentState = resolveCompanyPageState(prev, companyGroupKey, group);
+        cursor = currentState.cursorHistory[targetPage - 1] ?? null;
+
+        if (
+          cursor == null &&
+          targetPage === 2 &&
+          group.pagination?.hasMore &&
+          group.pagination?.nextCursor
+        ) {
+          cursor = group.pagination.nextCursor;
+        }
+
+        return {
+          ...prev,
+          [companyGroupKey]: {
+            ...currentState,
+            loading: true,
+          },
+        };
+      });
+
+      try {
+        const data = await getInvoiceCompanyGroupPage({
+          ...reportFilters,
+          tab: reportTab,
+          type: invoiceType,
+          companyGroupKey,
+          cursor,
+        });
+
+        const nextGroup = data.group;
+
+        if (!nextGroup?.rows?.length) {
+          if (targetPage > 1) {
+            setGroups((prev) =>
+              prev.map((item) =>
+                item.companyGroupKey === companyGroupKey
+                  ? {
+                      ...item,
+                      pagination: {
+                        ...item.pagination,
+                        hasMore: false,
+                        nextCursor: null,
+                      },
+                    }
+                  : item
+              )
+            );
+            setCompanyPageState((prev) => {
+              const prior = prev[companyGroupKey] || {
+                currentPage: 1,
+                cursorHistory: [null],
+              };
+              return {
+                ...prev,
+                [companyGroupKey]: {
+                  ...prior,
+                  currentPage: Math.max(targetPage - 1, 1),
+                  cursorHistory: prior.cursorHistory.slice(0, targetPage - 1),
+                  loading: false,
+                },
+              };
+            });
+          }
+          return;
+        }
+
+        if (!nextGroup) {
+          setCompanyPageState((prev) => ({
+            ...prev,
+            [companyGroupKey]: {
+              ...(prev[companyGroupKey] || { currentPage: 1, cursorHistory: [null] }),
+              loading: false,
+            },
+          }));
+          return;
+        }
+
+        setGroups((prev) =>
+          prev.map((item) =>
+            item.companyGroupKey === companyGroupKey ? nextGroup : item
+          )
+        );
+
+        const hasMore = Boolean(nextGroup.pagination?.hasMore);
+        const nextCursor = nextGroup.pagination?.nextCursor ?? null;
+
+        setCompanyPageState((prev) => {
+          const history = (prev[companyGroupKey]?.cursorHistory || [null]).slice(
+            0,
+            targetPage
+          );
+          if (hasMore && nextCursor != null) {
+            history[targetPage] = nextCursor;
+          }
+
+          return {
+            ...prev,
+            [companyGroupKey]: {
+              currentPage: targetPage,
+              cursorHistory: history,
+              loading: false,
+            },
+          };
+        });
+      } catch (error) {
+        console.error("Failed to load company invoice page:", error);
+        setCompanyPageState((prev) => ({
+          ...prev,
+          [companyGroupKey]: {
+            ...(prev[companyGroupKey] || { currentPage: 1, cursorHistory: [null] }),
+            loading: false,
+          },
+        }));
+      } finally {
+        setCompanyPageState((prev) => {
+          const state = prev[companyGroupKey];
+          if (!state?.loading) return prev;
+          return {
+            ...prev,
+            [companyGroupKey]: {
+              ...state,
+              loading: false,
+            },
+          };
+        });
+      }
+    },
+    [invoiceType, reportFilters, reportTab]
+  );
+
+  const handleCompanyPrevious = (group) => {
+    const companyGroupKey = group.companyGroupKey;
+    const companyState = resolveCompanyPageState(
+      companyPageState,
+      companyGroupKey,
+      group
+    );
+    const currentPage = companyState.currentPage || 1;
+    if (currentPage <= 1) return;
+    loadCompanyGroupPage(group, currentPage - 1);
+  };
+
+  const handleCompanyNext = (group) => {
+    const companyGroupKey = group.companyGroupKey;
+    const companyState = resolveCompanyPageState(
+      companyPageState,
+      companyGroupKey,
+      group
+    );
+
+    if (companyState.loading || !group.pagination?.hasMore) return;
+
+    const currentPage = companyState.currentPage || 1;
+    const totalPages = Math.max(
+      currentPage + (group.pagination?.hasMore ? 1 : 0),
+      1
+    );
+
+    if (currentPage >= totalPages || group.rows.length === 0) return;
+
+    loadCompanyGroupPage(group, currentPage + 1);
   };
 
   const handleToggleRow = (company, rowId) => {
@@ -386,21 +590,30 @@ export default function InvoiceReportTable({
               )}
 
               {!loading &&
-                invoiceGroups.map((group) => {
+                groups.map((group) => {
                 const selectedIds = selectedRows[group.company] || [];
                 const allSelected =
                   selectedIds.length === group.rows.length &&
                   group.rows.length > 0;
+                const companyState = resolveCompanyPageState(
+                  companyPageState,
+                  group.companyGroupKey,
+                  group
+                );
 
                 return (
                   <InvoiceGroup
-                    key={group.company}
+                    key={group.companyGroupKey ?? group.company}
                     group={group}
                     selectedIds={selectedIds}
                     allSelected={allSelected}
                     sendingCompany={sendingCompany}
                     resendingId={resendingId}
                     mode={mode}
+                    companyPage={companyState.currentPage}
+                    companyLoading={companyState.loading}
+                    onCompanyPrevious={() => handleCompanyPrevious(group)}
+                    onCompanyNext={() => handleCompanyNext(group)}
                     onToggleRow={handleToggleRow}
                     onToggleGroup={handleToggleGroup}
                     onBulkAction={handleBulkInvoiceAction}
@@ -413,7 +626,7 @@ export default function InvoiceReportTable({
                 );
               })}
 
-              {!loading && invoiceGroups.length === 0 && (
+              {!loading && groups.length === 0 && (
                 <tr>
                   <td
                     colSpan={9}
@@ -473,6 +686,10 @@ function InvoiceGroup({
   sendingCompany = null,
   resendingId = null,
   mode = "send",
+  companyPage = 1,
+  companyLoading = false,
+  onCompanyPrevious,
+  onCompanyNext,
   onToggleRow,
   onToggleGroup,
   onBulkAction,
@@ -492,6 +709,24 @@ function InvoiceGroup({
   const hasWritableSelected = group.rows.some(
     (row) => selectedIds.includes(row.id) && canWriteOffInvoice(row)
   );
+  const pageSize = group.pagination?.pageSize || 10;
+  const totalCompanyPages = Math.max(
+    companyPage + (group.pagination?.hasMore ? 1 : 0),
+    1
+  );
+  const startRecord = group.rows.length
+    ? (companyPage - 1) * pageSize + 1
+    : 0;
+  const endRecord = startRecord + group.rows.length - (group.rows.length ? 1 : 0);
+  const showCompanyPagination =
+    group.pagination?.hasMore || companyPage > 1 || endRecord > 1;
+  const invoiceRangeLabel = companyLoading
+    ? "Loading..."
+    : group.pagination?.hasMore
+      ? `Invoice ${startRecord}-${endRecord} of ${endRecord}+`
+      : endRecord > 0
+        ? `Invoice ${startRecord}-${endRecord} of ${endRecord}`
+        : "No invoices";
 
   return (
     <>
@@ -539,7 +774,7 @@ function InvoiceGroup({
         </td>
 
         <td colSpan={4} className="px-4 py-4 align-middle">
-          <div className="flex min-w-max items-center gap-3">
+          <div className="flex min-w-max flex-wrap items-center gap-3">
             <span className="text-[12px] font-medium text-[#64748B]">All</span>
 
             <button
@@ -577,6 +812,36 @@ function InvoiceGroup({
                 Writeoff Invoice
               </button>
             )}
+
+            {showCompanyPagination ? (
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <span className="text-[11px] text-[#64748B]">
+                  {invoiceRangeLabel}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={onCompanyPrevious}
+                  disabled={companyLoading || companyPage <= 1}
+                  className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[11px] font-semibold text-[#475569] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Prev
+                </button>
+
+                <span className="text-[11px] text-[#64748B]">
+                  Page {companyPage} of {totalCompanyPages}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={onCompanyNext}
+                  disabled={companyLoading || !group.pagination?.hasMore}
+                  className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#0097B2] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            ) : null}
           </div>
         </td>
 

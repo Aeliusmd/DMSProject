@@ -63,7 +63,8 @@ export default function ActivityReportPage() {
     }
   }, [allowed, router]);
 
-  const [filters, setFilters] = useState(getDefaultFilters);
+  const [draftFilters, setDraftFilters] = useState(getDefaultFilters);
+  const [appliedFilters, setAppliedFilters] = useState(getDefaultFilters);
   const [facilities, setFacilities] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [summary, setSummary] = useState({ facilityCount: 0, totalCases: 0 });
@@ -95,10 +96,10 @@ export default function ActivityReportPage() {
     setError("");
 
     getActivityReport({
-      reportDate: filters.reportDate,
-      throughDate: filters.throughDate,
-      facilityId: filters.facility,
-      activity: filters.activity,
+      reportDate: appliedFilters.reportDate,
+      throughDate: appliedFilters.throughDate,
+      facilityId: appliedFilters.facility,
+      activity: appliedFilters.activity,
       search: appliedSearch,
     })
       .then((data) => {
@@ -120,10 +121,10 @@ export default function ActivityReportPage() {
       active = false;
     };
   }, [
-    filters.reportDate,
-    filters.throughDate,
-    filters.facility,
-    filters.activity,
+    appliedFilters.reportDate,
+    appliedFilters.throughDate,
+    appliedFilters.facility,
+    appliedFilters.activity,
     appliedSearch,
   ]);
 
@@ -167,16 +168,29 @@ export default function ActivityReportPage() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFilters((prev) => ({ ...prev, [name]: value }));
+    setDraftFilters((prev) => ({ ...prev, [name]: value }));
   };
 
   const handlePreset = (preset) => {
     const range = getPresetRange(preset);
-    setFilters((prev) => ({
+    setDraftFilters((prev) => ({
       ...prev,
       reportDate: range.from,
       throughDate: range.to,
     }));
+  };
+
+  const handleApplyFilters = () => {
+    setAppliedFilters({ ...draftFilters });
+  };
+
+  const handleResetFilters = () => {
+    const defaults = getDefaultFilters();
+    setDraftFilters(defaults);
+    setAppliedFilters(defaults);
+    setSearchInput("");
+    setAppliedSearch("");
+    setIsSearchOpen(false);
   };
 
   const handleSearch = () => {
@@ -215,16 +229,16 @@ export default function ActivityReportPage() {
     setExportError("");
 
     const selectedFacility = facilityOptions.find(
-      (option) => option.value === filters.facility
+      (option) => option.value === appliedFilters.facility
     );
 
     try {
       const { blob, fileName } = await downloadActivityReportPdf({
-        reportDate: filters.reportDate,
-        throughDate: filters.throughDate,
-        facilityId: filters.facility,
+        reportDate: appliedFilters.reportDate,
+        throughDate: appliedFilters.throughDate,
+        facilityId: appliedFilters.facility,
         facilityLabel: selectedFacility?.label || "All Facilities",
-        activity: filters.activity,
+        activity: appliedFilters.activity,
         search: appliedSearch,
       });
 
@@ -280,7 +294,7 @@ export default function ActivityReportPage() {
               label="Report Date"
               name="reportDate"
               type="date"
-              value={filters.reportDate}
+              value={draftFilters.reportDate}
               onChange={handleChange}
             />
 
@@ -288,7 +302,7 @@ export default function ActivityReportPage() {
               label="Through Date"
               name="throughDate"
               type="date"
-              value={filters.throughDate}
+              value={draftFilters.throughDate}
               onChange={handleChange}
             />
 
@@ -296,7 +310,7 @@ export default function ActivityReportPage() {
               label="Facility"
               name="facility"
               type="select"
-              value={filters.facility}
+              value={draftFilters.facility}
               onChange={handleChange}
               options={facilityOptions}
             />
@@ -305,7 +319,7 @@ export default function ActivityReportPage() {
               label="Activity"
               name="activity"
               type="select"
-              value={filters.activity}
+              value={draftFilters.activity}
               onChange={handleChange}
               options={[
                 { value: "All", label: "All" },
@@ -316,6 +330,24 @@ export default function ActivityReportPage() {
                 { value: "Produced", label: "Produced" },
               ]}
             />
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleApplyFilters}
+              className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+            >
+              Apply Filters
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="inline-flex h-[34px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-5 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+            >
+              Reset
+            </button>
           </div>
 
           <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

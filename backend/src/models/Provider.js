@@ -1,4 +1,5 @@
 const { getPool } = require("../config/database");
+const { likeContains, assertPositiveInt } = require("../utils/sqlSafety");
 
 class Provider {
   static async findAll() {
@@ -20,14 +21,16 @@ class Provider {
 
     if (!trimmed) return [];
 
+    const safeLimit = assertPositiveInt(limit, "limit", { max: 50 });
+
     const [rows] = await pool.execute(
       `SELECT id, company_name, address, zip_code, city, state, phone, fax, email, is_active
        FROM providers
        WHERE is_active = 1
          AND LOWER(company_name) LIKE :query
        ORDER BY company_name ASC
-       LIMIT ${Number(limit)}`,
-      { query: `%${trimmed.toLowerCase()}%` }
+       LIMIT ${safeLimit}`,
+      { query: likeContains(trimmed.toLowerCase()) }
     );
 
     return rows;

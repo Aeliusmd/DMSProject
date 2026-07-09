@@ -4,6 +4,15 @@ const ActivityLog = require("../models/ActivityLog");
 const milestoneRollupService = require("./milestoneRollupService");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
+const {
+  assertEnum,
+  parseOptionalIsoDate,
+} = require("../utils/sqlSafety");
+const {
+  sanitizeSearchText,
+  sanitizeText,
+} = require("../utils/sanitize");
+const { FIELD_LIMITS } = require("../utils/fieldLimits");
 
 const MODULES = {
   SECURITY: "Security",
@@ -14,6 +23,8 @@ const MODULES = {
   PROCESSING: "Processing",
   REPORTS: "Reports",
 };
+
+const ALLOWED_LOG_MODULES = new Set(Object.values(MODULES));
 
 const CONTEXT_MODULE_MAP = {
   auth: MODULES.SECURITY,
@@ -306,17 +317,28 @@ async function recordActivity({
   const resolvedModule = resolveModule(context, module);
   const resolvedAction = formatActionLabel(action, context);
   const resolvedCompanyName = await resolveCompanyName({ companyName, facilityId });
-  const resolvedDetails = appendTargetEmployee(details, targetEmployeeId);
+  const resolvedDetails = sanitizeText(
+    appendTargetEmployee(details, targetEmployeeId),
+    { maxLength: FIELD_LIMITS.TEXT }
+  );
 
   const logId = await ActivityLog.create({
     logDate,
     logTime,
-    action: resolvedAction,
+    action: sanitizeText(resolvedAction, { maxLength: FIELD_LIMITS.ACTION }),
     module: resolvedModule,
-    companyName: resolvedCompanyName,
+    companyName:
+      sanitizeText(resolvedCompanyName, {
+        maxLength: FIELD_LIMITS.ACTIVITY_COMPANY_NAME,
+        allowEmpty: true,
+      }) || "System",
     facilityId: facilityId || null,
     performedBy,
-    performerName: resolvedName,
+    performerName:
+      sanitizeText(resolvedName, {
+        maxLength: FIELD_LIMITS.PERFORMER_NAME,
+        allowEmpty: true,
+      }) || "System",
     performerInitials: getInitials(resolvedName),
     details: resolvedDetails,
   });
@@ -379,19 +401,22 @@ async function queryLogs(query = {}) {
 
   const module = `${query.module || ""}`.trim();
   if (module && module !== "All Modules") {
+    assertEnum(module, ALLOWED_LOG_MODULES, "module");
     filters.module = module;
   }
 
-  if (query.fromDate && `${query.fromDate}`.trim()) {
-    filters.fromDate = `${query.fromDate}`.trim();
+  const fromDate = parseOptionalIsoDate(query.fromDate, "fromDate");
+  if (fromDate) {
+    filters.fromDate = fromDate;
   }
 
-  if (query.toDate && `${query.toDate}`.trim()) {
-    filters.toDate = `${query.toDate}`.trim();
+  const toDate = parseOptionalIsoDate(query.toDate, "toDate");
+  if (toDate) {
+    filters.toDate = toDate;
   }
 
   if (query.search && `${query.search}`.trim()) {
-    filters.search = `${query.search}`.trim();
+    filters.search = sanitizeSearchText(query.search);
   }
 
   if (query.limit) {
@@ -454,7 +479,9 @@ async function getEmployeeLogs(employeeId, query = {}) {
     : 10;
   const cursorRaw = Number(query.cursor);
   const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
-  const search = `${query.search || ""}`.trim() || null;
+  const search = query.search
+    ? sanitizeSearchText(query.search) || null
+    : null;
 
   if (!useKeysetPagination) {
     const logs = await ActivityLog.findByEmployeeId(employeeId, {

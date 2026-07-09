@@ -10,6 +10,7 @@ const {
   ORDER_AGE_SQL_ALIAS,
 } = require("../utils/rushUtils");
 const { toSqlDateOnly, parseDateOnlyParts } = require("../utils/dateUtils");
+const { likeContains, likePrefix } = require("../utils/sqlSafety");
 
 function toSqlDateTimeStart(value) {
   const dateOnly = toSqlDateOnly(value);
@@ -45,10 +46,6 @@ function appendYearFilter(conditions, params, year) {
   params.yearEnd = yearEnd;
   params.yearStartTs = `${yearStart} 00:00:00`;
   params.yearEndTs = `${yearEnd} 00:00:00`;
-}
-
-function escapeLikePrefix(value) {
-  return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
 function appendOrderSearchFilter(conditions, params, rawSearch) {
@@ -97,7 +94,7 @@ function appendOrderSearchFilter(conditions, params, rawSearch) {
     "p.company_name LIKE :searchPrefix",
   ];
 
-  params.searchPrefix = `${escapeLikePrefix(search)}%`;
+  params.searchPrefix = likePrefix(search);
 
   const ssnDigits = search.replace(/\D/g, "");
   if (ssnDigits.length === 4) {
@@ -547,7 +544,7 @@ class Order {
          AND specific_doctor LIKE :query
        ORDER BY name ASC
        LIMIT ${safeLimit}`,
-      { query: `%${trimmed}%` }
+      { query: likeContains(trimmed) }
     );
 
     return rows.map((row) => row.name).filter(Boolean);
@@ -569,7 +566,7 @@ class Order {
          AND full_address LIKE :query
        ORDER BY address ASC
        LIMIT ${safeLimit}`,
-      { query: `%${trimmed}%` }
+      { query: likeContains(trimmed) }
     );
 
     return rows.map((row) => row.address).filter(Boolean);
@@ -582,17 +579,17 @@ class Order {
 
     if (filters.orderNo) {
       conditions.push("o.order_number LIKE :orderNo");
-      params.orderNo = `%${filters.orderNo}%`;
+      params.orderNo = likeContains(filters.orderNo);
     }
 
     if (filters.caseNumber) {
       conditions.push("o.case_number LIKE :caseNumber");
-      params.caseNumber = `%${filters.caseNumber}%`;
+      params.caseNumber = likeContains(filters.caseNumber);
     }
 
     if (filters.doctor) {
       conditions.push("o.specific_doctor LIKE :doctor");
-      params.doctor = `%${filters.doctor}%`;
+      params.doctor = likeContains(filters.doctor);
     }
 
     if (filters.dateFrom) {
@@ -1221,7 +1218,7 @@ class Order {
       : "";
 
     if (trimmedSearch) {
-      params.search = `%${trimmedSearch}%`;
+      params.search = likeContains(trimmedSearch);
     }
 
     const globalConditions = ["al.details LIKE :orderTag"];
@@ -1231,8 +1228,8 @@ class Order {
       globalConditions.push(
         "(al.module = 'Orders' AND (al.details LIKE :orderNumberTag OR al.details LIKE :orderLabelTag))"
       );
-      params.orderNumberTag = `%${orderNumber}%`;
-      params.orderLabelTag = `%order ${orderNumber}%`;
+      params.orderNumberTag = likeContains(orderNumber);
+      params.orderLabelTag = likeContains(`order ${orderNumber}`);
     }
 
     const cursorClause =

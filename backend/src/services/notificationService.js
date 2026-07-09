@@ -4,6 +4,7 @@ const EmployeeSettings = require("../models/EmployeeSettings");
 const Order = require("../models/Order");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
+const { sanitizeSearchText } = require("../utils/sanitize");
 
 const NOTIFICATION_TYPES = ["order", "invoice", "reminder", "activity"];
 
@@ -403,9 +404,9 @@ async function getDueRemindersForUser(user) {
 
 async function getNotificationsForEmployee(employeeId, query = {}) {
   const limit = Number(query.limit) > 0 ? Number(query.limit) : 100;
-  const typeFilter = query.type
-    ? String(query.type).toLowerCase()
-    : null;
+  const rawType = query.type ? String(query.type).toLowerCase() : null;
+  const typeFilter =
+    rawType && NOTIFICATION_TYPES.includes(rawType) ? rawType : null;
 
   const rows = await Notification.findByEmployeeId(employeeId, {
     limit,
@@ -415,7 +416,11 @@ async function getNotificationsForEmployee(employeeId, query = {}) {
   let notifications = rows.map(mapNotificationRow);
 
   if (query.search && `${query.search}`.trim()) {
-    const term = `${query.search}`.trim().toLowerCase();
+    const term = sanitizeSearchText(query.search, { maxLength: 100 }).toLowerCase();
+    if (!term) {
+      const unreadCount = await Notification.countUnreadByEmployeeId(employeeId);
+      return { notifications, unreadCount };
+    }
 
     notifications = notifications.filter((item) => {
       return (

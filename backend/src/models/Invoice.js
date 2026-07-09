@@ -394,6 +394,25 @@ class Invoice {
     return rows;
   }
 
+  static async findDetailsByIds(ids = []) {
+    if (!ids.length) return [];
+
+    const pool = getPool();
+    const placeholders = ids.map((_, index) => `:id${index}`).join(", ");
+    const params = ids.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await pool.execute(
+      `${INVOICE_SELECT}
+       WHERE i.id IN (${placeholders}) AND ${ORDER_VISIBLE}`,
+      params
+    );
+
+    return rows;
+  }
+
   static async writeOff(connection, id, data) {
     const db = connection || getPool();
 
