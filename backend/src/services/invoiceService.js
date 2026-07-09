@@ -2786,11 +2786,13 @@ async function getCompanyWise() {
     standardResend,
     xrayOutstanding,
     xrayResend,
+    financialTotalsByProvider,
   ] = await Promise.all([
     Invoice.findOutstanding({}),
     Invoice.findResend({}),
     InvoiceXray.findOutstanding({}),
     InvoiceXray.findResend({}),
+    CompanyInvoice.getFinancialTotalsGroupedByProvider(),
   ]);
 
   const standardRows = [...standardOutstanding, ...standardResend];
@@ -2818,25 +2820,49 @@ async function getCompanyWise() {
     needsResend: true,
   });
 
+  const resolveFinancialTotals = (companyId) => {
+    const key = companyId == null ? "null" : String(companyId);
+    return (
+      financialTotalsByProvider.get(key) || {
+        totalCases: 0,
+        totalInvoiced: 0,
+        totalPaid: 0,
+        totalDue: 0,
+      }
+    );
+  };
+
   const companies = Array.from(companiesMap.values())
-    .map((company) => ({
-      ...company,
-      invoiced: formatMoney(company.invoiced),
-      paid: formatMoney(company.paid),
-      due: formatMoney(company.due),
-    }))
+    .map((company) => {
+      const financialTotals = resolveFinancialTotals(company.id);
+
+      return {
+        ...company,
+        cases: financialTotals.totalCases,
+        invoiced: formatMoney(financialTotals.totalInvoiced),
+        paid: formatMoney(financialTotals.totalPaid),
+        due: formatMoney(financialTotals.totalDue),
+      };
+    })
     .sort((a, b) => a.company.localeCompare(b.company));
 
-  const standardTotals = sumStandardFinancials(standardRows, paymentsByOrderId);
-  const xrayTotals = sumXrayFinancials(xrayRows, paymentsByOrderId);
+  const overallFinancials = Array.from(financialTotalsByProvider.values()).reduce(
+    (totals, entry) => ({
+      totalCases: totals.totalCases + Number(entry.totalCases || 0),
+      totalInvoiced: totals.totalInvoiced + Number(entry.totalInvoiced || 0),
+      totalPaid: totals.totalPaid + Number(entry.totalPaid || 0),
+      totalDue: totals.totalDue + Number(entry.totalDue || 0),
+    }),
+    { totalCases: 0, totalInvoiced: 0, totalPaid: 0, totalDue: 0 }
+  );
 
   const summary = {
     companies: companies.length,
-    totalCases: standardRows.length + xrayRows.length,
+    totalCases: overallFinancials.totalCases,
     needsResend: companies.reduce((sum, company) => sum + company.needsResend, 0),
-    invoiced: formatMoney(standardTotals.invoiced + xrayTotals.invoiced),
-    paid: formatMoney(standardTotals.paid + xrayTotals.paid),
-    due: formatMoney(standardTotals.due + xrayTotals.due),
+    invoiced: formatMoney(overallFinancials.totalInvoiced),
+    paid: formatMoney(overallFinancials.totalPaid),
+    due: formatMoney(overallFinancials.totalDue),
   };
 
   return { companies, summary };
@@ -3063,22 +3089,15 @@ async function getByCompany(providerId, query = {}) {
   const standardRows = [...standardOutstanding, ...standardResend];
   const xrayRows = [...xrayOutstanding, ...xrayResend];
 
+  const [summary, referenceRow] = await Promise.all([
+    CompanyInvoice.getSummaryByProvider(companyId, dateFilters),
+    CompanyInvoice.findCompanyReference(companyId),
+  ]);
+
   if (!standardRows.length && !xrayRows.length) {
-    return buildCompanyResponse(
-      companyId,
-      null,
-      [],
-      {
-        totalCases: 0,
-        needsResend: 0,
-        totalInvoiced: 0,
-        totalPaid: 0,
-        totalDue: 0,
-      }
-    );
+    return buildCompanyResponse(companyId, referenceRow, [], summary);
   }
 
-  const referenceRow = standardRows[0] || xrayRows[0];
   const orderIds = [
     ...new Set([
       ...standardRows.map((row) => row.order_id),
@@ -3093,20 +3112,11 @@ async function getByCompany(providerId, query = {}) {
     paymentsByOrderId
   );
 
-  const standardTotals = sumStandardFinancials(standardRows, paymentsByOrderId);
-  const xrayTotals = sumXrayFinancials(xrayRows, paymentsByOrderId);
-
   return buildCompanyResponse(
     companyId,
-    referenceRow,
+    referenceRow || standardRows[0] || xrayRows[0],
     invoices,
-    {
-      totalCases: invoices.length,
-      needsResend: invoices.filter((invoice) => invoice.needsResend).length,
-      totalInvoiced: standardTotals.invoiced + xrayTotals.invoiced,
-      totalPaid: standardTotals.paid + xrayTotals.paid,
-      totalDue: standardTotals.due + xrayTotals.due,
-    }
+    summary
   );
 }
 
