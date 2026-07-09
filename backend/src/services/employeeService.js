@@ -6,6 +6,7 @@ const EmployeeSettings = require("../models/EmployeeSettings");
 const AuthSession = require("../models/AuthSession");
 const { isAdminOrManager } = require("../utils/roles");
 const { formatEmployee } = require("../views/responses");
+const { sanitizeSearchText } = require("../utils/sanitize");
 
 const ALLOWED_CREATE_ROLES = ["Manager", "Employee"];
 
@@ -92,7 +93,7 @@ async function getAllEmployees(query = {}) {
   const filters = {};
 
   if (query.search && `${query.search}`.trim()) {
-    filters.search = `${query.search}`.trim();
+    filters.search = sanitizeSearchText(query.search);
   }
 
   if (query.limit) {

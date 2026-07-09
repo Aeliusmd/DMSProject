@@ -23,6 +23,8 @@ const invoiceService = require("./invoiceService");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const { getPool } = require("../config/database");
+const { sanitizeText, sanitizeSearchText } = require("../utils/sanitize");
+const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
@@ -186,10 +188,13 @@ const DEFAULT_ORDER_FORMS = [
   "CNR",
 ];
 
-function trimOrNull(value) {
+function trimOrNull(value, options = {}) {
   if (value === undefined || value === null) return null;
-  const trimmed = `${value}`.trim();
-  return trimmed === "" ? null : trimmed;
+  const sanitized = sanitizeText(value, {
+    maxLength: options.maxLength || 4000,
+    allowEmpty: true,
+  });
+  return sanitized === "" ? null : sanitized;
 }
 
 function dateOrNull(value) {
@@ -374,24 +379,24 @@ function buildOrderDbPayload(data) {
     defendant: trimOrNull(data.defendant),
     injuryType: enumOrNull(data.injuryType, ALLOWED_INJURY_TYPES),
     ...buildInjuryDatePayload(data),
-    serveCompanyName: trimOrNull(data.serveCompanyName),
-    serveAddress: trimOrNull(data.address),
-    serveZip: trimOrNull(data.zip),
-    serveCity: trimOrNull(data.city),
-    serveState: trimOrNull(data.state),
-    servePhone: trimOrNull(data.phone),
-    serveFax: trimOrNull(data.fax),
-    serveEmail: trimOrNull(data.email),
-    contact1Name: trimOrNull(data.contact1Name),
-    contact1Title: trimOrNull(data.contact1Title),
-    contact1Phone: trimOrNull(data.contact1Phone),
-    contact1Fax: trimOrNull(data.contact1Fax),
-    contact1Email: trimOrNull(data.contact1Email),
-    contact2Name: trimOrNull(data.contact2Name),
-    contact2Title: trimOrNull(data.contact2Title),
-    contact2Phone: trimOrNull(data.contact2Phone),
-    contact2Fax: trimOrNull(data.contact2Fax),
-    contact2Email: trimOrNull(data.contact2Email),
+    serveCompanyName: trimOrNull(data.serveCompanyName, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    serveAddress: trimOrNull(data.address, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    serveZip: trimOrNull(data.zip, { maxLength: 20 }),
+    serveCity: trimOrNull(data.city, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
+    serveState: trimOrNull(data.state, { maxLength: 2 }),
+    servePhone: trimOrNull(data.phone, { maxLength: 20 }),
+    serveFax: trimOrNull(data.fax, { maxLength: 20 }),
+    serveEmail: trimOrNull(data.email, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    contact1Name: trimOrNull(data.contact1Name, { maxLength: FIELD_LIMITS.VARCHAR_150 }),
+    contact1Title: trimOrNull(data.contact1Title, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
+    contact1Phone: trimOrNull(data.contact1Phone, { maxLength: 20 }),
+    contact1Fax: trimOrNull(data.contact1Fax, { maxLength: 20 }),
+    contact1Email: trimOrNull(data.contact1Email, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    contact2Name: trimOrNull(data.contact2Name, { maxLength: FIELD_LIMITS.VARCHAR_150 }),
+    contact2Title: trimOrNull(data.contact2Title, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
+    contact2Phone: trimOrNull(data.contact2Phone, { maxLength: 20 }),
+    contact2Fax: trimOrNull(data.contact2Fax, { maxLength: 20 }),
+    contact2Email: trimOrNull(data.contact2Email, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
     dateServed: dateOrNull(data.dateServed),
     depoDueDate: dateOrNull(data.depoDueDate),
     deliveryDate: dateOrNull(data.deliveryDate),
@@ -400,12 +405,12 @@ function buildOrderDbPayload(data) {
     readyDate: dateOrNull(data.readyDate),
     invoiceDate: dateOrNull(data.invoiceDate),
     xrayInvoiceDate: dateOrNull(data.xrayInvoiceDate),
-    specificRecord: trimOrNull(data.specificRecord),
-    specificDoctor: trimOrNull(data.specificDoctor),
+    specificRecord: trimOrNull(data.specificRecord, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    specificDoctor: trimOrNull(data.specificDoctor, { maxLength: FIELD_LIMITS.VARCHAR_200 }),
     specificDoctorIsDefault: boolToInt(data.specificDoctorIsDefault),
-    fullAddress: trimOrNull(data.fullAddress),
+    fullAddress: trimOrNull(data.fullAddress, { maxLength: FIELD_LIMITS.TEXT }),
     certificateNoRecords: boolToInt(data.certificateNoRecords),
-    cnrReason: trimOrNull(data.cnrReason),
+    cnrReason: trimOrNull(data.cnrReason, { maxLength: FIELD_LIMITS.TEXT }),
     cnrDelivery: enumOrNull(data.cnrDelivery, ALLOWED_CNR_DELIVERY),
     cnrDateSent: dateOrNull(data.cnrDateSent),
     cnrMemo: boolToInt(data.cnrMemo),
@@ -1270,7 +1275,7 @@ async function getAllOrders(query = {}) {
   }
 
   if (query.company && `${query.company}`.trim()) {
-    filters.company = `${query.company}`.trim();
+    filters.company = sanitizeSearchText(query.company, { maxLength: 255 });
   }
 
   if (query.status === "ready") {
@@ -1311,15 +1316,17 @@ async function getAllOrders(query = {}) {
   }
 
   if (query.createdFrom && `${query.createdFrom}`.trim()) {
-    filters.createdFrom = `${query.createdFrom}`.trim();
+    const cleaned = sanitizeText(query.createdFrom, { maxLength: 30, allowEmpty: true });
+    if (cleaned) filters.createdFrom = cleaned;
   }
 
   if (query.createdTo && `${query.createdTo}`.trim()) {
-    filters.createdTo = `${query.createdTo}`.trim();
+    const cleaned = sanitizeText(query.createdTo, { maxLength: 30, allowEmpty: true });
+    if (cleaned) filters.createdTo = cleaned;
   }
 
   if (query.search && `${query.search}`.trim()) {
-    filters.search = `${query.search}`.trim();
+    filters.search = sanitizeSearchText(query.search);
   }
 
   if (query.limit) {
@@ -1562,7 +1569,7 @@ async function addOrderNote(orderId, data, actorId, file) {
     throw new ApiError(404, "Order not found");
   }
 
-  const noteText = trimOrNull(data.note);
+  const noteText = trimOrNull(data.note, { maxLength: FIELD_LIMITS.ORDER_NOTE });
 
   if (!noteText) {
     throw new ApiError(400, "Note text is required");
@@ -1630,7 +1637,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
   }
 
   const markCalled = parseBooleanFlag(data.markCalled);
-  let noteText = trimOrNull(data.note);
+  let noteText = trimOrNull(data.note, { maxLength: FIELD_LIMITS.ORDER_NOTE });
 
   if (!noteText) {
     throw new ApiError(400, "Note text is required");
@@ -1733,7 +1740,9 @@ async function getOrderActivityLogs(orderId, query = {}) {
   const cursorRaw = Number(query.cursor);
   const cursorSortKey =
     Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
-  const search = `${query.search || ""}`.trim() || null;
+  const search = query.search
+    ? sanitizeSearchText(query.search) || null
+    : null;
 
   if (!useKeysetPagination) {
     const logs = await Order.findActivityLogsByOrderId(order.id);
@@ -2451,7 +2460,7 @@ async function cancelOrder(id, { reason, actorId, actorName }) {
     throw new ApiError(400, "Order is already cancelled");
   }
 
-  const trimmedReason = trimOrNull(reason);
+  const trimmedReason = trimOrNull(reason, { maxLength: FIELD_LIMITS.TEXT });
   if (!trimmedReason) {
     throw new ApiError(400, "Cancellation reason is required");
   }

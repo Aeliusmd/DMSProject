@@ -16,7 +16,8 @@ const EMPTY_SUMMARY = {
 };
 
 export default function CompanyWiseInvoicesPage() {
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState([]);
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
@@ -53,7 +54,7 @@ export default function CompanyWiseInvoicesPage() {
   }, []);
 
   const filteredCompanies = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = appliedSearch.trim().toLowerCase();
 
     if (!query) return companies;
 
@@ -63,7 +64,23 @@ export default function CompanyWiseInvoicesPage() {
         company.email.toLowerCase().includes(query)
       );
     });
-  }, [companies, searchQuery]);
+  }, [companies, appliedSearch]);
+
+  const handleSearch = () => {
+    setAppliedSearch(searchInput.trim());
+  };
+
+  const handleClearSearch = () => {
+    setSearchInput("");
+    setAppliedSearch("");
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSearch();
+    }
+  };
 
   return (
     <DashboardShell>
@@ -90,16 +107,37 @@ export default function CompanyWiseInvoicesPage() {
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative w-full sm:w-[260px]">
-              <SearchIcon />
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <div className="relative w-full sm:w-[260px]">
+                <SearchIcon />
 
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search companies..."
-                className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white pl-9 pr-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-              />
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Search companies..."
+                  className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white pl-9 pr-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSearch}
+                className="h-[36px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+              >
+                Search
+              </button>
+
+              {appliedSearch ? (
+                <button
+                  type="button"
+                  onClick={handleClearSearch}
+                  className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+                >
+                  Clear
+                </button>
+              ) : null}
             </div>
 
             <CurrentDateTime

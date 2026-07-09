@@ -4,9 +4,23 @@
 
 const { getPool } = require("../config/database");
 const Order = require("../models/Order");
+const {
+  assertPositiveInt,
+  parseOptionalIsoDate,
+} = require("../utils/sqlSafety");
+const { sanitizeSearchText } = require("../utils/sanitize");
 const { calculateOrderRushLevel } = require("../utils/rushUtils");
 
 const PRODUCED_STATUSES = new Set(["Ready", "Ready to Pickup", "Completed"]);
+
+const ACTIVITY_FILTER_VALUES = new Set([
+  "All",
+  "Invoiced",
+  "Paid",
+  "Unpaid",
+  "Written Off",
+  "Produced",
+]);
 
 const RECORD_TITLES = {
   medical: "Medical Records",
@@ -158,11 +172,11 @@ async function getOrdersReport({
   showDuplicates = true,
 } = {}) {
   const rows = await Order.findForReport({
-    orderNo: orderNo?.trim() || null,
-    caseNumber: caseNumber?.trim() || null,
-    doctor: doctor?.trim() || null,
-    dateFrom: dateFrom || null,
-    dateTo: dateTo || null,
+    orderNo: sanitizeSearchText(orderNo, { maxLength: 100 }) || null,
+    caseNumber: sanitizeSearchText(caseNumber, { maxLength: 100 }) || null,
+    doctor: sanitizeSearchText(doctor, { maxLength: 150 }) || null,
+    dateFrom: parseOptionalIsoDate(dateFrom, "dateFrom"),
+    dateTo: parseOptionalIsoDate(dateTo, "dateTo"),
     unpaidOnly: Boolean(unpaidOnly),
   });
 
@@ -263,29 +277,34 @@ async function getActivityReport({
   search = "",
 } = {}) {
   const pool = getPool();
+  const safeSearch = sanitizeSearchText(search, { maxLength: 150 });
+  const safeActivity = ACTIVITY_FILTER_VALUES.has(activity) ? activity : "All";
   const conditions = [
     "f.is_active = 1",
     "o.status NOT IN ('Cancelled', 'Deleted')",
   ];
   const params = {};
 
-  if (dateFrom) {
+  const validatedDateFrom = parseOptionalIsoDate(dateFrom, "dateFrom");
+  if (validatedDateFrom) {
     conditions.push(
       "DATE(COALESCE(i.invoice_date, x.xray_invoice_date, o.created_at)) >= :dateFrom"
     );
-    params.dateFrom = dateFrom;
+    params.dateFrom = validatedDateFrom;
   }
 
-  if (dateTo) {
+  const validatedDateTo = parseOptionalIsoDate(dateTo, "dateTo");
+  if (validatedDateTo) {
     conditions.push(
       "DATE(COALESCE(i.invoice_date, x.xray_invoice_date, o.created_at)) <= :dateTo"
     );
-    params.dateTo = dateTo;
+    params.dateTo = validatedDateTo;
   }
 
   if (facilityId) {
+    const normalizedFacilityId = assertPositiveInt(facilityId, "facilityId");
     conditions.push("f.id = :facilityId");
-    params.facilityId = Number(facilityId);
+    params.facilityId = normalizedFacilityId;
   }
 
   const [rows] = await pool.execute(
@@ -393,8 +412,8 @@ async function getActivityReport({
 
   companies = companies.filter((company) => {
     return (
-      companyMatchesActivity(company.activities, activity) &&
-      companyMatchesSearch(company, search)
+      companyMatchesActivity(company.activities, safeActivity) &&
+      companyMatchesSearch(company, safeSearch)
     );
   });
 
