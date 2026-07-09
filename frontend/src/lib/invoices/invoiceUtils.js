@@ -6,6 +6,40 @@ export function buildEditOrderUrl(orderId) {
   return `/orders/new?mode=edit&orderId=${encodeURIComponent(orderId)}`;
 }
 
+export function buildOrderForInvoiceEmailModal({
+  orderId,
+  caseNo,
+  applicant,
+  companyName,
+  companyEmail = "",
+  invoiceId = null,
+}) {
+  const email = `${companyEmail || ""}`.trim();
+  const primaryEmail = email.split(/[,;]/)[0]?.trim() || email;
+
+  return {
+    id: caseNo || orderId,
+    dbId: orderId,
+    applicant: applicant || caseNo || "N/A",
+    company: {
+      name: companyName || "—",
+      email,
+      emailAddress: primaryEmail,
+    },
+    invoice: invoiceId
+      ? { invoiceId: Number(invoiceId) || invoiceId }
+      : undefined,
+  };
+}
+
+export function resolveInvoiceEmailModalKind(invoices = []) {
+  if (invoices.length && invoices.every((invoice) => invoice.invoiceType === "xray")) {
+    return "xray";
+  }
+
+  return "standard";
+}
+
 export function isNoProviderEmailError(error) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("no provider email");

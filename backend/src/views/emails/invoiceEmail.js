@@ -50,6 +50,31 @@ function buildOrderDetailsSection(sendOrderDetails, orderDetailsText) {
     </tr>`;
 }
 
+function buildPayOnlineSection(paymentUrl) {
+  if (!paymentUrl) return "";
+
+  return `
+    <tr>
+      <td style="padding:0 40px 24px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:${BRAND.primaryLight};border-radius:12px;border:1px solid #BDECF3;">
+          <tr>
+            <td style="padding:18px 20px;">
+              <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:${BRAND.primaryDark};">
+                Pay Online
+              </p>
+              <p style="margin:0 0 14px;font-size:13px;line-height:1.55;color:${BRAND.text};">
+                If you would like to pay this invoice online, please use the secure link below.
+              </p>
+              <a href="${escapeHtml(paymentUrl)}" style="display:inline-block;background-color:${BRAND.primary};color:#ffffff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 18px;border-radius:8px;">
+                Pay Invoice Online
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`;
+}
+
 function renderInvoiceText({
   companyName,
   caseNo,
@@ -65,6 +90,7 @@ function renderInvoiceText({
   isRushOrder,
   rushLevel,
   orderDetailsText,
+  paymentUrl = null,
 }) {
   const reminderNumber = Number(reminderLevel) || 0;
   const isReminder = reminderNumber > 0;
@@ -95,6 +121,14 @@ function renderInvoiceText({
     ...(sendOrderDetails && orderDetailsText
       ? ["", "Order Details:", orderDetailsText]
       : []),
+    ...(paymentUrl
+      ? [
+          "",
+          "Pay Online:",
+          "If you would like to pay this invoice online, use this secure link:",
+          paymentUrl,
+        ]
+      : []),
     "",
     "Thank you,",
     "DMS Document Management System",
@@ -116,6 +150,7 @@ function renderInvoiceHtml({
   isRushOrder,
   rushLevel,
   orderDetailsText,
+  paymentUrl = null,
 }) {
   const safeCompany = escapeHtml(companyName || "Valued Customer");
   const reminderNumber = Number(reminderLevel) || 0;
@@ -195,6 +230,7 @@ function renderInvoiceHtml({
       </td>
     </tr>
     ${buildOrderDetailsSection(sendOrderDetails, orderDetailsText)}
+    ${buildPayOnlineSection(paymentUrl)}
     <tr>
       <td style="padding:0 40px 36px;">
         <p style="margin:0;font-size:14px;line-height:1.6;color:${BRAND.muted};">

@@ -265,7 +265,7 @@ export function splitInvoicesForResend(invoices = []) {
   };
 }
 
-export async function resendInvoiceSelection(invoices = []) {
+export async function resendInvoiceSelection(invoices = [], emails = null) {
   const { standardIds, xrayOrderIds } = splitInvoicesForResend(invoices);
 
   if (!standardIds.length && !xrayOrderIds.length) {
@@ -273,11 +273,11 @@ export async function resendInvoiceSelection(invoices = []) {
   }
 
   if (standardIds.length) {
-    await resendInvoices(standardIds);
+    await resendInvoices(standardIds, emails);
   }
 
   if (xrayOrderIds.length) {
-    await resendXrayInvoices(xrayOrderIds);
+    await resendXrayInvoices(xrayOrderIds, emails);
   }
 }
 
