@@ -9,6 +9,7 @@ import {
 } from "@/lib/validations/nameValidation";
 
 export const immediateRequiredFields = [
+  "orderNumber",
   "facility",
   "type",
   "firstName",
@@ -47,6 +48,18 @@ export const paymentPrefixes = ["prepayment", "custodian", "xray"];
 
 export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
+
+  if (!data.orderNumber?.trim()) {
+    errors.orderNumber = "Order number is required";
+  } else {
+    const orderNumberError = validateNoHtmlMarkup(data.orderNumber, {
+      fieldLabel: "Order number",
+    });
+    if (orderNumberError) errors.orderNumber = orderNumberError;
+    else if (data.orderNumber.trim().length > 50) {
+      errors.orderNumber = "Order number cannot be more than 50 characters";
+    }
+  }
 
   if (!data.facility) errors.facility = "Facility is required";
   if (!hasFormRecordTypesSelected(data)) {
