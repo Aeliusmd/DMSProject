@@ -1,410 +1,598 @@
-# DMS Backend — Validation, Sanitization, SQL Safety & Exception Handling
+# DMS System Security & Validation Reference
 
-This document summarizes how the DMS API protects input, queries, and errors **by module**. It covers what was already in place and what was added to strengthen backend validation (so frontend-only checks are not relied on alone).
+**Document version:** 1.5  
+**Last updated:** July 2026  
+**Scope:** Backend validation, data sanitization, SQL injection protection, exception handling, and frontend integration — **module by module**.
 
 ---
 
-## Architecture overview
+## 1. Target behavior (all modules)
 
-Every API request passes through these layers:
+Every user-facing write operation should follow this pattern:
 
 ```
-Request
-  → Auth / role middleware (where required)
-  → Upload middleware (file routes)
-  → Controller validation (validators)
-  → Service business rules + sanitization
-  → Model (parameterized SQL)
-  → asyncHandler catches async errors
-  → errorHandler + errorMapper → JSON response
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐     ┌──────────────┐
+│  Frontend   │     │  Frontend        │     │  Backend        │     │  Backend     │
+│  Validate   │ ──► │  Disable submit  │ ──► │  Validate       │ ──► │  Sanitize +  │
+│  on change  │     │  when invalid    │     │  in controller  │     │  parameterized│
+└─────────────┘     └──────────────────┘     └─────────────────┘     │  SQL + service│
+                                                                      └──────────────┘
+                                                                              │
+                                                                              ▼
+                                                                    ┌──────────────────┐
+                                                                    │ errorHandler →   │
+                                                                    │ { message,       │
+                                                                    │   errors[] }     │
+                                                                    └──────────────────┘
 ```
 
-### Standard error response (frontend)
+| Layer | Responsibility | Can be bypassed? |
+|-------|----------------|------------------|
+| **Frontend validation** | UX — early feedback, highlight fields | Yes (devtools, API tools) |
+| **Disabled submit button** | UX — prevent accidental submit | Yes |
+| **Backend validation** | **Required** — security & data integrity | No |
+| **Sanitization** | Clean text before storage/search | No (in service/model path) |
+| **SQL parameterization** | Prevent injection | No |
 
-All handled API errors return:
+**Rule:** Never rely on frontend or disabled buttons alone. Backend **always** returns structured errors on invalid input.
+
+### Standard API error response
 
 ```json
 {
   "success": false,
-  "message": "Human-readable message",
-  "errors": [{ "field": "email", "message": "Enter a valid email address" }]
+  "message": "Validation failed",
+  "errors": [
+    { "field": "email", "message": "Provider email is required" }
+  ]
 }
 ```
 
-- `errors` is an array for validation failures, or `null` for general errors.
-- Stack traces are **never** sent to the client.
-- Unknown 500 errors return `"Internal server error"`.
-
-The frontend `request()` helper in `frontend/src/lib/auth/authApi.js` maps this to:
+Frontend client (`frontend/src/lib/auth/authApi.js`):
 
 ```js
 throw new ApiRequestError(data.message, response.status, data.errors);
 ```
 
+Shared frontend helpers (`frontend/src/lib/apiErrorUtils.js`):
+
+| Function | Purpose |
+|----------|---------|
+| `mapApiErrors(errors, fieldMap)` | Map `{ field, message }[]` → `{ [field]: message }` |
+| `shouldShowSubmitError(message, fieldErrors)` | Hide generic banner when field errors exist |
+| `getApiErrorMessage(error, fallback)` | Prefer first field message over generic API text |
+| `applyApiFieldErrors(error, fieldMap)` | Parse API error into field errors + banner |
+| `mergeApiFieldErrors(error, setFieldErrors)` | Merge into React state; returns banner text |
+| `hasValidationErrors(validationErrors)` | True when client validation object is non-empty |
+
 ---
 
-## Shared infrastructure
+## 2. Current system status (summary)
+
+| Rating | Meaning |
+|--------|---------|
+| **FULLY COVERED** | Backend validates writes/queries; read-only or no forms |
+| **PARTIAL** | Backend strong; frontend missing disable-on-invalid and/or `errors[]` field mapping |
+| **MISSING** | Significant gap in frontend or backend for that module |
+
+| Module | Backend validation | Frontend pre-submit | Submit disabled when invalid | API `errors[]` → fields |
+|--------|-------------------|---------------------|------------------------------|-------------------------|
+| Auth | ✅ Strong | ✅ Login + 2FA | ✅ Login | ✅ Login + 2FA (`identifier`→`email`, `code`) |
+| Employees | ✅ Strong | ✅ Create/edit/suspend | ✅ Create/edit/suspend | ✅ Form modal + suspend modal |
+| Orders | ✅ Strong | ✅ Main form + modals | ✅ Main form + action modals | ✅ Save + provider sync + modals |
+| Invoices | ✅ Strong | ✅ Modals | ✅ Create/X-ray/write-off | ✅ Create + X-ray + write-off modals |
+| Facilities | ✅ Strong | ✅ Create/edit/notes/docs | ✅ Create/edit/notes/docs | ✅ Main forms + note/upload modals |
+| Providers | ⚠️ Update only | ⚠️ Via order page blur | N/A | ✅ Order page maps sync errors |
+| Payments | ✅ Manual payment + list queries | ✅ Basic | ✅ Manual payment modal | ✅ Manual payment modal |
+| Settings | ✅ Strong | ✅ Profile/password | ✅ Profile/password | ✅ Profile/password |
+| Notifications | ✅ Query limit | N/A (read) | N/A | N/A |
+| Reports | ✅ Query parser | N/A (filters) | N/A | N/A |
+| Stripe public | ✅ Checkout | N/A | ⚠️ Processing only | ✅ `publicPayApi.js` |
+| Activity log | ✅ Service parse | N/A (read) | N/A | N/A |
+| Dashboard | ✅ Limit clamp | N/A (read) | N/A | N/A |
+
+**Conclusion:** Backend validation remains the authoritative gate on all major write paths. Frontend now **uniformly** disables submit when client validation fails and maps API `errors[]` to form fields on the primary write surfaces (orders, invoices, facilities, employees, settings, payments, and order action modals).
+
+---
+
+## 3. Shared backend infrastructure
 
 | File | Purpose |
 |------|---------|
 | `src/validators/validationHelpers.js` | Email, ISO date, money, SSN, positive IDs, max length |
 | `src/validators/*.js` | Per-domain request validators |
 | `src/utils/validationUtils.js` | `throwIfInvalid()` → `ApiError(400, "Validation failed", errors)` |
-| `src/lib/facilityValidation.js` | Facility & doctor payload rules (used by `facilityValidator`) |
+| `src/lib/facilityValidation.js` | Facility & doctor rules |
 | `src/lib/reportQueryParser.js` | Report query validation + sanitization |
-| `src/utils/sanitize.js` | Strip control chars, bound text/search length, `escapeHtml`, `sanitizeTrimOrNull` |
-| `src/utils/sqlSafety.js` | `escapeLike`, `likeContains`, `assertPositiveInt`, `assertIsoDate`, `assertEnum` |
-| `src/utils/fieldLimits.js` | Column-aligned max lengths |
-| `src/utils/asyncHandler.js` | Wraps controllers; `runSideEffect` / `runSafely` for background work |
-| `src/utils/errorMapper.js` | Maps DB, JWT, Stripe, FS, JSON errors → `ApiError` |
+| `src/utils/sanitize.js` | `stripControlCharacters`, `sanitizeText`, `sanitizeSearchText`, `escapeHtml` |
+| `src/utils/sqlSafety.js` | `escapeLike`, `likeContains`, `assertPositiveInt`, `assertIsoDate` |
+| `src/utils/fieldLimits.js` | DB column-aligned max lengths |
+| `src/utils/asyncHandler.js` | Catches async controller errors → `errorHandler`; `runSideEffect` / `runSafely` for jobs |
+| `src/utils/serviceErrorUtils.js` | `rethrowServiceError`, `withTransaction`, `runNonCritical` — shared service-layer error patterns |
+| `src/utils/errorMapper.js` | Maps runtime errors → safe `ApiError` |
 | `src/middleware/errorHandler.js` | Global Express error middleware |
-| `src/middleware/uploadMiddleware.js` | MIME allowlists, file size limits, safe filenames |
-| `src/app.js` | `express.json({ limit: "2mb" })`, global `errorHandler` |
-| `server.js` | `unhandledRejection` / `uncaughtException` logging |
+| `src/middleware/uploadMiddleware.js` | MIME allowlists, file size limits |
+| `src/app.js` | `express.json({ limit: "2mb" })` |
+| `server.js` | `unhandledRejection`, `uncaughtException` logging |
 
-### Validator pattern
+### Validator return shape
 
 ```js
 { valid: boolean, errors?: [{ field: string, message: string }] }
 ```
 
-Controllers call validators **before** services. Services keep existing business-rule checks (no logic removed).
+### Service-layer error handling
+
+| Helper | Use when | Behavior |
+|--------|----------|----------|
+| `rethrowServiceError(error)` | Transaction `catch`, DB helpers, email send failures | Preserves `ApiError`; maps MySQL/JWT/FS/Stripe via `errorMapper` |
+| `withTransaction(pool, fn)` | New multi-step DB writes | begin → commit / rollback → release + mapped rethrow |
+| `runNonCritical(label, fn, logger)` | Side effects (notifications, activity logs, milestone rollups, payment emails) | Logs warning; returns `null` — parent request still succeeds |
+| `asyncHandler.runSafely(label, fn)` | Background jobs (`invoiceReminderJob`, `employeeReactivationJob`) | Logs **error**; returns `null` — job loop continues |
+
+Controllers stay thin: no local `try/catch`; errors bubble to `errorHandler`.
 
 ---
 
-## Module summary
-
-### Auth (`/api/auth`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `authValidator.js` — login, 2FA, resend 2FA, refresh, logout |
-| **Sanitization** | Trim + format checks on identifier/email/password/token fields |
-| **SQL injection** | Parameterized queries in `AuthSession`, `Employee` models |
-| **Exceptions** | `ApiError` for invalid credentials; JWT errors mapped in `errorMapper` (`TokenExpiredError`, `JsonWebTokenError`, `NotBeforeError`) |
+## 4. Module reference (validation · sanitization · SQL · exceptions)
 
 ---
 
-### Employees (`/api/employees`)
+### 4.1 Auth — `/api/auth`
 
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `employeeValidator.js` — create, update, **suspend** (reactivation datetime, must be future) |
-| **Query validation** | `validateMilestoneStatsQuery` — optional ISO `from` / `to` |
-| **Sanitization** | `sanitizeSearchText` on employee list search in service |
-| **SQL injection** | `Employee` model uses `:named` params + `escapeLikePrefix` for search |
-| **Exceptions** | `ApiError` for duplicate email, self-suspend, admin suspend, etc. |
+| Area | Details |
+|------|---------|
+| **Validation** | `authValidator.js` — login (trim + max length), 2FA, resend 2FA, refresh, logout |
+| **Sanitization** | Trim on identifier; password max 128 chars; 2FA code digits-only |
+| **SQL injection** | Parameterized queries in `AuthSession`, `Employee` |
+| **Frontend** | `login/page.jsx` — validates, disables submit, maps API `errors[]` to email/password; `TwoFactorAuthModal.jsx` maps `code` errors |
 
----
+**Exceptions handled**
 
-### Orders (`/api/orders`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `orderValidator.js` — create, update, facility update, notes, workflow stages |
-| **Action validation** | `orderActionValidator.js` — cancel, mail/CNR/certificate emails, copy letter, pickup, fax, batch scan, medical record upload (`recordType` enum) |
-| **Query validation** | `validateOrderNotesQuery` (dates, pageSize 1–100, noteId); `validateSearchQuery` on doctor/address search |
-| **Sanitization** | `sanitizeSearchText` on order list filters; `sanitizeText` on notes/text fields in service |
-| **SQL injection** | `Order` model — parameterized queries; `sortDir` whitelisted (`asc`/`desc` only); `LIKE` via escaped patterns |
-| **Upload** | PDF-only medical records; batch scan PDF; multer size limits |
-| **Exceptions** | Business rules in `orderService` (not found, already cancelled, CNR flags, etc.) → `ApiError` |
-
-**Validated endpoints (controller layer):**
-
-- `POST /` create, `PUT /:id` update, `PATCH /:id/facility`
-- `POST/PUT …/notes`, `GET …/notes` (query), `PATCH …/workflow-stages`
-- `POST /:id/cancel`, `mail`, `send-cnr-record`, `send-certificate-of-records`, `send-copy-letter`, `pickup`, `fax`
-- `POST /batch-scan`, `POST /:id/scan-medical-records`
-- Doctor/address search queries
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400/401 | Invalid credentials, validation failed |
+| JWT | `TokenExpiredError` | 401 | Session expired. Please sign in again. |
+| JWT | `JsonWebTokenError` | 401 | Invalid or expired session. Please sign in again. |
+| JWT | `NotBeforeError` | 401 | Invalid or expired session. Please sign in again. |
+| MySQL | `ER_DUP_ENTRY` | 409 | This record already exists. |
+| Network | `ECONNREFUSED`, etc. | 503 | Database is temporarily unavailable. |
 
 ---
 
-### Invoices (`/api/invoices`)
+### 4.2 Employees — `/api/employees`
 
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `invoiceValidator.js` — create/update, X-ray invoice, invoice/order ID arrays, recipient emails, write-off payloads |
-| **Sanitization** | `sanitizeTrimOrNull` on text fields in `invoiceService` |
-| **SQL injection** | `Invoice`, `InvoiceXray`, `InvoiceReport` — parameterized queries; report `ORDER BY` from internal constants only |
-| **Exceptions** | `throwIfInvalid` in controller; service throws for not found, already paid, zero total |
+| Area | Details |
+|------|---------|
+| **Validation** | `employeeValidator.js` — create, update, suspend (future datetime) |
+| **Query** | `validateMilestoneStatsQuery` — ISO `from`/`to` |
+| **Sanitization** | `sanitizeSearchText` on list search |
+| **SQL injection** | `Employee` — `:named` params, `escapeLikePrefix` |
+| **Frontend** | `EmployeeFormModal.jsx` + `SuspendEmployeeModal.jsx` — validate, disable submit, map `errors[]` |
 
----
+**Exceptions handled**
 
-### Facilities (`/api/facilities`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `facilityValidator.js` wraps `facilityValidation.js` — create, update, resolve (name required), doctors create/update, notes, document upload (type enum + file required) |
-| **Sanitization** | `sanitizeSearchText` on facility search; service-layer validation retained |
-| **SQL injection** | `Facility`, `FacilityDoctor`, `OfficeManager` — `:named` params + `escapeLikePrefix` |
-| **Upload** | Facility documents — MIME/size via `uploadMiddleware` |
-| **Exceptions** | Duplicate facility, not found, invalid doctor — `ApiError` |
-
-**Sub-routes:**
-
-- **Notes** (`facilityNoteController`) — `validateFacilityNote` (required, max 500 chars)
-- **Documents** (`facilityDocumentController`) — `validateDocumentUpload` (file + `Standard|Legal|Medical|Financial|Other`)
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Validation failed (field errors) |
+| Custom | `ApiError` | 400 | You cannot suspend your own account |
+| Custom | `ApiError` | 400 | Admin accounts cannot be suspended |
+| Custom | `ApiError` | 409 | This email is already in use |
+| Custom | `ApiError` | 404 | Employee not found |
+| MySQL | `ER_DUP_ENTRY` | 409 | This record already exists. |
+| MySQL | `ER_DATA_TOO_LONG` | 400 | One or more fields exceed the allowed length. |
 
 ---
 
-### Providers (`/api/providers`)
+### 4.3 Orders — `/api/orders`
 
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `providerValidator.js` — update (company name, email, zip, state, phone/fax formats, max lengths) |
-| **Query validation** | `validateSearchQuery` on search |
-| **Sanitization** | **Added:** `sanitizeSearchText` + `stripControlCharacters` on provider text fields in `providerService.buildProviderPayload` |
-| **SQL injection** | `Provider.search` uses `likeContains` + `assertPositiveInt` for limit |
-| **Exceptions** | Not found, invalid id, missing company name |
+| Area | Details |
+|------|---------|
+| **Validation** | `orderValidator.js` — create/update, facility, notes, workflow; **provider email required** |
+| **Actions** | `orderActionValidator.js` — cancel, mail, CNR, certificate, copy letter, pickup, fax, batch scan, medical scan, **remove medical records**, **medical record file type** |
+| **Query** | `validateOrderNotesQuery`, `validateSearchQuery` |
+| **Sanitization** | `sanitizeSearchText` on filters; `sanitizeText` on notes |
+| **SQL injection** | Parameterized queries; `sortDir` whitelist; escaped `LIKE` |
+| **Upload** | PDF medical records; batch scan; multer limits |
+| **Frontend** | `orders/new/page.jsx` — validates, disables save, maps API `errors[]`; action modals (`OrderFaxModal`, `OrderPickupModal`, `SendCopyLetterModal`, `SendInvoiceEmailModal`, `OrderNotesModal`, `OrderAddNoteModal`, `OrderNotesListModal`, `OrderCancelModal`) use `apiErrorUtils` |
 
----
+**Exceptions handled**
 
-### Payments (`/api/payments`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `paymentValidator.js` — manual payment (orderId, invoiceType, check number, payment date) |
-| **Query validation** | `validatePaymentSearchQuery` — order search ref required, max length |
-| **Sanitization** | `sanitizeTrimOrNull` on payment notes in service |
-| **SQL injection** | Parameterized updates/inserts in `paymentService` |
-| **Exceptions** | Invoice not found, already paid, invalid date — `ApiError` |
-
----
-
-### Settings (`/api/settings`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `settingsValidator.js` — profile (name, email), password change, notification booleans |
-| **Sanitization** | Trim on profile fields in service |
-| **SQL injection** | `Employee`, `EmployeeSettings` parameterized |
-| **Exceptions** | Email in use (409), wrong current password, validation field errors |
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Validation failed (e.g. provider email required) |
+| Custom | `ApiError` | 400 | Cancellation reason is required |
+| Custom | `ApiError` | 400 | At least one recipient email is required |
+| Custom | `ApiError` | 400 | A valid company email is required |
+| Custom | `ApiError` | 400 | Invalid record type |
+| Custom | `ApiError` | 400 | Cannot cancel a deleted order |
+| Custom | `ApiError` | 404 | Order not found |
+| Upload | `MulterError` | 400 | File upload error / size limit |
+| Upload | `"Unsupported file type"` | 400 | Unsupported file type |
+| MySQL | `ER_*` | 400/503 | Mapped via `errorMapper` |
 
 ---
 
-### Notifications (`/api/notifications`)
+### 4.4 Invoices — `/api/invoices`
 
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `validateNotificationQuery` — `limit` capped 1–100 |
-| **Sanitization** | `sanitizeSearchText` on optional search in service |
-| **SQL injection** | `Notification` model parameterized |
-| **Exceptions** | Not found when marking read — `ApiError` |
+| Area | Details |
+|------|---------|
+| **Validation** | `invoiceValidator.js` — create/update, X-ray, send/resend, write-off, email arrays |
+| **Sanitization** | `sanitizeTrimOrNull` on text in service |
+| **SQL injection** | Parameterized; report `ORDER BY` from internal constants |
+| **Frontend** | `CreateInvoiceModal.jsx`, `CreateXrayInvoiceModal.jsx`, `WriteOffInvoiceModal.jsx` — validate, disable submit, map `errors[]` |
 
----
+**Exceptions handled**
 
-### Reports (`/api/reports`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `reportQueryParser.js` — date ranges, page size (max 100), cursor length, rush levels, activity filters, company group key |
-| **Sanitization** | `sanitizeSearchText` on search, orderNo, caseNumber, doctor fields |
-| **SQL injection** | Report models use bound parameters; enums whitelisted |
-| **Exceptions** | Invalid date range, invalid cursor — `ApiError` |
-
----
-
-### Dashboard (`/api/dashboard`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `limit` clamped 1–20 in `dashboardService` |
-| **SQL injection** | Static SQL with parameterized filters |
-| **Exceptions** | DB errors via `errorMapper` |
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Validation failed (amounts, dates, IDs) |
+| Custom | `ApiError` | 400 | Invoice total must be greater than zero |
+| Custom | `ApiError` | 400 | This invoice is already paid |
+| Custom | `ApiError` | 404 | Invoice / order not found |
+| MySQL | `ER_DUP_ENTRY` | 409 | This record already exists. |
 
 ---
 
-### Activity log (`/api/activity-log`)
+### 4.5 Facilities — `/api/facilities`
 
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `queryLogs` parsing in `activityLogService` (dates, module, pagination) |
-| **Sanitization** | `sanitizeSearchText` on search filter |
-| **SQL injection** | `ActivityLog` parameterized + `escapeLike` for search |
-| **Exceptions** | Access restrictions by role — `ApiError` |
+| Area | Details |
+|------|---------|
+| **Validation** | `facilityValidator.js` — create, update, resolve, **resolve doctor**, doctors, notes, document upload |
+| **Sanitization** | `sanitizeSearchText` on search; `sanitizeText` on resolve-doctor name |
+| **SQL injection** | `escapeLikePrefix`, parameterized queries |
+| **Upload** | Document MIME/size limits |
+| **Frontend** | `facilities/new/page.jsx`, `facilities/[id]/info/page.jsx`, `FacilityAddNoteModal.jsx`, `UploadDocumentsModal.jsx` — validate, disable submit, map `errors[]` |
 
----
+**Exceptions handled**
 
-### Stripe public (`/api/public/pay`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | `stripeValidator.js` — checkout `invoiceType` (`regular` \| `xray`); `validateStripeCheckoutResult` — `session_id` required |
-| **Exceptions** | Stripe errors (`error.type` starts with `Stripe`) mapped in `errorMapper`; invalid/expired token — `ApiError` |
-
----
-
-### Stripe webhook (`/api/webhooks/stripe`)
-
-| Area | Implementation |
-|------|----------------|
-| **Validation** | Signature verification in `stripePaymentService` |
-| **Exceptions** | `Webhook signature verification failed` → 400; wrapped in `asyncHandler` |
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Validation failed (facility name, email, zip, etc.) |
+| Custom | `ApiError` | 400 | Invalid document type |
+| Custom | `ApiError` | 400 | A file is required |
+| Custom | `ApiError` | 404 | Facility / doctor / note not found |
+| Upload | `MulterError` | 400 | File size / upload error |
+| MySQL | `ER_ROW_IS_REFERENCED_2` | 400 | This record is in use and cannot be removed. |
 
 ---
 
-### Public record download (`/api/public`)
+### 4.6 Providers — `/api/providers`
 
-| Area | Implementation |
-|------|----------------|
+| Area | Details |
+|------|---------|
+| **Validation** | `providerValidator.js` — update (name, email format, zip, phone) |
+| **Query** | `validateSearchQuery` |
+| **Sanitization** | `sanitizeSearchText`, `stripControlCharacters` on text fields |
+| **SQL injection** | `likeContains`, `assertPositiveInt` on limit |
+| **Frontend** | No dedicated provider form; order page `syncProviderFromForm` maps API validation errors to provider fields on blur |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Provider company name is required |
+| Custom | `ApiError` | 400 | Validation failed (email, zip, phone) |
+| Custom | `ApiError` | 404 | Provider not found |
+
+---
+
+### 4.7 Payments — `/api/payments`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `paymentValidator.js` — manual payment; `validatePaymentSearchQuery`; **`validatePaymentListQuery`** (dates, orderId, limit 1–500) |
+| **Sanitization** | `sanitizeTrimOrNull` on notes |
+| **SQL injection** | Parameterized inserts/updates; list queries capped via `parsePaymentListLimit` |
+| **Frontend** | `ManualPaymentModal.jsx` — validates, disables save when invalid, maps `errors[]` to check/date fields |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | orderId / check number / payment date required |
+| Custom | `ApiError` | 400 | invoiceType must be regular or xray |
+| Custom | `ApiError` | 400 | This invoice is already paid |
+| Custom | `ApiError` | 404 | Order / invoice not found |
+
+---
+
+### 4.8 Settings — `/api/settings`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `settingsValidator.js` — profile, password, notification booleans |
+| **Sanitization** | Trim on profile fields |
+| **SQL injection** | Parameterized `Employee`, `EmployeeSettings` |
+| **Frontend** | Profile/password validate, disable save when invalid, map `errors[]` |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Validation failed (firstName, email, password) |
+| Custom | `ApiError` | 400 | Current password is incorrect |
+| Custom | `ApiError` | 409 | This email is already in use |
+| Custom | `ApiError` | 404 | User not found |
+
+---
+
+### 4.9 Notifications — `/api/notifications`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `validateNotificationQuery` — limit 1–100 |
+| **Sanitization** | `sanitizeSearchText` on optional search |
+| **SQL injection** | Parameterized `Notification` model |
+| **Frontend** | Read-only list + mark read |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 404 | Notification not found |
+
+---
+
+### 4.10 Reports — `/api/reports`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `reportQueryParser.js` — dates, page size, cursor, enums |
+| **Sanitization** | `sanitizeSearchText` on search fields |
+| **SQL injection** | Bound parameters; whitelisted filters |
+| **Frontend** | Filter UI only |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 400 | Start date must be on or before end date |
+| Custom | `ApiError` | 400 | Invalid cursor / companyGroupKey |
+
+---
+
+### 4.11 Dashboard — `/api/dashboard`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `limit` clamped 1–20 in service |
+| **SQL injection** | Static SQL + params |
+| **Frontend** | Read-only widgets |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| MySQL / Network | `ER_*`, `ECONN*` | 400/503 | Via `errorMapper` |
+
+---
+
+### 4.12 Activity log — `/api/activity-log`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `activityLogService.queryLogs` — dates, module, pagination |
+| **Sanitization** | `sanitizeSearchText` |
+| **SQL injection** | `escapeLike` + parameterized |
+| **Frontend** | Read-only table |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Custom | `ApiError` | 403 | Role-based access restrictions |
+
+---
+
+### 4.13 Stripe public — `/api/public/pay`
+
+| Area | Details |
+|------|---------|
+| **Validation** | `stripeValidator.js` — invoiceType; session_id on result; **receipt download** (`sessionId` + `token`) |
+| **Frontend** | Pay page; `publicPayApi.js` throws `ApiRequestError` with `errors[]` |
+
+**Exceptions handled**
+
+| Type | Name / code | HTTP | Client message |
+|------|-------------|------|----------------|
+| Stripe | `Stripe*` types | 4xx | Stripe error message |
+| Custom | `ApiError` | 400 | invoiceType must be regular or xray |
+| Custom | `ApiError` | 400/410 | Invalid / expired payment link |
+| Custom | `ApiError` | 400 | Invoice amount must be greater than zero |
+
+---
+
+### 4.14 Stripe webhook — `/api/webhooks/stripe`
+
+| Area | Details |
+|------|---------|
+| **Validation** | Webhook signature verification |
+| **Exceptions** | `Webhook signature verification failed` → 400 |
+
+---
+
+### 4.15 Public record download — `/api/public`
+
+| Area | Details |
+|------|---------|
 | **Validation** | Token validation in `recordDownloadService` |
-| **Exceptions** | Expired/invalid token — `ApiError` |
+| **Exceptions** | Expired/invalid token → `ApiError` 400/404 |
 
 ---
 
-## SQL injection protection (global)
+## 5. Global exception catalog
 
-| Technique | Where |
-|-----------|--------|
-| **Named parameters** (`:orderId`, `:query`, etc.) | All models via `mysql2` `pool.execute()` |
-| **LIKE escaping** | `sqlSafety.escapeLike`, `likeContains`, model `escapeLikePrefix` |
-| **Integer limits** | `assertPositiveInt` on LIMIT values |
-| **Sort whitelist** | Order list: only `asc` / `desc` for `sortDir` |
-| **Enum whitelist** | Reports, rush levels, document types, record types, invoice types |
-| **No user SQL fragments** | Dynamic SQL builds `WHERE` from fixed condition templates + bound params |
+### 5.1 Always returned to client (via `errorHandler`)
 
----
+| Category | Exact names | Typical HTTP |
+|----------|-------------|--------------|
+| **Custom** | `ApiError` | 400, 401, 403, 404, 409, 500, 503, 507 |
+| **JSON parse** | `SyntaxError` (`entity.parse.failed`) | 400 |
+| **Upload** | `MulterError`, code `LIMIT_FILE_SIZE` | 400 |
+| **Upload** | Error message `"Unsupported file type"` | 400 |
+| **JWT** | `TokenExpiredError`, `JsonWebTokenError`, `NotBeforeError` | 401 |
+| **MySQL** | `ER_DUP_ENTRY` | 409 |
+| **MySQL** | `ER_NO_REFERENCED_ROW_2`, `ER_ROW_IS_REFERENCED_2`, `ER_BAD_NULL_ERROR`, `ER_DATA_TOO_LONG`, `ER_TRUNCATED_WRONG_VALUE`, `ER_PARSE_ERROR` | 400 |
+| **MySQL** | `ER_LOCK_WAIT_TIMEOUT`, `ER_LOCK_DEADLOCK` | 503 |
+| **MySQL** | `ER_ACCESS_DENIED_ERROR`, other `ER_*` | 503 / 400 |
+| **Network** | `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENOTFOUND`, `PROTOCOL_CONNECTION_LOST` | 503 |
+| **File system** | `ENOENT`, `EACCES`, `EPERM`, `ENOSPC` | 404 / 403 / 507 |
+| **Stripe** | Any `error.type` starting with `Stripe` | 4xx |
+| **Fallback** | Unknown `Error` | 500 — "Internal server error" |
 
-## Data sanitization (global)
+### 5.2 Server-only (never sent to client)
 
-| Function | Use |
-|----------|-----|
-| `stripControlCharacters` | Remove null bytes and control chars |
-| `sanitizeText` | Trim + max length before storage |
-| `sanitizeSearchText` | Query/search strings (default max 200 chars) |
-| `sanitizeTrimOrNull` | Optional text fields in payments/invoices |
-| `escapeHtml` | Email templates / HTML output |
-| `fieldLimits.js` | Aligns with DB column sizes |
-
----
-
-## Exception handling reference
-
-### Custom
-
-| Name | Handling |
-|------|----------|
-| `ApiError` | Passed through `errorHandler`; returns `message` + optional `errors` |
-
-### Upload
-
-| Name | Client message |
-|------|----------------|
-| `MulterError` | File upload error |
-| `MulterError` code `LIMIT_FILE_SIZE` | Uploaded file exceeds limit |
-| Message `"Unsupported file type"` | Same text (400) |
-
-### JSON / Express
-
-| Name | Client message |
-|------|----------------|
-| `SyntaxError` (`entity.parse.failed`) | Invalid JSON in request body |
-
-### JWT
-
-| Name | Client message |
-|------|----------------|
-| `TokenExpiredError` | Session expired. Please sign in again. |
-| `JsonWebTokenError` | Invalid or expired session. Please sign in again. |
-| `NotBeforeError` | Invalid or expired session. Please sign in again. |
-
-### MySQL (`error.code`)
-
-| Code | Status | Client message |
-|------|--------|----------------|
-| `ER_DUP_ENTRY` | 409 | This record already exists. |
-| `ER_NO_REFERENCED_ROW_2` | 400 | A related record was not found. |
-| `ER_ROW_IS_REFERENCED_2` | 400 | This record is in use and cannot be removed. |
-| `ER_BAD_NULL_ERROR` | 400 | A required field is missing. |
-| `ER_DATA_TOO_LONG` | 400 | One or more fields exceed the allowed length. |
-| `ER_TRUNCATED_WRONG_VALUE` | 400 | One or more fields contain an invalid value. |
-| `ER_PARSE_ERROR` | 400 | Invalid data was submitted. |
-| `ER_LOCK_WAIT_TIMEOUT` | 503 | The request timed out. Please try again. |
-| `ER_LOCK_DEADLOCK` | 503 | The request conflicted with another update. Please try again. |
-| `ER_ACCESS_DENIED_ERROR` | 503 | Database is temporarily unavailable. |
-| Other `ER_*` | 400 | Database request could not be completed. |
-
-### Network / DB connection
-
-`ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENOTFOUND`, `PROTOCOL_CONNECTION_LOST` → **503** Database is temporarily unavailable.
-
-### File system
-
-| Code | Status | Message |
-|------|--------|---------|
-| `ENOENT` | 404 | The requested file was not found. |
-| `EACCES` / `EPERM` | 403 | File access was denied. |
-| `ENOSPC` | 507 | Server storage is full. |
-
-### Stripe
-
-Any error with `type` starting with `Stripe` → mapped to `ApiError` with Stripe message.
-
-### Process-level (server only, not sent to client)
-
-| Event | Action |
-|-------|--------|
-| `unhandledRejection` | Logged in `server.js` |
-| `uncaughtException` | Logged in `server.js` |
-
-### Fallback
-
-Unknown errors → **500** `"Internal server error"` (logged with stack server-side).
+| Event | Handler |
+|-------|---------|
+| `unhandledRejection` | `server.js` — logged |
+| `uncaughtException` | `server.js` — logged |
+| Non-critical side effects | `runNonCritical` / `runSafely` — logged as warning, request continues |
+| Per-item batch failures | `orderService.autoCreateOrdersFromBatch`, `invoiceReminderService` — logged per item |
+| Stack traces | Logged server-side only |
 
 ---
 
-## Frontend integration notes
+## 6. SQL injection protection (global)
 
-| Screen / area | Field-level `errors[]` | Banner `message` only |
-|---------------|------------------------|------------------------|
-| Employee form | Yes | — |
-| Settings profile/password | Yes | — |
-| Facility create/edit/doctors | Yes | — |
-| Orders, lists, many modals | Partial | Yes |
-
-All API clients receive `message` and `errors` via `ApiRequestError`. Per-field UI mapping depends on each page implementing `error.errors`.
-
----
-
-## Files added or extended (validation hardening)
-
-### New validator files
-
-- `src/validators/providerValidator.js`
-- `src/validators/settingsValidator.js`
-- `src/validators/paymentValidator.js`
-- `src/validators/orderActionValidator.js`
-- `src/validators/facilityValidator.js`
-- `src/validators/queryValidators.js`
-- `src/validators/stripeValidator.js`
-- `src/utils/validationUtils.js`
-
-### Extended
-
-- `src/validators/employeeValidator.js` — `validateSuspendEmployee`
-- `src/validators/index.js` — exports all validators
-- Controllers wired with `throwIfInvalid` / validators (providers, settings, payments, facilities, orders actions, notifications, Stripe public, facility notes/documents)
-- `src/services/providerService.js` — search sanitization + control-char stripping on text fields
-- `src/services/facilityService.js` — search sanitization
-- `src/app.js` — JSON body size limit (2MB)
-
-### Unchanged (by design)
-
-- Service-layer business rules remain as a second line of defense.
-- Existing auth, order create/update, and invoice validators were not modified in behavior.
-- No raw SQL or route logic was changed.
+| Technique | Implementation |
+|-----------|----------------|
+| Named parameters | All models: `pool.execute(sql, { :param })` |
+| LIKE escaping | `sqlSafety.escapeLike`, `likeContains`, model `escapeLikePrefix` |
+| LIMIT safety | `assertPositiveInt`, `Math.min` clamps |
+| Sort whitelist | Order list: `asc` / `desc` only |
+| Enum whitelist | Document types, record types, invoice types, report filters |
+| No string concat | User input never embedded in SQL text |
 
 ---
 
-## Testing recommendations
+## 7. Data sanitization (global)
 
-1. Send invalid body to each validated endpoint → expect `400` with `errors[]`.
-2. Send oversized JSON (>2MB) → expect parse error.
-3. Upload wrong MIME / oversized file → expect `MulterError` or unsupported type message.
-4. Use expired JWT → expect `401` with session message.
-5. Trigger duplicate DB insert → expect `409` with friendly message.
-6. Verify valid requests still succeed (regression on create order, facility, invoice, payment).
+| Function | Purpose |
+|----------|---------|
+| `stripControlCharacters` | Remove null bytes / control chars |
+| `sanitizeText` | Trim + max length |
+| `sanitizeSearchText` | Search queries (max 200 chars default) |
+| `sanitizeTrimOrNull` | Optional fields → null if empty |
+| `escapeHtml` | Safe HTML in emails |
+| `fieldLimits.js` | Matches DB column sizes |
 
 ---
 
-*Last updated: July 2026*
+## 8. Frontend validation utilities (complete coverage v1.3)
+
+Shared module: `frontend/src/lib/apiErrorUtils.js`
+
+| Screen / component | Disable submit when invalid | API `errors[]` → fields |
+|--------------------|----------------------------|-------------------------|
+| `login/page.jsx` | ✅ | ✅ (`identifier` → `email`) |
+| `TwoFactorAuthModal.jsx` | ✅ (6-digit code) | ✅ (`code`) |
+| `EmployeeFormModal.jsx` | ✅ | ✅ |
+| `SuspendEmployeeModal.jsx` | ✅ | ✅ (`reactivatedDate`) |
+| `orders/new/page.jsx` | ✅ | ✅ (save + provider sync) |
+| `OrderAddNoteModal.jsx` | ✅ | ✅ |
+| `OrderNotesModal.jsx` | ✅ | ✅ |
+| `OrderNotesListModal.jsx` | ✅ | ✅ |
+| `OrderCancelModal.jsx` | ✅ | ✅ (`reason`) |
+| `OrderFaxModal.jsx` | ✅ | ✅ |
+| `OrderPickupModal.jsx` | ✅ | ✅ |
+| `SendCopyLetterModal.jsx` | ✅ | ✅ |
+| `SendInvoiceEmailModal.jsx` | ✅ | ✅ |
+| `facilities/new/page.jsx` | ✅ | ✅ |
+| `facilities/[FacilityId]/info/page.jsx` | ✅ | ✅ |
+| `FacilityAddNoteModal.jsx` | ✅ | ✅ (`note`) |
+| `UploadDocumentsModal.jsx` | ✅ | ✅ (`file`) |
+| `settings/page.jsx` | ✅ | ✅ |
+| `ManualPaymentModal.jsx` | ✅ | ✅ |
+| `CreateInvoiceModal.jsx` | ✅ | ✅ |
+| `CreateXrayInvoiceModal.jsx` | ✅ | ✅ |
+| `WriteOffInvoiceModal.jsx` | ✅ | ✅ (`amount`, `orderAction`) |
+| `publicPayApi.js` | N/A | ✅ (`ApiRequestError`) |
+
+**Status:** All identified write surfaces now follow the standard pattern — client validation, disabled submit when invalid, and API field error mapping.
+
+---
+
+## 9. Validator file index
+
+| File | Modules |
+|------|---------|
+| `authValidator.js` | Auth |
+| `employeeValidator.js` | Employees |
+| `orderValidator.js` | Orders (create/update) |
+| `orderActionValidator.js` | Order actions |
+| `invoiceValidator.js` | Invoices |
+| `facilityValidator.js` | Facilities, notes, documents |
+| `providerValidator.js` | Providers |
+| `paymentValidator.js` | Payments |
+| `settingsValidator.js` | Settings |
+| `queryValidators.js` | Notifications, order notes, search, payments, **payment lists**, **route id**, Stripe result, milestones |
+| `stripeValidator.js` | Stripe checkout, **receipt download** |
+| `validationHelpers.js` | Shared primitives |
+| `reportQueryParser.js` | Reports |
+| `facilityValidation.js` | Facility/doctor rules (lib) |
+
+---
+
+## 10. Testing checklist
+
+1. Submit invalid body to each validated endpoint → `400` + `errors[]`
+2. Submit valid body → `200`/`201` success
+3. Bypass frontend (curl/Postman) → backend still rejects invalid data
+4. Oversized JSON (>2MB) → `SyntaxError` / invalid JSON message
+5. Wrong upload MIME → `Unsupported file type` or `MulterError`
+6. Expired JWT → `401` session message
+7. Duplicate DB row → `409` friendly message
+8. Order save without provider email → `400` field error on `email`
+
+---
+
+## 11. Complete backend module checklist (v1.5)
+
+Every API route group and how validation, sanitization, and SQL safety are applied.
+
+| Module | Routes prefix | Validation | Sanitization | SQL injection |
+|--------|---------------|------------|--------------|---------------|
+| **Auth** | `/api/auth` | `authValidator.js` (all POST) | Trim identifier; password max length | `Employee`, `AuthSession` — `:named` params |
+| **Employees** | `/api/employees` | `employeeValidator.js` (create/update/suspend); `validateMilestoneStatsQuery` | `sanitizeSearchText` on list | `escapeLikePrefix`, parameterized |
+| **Orders** | `/api/orders` | `orderValidator.js`, `orderActionValidator.js`, `validateSearchQuery`, `validateOrderNotesQuery` | `sanitizeText`/`sanitizeSearchText`; `buildOrderDbPayload` | Whitelist sort; `likeContains`; parameterized |
+| **Invoices** | `/api/invoices` | `invoiceValidator.js` (writes) | `sanitizeTrimOrNull` | `reportQueryParser`; internal ORDER BY |
+| **Facilities** | `/api/facilities` | `facilityValidator.js` incl. **resolve doctor**; `validateSearchQuery` | `sanitizeSearchText`, `sanitizeText` on doctor resolve | `escapeLikePrefix`; parameterized |
+| **Providers** | `/api/providers` | `providerValidator.js` (update); `validateSearchQuery` | `sanitizeSearchText`, `stripControlCharacters` | `likeContains`; `assertPositiveInt` |
+| **Payments** | `/api/payments` | `paymentValidator.js`, `validatePaymentSearchQuery`, **`validatePaymentListQuery`** | `sanitizeTrimOrNull` on notes | Parameterized; **limit 1–500** on lists |
+| **Settings** | `/api/settings` | `settingsValidator.js` | Trim profile fields | Parameterized `Employee`, `EmployeeSettings` |
+| **Notifications** | `/api/notifications` | `validateNotificationQuery` | `sanitizeSearchText` | Parameterized `Notification` |
+| **Reports** | `/api/reports` | `reportQueryParser.js` | `sanitizeSearchText` on all search fields | Bound params; enum whitelists |
+| **Dashboard** | `/api/dashboard` | Service clamps `limit` 1–20 | N/A (aggregates) | Static SQL + numeric LIMIT |
+| **Activity log** | `/api/activity-log` | `activityLogService.queryLogs` | `sanitizeSearchText` | `escapeLike`; parameterized |
+| **Stripe public** | `/api/public/pay` | `stripeValidator.js`, `validateStripeCheckoutResult`, **`validateStripeReceiptDownload`** | Token trim in service | Parameterized token/session lookups |
+| **Stripe webhook** | `/api/webhooks/stripe` | Signature verification | N/A | Parameterized Stripe DB ops |
+| **Public download** | `/api/public/records-download` | `recordDownloadService` token check | Token trim | Parameterized `:token` |
+| **Health** | `/health` | N/A | N/A | No DB |
+
+### Shared query helpers (`queryValidators.js`)
+
+| Function | Used for |
+|----------|----------|
+| `validateNotificationQuery` | Notification list limit |
+| `validateOrderNotesQuery` | Order notes pagination/dates |
+| `validateMilestoneStatsQuery` | Employee milestone ISO dates |
+| `validateSearchQuery` | Facility/provider/doctor search (`q` max 200) |
+| `validatePaymentSearchQuery` | Payment order invoice search |
+| `validatePaymentListQuery` | Manual/online payment lists (orderId, dates, limit) |
+| `validatePositiveIntRouteParam` | Route `:id` positive integer |
+| `validateStripeCheckoutResult` | Stripe result `session_id` |
+| `parsePaymentListLimit` | Clamp list results (default 100, max 500) |
+
+### SQL injection rules (all modules)
+
+1. **Never** concatenate user input into SQL strings.
+2. **Always** use `pool.execute(sql, { :param })` with `namedPlaceholders: true`.
+3. **LIKE** searches: `escapeLike`, `likeContains`, or model `escapeLikePrefix`.
+4. **LIMIT/OFFSET**: numeric coercion + `Math.min` clamp or `parsePaymentListLimit`.
+5. **ORDER BY / sort**: whitelist (`asc`/`desc`) or internal column constants only.
+6. **Enums**: `assertEnum` or `Set` membership before SQL.
+
+---
+
+*DMS Project — Internal technical reference*

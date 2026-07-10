@@ -4,6 +4,7 @@
  */
 
 const ApiError = require("../utils/ApiError");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const { getPool } = require("../config/database");
 const Order = require("../models/Order");
 const Invoice = require("../models/Invoice");
@@ -15,6 +16,7 @@ const {
   parseOptionalIsoDate,
   assertPositiveInt,
 } = require("../utils/sqlSafety");
+const { parsePaymentListLimit } = require("../validators/queryValidators");
 
 function toNumber(value) {
   const number = Number(value);
@@ -290,7 +292,7 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -331,6 +333,7 @@ function mapManualPaymentRow(row) {
 
 async function getManualPayments(query = {}) {
   const pool = getPool();
+  const limit = parsePaymentListLimit(query);
   const conditions = ["i.payment_method = 'manual'"];
   const params = {};
 
@@ -429,7 +432,8 @@ async function getManualPayments(query = {}) {
     .map(mapManualPaymentRow)
     .sort((a, b) =>
       String(b.paymentDate || "").localeCompare(String(a.paymentDate || ""))
-    );
+    )
+    .slice(0, limit);
 
   return payments;
 }

@@ -7,11 +7,17 @@ const Stripe = require("stripe");
 
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
+const { rethrowServiceError, runNonCritical } = require("../utils/serviceErrorUtils");
 const { getPool } = require("../config/database");
 const Order = require("../models/Order");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const logger = require("../utils/logger");
+const {
+  parseOptionalIsoDate,
+  assertPositiveInt,
+} = require("../utils/sqlSafety");
+const { parsePaymentListLimit } = require("../validators/queryValidators");
 
 let stripeClient = null;
 
@@ -425,22 +431,25 @@ function mapOnlinePaymentRow(row) {
 
 async function getOnlinePayments(query = {}) {
   const pool = getPool();
+  const limit = parsePaymentListLimit(query);
   const conditions = ["s.status = 'succeeded'"];
   const params = {};
 
   if (query.orderId) {
     conditions.push("o.id = :orderId");
-    params.orderId = Number(query.orderId);
+    params.orderId = assertPositiveInt(query.orderId, "orderId");
   }
 
-  if (query.dateFrom) {
+  const dateFrom = parseOptionalIsoDate(query.dateFrom, "dateFrom");
+  if (dateFrom) {
     conditions.push("DATE(COALESCE(s.paid_at, s.created_at)) >= :dateFrom");
-    params.dateFrom = query.dateFrom;
+    params.dateFrom = dateFrom;
   }
 
-  if (query.dateTo) {
+  const dateTo = parseOptionalIsoDate(query.dateTo, "dateTo");
+  if (dateTo) {
     conditions.push("DATE(COALESCE(s.paid_at, s.created_at)) <= :dateTo");
-    params.dateTo = query.dateTo;
+    params.dateTo = dateTo;
   }
 
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
@@ -458,7 +467,8 @@ async function getOnlinePayments(query = {}) {
      LEFT JOIN facilities f ON f.id = o.facility_id
      LEFT JOIN providers p ON p.id = o.provider_id
      ${whereClause}
-     ORDER BY COALESCE(s.paid_at, s.created_at) DESC`,
+     ORDER BY COALESCE(s.paid_at, s.created_at) DESC
+     LIMIT ${limit}`,
     params
   );
 
@@ -592,24 +602,23 @@ async function updatePaymentRecord(connection, paymentRecordId, fields) {
 }
 
 async function sendPaymentNotificationEmail(paymentRow, outcome) {
-  try {
-    const { sendPaymentResultEmail } = require("./emailService");
-    await sendPaymentResultEmail({
-      to: paymentRow.customer_email,
-      outcome,
-      companyName: paymentRow.company_name || "Customer",
-      orderNumber: paymentRow.order_number || "",
-      invoiceNumber: paymentRow.invoice_number || "",
-      amount: formatMoney(paymentRow.amount),
-      failureMessage: paymentRow.failure_message || "",
-      receiptUrl: paymentRow.receipt_url || "",
-    });
-  } catch (error) {
-    logger.warn("Failed to send payment notification email", {
-      error: error.message,
-      paymentId: paymentRow.id,
-    });
-  }
+  await runNonCritical(
+    "Failed to send payment notification email",
+    async () => {
+      const { sendPaymentResultEmail } = require("./emailService");
+      await sendPaymentResultEmail({
+        to: paymentRow.customer_email,
+        outcome,
+        companyName: paymentRow.company_name || "Customer",
+        orderNumber: paymentRow.order_number || "",
+        invoiceNumber: paymentRow.invoice_number || "",
+        amount: formatMoney(paymentRow.amount),
+        failureMessage: paymentRow.failure_message || "",
+        receiptUrl: paymentRow.receipt_url || "",
+      });
+    },
+    logger
+  );
 }
 
 async function insertSuccessfulPaymentRecord(connection, session, stripeDetails) {
@@ -717,7 +726,7 @@ async function fulfillSuccessfulCheckoutSession(session) {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }

@@ -1,17 +1,12 @@
 const invoiceReminderService = require("../services/invoiceReminderService");
-const logger = require("../utils/logger");
-const config = require("../config");
+const { runSafely } = require("../utils/asyncHandler");
 
 function startInvoiceReminderJob() {
-  const intervalMs = config.invoiceReminder.checkIntervalMs;
-
-  const run = async () => {
-    try {
-      await invoiceReminderService.processDueInvoiceReminders();
-    } catch (error) {
-      logger.error("Invoice reminder job failed", { error: error.message });
-    }
-  };
+  const intervalMs = require("../config").invoiceReminder.checkIntervalMs;
+  const run = runSafely(
+    "Invoice reminder job failed",
+    () => invoiceReminderService.processDueInvoiceReminders()
+  );
 
   run();
   setInterval(run, intervalMs).unref();

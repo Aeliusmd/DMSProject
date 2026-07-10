@@ -4,6 +4,7 @@ const EmployeeSettings = require("../models/EmployeeSettings");
 const Order = require("../models/Order");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
+const { runNonCritical } = require("../utils/serviceErrorUtils");
 const { sanitizeSearchText } = require("../utils/sanitize");
 
 const NOTIFICATION_TYPES = ["order", "invoice", "reminder", "activity"];
@@ -139,24 +140,19 @@ async function createNotification({
     return null;
   }
 
-  try {
-    return await Notification.create({
-      employeeId,
-      notificationType: normalizedType,
-      title,
-      description,
-      referenceType,
-      referenceId,
-    });
-  } catch (error) {
-    logger.error("Failed to create notification row", {
-      error: error.message,
-      employeeId,
-      notificationType: normalizedType,
-      title,
-    });
-    return null;
-  }
+  return runNonCritical(
+    "Failed to create notification row",
+    () =>
+      Notification.create({
+        employeeId,
+        notificationType: normalizedType,
+        title,
+        description,
+        referenceType,
+        referenceId,
+      }),
+    logger
+  );
 }
 
 async function dispatchSystemWide({
@@ -167,34 +163,32 @@ async function dispatchSystemWide({
   referenceType = null,
   referenceId = null,
 }) {
-  try {
-    const employees = await getActiveEmployees();
+  return runNonCritical(
+    "Failed to dispatch system-wide notification",
+    async () => {
+      const employees = await getActiveEmployees();
 
-    await Promise.all(
-      employees.map(async (employee) => {
-        const enabled = await isPreferenceEnabled(employee.id, preferenceKey);
+      await Promise.all(
+        employees.map(async (employee) => {
+          const enabled = await isPreferenceEnabled(employee.id, preferenceKey);
 
-        if (!enabled) {
-          return null;
-        }
+          if (!enabled) {
+            return null;
+          }
 
-        return createNotification({
-          employeeId: employee.id,
-          notificationType,
-          title,
-          description,
-          referenceType,
-          referenceId,
-        });
-      })
-    );
-  } catch (error) {
-    logger.error("Failed to dispatch system-wide notification", {
-      error: error.message,
-      notificationType,
-      preferenceKey,
-    });
-  }
+          return createNotification({
+            employeeId: employee.id,
+            notificationType,
+            title,
+            description,
+            referenceType,
+            referenceId,
+          });
+        })
+      );
+    },
+    logger
+  );
 }
 
 async function dispatchPersonal({
@@ -206,33 +200,30 @@ async function dispatchPersonal({
   referenceType = null,
   referenceId = null,
 }) {
-  try {
-    if (!employeeId) {
-      return null;
-    }
+  return runNonCritical(
+    "Failed to dispatch personal notification",
+    async () => {
+      if (!employeeId) {
+        return null;
+      }
 
-    const enabled = await isPreferenceEnabled(employeeId, preferenceKey);
+      const enabled = await isPreferenceEnabled(employeeId, preferenceKey);
 
-    if (!enabled) {
-      return null;
-    }
+      if (!enabled) {
+        return null;
+      }
 
-    return createNotification({
-      employeeId,
-      notificationType,
-      title,
-      description,
-      referenceType,
-      referenceId,
-    });
-  } catch (error) {
-    logger.warn("Failed to dispatch personal notification", {
-      error: error.message,
-      employeeId,
-      notificationType,
-    });
-    return null;
-  }
+      return createNotification({
+        employeeId,
+        notificationType,
+        title,
+        description,
+        referenceType,
+        referenceId,
+      });
+    },
+    logger
+  );
 }
 
 async function notifyOrderCreated({ orderNumber, companyName, orderId }) {

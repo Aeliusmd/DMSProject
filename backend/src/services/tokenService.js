@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const config = require("../config");
+const ApiError = require("../utils/ApiError");
 
 function generateSessionToken() {
   return crypto.randomBytes(48).toString("hex");
@@ -36,7 +37,7 @@ function verifyAccessToken(token) {
   const decoded = jwt.verify(token, config.jwt.accessSecret);
 
   if (decoded.type !== "access") {
-    throw new Error("Invalid access token type");
+    throw new ApiError(401, "Invalid or expired session. Please sign in again.");
   }
 
   return decoded;
@@ -46,7 +47,7 @@ function verifyRefreshToken(token) {
   const decoded = jwt.verify(token, config.jwt.refreshSecret);
 
   if (decoded.type !== "refresh") {
-    throw new Error("Invalid refresh token type");
+    throw new ApiError(401, "Invalid or expired session. Please sign in again.");
   }
 
   return decoded;

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { resolveProviderEmail } from "@/lib/orders/deliveryActions";
 import { getOrderRecordsForMail } from "@/lib/orders/recordTypeUtils";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -37,6 +38,7 @@ export default function SendInvoiceEmailModal({
   const mounted = useIsClient();
   const [primaryEmail, setPrimaryEmail] = useState("");
   const [additionalEmails, setAdditionalEmails] = useState([]);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -86,6 +88,7 @@ export default function SendInvoiceEmailModal({
 
     setPrimaryEmail(resolveProviderEmail(order) || "");
     setAdditionalEmails([]);
+    setFieldErrors({});
     setError("");
     setSubmitting(false);
   }, [isOpen, order]);
@@ -103,6 +106,9 @@ export default function SendInvoiceEmailModal({
 
   if (!mounted || !isOpen || !order) return null;
 
+  const isFormInvalid =
+    !primaryEmail.trim() || !EMAIL_PATTERN.test(primaryEmail.trim());
+
   const uploadedRecords = isRecords
     ? getOrderRecordsForMail(order).filter((slot) => slot.hasFile)
     : [];
@@ -115,6 +121,7 @@ export default function SendInvoiceEmailModal({
     setAdditionalEmails((prev) =>
       prev.map((email, emailIndex) => (emailIndex === index ? value : email))
     );
+    setFieldErrors({});
     setError("");
   };
 
@@ -125,26 +132,48 @@ export default function SendInvoiceEmailModal({
 
   const handleSubmit = async () => {
     const emails = normalizeEmails(primaryEmail, additionalEmails);
+    const nextErrors = {};
 
     if (!emails.length) {
-      setError("Enter at least one email address");
-      return;
+      nextErrors.email = "Enter at least one email address";
+    } else {
+      const invalidEmail = emails.find((email) => !EMAIL_PATTERN.test(email));
+      if (invalidEmail) {
+        setError(`Enter a valid email address: ${invalidEmail}`);
+        return;
+      }
     }
 
-    const invalidEmail = emails.find((email) => !EMAIL_PATTERN.test(email));
-    if (invalidEmail) {
-      setError(`Enter a valid email address: ${invalidEmail}`);
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError("");
       return;
     }
 
     setSubmitting(true);
     setError("");
+    setFieldErrors({});
 
     try {
       await onSend?.(emails);
       onClose();
     } catch (err) {
-      setError(err.message || `Failed to send ${isCertification ? "certificate of records " : isCnr ? "CNR " : isRecords ? "records" : isXray ? "X-Ray " : ""}email`);
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err, {
+        emails: "email",
+      });
+
+      if (Object.keys(apiErrors).length > 0) {
+        setFieldErrors(apiErrors);
+      }
+
+      setError(
+        message ||
+          getApiErrorMessage(
+            err,
+            `Failed to send ${isCertification ? "certificate of records " : isCnr ? "CNR " : isRecords ? "records" : isXray ? "X-Ray " : ""}email`
+          )
+      );
     } finally {
       setSubmitting(false);
     }
@@ -203,15 +232,19 @@ export default function SendInvoiceEmailModal({
               value={primaryEmail}
               onChange={(e) => {
                 setPrimaryEmail(e.target.value);
+                setFieldErrors({});
                 setError("");
               }}
               placeholder="Enter company email"
               className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
-                error
+                fieldErrors.email || error
                   ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
                   : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
               }`}
             />
+            {fieldErrors.email ? (
+              <p className="mt-1 text-[11px] text-red-500">{fieldErrors.email}</p>
+            ) : null}
           </div>
 
           {additionalEmails.map((email, index) => (
@@ -261,7 +294,7 @@ export default function SendInvoiceEmailModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || isFormInvalid}
             className="h-[34px] rounded-[6px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:opacity-60"
           >
             {submitting ? "Sending..." : submitLabel}

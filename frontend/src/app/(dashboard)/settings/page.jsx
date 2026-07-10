@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import AlertModal from "@/components/ui/AlertModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
+import {
+  mapApiErrors,
+  hasValidationErrors,
+  getApiErrorMessage,
+} from "@/lib/apiErrorUtils";
 import { setAuth, getStoredUser } from "@/lib/auth/authStorage";
 import { validatePasswordChangeForm } from "@/lib/passwordValidations";
 import {
@@ -160,6 +165,18 @@ export default function SettingsPage() {
     return nextErrors;
   };
 
+  const profileValidationErrors = useMemo(
+    () => validateProfileForm(),
+    [profile]
+  );
+  const isProfileInvalid = hasValidationErrors(profileValidationErrors);
+
+  const passwordValidationErrors = useMemo(
+    () => validatePasswordChangeForm(passwordData),
+    [passwordData]
+  );
+  const isPasswordInvalid = hasValidationErrors(passwordValidationErrors);
+
   const handleSaveProfile = async () => {
     const validationErrors = validateProfileForm();
     setProfileErrors(validationErrors);
@@ -188,17 +205,13 @@ export default function SettingsPage() {
       showAlert("success", "Profile Updated", "Your profile was saved successfully.");
     } catch (err) {
       if (err instanceof ApiRequestError && err.errors) {
-        const mapped = {};
-        err.errors.forEach(({ field, message }) => {
-          mapped[field] = message;
-        });
-        setProfileErrors(mapped);
+        setProfileErrors(mapApiErrors(err.errors));
       }
 
       showAlert(
         "error",
         "Profile Update Failed",
-        err.message || "Failed to save profile"
+        getApiErrorMessage(err, "Failed to save profile")
       );
     } finally {
       setSavingProfile(false);
@@ -261,13 +274,10 @@ export default function SettingsPage() {
         "Your password was changed successfully."
       );
     } catch (err) {
-      const mapped = {};
+      const mapped = mapApiErrors(err instanceof ApiRequestError ? err.errors : []);
 
-      if (err instanceof ApiRequestError && err.errors) {
-        err.errors.forEach(({ field, message }) => {
-          mapped[field] = message;
-        });
-      } else if (
+      if (
+        Object.keys(mapped).length === 0 &&
         err instanceof ApiRequestError &&
         /current password/i.test(err.message || "")
       ) {
@@ -281,7 +291,7 @@ export default function SettingsPage() {
       showAlert(
         "error",
         "Password Update Failed",
-        err.message || "Failed to update password"
+        getApiErrorMessage(err, "Failed to update password")
       );
     } finally {
       setUpdatingPassword(false);
@@ -349,7 +359,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={handleSaveProfile}
-              disabled={savingProfile}
+              disabled={savingProfile || isProfileInvalid}
               className="inline-flex h-[38px] min-w-[110px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {savingProfile ? "Saving..." : "Save Profile"}
@@ -422,7 +432,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleUpdatePassword}
-                disabled={updatingPassword}
+                disabled={updatingPassword || isPasswordInvalid}
                 className="inline-flex h-[38px] min-w-[132px] items-center justify-center rounded-[6px] bg-[#111827] px-5 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {updatingPassword ? "Updating..." : "Update Password"}

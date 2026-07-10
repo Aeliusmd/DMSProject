@@ -4,6 +4,7 @@ const ActivityLog = require("../models/ActivityLog");
 const milestoneRollupService = require("./milestoneRollupService");
 const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
+const { runNonCritical } = require("../utils/serviceErrorUtils");
 const {
   assertEnum,
   parseOptionalIsoDate,
@@ -356,38 +357,38 @@ async function recordActivity({
 }
 
 async function recordFromRequest(req, data) {
-  try {
-    return await recordActivity({
-      performedBy: req.user?.id,
-      ...data,
-      details:
-        data.details ||
-        data.description ||
-        data.note ||
-        formatActionLabel(data.action, data.context),
-    });
-  } catch (error) {
-    logger.warn("Failed to record activity log", { error: error.message });
-    return null;
-  }
+  return runNonCritical(
+    "Failed to record activity log",
+    () =>
+      recordActivity({
+        performedBy: req.user?.id,
+        ...data,
+        details:
+          data.details ||
+          data.description ||
+          data.note ||
+          formatActionLabel(data.action, data.context),
+      }),
+    logger
+  );
 }
 
 async function recordSafe(payload) {
-  try {
-    return await recordActivity({
-      ...payload,
-      performedBy: payload.performedBy || payload.actorId,
-      performerName: payload.performerName || payload.actorName,
-      details:
-        payload.details ||
-        payload.description ||
-        payload.note ||
-        formatActionLabel(payload.action, payload.context),
-    });
-  } catch (error) {
-    logger.warn("Failed to record activity log", { error: error.message });
-    return null;
-  }
+  return runNonCritical(
+    "Failed to record activity log",
+    () =>
+      recordActivity({
+        ...payload,
+        performedBy: payload.performedBy || payload.actorId,
+        performerName: payload.performerName || payload.actorName,
+        details:
+          payload.details ||
+          payload.description ||
+          payload.note ||
+          formatActionLabel(payload.action, payload.context),
+      }),
+    logger
+  );
 }
 
 async function queryLogs(query = {}) {

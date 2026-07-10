@@ -2,7 +2,7 @@ const {
   validateFacilityPayload,
   validateDoctorsPayload,
 } = require("../lib/facilityValidation");
-const { trimToString, isBlank, addMaxLengthError } = require("./validationHelpers");
+const { trimToString, isBlank, isValidPositiveIntId, addMaxLengthError } = require("./validationHelpers");
 
 const DOCUMENT_TYPES = new Set([
   "Standard",
@@ -76,6 +76,26 @@ function validateCreateFacilityNote(body = {}) {
   return { valid: errors.length === 0, errors };
 }
 
+function validateResolveDoctor(body = {}) {
+  const errors = [];
+  const doctorName = trimToString(body.doctorName);
+
+  if (
+    body.doctorId !== undefined &&
+    body.doctorId !== null &&
+    `${body.doctorId}`.trim() !== "" &&
+    !isValidPositiveIntId(body.doctorId)
+  ) {
+    errors.push({ field: "doctorId", message: "Invalid doctor id" });
+  }
+
+  if (doctorName) {
+    addMaxLengthError(errors, "doctorName", doctorName, 200);
+  }
+
+  return { valid: errors.length === 0, errors, doctorName };
+}
+
 function validateUploadFacilityDocument(body = {}, file) {
   const errors = [];
 
@@ -98,6 +118,7 @@ module.exports = {
   validateCreateFacility,
   validateUpdateFacility,
   validateResolveFacility,
+  validateResolveDoctor,
   validateCreateDoctors,
   validateUpdateDoctor,
   validateCreateFacilityNote,

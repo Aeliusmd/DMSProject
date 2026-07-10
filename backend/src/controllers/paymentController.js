@@ -2,7 +2,7 @@ const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const { throwIfInvalid } = require("../utils/validationUtils");
 const { validateManualPayment } = require("../validators/paymentValidator");
-const { validatePaymentSearchQuery } = require("../validators/queryValidators");
+const { validatePaymentSearchQuery, validatePaymentListQuery } = require("../validators/queryValidators");
 const paymentService = require("../services/paymentService");
 const activityLogService = require("../services/activityLogService");
 
@@ -57,11 +57,13 @@ exports.recordManualPayment = asyncHandler(async (req, res) => {
 });
 
 exports.getManualPayments = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePaymentListQuery(req.query));
   const payments = await paymentService.getManualPayments(req.query);
   return ApiResponse.success(res, { payments });
 });
 
 exports.getOnlinePayments = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePaymentListQuery(req.query));
   const payments = await paymentService.getOnlinePayments(req.query);
   return ApiResponse.success(res, { payments });
 });

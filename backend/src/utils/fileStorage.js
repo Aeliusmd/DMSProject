@@ -1,12 +1,13 @@
 const fs = require("fs");
 const path = require("path");
 const config = require("../config");
+const ApiError = require("./ApiError");
 const { ORDER_UPLOAD_DIRS, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 
 function getFileServerRoot() {
   const root = config.fileServer;
   if (!root) {
-    throw new Error("FILE_SERVER is not configured in environment");
+    throw new ApiError(503, "File storage is not configured");
   }
   return path.resolve(root);
 }
@@ -74,7 +75,7 @@ function isUploadsRelativePath(relativePath) {
 function archiveBatchScanSubpoenaToProcessed(batchScanRelativePath, orderNumber) {
   const sourceAbsolute = resolveAbsolutePath(batchScanRelativePath);
   if (!fs.existsSync(sourceAbsolute)) {
-    throw new Error(`Subpoena file not found: ${batchScanRelativePath}`);
+    throw new ApiError(404, `Subpoena file not found: ${batchScanRelativePath}`);
   }
 
   fs.mkdirSync(ORDER_UPLOAD_DIRS.processed, { recursive: true });

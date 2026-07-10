@@ -1,7 +1,7 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const { throwIfInvalid } = require("../utils/validationUtils");
-const { validateStripeCheckout } = require("../validators/stripeValidator");
+const { validateStripeCheckout, validateStripeReceiptDownload } = require("../validators/stripeValidator");
 const { validateStripeCheckoutResult } = require("../validators/queryValidators");
 const stripePaymentService = require("../services/stripePaymentService");
 const { sendBufferResponse } = require("../utils/responseUtils");
@@ -32,6 +32,8 @@ exports.getCheckoutResult = asyncHandler(async (req, res) => {
 });
 
 exports.downloadReceipt = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateStripeReceiptDownload(req.params, req.query));
+
   const sessionId = req.params.sessionId;
   const token = req.query.token || "";
 

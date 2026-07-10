@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { searchOrderDoctors } from "@/lib/orders/orderApi";
 
 function namesMatch(left = "", right = "") {
@@ -204,7 +205,7 @@ export default function DoctorSearchField({
         .catch((err) => {
           if (!active) return;
           setSuggestions([]);
-          setSearchError(err.message || "Failed to search doctors");
+          setSearchError(getApiErrorMessage(err, "Failed to search doctors"));
         })
         .finally(() => {
           if (active) setLoading(false);

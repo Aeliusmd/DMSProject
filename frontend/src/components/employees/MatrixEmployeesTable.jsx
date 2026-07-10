@@ -87,21 +87,8 @@ export default function MatrixEmployeesTable({
 
     if (!employee || actionLoading) return;
 
-    setActionLoading(true);
-    setActionError("");
-
-    try {
-      await onSuspendEmployee?.(employee, reactivatedDate);
-      closeSuspendModal();
-    } catch (error) {
-      setActionError(
-        error instanceof ApiRequestError
-          ? error.message
-          : "Unable to suspend employee"
-      );
-    } finally {
-      setActionLoading(false);
-    }
+    await onSuspendEmployee?.(employee, reactivatedDate);
+    closeSuspendModal();
   };
 
   const closeConfirmModal = () => {

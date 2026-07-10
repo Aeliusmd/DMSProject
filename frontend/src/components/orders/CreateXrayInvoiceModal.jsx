@@ -8,6 +8,11 @@ import {
   getXrayInvoiceByOrderId,
   saveXrayInvoice,
 } from "@/lib/invoices/invoiceApi";
+import {
+  applyApiFieldErrors,
+  getApiErrorMessage,
+  hasValidationErrors,
+} from "@/lib/apiErrorUtils";
 
 const initialFormData = {
   xrayInvoiceDate: "",
@@ -110,6 +115,12 @@ export default function CreateXrayInvoiceModal({
 
   const balanceDue = totalInvoiced;
 
+  const clientValidationErrors = useMemo(
+    () => validateXrayInvoiceForm(formData),
+    [formData]
+  );
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
+
   if (!mounted || !isOpen || !order) return null;
 
   const handleChange = (e) => {
@@ -185,7 +196,15 @@ export default function CreateXrayInvoiceModal({
 
       onClose();
     } catch (error) {
-      setSubmitError(error?.message || "Failed to save X-Ray invoice");
+      const { fieldErrors, message } = applyApiFieldErrors(error);
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors((prev) => ({ ...prev, ...fieldErrors }));
+      }
+
+      setSubmitError(
+        message || getApiErrorMessage(error, "Failed to save X-Ray invoice")
+      );
     } finally {
       setSubmitting(false);
     }
@@ -378,7 +397,7 @@ export default function CreateXrayInvoiceModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || loadingXray}
+                disabled={submitting || loadingXray || isFormInvalid}
                 className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? "Saving..." : "Save Invoice"}

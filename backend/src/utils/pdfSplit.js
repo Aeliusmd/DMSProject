@@ -1,4 +1,5 @@
 const { PDFDocument } = require("pdf-lib");
+const ApiError = require("./ApiError");
 
 async function getPdfPageCount(pdfBuffer) {
   const doc = await PDFDocument.load(pdfBuffer);
@@ -16,7 +17,7 @@ async function extractPageRange(pdfBuffer, startPage, endPage) {
   const end = Math.min(endPage, total - 1);
 
   if (start > end) {
-    throw new Error(`Invalid page range: ${startPage}-${endPage}`);
+    throw new ApiError(400, `Invalid page range: ${startPage}-${endPage}`);
   }
 
   const target = await PDFDocument.create();

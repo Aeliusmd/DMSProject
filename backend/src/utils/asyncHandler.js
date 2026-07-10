@@ -8,31 +8,25 @@ function asyncHandler(fn) {
  * Run non-critical async work without failing the parent request.
  */
 async function runSideEffect(label, fn) {
-  try {
-    return await fn();
-  } catch (error) {
-    const logger = require("./logger");
-    logger.warn(label, {
-      error: error.message,
-      code: error.code,
-    });
-    return null;
-  }
+  const { runNonCritical } = require("./serviceErrorUtils");
+  const logger = require("./logger");
+  return runNonCritical(label, fn, logger);
 }
 
 /**
  * Wrap non-route async work (jobs, scripts) so failures are logged safely.
  */
 function runSafely(label, fn) {
+  const logger = require("./logger");
+
   return async (...args) => {
     try {
       return await fn(...args);
     } catch (error) {
-      const logger = require("./logger");
       logger.error(label, {
         error: error.message,
         code: error.code,
-        stack: error.stack,
+        name: error.name,
       });
       return null;
     }

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { resolveProviderEmail } from "@/lib/orders/deliveryActions";
 import { SHEET_COMPANY_INFO } from "@/lib/sheetTemplateConstants";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -17,6 +18,7 @@ export default function SendCopyLetterModal({
   const mounted = useIsClient();
   const [primaryEmail, setPrimaryEmail] = useState("");
   const [additionalEmails, setAdditionalEmails] = useState([""]);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -42,6 +44,7 @@ export default function SendCopyLetterModal({
 
     setPrimaryEmail(resolveProviderEmail(order) || "");
     setAdditionalEmails([""]);
+    setFieldErrors({});
     setError("");
     setSuccessMessage("");
   }, [isOpen, order]);
@@ -59,10 +62,14 @@ export default function SendCopyLetterModal({
 
   if (!mounted || !isOpen || !order || !preview) return null;
 
+  const isFormInvalid =
+    !primaryEmail.trim() || !EMAIL_PATTERN.test(primaryEmail.trim());
+
   const handleAdditionalEmailChange = (index, value) => {
     setAdditionalEmails((prev) =>
       prev.map((email, itemIndex) => (itemIndex === index ? value : email))
     );
+    setFieldErrors({});
     setError("");
   };
 
@@ -76,15 +83,12 @@ export default function SendCopyLetterModal({
 
   const handleSubmit = async () => {
     const trimmedPrimary = primaryEmail.trim();
+    const nextErrors = {};
 
     if (!trimmedPrimary) {
-      setError("Company email is required");
-      return;
-    }
-
-    if (!EMAIL_PATTERN.test(trimmedPrimary)) {
-      setError("Enter a valid company email address");
-      return;
+      nextErrors.email = "Company email is required";
+    } else if (!EMAIL_PATTERN.test(trimmedPrimary)) {
+      nextErrors.email = "Enter a valid company email address";
     }
 
     const extras = additionalEmails
@@ -94,12 +98,21 @@ export default function SendCopyLetterModal({
     for (const email of extras) {
       if (!EMAIL_PATTERN.test(email)) {
         setError(`Invalid additional email: ${email}`);
+        setFieldErrors(nextErrors);
         return;
       }
     }
 
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError("");
+      return;
+    }
+
     setSubmitting(true);
     setError("");
+    setFieldErrors({});
     setSuccessMessage("");
 
     try {
@@ -119,7 +132,17 @@ export default function SendCopyLetterModal({
         onClose();
       }, 1400);
     } catch (err) {
-      setError(err.message || "Failed to send copy service letter");
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err, {
+        emails: "email",
+      });
+
+      if (Object.keys(apiErrors).length > 0) {
+        setFieldErrors(apiErrors);
+      }
+
+      setError(
+        message || getApiErrorMessage(err, "Failed to send copy service letter")
+      );
     } finally {
       setSubmitting(false);
     }
@@ -163,11 +186,19 @@ export default function SendCopyLetterModal({
               value={primaryEmail}
               onChange={(e) => {
                 setPrimaryEmail(e.target.value);
+                setFieldErrors({});
                 setError("");
               }}
               placeholder="company@example.com"
-              className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                fieldErrors.email
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                  : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+              }`}
             />
+            {fieldErrors.email ? (
+              <p className="mt-1 text-[11px] text-red-500">{fieldErrors.email}</p>
+            ) : null}
           </div>
 
           <div>
@@ -230,7 +261,7 @@ export default function SendCopyLetterModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || Boolean(successMessage)}
+            disabled={submitting || Boolean(successMessage) || isFormInvalid}
             className="h-[34px] rounded-[6px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:opacity-60"
           >
             {submitting ? "Sending..." : "Send"}

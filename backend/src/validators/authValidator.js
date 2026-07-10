@@ -1,17 +1,26 @@
+const { trimToString, addMaxLengthError } = require("./validationHelpers");
+
 function validateLogin(body = {}) {
   const errors = [];
 
-  const identifier = body.identifier || body.email || body.logon;
+  const identifier = trimToString(body.identifier || body.email || body.logon);
 
-  if (!identifier?.trim()) {
+  if (!identifier) {
     errors.push({
       field: "identifier",
       message: "Email or logon is required",
     });
+  } else {
+    addMaxLengthError(errors, "identifier", identifier, 255);
   }
 
   if (!body.password) {
     errors.push({ field: "password", message: "Password is required" });
+  } else if (typeof body.password === "string" && body.password.length > 128) {
+    errors.push({
+      field: "password",
+      message: "Password must be 128 characters or less",
+    });
   }
 
   return { valid: errors.length === 0, errors, identifier };

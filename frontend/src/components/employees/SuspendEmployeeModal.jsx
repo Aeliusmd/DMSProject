@@ -7,6 +7,7 @@ import {
   getMinFutureDateTimeLocal,
   isFutureDateTimeLocal,
 } from "@/lib/utils/dateUtils";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export default function SuspendEmployeeModal({
   open,
@@ -17,7 +18,9 @@ export default function SuspendEmployeeModal({
 }) {
   const mounted = useIsClient();
   const [reactivatedAt, setReactivatedAt] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const minDateTime = useMemo(() => getMinFutureDateTimeLocal(), [open]);
 
@@ -25,7 +28,9 @@ export default function SuspendEmployeeModal({
     if (!open) return undefined;
 
     setReactivatedAt(minDateTime);
+    setFieldErrors({});
     setError("");
+    setSubmitting(false);
 
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -35,23 +40,49 @@ export default function SuspendEmployeeModal({
     };
   }, [open, minDateTime, employee?.id]);
 
+  const isFormInvalid = !reactivatedAt || !isFutureDateTimeLocal(reactivatedAt);
+
   if (!mounted || !open || !employee) return null;
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    const nextErrors = {};
+
     if (!reactivatedAt) {
-      setError("Reactivation date and time is required");
+      nextErrors.reactivatedDate = "Reactivation date and time is required";
+    } else if (!isFutureDateTimeLocal(reactivatedAt)) {
+      nextErrors.reactivatedDate = "Reactivation date and time must be in the future";
+    }
+
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError("");
       return;
     }
 
-    if (!isFutureDateTimeLocal(reactivatedAt)) {
-      setError("Reactivation date and time must be in the future");
-      return;
-    }
+    setSubmitting(true);
+    setError("");
+    setFieldErrors({});
 
-    onConfirm?.({
-      reactivatedDate: `${reactivatedAt}:00`,
-    });
+    try {
+      await onConfirm?.({
+        reactivatedDate: `${reactivatedAt}:00`,
+      });
+      onClose?.();
+    } catch (err) {
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err);
+
+      if (Object.keys(apiErrors).length > 0) {
+        setFieldErrors(apiErrors);
+      }
+
+      setError(message || getApiErrorMessage(err, "Unable to suspend employee"));
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const isBusy = loading || submitting;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/35 px-4 py-6 backdrop-blur-[2px]">
@@ -87,21 +118,31 @@ export default function SuspendEmployeeModal({
                 min={minDateTime}
                 onChange={(event) => {
                   setReactivatedAt(event.target.value);
+                  setFieldErrors({});
                   setError("");
                 }}
-                className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                  fieldErrors.reactivatedDate
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                    : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
               />
+              {fieldErrors.reactivatedDate ? (
+                <p className="mt-2 text-[11px] font-medium text-red-600">
+                  {fieldErrors.reactivatedDate}
+                </p>
+              ) : null}
             </div>
 
-            {error && (
+            {error ? (
               <p className="mt-3 text-[11px] font-medium text-red-600">{error}</p>
-            )}
+            ) : null}
 
             <div className="mt-6 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                disabled={loading}
+                disabled={isBusy}
                 className="h-[34px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0] disabled:opacity-60"
               >
                 Cancel
@@ -109,12 +150,12 @@ export default function SuspendEmployeeModal({
 
               <button
                 type="button"
-                disabled={loading}
+                disabled={isBusy || isFormInvalid}
                 onClick={handleConfirm}
                 className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] bg-[#F59E0B] px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <SmallCircleIcon />
-                {loading ? "Processing..." : "Suspend"}
+                {isBusy ? "Processing..." : "Suspend"}
               </button>
             </div>
           </div>

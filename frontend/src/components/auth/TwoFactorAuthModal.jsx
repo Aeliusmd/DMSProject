@@ -9,6 +9,7 @@ import {
   saveAuthSession,
   verifyTwoFactor,
 } from "@/lib/auth/authApi";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export default function TwoFactorAuthModal({
   isOpen,
@@ -87,7 +88,15 @@ export default function TwoFactorAuthModal({
 
       onSuccess?.();
     } catch (requestError) {
-      setError(requestError.message || "Invalid verification code");
+      const { fieldErrors, message } = applyApiFieldErrors(requestError, {
+        code: "otp",
+      });
+
+      setError(
+        fieldErrors.otp ||
+          message ||
+          getApiErrorMessage(requestError, "Invalid verification code")
+      );
       setOtp(["", "", "", "", "", ""]);
       inputRefs.current[0]?.focus();
     } finally {
@@ -174,7 +183,7 @@ export default function TwoFactorAuthModal({
       setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
       inputRefs.current[0]?.focus();
     } catch (requestError) {
-      setError(requestError.message || "Unable to resend code");
+      setError(getApiErrorMessage(requestError, "Unable to resend code"));
     } finally {
       setIsResending(false);
     }

@@ -1,5 +1,6 @@
 const EmployeeMilestoneEvent = require("../models/EmployeeMilestoneEvent");
 const logger = require("../utils/logger");
+const { runNonCritical } = require("../utils/serviceErrorUtils");
 
 function extractOrderIdFromDetails(details) {
   const match = String(details || "").match(/order_id:(\d+)/i);
@@ -72,25 +73,23 @@ async function recordFromOrderAction({
 }
 
 async function recordFromActivityLogSafe(payload) {
-  try {
-    return await recordFromActivityLog(payload);
-  } catch (error) {
-    logger.warn("Failed to record employee milestone rollup", {
-      error: error.message,
-    });
-    return false;
-  }
+  const result = await runNonCritical(
+    "Failed to record employee milestone rollup",
+    () => recordFromActivityLog(payload),
+    logger
+  );
+
+  return Boolean(result);
 }
 
 async function recordFromOrderActionSafe(payload) {
-  try {
-    return await recordFromOrderAction(payload);
-  } catch (error) {
-    logger.warn("Failed to record employee milestone rollup from order", {
-      error: error.message,
-    });
-    return false;
-  }
+  const result = await runNonCritical(
+    "Failed to record employee milestone rollup from order",
+    () => recordFromOrderAction(payload),
+    logger
+  );
+
+  return Boolean(result);
 }
 
 module.exports = {

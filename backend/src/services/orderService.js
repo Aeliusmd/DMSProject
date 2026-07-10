@@ -3,6 +3,7 @@
  */
 
 const ApiError = require("../utils/ApiError");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const fs = require("fs");
 const path = require("path");
 const Order = require("../models/Order");
@@ -1694,7 +1695,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2129,7 +2130,7 @@ async function createOrder(data, actorId, files, options = {}) {
     return getOrderById(orderId);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2290,7 +2291,7 @@ async function updateOrderFacility(id, data, actorId) {
     return getOrderById(existing.id);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2410,7 +2411,7 @@ async function updateOrder(id, data, actorId, files) {
     return getOrderById(existing.id);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2660,7 +2661,7 @@ async function scanMedicalRecords(
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2718,7 +2719,7 @@ async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }

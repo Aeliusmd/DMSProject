@@ -40,6 +40,7 @@ import {
   recordOrderFax,
   removeMedicalRecords,
 } from "@/lib/orders/orderApi";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import {
   getCompletedDeliveryActions,
@@ -624,7 +625,7 @@ export default function OrdersTable({
       } catch (err) {
         if (requestId !== requestIdRef.current) return;
         if (!silent) {
-          setError(err.message || "Failed to load orders");
+          setError(getApiErrorMessage(err, "Failed to load orders"));
           setOrders([]);
         }
       } finally {
@@ -716,7 +717,7 @@ export default function OrdersTable({
       setRemoveRecordsModal({ open: false, order: null });
       await fetchOrders();
     } catch (err) {
-      setActionError(err.message || "Failed to remove uploaded records");
+      setActionError(getApiErrorMessage(err, "Failed to remove uploaded records"));
     } finally {
       setActionLoading(false);
     }
@@ -733,7 +734,7 @@ export default function OrdersTable({
       setDeleteModal({ open: false, order: null });
       await fetchOrders();
     } catch (err) {
-      setActionError(err.message || "Failed to delete order");
+      setActionError(getApiErrorMessage(err, "Failed to delete order"));
     } finally {
       setActionLoading(false);
     }
@@ -750,7 +751,7 @@ export default function OrdersTable({
       setCancelModal({ open: false, order: null });
       await fetchOrders();
     } catch (err) {
-      setActionError(err.message || "Failed to cancel order");
+      setActionError(getApiErrorMessage(err, "Failed to cancel order"));
     } finally {
       setActionLoading(false);
     }
@@ -767,7 +768,7 @@ export default function OrdersTable({
       setRestoreModal({ open: false, order: null });
       await fetchOrders({ silent: true, force: true });
     } catch (err) {
-      setActionError(err.message || "Failed to restore order");
+      setActionError(getApiErrorMessage(err, "Failed to restore order"));
     } finally {
       setActionLoading(false);
     }
@@ -2084,7 +2085,7 @@ function OrderPdfPreviewModal({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err.message || "Failed to load PDF.");
+          setError(getApiErrorMessage(err, "Failed to load PDF."));
         }
       })
       .finally(() => {

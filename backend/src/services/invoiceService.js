@@ -1,4 +1,5 @@
 const ApiError = require("../utils/ApiError");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const CompanyInvoice = require("../models/CompanyInvoice");
@@ -2429,7 +2430,7 @@ async function createOrUpdateXrayInvoice(body, userId) {
     return getXrayInvoiceByOrderId(orderId);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2559,7 +2560,7 @@ async function createInvoice(body, userId) {
     return getInvoiceById(invoiceId);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -2632,7 +2633,7 @@ async function updateInvoice(id, body) {
     return getInvoiceById(id);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -3855,7 +3856,7 @@ async function writeOffInvoices(body = {}, userId) {
     return { writtenOffCount: writtenOff.length, invoices: writtenOff };
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }

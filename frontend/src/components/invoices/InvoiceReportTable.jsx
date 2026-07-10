@@ -496,31 +496,24 @@ export default function InvoiceReportTable({
   };
 
   const handleSubmitWriteOff = async (payload) => {
-    setWriteOffError("");
+    await submitWriteOffInvoices(payload);
 
-    try {
-      await submitWriteOffInvoices(payload);
+    setSelectedRows((prev) => {
+      const next = { ...prev };
 
-      setSelectedRows((prev) => {
-        const next = { ...prev };
+      payload.invoices.forEach((invoice) => {
+        if (!invoice.company || !next[invoice.company]) return;
 
-        payload.invoices.forEach((invoice) => {
-          if (!invoice.company || !next[invoice.company]) return;
-
-          next[invoice.company] = next[invoice.company].filter(
-            (rowId) => rowId !== invoice.id
-          );
-        });
-
-        return next;
+        next[invoice.company] = next[invoice.company].filter(
+          (rowId) => rowId !== invoice.id
+        );
       });
 
-      setWriteOffInvoices([]);
-      onRefresh?.();
-    } catch (error) {
-      setWriteOffError(error?.message || "Failed to write off invoices");
-      console.error("Failed to write off invoices:", error);
-    }
+      return next;
+    });
+
+    setWriteOffInvoices([]);
+    onRefresh?.();
   };
 
   const handleOpenInvoiceModal = (group, row) => {

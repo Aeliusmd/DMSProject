@@ -25,6 +25,8 @@ const {
   validateRecordPickup,
   validateRecordFax,
   validateScanMedicalRecords,
+  validateRemoveMedicalRecords,
+  validateMedicalRecordTypeQuery,
   validateBatchScan,
 } = require("../validators/orderActionValidator");
 const {
@@ -261,6 +263,8 @@ exports.scanMedicalRecords = asyncHandler(async (req, res) => {
 });
 
 exports.removeMedicalRecords = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateRemoveMedicalRecords(req.query));
+
   const recordType = req.query.recordType || null;
 
   const order = await orderService.removeMedicalRecords(
@@ -273,6 +277,8 @@ exports.removeMedicalRecords = asyncHandler(async (req, res) => {
 });
 
 exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMedicalRecordTypeQuery(req.query));
+
   const recordType = req.query.recordType || "medical";
   const fileInfo = await orderService.getOrderMedicalRecordsFile(req.params.id, {
     recordType,

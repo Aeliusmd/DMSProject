@@ -188,6 +188,28 @@ function validateScanMedicalRecords(body = {}, query = {}, file = null) {
   return { valid: errors.length === 0, errors };
 }
 
+function validateRemoveMedicalRecords(query = {}) {
+  const errors = [];
+  const recordType = trimToString(query.recordType).toLowerCase();
+
+  if (recordType && !VALID_RECORD_TYPES.includes(recordType)) {
+    errors.push({ field: "recordType", message: "Invalid record type" });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+function validateMedicalRecordTypeQuery(query = {}) {
+  const errors = [];
+  const recordType = trimToString(query.recordType || "medical").toLowerCase();
+
+  if (!VALID_RECORD_TYPES.includes(recordType)) {
+    errors.push({ field: "recordType", message: "Invalid record type" });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 function validateBatchScan(body = {}, file = null, userId = null) {
   const errors = [];
 
@@ -215,5 +237,8 @@ module.exports = {
   validateRecordPickup,
   validateRecordFax,
   validateScanMedicalRecords,
+  validateRemoveMedicalRecords,
+  validateMedicalRecordTypeQuery,
   validateBatchScan,
+  VALID_RECORD_TYPES,
 };

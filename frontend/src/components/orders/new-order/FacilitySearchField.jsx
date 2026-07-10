@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { searchFacilities } from "@/lib/facilities/facilityApi";
 
 export default function FacilitySearchField({
@@ -74,7 +75,7 @@ export default function FacilitySearchField({
         .catch((err) => {
           if (!active) return;
           setSuggestions([]);
-          setSearchError(err.message || "Failed to search facilities");
+          setSearchError(getApiErrorMessage(err, "Failed to search facilities"));
         })
         .finally(() => {
           if (active) setLoading(false);

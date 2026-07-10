@@ -3,12 +3,16 @@ const {
   isBlank,
   isValidPositiveIntId,
   addOptionalIsoDateError,
+  addMaxLengthError,
 } = require("./validationHelpers");
 const { toSqlDateOnly } = require("../utils/dateUtils");
 
 const MAX_NOTIFICATION_LIMIT = 100;
 const MAX_PAGE_SIZE = 100;
+const MAX_PAYMENT_LIST_LIMIT = 500;
+const DEFAULT_PAYMENT_LIST_LIMIT = 100;
 const MAX_SEARCH_LENGTH = 200;
+const MAX_ROUTE_ID = Number.MAX_SAFE_INTEGER;
 
 function addOptionalDateInputError(errors, field, value) {
   if (!isBlank(value) && !toSqlDateOnly(value)) {
@@ -117,6 +121,64 @@ function validatePaymentSearchQuery(query = {}) {
   return { valid: errors.length === 0, errors };
 }
 
+function validatePaymentListQuery(query = {}) {
+  const errors = [];
+
+  if (!isBlank(query.orderId) && !isValidPositiveIntId(query.orderId)) {
+    errors.push({ field: "orderId", message: "Invalid order id" });
+  }
+
+  addOptionalIsoDateError(errors, "dateFrom", query.dateFrom);
+  addOptionalIsoDateError(errors, "dateTo", query.dateTo);
+
+  if (!isBlank(query.limit)) {
+    const limit = Number(query.limit);
+
+    if (
+      !Number.isFinite(limit) ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > MAX_PAYMENT_LIST_LIMIT
+    ) {
+      errors.push({
+        field: "limit",
+        message: `limit must be between 1 and ${MAX_PAYMENT_LIST_LIMIT}`,
+      });
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+function validatePositiveIntRouteParam(value, fieldName = "id") {
+  const errors = [];
+
+  if (!isValidPositiveIntId(value)) {
+    errors.push({ field: fieldName, message: `Invalid ${fieldName}` });
+  } else if (Number(value) > MAX_ROUTE_ID) {
+    errors.push({ field: fieldName, message: `Invalid ${fieldName}` });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+function parsePaymentListLimit(query = {}) {
+  if (isBlank(query.limit)) {
+    return DEFAULT_PAYMENT_LIST_LIMIT;
+  }
+
+  const limit = Number(query.limit);
+  if (
+    !Number.isFinite(limit) ||
+    !Number.isInteger(limit) ||
+    limit < 1
+  ) {
+    return DEFAULT_PAYMENT_LIST_LIMIT;
+  }
+
+  return Math.min(limit, MAX_PAYMENT_LIST_LIMIT);
+}
+
 module.exports = {
   validateNotificationQuery,
   validateOrderNotesQuery,
@@ -124,4 +186,9 @@ module.exports = {
   validateSearchQuery,
   validateStripeCheckoutResult,
   validatePaymentSearchQuery,
+  validatePaymentListQuery,
+  validatePositiveIntRouteParam,
+  parsePaymentListLimit,
+  MAX_PAYMENT_LIST_LIMIT,
+  DEFAULT_PAYMENT_LIST_LIMIT,
 };

@@ -9,6 +9,7 @@ import {
   searchOrderInvoices,
 } from "@/lib/payments/paymentApi";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 const INVOICE_STYLES = {
   regular: {
@@ -32,6 +33,7 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
   const [invoices, setInvoices] = useState([]);
   const [expandedType, setExpandedType] = useState(null);
   const [formByType, setFormByType] = useState({});
+  const [fieldErrorsByType, setFieldErrorsByType] = useState({});
   const [savingType, setSavingType] = useState(null);
   const [saveError, setSaveError] = useState("");
 
@@ -43,6 +45,7 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
     setInvoices([]);
     setExpandedType(null);
     setFormByType({});
+    setFieldErrorsByType({});
     setSaveError("");
   };
 
@@ -63,6 +66,7 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
     setSearchError("");
     setExpandedType(null);
     setFormByType({});
+    setFieldErrorsByType({});
     setSaveError("");
 
     try {
@@ -108,6 +112,19 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
         [field]: value,
       },
     }));
+
+    setFieldErrorsByType((current) => {
+      const typeErrors = current[type];
+      if (!typeErrors?.[field]) return current;
+
+      const nextTypeErrors = { ...typeErrors };
+      delete nextTypeErrors[field];
+
+      return {
+        ...current,
+        [type]: nextTypeErrors,
+      };
+    });
   };
 
   const handleSave = async (invoice) => {
@@ -117,19 +134,31 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
     const checkNumber = `${form.checkNumber || ""}`.trim();
     const paymentDate = `${form.paymentDate || ""}`.trim();
     const note = `${form.note || ""}`.trim();
+    const nextErrors = {};
 
     if (!checkNumber) {
-      setSaveError("Check number is required.");
-      return;
+      nextErrors.checkNumber = "Check number is required.";
     }
 
     if (!paymentDate) {
-      setSaveError("Payment date is required.");
+      nextErrors.paymentDate = "Payment date is required.";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrorsByType((current) => ({
+        ...current,
+        [invoice.type]: nextErrors,
+      }));
+      setSaveError("");
       return;
     }
 
     setSavingType(invoice.type);
     setSaveError("");
+    setFieldErrorsByType((current) => ({
+      ...current,
+      [invoice.type]: {},
+    }));
 
     try {
       const result = await recordManualPayment({
@@ -145,7 +174,18 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
       setExpandedType(null);
       onSaved?.();
     } catch (error) {
-      setSaveError(error.message || "Unable to save manual payment.");
+      const { fieldErrors, message } = applyApiFieldErrors(error);
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setFieldErrorsByType((current) => ({
+          ...current,
+          [invoice.type]: fieldErrors,
+        }));
+      }
+
+      setSaveError(
+        message || getApiErrorMessage(error, "Unable to save manual payment.")
+      );
     } finally {
       setSavingType(null);
     }
@@ -239,6 +279,10 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
                   paymentDate: getTodayInputDate(),
                   note: "",
                 };
+                const fieldErrors = fieldErrorsByType[invoice.type] || {};
+                const isPaymentFormInvalid =
+                  !`${form.checkNumber || ""}`.trim() ||
+                  !`${form.paymentDate || ""}`.trim();
 
                 return (
                   <div
@@ -305,8 +349,17 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
                                 )
                               }
                               placeholder="Enter check number"
-                              className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                              className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
+                                fieldErrors.checkNumber
+                                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                                  : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                              }`}
                             />
+                            {fieldErrors.checkNumber ? (
+                              <p className="mt-1 text-[11px] text-red-500">
+                                {fieldErrors.checkNumber}
+                              </p>
+                            ) : null}
                           </div>
 
                           <div>
@@ -323,8 +376,17 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
                                   e.target.value
                                 )
                               }
-                              className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                              className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                                fieldErrors.paymentDate
+                                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                                  : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                              }`}
                             />
+                            {fieldErrors.paymentDate ? (
+                              <p className="mt-1 text-[11px] text-red-500">
+                                {fieldErrors.paymentDate}
+                              </p>
+                            ) : null}
                           </div>
                         </div>
 
@@ -347,7 +409,9 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
                           <button
                             type="button"
                             onClick={() => handleSave(invoice)}
-                            disabled={savingType === invoice.type}
+                            disabled={
+                              savingType === invoice.type || isPaymentFormInvalid
+                            }
                             className="h-[38px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {savingType === invoice.type

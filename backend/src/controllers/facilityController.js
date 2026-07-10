@@ -5,10 +5,11 @@ const {
   validateCreateFacility,
   validateUpdateFacility,
   validateResolveFacility,
+  validateResolveDoctor,
   validateCreateDoctors,
   validateUpdateDoctor,
 } = require("../validators/facilityValidator");
-const { validateSearchQuery } = require("../validators/queryValidators");
+const { validateSearchQuery, validatePositiveIntRouteParam } = require("../validators/queryValidators");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
 const notificationService = require("../services/notificationService");
@@ -171,6 +172,9 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.resolveDoctor = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePositiveIntRouteParam(req.params.id, "id"));
+  throwIfInvalid(validateResolveDoctor(req.body || {}));
+
   const result = await facilityService.resolveFacilityDoctor(
     req.params.id,
     req.body || {}
