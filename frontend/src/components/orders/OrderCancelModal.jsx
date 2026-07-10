@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 export default function OrderCancelModal({
   open,
@@ -100,6 +101,16 @@ export default function OrderCancelModal({
                 setError("");
                 return;
               }
+
+              const reasonError = validateNoHtmlMarkup(reason, {
+                fieldLabel: "Cancellation reason",
+              });
+              if (reasonError) {
+                setFieldErrors({ reason: reasonError });
+                setError("");
+                return;
+              }
+
               setFieldErrors({});
               setStep("confirm");
             }}

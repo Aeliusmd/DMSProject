@@ -11,10 +11,17 @@ function stripControlCharacters(value) {
 }
 
 /**
+ * Remove angle brackets so user text cannot become HTML/script when rendered in emails or rich views.
+ */
+function stripHtmlMarkup(value) {
+  return `${value || ""}`.replace(/[<>]/g, "");
+}
+
+/**
  * Normalize and bound free-text input before storage or logging.
  */
 function sanitizeText(value, { maxLength = DEFAULT_TEXT_MAX_LENGTH, allowEmpty = false } = {}) {
-  const cleaned = stripControlCharacters(value).trim();
+  const cleaned = stripHtmlMarkup(stripControlCharacters(value)).trim();
 
   if (!cleaned && !allowEmpty) {
     return "";
@@ -70,6 +77,7 @@ module.exports = {
   DEFAULT_TEXT_MAX_LENGTH,
   DEFAULT_SEARCH_MAX_LENGTH,
   stripControlCharacters,
+  stripHtmlMarkup,
   sanitizeText,
   sanitizeSearchText,
   sanitizeTrimOrNull,

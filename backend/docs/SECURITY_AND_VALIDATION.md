@@ -1,6 +1,6 @@
 # DMS System Security & Validation Reference
 
-**Document version:** 1.5  
+**Document version:** 1.8  
 **Last updated:** July 2026  
 **Scope:** Backend validation, data sanitization, SQL injection protection, exception handling, and frontend integration — **module by module**.
 
@@ -475,7 +475,28 @@ Controllers stay thin: no local `try/catch`; errors bubble to `errorHandler`.
 | `sanitizeSearchText` | Search queries (max 200 chars default) |
 | `sanitizeTrimOrNull` | Optional fields → null if empty |
 | `escapeHtml` | Safe HTML in emails |
+| `isValidPersonName` / `isValidOrganizationName` | Reject HTML markup and invalid characters in name fields |
+| `hasHtmlMarkup` | Block `<` / `>` in free-text fields (notes, CNR reason, cancel reason) |
 | `fieldLimits.js` | Matches DB column sizes |
+
+---
+
+## 7.1 XSS / script injection (HTML output)
+
+| Surface | Risk | Mitigation |
+|---------|------|------------|
+| React UI (`frontend/src`) | Stored/reflected XSS via user fields | JSX escapes text by default; no `dangerouslySetInnerHTML` / `innerHTML` / `eval` in app code |
+| Email HTML (`emailService.js`, `views/emails/*`) | Script tags in interpolated values | All interpolated HTML values use `escapeHtml`; multiline text uses `escapeHtmlMultiline` |
+| API write validators | Script/HTML stored in notes, addresses, search, invoices | `addNoHtmlMarkupError` on free-text fields; person/org name patterns on name fields |
+| Storage (`sanitizeText`) | Bypassed validation / legacy data paths | `stripHtmlMarkup` removes `<` and `>` before persistence |
+| API JSON responses | Low (consumed by React, not executed as HTML) | `Content-Type: application/json`; security headers on API |
+| Uploaded files | MIME sniffing | Upload middleware whitelists MIME types; `X-Content-Type-Options: nosniff` on API and Next.js |
+
+**Headers (v1.6):** `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` on Express (`app.js`) and Next.js (`next.config.ts`).
+
+**Name validation (v1.7):** Person names allow letters, spaces, `-`, `'`, `.` only. Organization names allow letters, digits, and `&.,'()#-/`. Enforced in backend validators and matching frontend forms.
+
+**System-wide text validation (v1.8):** All notes, reasons, descriptions, addresses, memos, and search queries reject angle brackets at validation time. Frontend mirrors the same rules on order, facility, invoice, payment, fax, pickup, and reminder forms.
 
 ---
 

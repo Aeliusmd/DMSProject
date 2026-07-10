@@ -10,6 +10,7 @@ const {
   addMaxLengthError,
   addOptionalIsoDateError,
 } = require("./validationHelpers");
+const { addNoHtmlMarkupError } = require("../utils/nameValidation");
 
 const ALLOWED_WRITE_OFF_ACTIONS = new Set(["close_order", "keep_write_off"]);
 
@@ -80,7 +81,9 @@ function validateInvoicePayload(body = {}, { requireOrderId = false, blockZeroTo
   }
 
   addMaxLengthError(errors, "notes", body.notes, FIELD_LIMITS.TEXT);
+  addNoHtmlMarkupError(errors, "notes", body.notes);
   addMaxLengthError(errors, "invoiceNumber", body.invoiceNumber, 50);
+  addNoHtmlMarkupError(errors, "invoiceNumber", body.invoiceNumber);
 
   if (!isBlank(body.prepaymentAmount) && !isValidMoney(body.prepaymentAmount)) {
     errors.push({
@@ -144,6 +147,7 @@ function validateXrayInvoice(body = {}) {
   addOptionalIsoDateError(errors, "examDate", body.examDate);
   addMaxLengthError(errors, "checkNumber", body.checkNumber, 50);
   addMaxLengthError(errors, "description", body.description, FIELD_LIMITS.TEXT);
+  addNoHtmlMarkupError(errors, "description", body.description);
 
   return { valid: errors.length === 0, errors };
 }

@@ -5,6 +5,10 @@ const {
   isValidEmail,
   addMaxLengthError,
 } = require("./validationHelpers");
+const {
+  addPersonNameFormatError,
+  addOrganizationNameFormatError,
+} = require("../utils/nameValidation");
 
 function validateUpdateProfile(body = {}) {
   const errors = [];
@@ -16,9 +20,11 @@ function validateUpdateProfile(body = {}) {
     errors.push({ field: "firstName", message: "First name is required" });
   } else {
     addMaxLengthError(errors, "firstName", firstName, FIELD_LIMITS.VARCHAR_100);
+    addPersonNameFormatError(errors, "firstName", firstName);
   }
 
   addMaxLengthError(errors, "lastName", lastName, FIELD_LIMITS.VARCHAR_100);
+  addPersonNameFormatError(errors, "lastName", lastName);
 
   if (!email) {
     errors.push({ field: "email", message: "Email is required" });

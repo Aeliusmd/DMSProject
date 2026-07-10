@@ -12,6 +12,9 @@ import {
 import { setAuth, getStoredUser } from "@/lib/auth/authStorage";
 import { validatePasswordChangeForm } from "@/lib/passwordValidations";
 import {
+  validatePersonName,
+} from "@/lib/validations/nameValidation";
+import {
   changePassword,
   getSettings,
   updateNotificationPreferences,
@@ -154,7 +157,17 @@ export default function SettingsPage() {
 
     if (!profile.firstName.trim()) {
       nextErrors.firstName = "First name is required";
+    } else {
+      const firstNameError = validatePersonName(profile.firstName, {
+        fieldLabel: "First name",
+      });
+      if (firstNameError) nextErrors.firstName = firstNameError;
     }
+
+    const lastNameError = validatePersonName(profile.lastName, {
+      fieldLabel: "Last name",
+    });
+    if (lastNameError) nextErrors.lastName = lastNameError;
 
     if (!profile.email.trim()) {
       nextErrors.email = "Email is required";

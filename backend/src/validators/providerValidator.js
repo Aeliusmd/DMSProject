@@ -6,6 +6,7 @@ const {
   isValidEmail,
   addMaxLengthError,
 } = require("./validationHelpers");
+const { addOrganizationNameFormatError, addNoHtmlMarkupErrors } = require("../utils/nameValidation");
 
 function validateUpdateProvider(body = {}) {
   const errors = [];
@@ -23,10 +24,12 @@ function validateUpdateProvider(body = {}) {
       companyName,
       FIELD_LIMITS.VARCHAR_255
     );
+    addOrganizationNameFormatError(errors, "companyName", companyName);
   }
 
   addMaxLengthError(errors, "address", body.address, FIELD_LIMITS.VARCHAR_255);
   addMaxLengthError(errors, "city", body.city, FIELD_LIMITS.VARCHAR_100);
+  addNoHtmlMarkupErrors(errors, body, ["address", "city"]);
 
   const zip = trimToString(body.zipCode ?? body.zip);
   if (zip && getDigits(zip).length !== 5) {

@@ -2,6 +2,13 @@ function getDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+const {
+  addPersonNameFormatError,
+  addOrganizationNameFormatError,
+  addNoHtmlMarkupError,
+  addNoHtmlMarkupErrors,
+} = require("../utils/nameValidation");
+
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || "").trim());
 }
@@ -49,6 +56,7 @@ function validateFacilityPayload(data) {
     errors.push({ field: "facilityName", message: "Facility name is required" });
   } else {
     addMaxLengthError(errors, "facilityName", facilityName, LIMITS.facilityName);
+    addOrganizationNameFormatError(errors, "facilityName", facilityName);
   }
 
   if (!email) {
@@ -63,11 +71,15 @@ function validateFacilityPayload(data) {
   }
 
   addMaxLengthError(errors, "firstName", data.firstName, LIMITS.contactName);
+  addPersonNameFormatError(errors, "firstName", data.firstName);
   addMaxLengthError(errors, "middleName", data.middleName, LIMITS.contactName);
+  addPersonNameFormatError(errors, "middleName", data.middleName);
   addMaxLengthError(errors, "lastName", data.lastName, LIMITS.contactName);
+  addPersonNameFormatError(errors, "lastName", data.lastName);
   addMaxLengthError(errors, "address", data.address, LIMITS.address);
   addMaxLengthError(errors, "zipCode", zipCode, LIMITS.zipCode);
   addMaxLengthError(errors, "city", data.city, LIMITS.city);
+  addNoHtmlMarkupErrors(errors, data, ["address", "city"]);
   addMaxLengthError(errors, "state", state, LIMITS.state);
   addMaxLengthError(errors, "phone", phone, LIMITS.phone);
   addMaxLengthError(errors, "fax", fax, LIMITS.fax);
@@ -92,8 +104,11 @@ function validateFacilityPayload(data) {
 
   managers.forEach((manager, index) => {
     addMaxLengthError(errors, `managers.${index}.firstName`, manager.firstName, LIMITS.managerName);
+    addPersonNameFormatError(errors, `managers.${index}.firstName`, manager.firstName);
     addMaxLengthError(errors, `managers.${index}.middleName`, manager.middleName, LIMITS.managerName);
+    addPersonNameFormatError(errors, `managers.${index}.middleName`, manager.middleName);
     addMaxLengthError(errors, `managers.${index}.lastName`, manager.lastName, LIMITS.managerName);
+    addPersonNameFormatError(errors, `managers.${index}.lastName`, manager.lastName);
     addMaxLengthError(errors, `managers.${index}.phone`, manager.phone, LIMITS.managerPhone);
     addMaxLengthError(errors, `managers.${index}.email`, manager.email, LIMITS.managerEmail);
 
@@ -128,6 +143,7 @@ function validateDoctorPayload(doctor, index = 0) {
       doctor.officeName,
       LIMITS.doctorOfficeName
     );
+    addOrganizationNameFormatError(errors, `${prefix}.officeName`, doctor.officeName);
   }
 
   if (!doctor.firstName?.trim() && !doctor.lastName?.trim()) {
@@ -138,8 +154,11 @@ function validateDoctorPayload(doctor, index = 0) {
   }
 
   addMaxLengthError(errors, `${prefix}.firstName`, doctor.firstName, LIMITS.doctorName);
+  addPersonNameFormatError(errors, `${prefix}.firstName`, doctor.firstName);
   addMaxLengthError(errors, `${prefix}.middleName`, doctor.middleName, LIMITS.doctorName);
+  addPersonNameFormatError(errors, `${prefix}.middleName`, doctor.middleName);
   addMaxLengthError(errors, `${prefix}.lastName`, doctor.lastName, LIMITS.doctorName);
+  addPersonNameFormatError(errors, `${prefix}.lastName`, doctor.lastName);
   addMaxLengthError(errors, `${prefix}.phone`, doctor.phone, LIMITS.doctorPhone);
   addMaxLengthError(errors, `${prefix}.fax`, doctor.fax, LIMITS.doctorFax);
   addMaxLengthError(errors, `${prefix}.email`, doctor.email, LIMITS.doctorEmail);

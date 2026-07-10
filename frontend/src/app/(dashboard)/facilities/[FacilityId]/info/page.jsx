@@ -16,6 +16,10 @@ import {
   hasValidationErrors,
 } from "@/lib/apiErrorUtils";
 import {
+  validateOrganizationName,
+  validatePersonName,
+} from "@/lib/validations/nameValidation";
+import {
   createDoctors,
   deactivateDoctor,
   deleteFacilityDocument,
@@ -2068,6 +2072,11 @@ function validateFacilityForm(data) {
 
   if (!data.facilityName?.trim()) {
     errors.facilityName = "Facility name is required";
+  } else {
+    const facilityNameError = validateOrganizationName(data.facilityName, {
+      fieldLabel: "Facility name",
+    });
+    if (facilityNameError) errors.facilityName = facilityNameError;
   }
 
   if (!data.email?.trim()) {
@@ -2093,6 +2102,17 @@ function validateFacilityForm(data) {
   }
 
   (data.officeManagers || []).forEach((manager, index) => {
+    ["firstName", "middleName", "lastName"].forEach((nameField) => {
+      const label =
+        nameField === "firstName"
+          ? "Manager first name"
+          : nameField === "middleName"
+            ? "Manager middle name"
+            : "Manager last name";
+      const nameError = validatePersonName(manager[nameField], { fieldLabel: label });
+      if (nameError) errors[`managers.${index}.${nameField}`] = nameError;
+    });
+
     if (manager.phone && getDigits(manager.phone).length !== 10) {
       errors[`managers.${index}.phone`] = "Enter a valid 10 digit number";
     }
@@ -2109,6 +2129,13 @@ function validateFacilityField(field, value) {
   if (!value?.trim()) {
     if (field === "facilityName") return "Facility name is required";
     if (field === "email") return "Email is required";
+  }
+
+  if (field === "facilityName" && value) {
+    const facilityNameError = validateOrganizationName(value, {
+      fieldLabel: "Facility name",
+    });
+    if (facilityNameError) return facilityNameError;
   }
 
   if (field === "email" && value && !isValidEmail(value)) {
@@ -2131,6 +2158,17 @@ function validateFacilityField(field, value) {
 }
 
 function validateManagerField(field, value) {
+  if ((field === "firstName" || field === "middleName" || field === "lastName") && value) {
+    const label =
+      field === "firstName"
+        ? "Manager first name"
+        : field === "middleName"
+          ? "Manager middle name"
+          : "Manager last name";
+    const nameError = validatePersonName(value, { fieldLabel: label });
+    if (nameError) return nameError;
+  }
+
   if (field === "email" && value && !isValidEmail(value)) {
     return "Enter a valid email address";
   }
@@ -2147,12 +2185,30 @@ function validateDoctorField(field, value, candidate = {}) {
     return "Office name is required";
   }
 
+  if (field === "officeName" && value) {
+    const officeNameError = validateOrganizationName(value, {
+      fieldLabel: "Office name",
+    });
+    if (officeNameError) return officeNameError;
+  }
+
   if (
     (field === "firstName" || field === "lastName") &&
     !`${candidate.firstName || ""}`.trim() &&
     !`${candidate.lastName || ""}`.trim()
   ) {
     return "Doctor first or last name is required";
+  }
+
+  if ((field === "firstName" || field === "middleName" || field === "lastName") && value) {
+    const label =
+      field === "firstName"
+        ? "Doctor first name"
+        : field === "middleName"
+          ? "Doctor middle name"
+          : "Doctor last name";
+    const nameError = validatePersonName(value, { fieldLabel: label });
+    if (nameError) return nameError;
   }
 
   if ((field === "phone" || field === "fax") && value && getDigits(value).length !== 10) {
@@ -2172,12 +2228,28 @@ function validateDoctorsForm(doctors) {
   doctors.forEach((doctor, index) => {
     if (!doctor.officeName?.trim()) {
       errors[`doctors.${index}.officeName`] = "Office name is required";
+    } else {
+      const officeNameError = validateOrganizationName(doctor.officeName, {
+        fieldLabel: "Office name",
+      });
+      if (officeNameError) errors[`doctors.${index}.officeName`] = officeNameError;
     }
 
     if (!doctor.firstName?.trim() && !doctor.lastName?.trim()) {
       errors[`doctors.${index}.firstName`] =
         "Doctor first or last name is required";
     }
+
+    ["firstName", "middleName", "lastName"].forEach((nameField) => {
+      const label =
+        nameField === "firstName"
+          ? "Doctor first name"
+          : nameField === "middleName"
+            ? "Doctor middle name"
+            : "Doctor last name";
+      const nameError = validatePersonName(doctor[nameField], { fieldLabel: label });
+      if (nameError) errors[`doctors.${index}.${nameField}`] = nameError;
+    });
 
     if (doctor.phone && getDigits(doctor.phone).length !== 10) {
       errors[`doctors.${index}.phone`] = "Enter a valid 10 digit number";

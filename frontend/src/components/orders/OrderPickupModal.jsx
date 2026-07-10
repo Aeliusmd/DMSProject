@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup, validatePersonName } from "@/lib/validations/nameValidation";
 
 export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) {
   const mounted = useIsClient();
@@ -45,11 +46,21 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
 
     if (!pickupPersonName.trim()) {
       nextErrors.pickupPersonName = "Pickup person name is required";
+    } else {
+      const nameError = validatePersonName(pickupPersonName, {
+        fieldLabel: "Pickup person name",
+      });
+      if (nameError) nextErrors.pickupPersonName = nameError;
     }
 
     if (!pickupDate) {
       nextErrors.pickupDate = "Pickup date is required";
     }
+
+    const notesError = validateNoHtmlMarkup(notes, {
+      fieldLabel: "Pickup notes",
+    });
+    if (notesError) nextErrors.notes = notesError;
 
     setFieldErrors(nextErrors);
 

@@ -6,6 +6,7 @@ const {
   isValidPositiveIntId,
   addMaxLengthError,
 } = require("./validationHelpers");
+const { addNoHtmlMarkupError, addPersonNameFormatError } = require("../utils/nameValidation");
 
 const VALID_RECORD_TYPES = ["medical", "billing", "employment", "xrays", "other"];
 
@@ -87,6 +88,7 @@ function validateCancelOrder(body = {}) {
     errors.push({ field: "reason", message: "Cancellation reason is required" });
   } else {
     addMaxLengthError(errors, "reason", reason, FIELD_LIMITS.TEXT);
+    addNoHtmlMarkupError(errors, "reason", reason);
   }
 
   return { valid: errors.length === 0, errors };
@@ -136,6 +138,7 @@ function validateRecordPickup(body = {}) {
       pickupPersonName,
       FIELD_LIMITS.PERFORMER_NAME
     );
+    addPersonNameFormatError(errors, "pickupPersonName", pickupPersonName);
   }
 
   addRequiredDateError(
@@ -145,6 +148,7 @@ function validateRecordPickup(body = {}) {
     "Pickup date is required"
   );
   addMaxLengthError(errors, "notes", body.notes, FIELD_LIMITS.TEXT);
+  addNoHtmlMarkupError(errors, "notes", body.notes);
 
   return { valid: errors.length === 0, errors };
 }
@@ -166,6 +170,7 @@ function validateRecordFax(body = {}) {
     "Fax sent date is required"
   );
   addMaxLengthError(errors, "notes", body.notes, FIELD_LIMITS.TEXT);
+  addNoHtmlMarkupError(errors, "notes", body.notes);
 
   return { valid: errors.length === 0, errors };
 }

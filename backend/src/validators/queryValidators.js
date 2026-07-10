@@ -5,6 +5,7 @@ const {
   addOptionalIsoDateError,
   addMaxLengthError,
 } = require("./validationHelpers");
+const { hasHtmlMarkup, htmlMarkupMessage } = require("../utils/nameValidation");
 const { toSqlDateOnly } = require("../utils/dateUtils");
 
 const MAX_NOTIFICATION_LIMIT = 100;
@@ -89,6 +90,8 @@ function validateSearchQuery(query = {}, fieldName = "q") {
       field: fieldName,
       message: `Search must be ${MAX_SEARCH_LENGTH} characters or less`,
     });
+  } else if (hasHtmlMarkup(value)) {
+    errors.push({ field: fieldName, message: htmlMarkupMessage(fieldName) });
   }
 
   return { valid: errors.length === 0, errors };
@@ -116,6 +119,8 @@ function validatePaymentSearchQuery(query = {}) {
       field: "orderId",
       message: `Search must be ${MAX_SEARCH_LENGTH} characters or less`,
     });
+  } else if (hasHtmlMarkup(orderRef)) {
+    errors.push({ field: "orderId", message: htmlMarkupMessage("orderId") });
   }
 
   return { valid: errors.length === 0, errors };

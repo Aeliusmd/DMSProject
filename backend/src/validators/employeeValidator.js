@@ -3,6 +3,7 @@ const MAX_LOGON_LENGTH = 100;
 const MAX_EMAIL_LENGTH = 255;
 const MAX_PASSWORD_LENGTH = 128;
 const ALLOWED_ROLES = new Set(["Manager", "Employee"]);
+const { addPersonNameFormatError } = require("../utils/nameValidation");
 
 function trimToString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -24,6 +25,8 @@ function validateCreateEmployee(body = {}) {
       field: "name",
       message: `Name must be ${MAX_NAME_LENGTH} characters or less`,
     });
+  } else {
+    addPersonNameFormatError(errors, "name", name);
   }
 
   if (!logon) {
@@ -94,6 +97,8 @@ function validateUpdateEmployee(body = {}) {
       field: "name",
       message: `Name must be ${MAX_NAME_LENGTH} characters or less`,
     });
+  } else {
+    addPersonNameFormatError(errors, "name", name);
   }
 
   if (!logon) {

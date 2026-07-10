@@ -1,3 +1,5 @@
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
+
 export function getEmptyReminderForm() {
   return {
     caseNumber: "",
@@ -21,6 +23,9 @@ export function validateReminderForm(data) {
 
   if (!data.note.trim()) {
     errors.note = "Note is required";
+  } else {
+    const noteError = validateNoHtmlMarkup(data.note, { fieldLabel: "Note" });
+    if (noteError) errors.note = noteError;
   }
 
   if (!data.callbackDate) {

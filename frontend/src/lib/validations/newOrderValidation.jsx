@@ -1,6 +1,12 @@
 import {
   hasFormRecordTypesSelected,
 } from "@/lib/orders/recordTypeUtils";
+import {
+  validatePersonName,
+  validateOrganizationName,
+  validateNoHtmlMarkup,
+  addNoHtmlMarkupFieldErrors,
+} from "@/lib/validations/nameValidation";
 
 export const immediateRequiredFields = [
   "facility",
@@ -47,10 +53,28 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     errors.type = "Select at least one record type";
   }
   if (!data.firstName.trim()) errors.firstName = "First name is required";
+  else {
+    const firstNameError = validatePersonName(data.firstName, {
+      fieldLabel: "First name",
+    });
+    if (firstNameError) errors.firstName = firstNameError;
+  }
+
   if (!data.lastName.trim()) errors.lastName = "Last name is required";
+  else {
+    const lastNameError = validatePersonName(data.lastName, {
+      fieldLabel: "Last name",
+    });
+    if (lastNameError) errors.lastName = lastNameError;
+  }
 
   if (!data.serveCompanyName.trim()) {
     errors.serveCompanyName = "Company name is required";
+  } else {
+    const companyError = validateOrganizationName(data.serveCompanyName, {
+      fieldLabel: "Company name",
+    });
+    if (companyError) errors.serveCompanyName = companyError;
   }
 
   if (!data.email?.trim()) {
@@ -61,7 +85,45 @@ export function validateNewOrderForm(data, fileErrors = {}) {
 
   if (!data.specificDoctor?.trim()) {
     errors.specificDoctor = "Specific doctor is required";
+  } else {
+    const doctorError = validateOrganizationName(data.specificDoctor, {
+      fieldLabel: "Specific doctor",
+    });
+    if (doctorError) errors.specificDoctor = doctorError;
   }
+
+  const middleNameError = validatePersonName(data.middleName, {
+    fieldLabel: "Middle name",
+  });
+  if (middleNameError) errors.middleName = middleNameError;
+
+  const akaError = validatePersonName(data.aka, { fieldLabel: "AKA" });
+  if (akaError) errors.aka = akaError;
+
+  const defendantError = validateOrganizationName(data.defendant, {
+    fieldLabel: "Defendant",
+  });
+  if (defendantError) errors.defendant = defendantError;
+
+  const cnrReasonError = validateNoHtmlMarkup(data.cnrReason, {
+    fieldLabel: "CNR reason",
+  });
+  if (cnrReasonError) errors.cnrReason = cnrReasonError;
+
+  addNoHtmlMarkupFieldErrors(errors, data, {
+    address: "Address",
+    city: "City",
+    specificRecord: "Specific record",
+    court: "Court",
+    caseNumber: "Case number",
+    recNumber: "REC number",
+    orderRef: "Order reference",
+    fullAddress: "Full address",
+    documentName: "Document name",
+    prepaymentMemo: "Prepayment memo",
+    custodianMemo: "Custodian memo",
+    xrayMemo: "X-Ray memo",
+  });
 
   if (data.ssn && !isValidSSN(data.ssn)) {
     errors.ssn = "Enter SSN as XXX-XX-1234";

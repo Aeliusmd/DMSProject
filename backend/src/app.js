@@ -11,6 +11,13 @@ const stripeWebhookController = require("./controllers/stripeWebhookController")
 
 const app = express();
 
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
 app.set("trust proxy", 1);
 
 app.use(cors({ origin: config.clientUrl, credentials: true }));

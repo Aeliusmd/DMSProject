@@ -10,6 +10,7 @@ import {
 } from "@/lib/payments/paymentApi";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 const INVOICE_STYLES = {
   regular: {
@@ -143,6 +144,9 @@ export default function ManualPaymentModal({ isOpen, onClose, onSaved }) {
     if (!paymentDate) {
       nextErrors.paymentDate = "Payment date is required.";
     }
+
+    const noteError = validateNoHtmlMarkup(note, { fieldLabel: "Payment note" });
+    if (noteError) nextErrors.note = noteError;
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrorsByType((current) => ({

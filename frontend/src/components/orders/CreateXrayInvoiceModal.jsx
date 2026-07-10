@@ -13,6 +13,7 @@ import {
   getApiErrorMessage,
   hasValidationErrors,
 } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 const initialFormData = {
   xrayInvoiceDate: "",
@@ -487,18 +488,25 @@ function validateXrayInvoiceForm(data) {
   const errors = {};
 
   if (!data.xrayInvoiceDate) {
-    errors.xrayInvoiceDate = "Required";
+    errors.xrayInvoiceDate = "X-Ray invoice date is required";
   }
 
   if (data.views === "") {
-    errors.views = "Required";
+    errors.views = "View count is required";
+  } else if (Number(data.views) < 0) {
+    errors.views = "Enter a valid view count (0 or greater)";
   }
 
   if (data.perViewAmount === "") {
-    errors.perViewAmount = "Required";
+    errors.perViewAmount = "Per view amount is required";
   } else if (Number.isNaN(Number(data.perViewAmount))) {
-    errors.perViewAmount = "Invalid amount";
+    errors.perViewAmount = "Enter a valid per view amount";
   }
+
+  const descriptionError = validateNoHtmlMarkup(data.description, {
+    fieldLabel: "Description",
+  });
+  if (descriptionError) errors.description = descriptionError;
 
   return errors;
 }

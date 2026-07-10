@@ -11,6 +11,24 @@ const {
   addMaxLengthError,
   addOptionalIsoDateError,
 } = require("./validationHelpers");
+const {
+  addPersonNameFormatError,
+  addOrganizationNameFormatError,
+  addNoHtmlMarkupError,
+  addNoHtmlMarkupErrors,
+} = require("../utils/nameValidation");
+
+const ORDER_FREE_TEXT_FIELDS = [
+  "address",
+  "city",
+  "specificRecord",
+  "court",
+  "caseNumber",
+  "recNumber",
+  "orderRef",
+  "fullAddress",
+  "documentName",
+];
 
 const ALLOWED_ORDER_TYPES = ["medical", "billing", "employment", "xrays", "other"];
 const ALLOWED_INJURY_TYPES = ["specific", "cumulative"];
@@ -72,12 +90,14 @@ function validateOrderPayload(body = {}) {
     errors.push({ field: "firstName", message: "First name is required" });
   } else {
     addMaxLengthError(errors, "firstName", body.firstName, FIELD_LIMITS.VARCHAR_100);
+    addPersonNameFormatError(errors, "firstName", body.firstName);
   }
 
   if (isBlank(body.lastName)) {
     errors.push({ field: "lastName", message: "Last name is required" });
   } else {
     addMaxLengthError(errors, "lastName", body.lastName, FIELD_LIMITS.VARCHAR_100);
+    addPersonNameFormatError(errors, "lastName", body.lastName);
   }
 
   if (isBlank(body.serveCompanyName)) {
@@ -89,6 +109,7 @@ function validateOrderPayload(body = {}) {
       body.serveCompanyName,
       FIELD_LIMITS.VARCHAR_255
     );
+    addOrganizationNameFormatError(errors, "serveCompanyName", body.serveCompanyName);
   }
 
   const providerEmail = trimToString(body.email);
@@ -109,11 +130,15 @@ function validateOrderPayload(body = {}) {
       body.specificDoctor,
       FIELD_LIMITS.VARCHAR_200
     );
+    addOrganizationNameFormatError(errors, "specificDoctor", body.specificDoctor);
   }
 
   addMaxLengthError(errors, "middleName", body.middleName, FIELD_LIMITS.VARCHAR_100);
+  addPersonNameFormatError(errors, "middleName", body.middleName);
   addMaxLengthError(errors, "aka", body.aka, FIELD_LIMITS.VARCHAR_150);
+  addPersonNameFormatError(errors, "aka", body.aka);
   addMaxLengthError(errors, "defendant", body.defendant, FIELD_LIMITS.VARCHAR_200);
+  addOrganizationNameFormatError(errors, "defendant", body.defendant);
   addMaxLengthError(errors, "address", body.address, FIELD_LIMITS.VARCHAR_255);
   addMaxLengthError(errors, "city", body.city, FIELD_LIMITS.VARCHAR_100);
   addMaxLengthError(errors, "specificRecord", body.specificRecord, FIELD_LIMITS.VARCHAR_255);
@@ -122,12 +147,19 @@ function validateOrderPayload(body = {}) {
   addMaxLengthError(errors, "recNumber", body.recNumber, 50);
   addMaxLengthError(errors, "orderRef", body.orderRef, 50);
   addMaxLengthError(errors, "contact1Name", body.contact1Name, FIELD_LIMITS.VARCHAR_150);
+  addPersonNameFormatError(errors, "contact1Name", body.contact1Name);
   addMaxLengthError(errors, "contact1Title", body.contact1Title, FIELD_LIMITS.VARCHAR_100);
+  addPersonNameFormatError(errors, "contact1Title", body.contact1Title);
   addMaxLengthError(errors, "contact2Name", body.contact2Name, FIELD_LIMITS.VARCHAR_150);
+  addPersonNameFormatError(errors, "contact2Name", body.contact2Name);
   addMaxLengthError(errors, "contact2Title", body.contact2Title, FIELD_LIMITS.VARCHAR_100);
+  addPersonNameFormatError(errors, "contact2Title", body.contact2Title);
   addMaxLengthError(errors, "fullAddress", body.fullAddress, FIELD_LIMITS.TEXT);
   addMaxLengthError(errors, "cnrReason", body.cnrReason, FIELD_LIMITS.TEXT);
+  addNoHtmlMarkupError(errors, "cnrReason", body.cnrReason);
   addMaxLengthError(errors, "documentName", body.documentName, FIELD_LIMITS.VARCHAR_255);
+  addNoHtmlMarkupErrors(errors, body, ORDER_FREE_TEXT_FIELDS);
+  addNoHtmlMarkupError(errors, "documentName", body.documentName);
 
   if (!isBlank(body.ssn) && !isValidSSN(body.ssn)) {
     errors.push({ field: "ssn", message: "Enter SSN as XXX-XX-1234" });
@@ -184,6 +216,9 @@ function validateOrderPayload(body = {}) {
 
     addMaxLengthError(errors, checkField, body[checkField], 50);
     addOptionalIsoDateError(errors, `${prefix}Date`, body[`${prefix}Date`]);
+    const memoField = `${prefix}Memo`;
+    addMaxLengthError(errors, memoField, body[memoField], FIELD_LIMITS.TEXT);
+    addNoHtmlMarkupError(errors, memoField, body[memoField]);
   });
 
   [
@@ -309,6 +344,8 @@ function validateOrderNote(body = {}) {
       field: "note",
       message: `Note cannot be more than ${MAX_NOTE_LENGTH} characters`,
     });
+  } else {
+    addNoHtmlMarkupError(errors, "note", note);
   }
 
   return { valid: errors.length === 0, errors };
