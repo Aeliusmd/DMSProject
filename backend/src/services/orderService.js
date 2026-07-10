@@ -346,11 +346,6 @@ function buildInjuryDatePayload(data) {
   };
 }
 
-function generateOrderNumber() {
-  const stamp = Date.now().toString().slice(-7);
-  return `${stamp}-1`;
-}
-
 function buildSubpoenaUrl(storagePath) {
   const normalized = String(storagePath || "").replace(/\\/g, "/");
   if (!normalized) return "";
@@ -1902,7 +1897,11 @@ async function saveOrderDocuments(
 }
 
 async function resolveOrderNumber(rawOrderNumber, excludeId = null) {
-  let orderNumber = trimOrNull(rawOrderNumber) || generateOrderNumber();
+  const orderNumber = trimOrNull(rawOrderNumber);
+
+  if (!orderNumber) {
+    throw new ApiError(400, "Order number is required");
+  }
 
   const existing = await Order.findByOrderNumber(orderNumber, excludeId);
 
@@ -2328,10 +2327,12 @@ async function updateOrder(id, data, actorId, files) {
 
     assertFacilityProfileComplete(facility);
 
-    const orderNumber = await resolveOrderNumber(
-      data.orderNumber || existing.order_number,
-      existing.id
-    );
+    const rawOrderNumber = trimOrNull(data.orderNumber);
+    if (!rawOrderNumber) {
+      throw new ApiError(400, "Order number is required");
+    }
+
+    const orderNumber = await resolveOrderNumber(rawOrderNumber, existing.id);
     const payments = collectPayments(data);
 
     const subpoenaFile = getUploadedFile(files, "subpoenaFile");

@@ -1082,6 +1082,8 @@ function NewOrderPageContent() {
     (field) => errors[field]
   );
 
+  const hasValidationErrors = Object.values(errors).some(Boolean);
+
   const syncDoctorFromForm = async (data, options = {}) => {
     const facilityId = `${data.facility || ""}`.trim();
 
@@ -1446,7 +1448,8 @@ function NewOrderPageContent() {
   };
 
   const getError = (name) => {
-    const shouldShowImmediately = immediateRequiredFields.includes(name);
+    const shouldShowImmediately =
+      immediateRequiredFields.includes(name) || isEditMode;
 
     if (shouldShowImmediately || touched[name] || submitAttempted) {
       return errors[name] || "";
@@ -1886,7 +1889,7 @@ function NewOrderPageContent() {
         <OrderSaveActionBar
           onSave={handleSaveOrder}
           disabled={
-            hasImmediateRequiredErrors ||
+            (isEditMode ? hasValidationErrors : hasImmediateRequiredErrors) ||
             saving ||
             facilityProfileIncomplete ||
             missingDefaultDoctor ||
@@ -2281,6 +2284,9 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Order number"
+        required
+        error={getError("orderNumber")}
+        maxLength={50}
       />
 
       <NewOrderField

@@ -39,6 +39,11 @@ function hasInjuryPayload(data = {}) {
 
 const REQUIRED_FIELD_RULES = [
   {
+    key: "orderNumber",
+    label: "Order number",
+    check: (data) => Boolean(`${data.orderNumber || ""}`.trim()),
+  },
+  {
     key: "facility",
     label: "Facility",
     check: (data) => Boolean(`${data.facility || ""}`.trim()),
@@ -95,6 +100,7 @@ function mapOrderRowToRequiredFieldData(row = {}, orderRecords = []) {
   const primaryType = recordTypes[0] || "";
 
   return {
+    orderNumber: row.order_number || "",
     facility: row.facility_id ? String(row.facility_id) : "",
     type: primaryType,
     medicalRecords: recordTypes.includes("medical"),

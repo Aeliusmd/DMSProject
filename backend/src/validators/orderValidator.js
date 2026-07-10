@@ -63,8 +63,21 @@ function hasRecordTypesSelected(body = {}) {
   ].some(Boolean);
 }
 
-function validateOrderPayload(body = {}) {
+function validateOrderPayload(body = {}, options = {}) {
+  const { requireOrderNumber = true } = options;
   const errors = [];
+
+  if (requireOrderNumber) {
+    if (isBlank(body.orderNumber)) {
+      errors.push({ field: "orderNumber", message: "Order number is required" });
+    } else {
+      addMaxLengthError(errors, "orderNumber", body.orderNumber, 50);
+      addNoHtmlMarkupError(errors, "orderNumber", body.orderNumber);
+    }
+  } else if (!isBlank(body.orderNumber)) {
+    addMaxLengthError(errors, "orderNumber", body.orderNumber, 50);
+    addNoHtmlMarkupError(errors, "orderNumber", body.orderNumber);
+  }
 
   const facility = body.facility;
 
@@ -326,11 +339,11 @@ function validateCnrFields(body = {}) {
 }
 
 function validateCreateOrder(body = {}) {
-  return validateOrderPayload(body);
+  return validateOrderPayload(body, { requireOrderNumber: true });
 }
 
 function validateUpdateOrder(body = {}) {
-  return validateOrderPayload(body);
+  return validateOrderPayload(body, { requireOrderNumber: true });
 }
 
 function validateOrderNote(body = {}) {
