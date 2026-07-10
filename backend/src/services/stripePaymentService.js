@@ -305,27 +305,24 @@ async function assertInvoicePayable(orderId, invoiceType) {
   throw new ApiError(400, "invoiceType must be regular or xray");
 }
 
+async function deleteAbandonedPendingPayments(orderId, invoiceType) {
+  const pool = getPool();
+  await pool.execute(
+    `DELETE FROM stripe_online_payments
+     WHERE order_id = :orderId
+       AND invoice_type = :invoiceType
+       AND status IN ('pending', 'expired')`,
+    { orderId, invoiceType }
+  );
+}
+
 async function createCheckoutSession(token, invoiceType) {
   const tokenRow = await resolveTokenRow(token);
   const payable = await assertInvoicePayable(tokenRow.order_id, invoiceType);
   const stripe = getStripe();
 
-  const pool = getPool();
-  const [insertResult] = await pool.execute(
-    `INSERT INTO stripe_online_payments
-       (order_id, invoice_type, invoice_number, amount, currency, status)
-     VALUES
-       (:orderId, :invoiceType, :invoiceNumber, :amount, :currency, 'pending')`,
-    {
-      orderId: tokenRow.order_id,
-      invoiceType: payable.invoiceType,
-      invoiceNumber: payable.invoiceNumber,
-      amount: payable.amountDue,
-      currency: config.stripe.currency || "usd",
-    }
-  );
+  await deleteAbandonedPendingPayments(tokenRow.order_id, payable.invoiceType);
 
-  const paymentRecordId = insertResult.insertId;
   const amountCents = Math.round(toNumber(payable.amountDue) * 100);
 
   if (amountCents <= 0) {
@@ -356,19 +353,14 @@ async function createCheckoutSession(token, invoiceType) {
     metadata: {
       order_id: String(tokenRow.order_id),
       invoice_type: payable.invoiceType,
-      payment_record_id: String(paymentRecordId),
+      invoice_number: payable.invoiceNumber,
+      amount: String(payable.amountDue),
       access_token: token,
+      currency: config.stripe.currency || "usd",
     },
     success_url: successUrl,
     cancel_url: cancelUrl,
   });
-
-  await pool.execute(
-    `UPDATE stripe_online_payments
-     SET stripe_checkout_session_id = :sessionId
-     WHERE id = :id`,
-    { sessionId: session.id, id: paymentRecordId }
-  );
 
   return {
     checkoutUrl: session.url,
@@ -433,7 +425,7 @@ function mapOnlinePaymentRow(row) {
 
 async function getOnlinePayments(query = {}) {
   const pool = getPool();
-  const conditions = ["1=1"];
+  const conditions = ["s.status = 'succeeded'"];
   const params = {};
 
   if (query.orderId) {
@@ -620,44 +612,108 @@ async function sendPaymentNotificationEmail(paymentRow, outcome) {
   }
 }
 
+async function insertSuccessfulPaymentRecord(connection, session, stripeDetails) {
+  const orderId = Number(session.metadata?.order_id);
+  const invoiceType = session.metadata?.invoice_type;
+  const invoiceNumber = session.metadata?.invoice_number || "";
+  const amount = toNumber(session.metadata?.amount);
+  const currency = session.metadata?.currency || config.stripe.currency || "usd";
+
+  const [existingRows] = await connection.execute(
+    `SELECT id, status
+     FROM stripe_online_payments
+     WHERE stripe_checkout_session_id = :sessionId
+     LIMIT 1`,
+    { sessionId: session.id }
+  );
+
+  const existing = existingRows[0];
+  if (existing?.status === "succeeded") {
+    return existing.id;
+  }
+
+  if (existing) {
+    await updatePaymentRecord(connection, existing.id, {
+      status: "succeeded",
+      ...stripeDetails,
+      paidAt: new Date(),
+      failureMessage: null,
+    });
+    return existing.id;
+  }
+
+  const [insertResult] = await connection.execute(
+    `INSERT INTO stripe_online_payments
+       (order_id, invoice_type, invoice_number, amount, currency, status,
+        stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
+        stripe_customer_id, payment_method_type, card_brand, card_last4,
+        customer_email, customer_name, receipt_url, processing_fee, net_amount,
+        failure_message, paid_at)
+     VALUES
+       (:orderId, :invoiceType, :invoiceNumber, :amount, :currency, 'succeeded',
+        :sessionId, :paymentIntentId, :chargeId, :customerId, :paymentMethodType,
+        :cardBrand, :cardLast4, :customerEmail, :customerName, :receiptUrl,
+        :processingFee, :netAmount, NULL, :paidAt)`,
+    {
+      orderId,
+      invoiceType,
+      invoiceNumber,
+      amount,
+      currency,
+      sessionId: session.id,
+      paymentIntentId: stripeDetails.stripePaymentIntentId,
+      chargeId: stripeDetails.stripeChargeId,
+      customerId: stripeDetails.stripeCustomerId,
+      paymentMethodType: stripeDetails.paymentMethodType,
+      cardBrand: stripeDetails.cardBrand,
+      cardLast4: stripeDetails.cardLast4,
+      customerEmail: stripeDetails.customerEmail,
+      customerName: stripeDetails.customerName,
+      receiptUrl: stripeDetails.receiptUrl,
+      processingFee: stripeDetails.processingFee,
+      netAmount: stripeDetails.netAmount,
+      paidAt: new Date(),
+    }
+  );
+
+  return insertResult.insertId;
+}
+
 async function fulfillSuccessfulCheckoutSession(session) {
-  const paymentRecordId = Number(session.metadata?.payment_record_id);
   const orderId = Number(session.metadata?.order_id);
   const invoiceType = session.metadata?.invoice_type;
 
-  if (!paymentRecordId || !orderId || !invoiceType) {
+  if (!orderId || !invoiceType) {
     logger.warn("Stripe session missing metadata", { sessionId: session.id });
     return;
   }
 
   const pool = getPool();
   const [existingRows] = await pool.execute(
-    `SELECT * FROM stripe_online_payments WHERE id = :id LIMIT 1`,
-    { id: paymentRecordId }
+    `SELECT id, status
+     FROM stripe_online_payments
+     WHERE stripe_checkout_session_id = :sessionId
+     LIMIT 1`,
+    { sessionId: session.id }
   );
-  const existing = existingRows[0];
 
-  if (!existing) {
-    logger.warn("Stripe payment record not found", { paymentRecordId });
-    return;
-  }
-
-  if (existing.status === "succeeded") {
+  if (existingRows[0]?.status === "succeeded") {
     return;
   }
 
   const stripeDetails = await extractStripePaymentDetails(session);
   const connection = await pool.getConnection();
 
+  let paymentRecordId = null;
+
   try {
     await connection.beginTransaction();
     await fulfillInvoicePayment(connection, orderId, invoiceType);
-    await updatePaymentRecord(connection, paymentRecordId, {
-      status: "succeeded",
-      ...stripeDetails,
-      paidAt: new Date(),
-      failureMessage: null,
-    });
+    paymentRecordId = await insertSuccessfulPaymentRecord(
+      connection,
+      session,
+      stripeDetails
+    );
     await connection.commit();
   } catch (error) {
     await connection.rollback();
@@ -686,26 +742,34 @@ async function markPaymentFailed(sessionOrIntent, failureMessage) {
   const sessionId = sessionOrIntent.id?.startsWith("cs_")
     ? sessionOrIntent.id
     : sessionOrIntent.metadata?.checkout_session || null;
-  const paymentRecordId = Number(sessionOrIntent.metadata?.payment_record_id);
 
-  const pool = getPool();
-  let record = null;
-
-  if (paymentRecordId) {
-    const [rows] = await pool.execute(
-      `SELECT * FROM stripe_online_payments WHERE id = :id LIMIT 1`,
-      { id: paymentRecordId }
-    );
-    record = rows[0];
-  } else if (sessionId) {
-    const [rows] = await pool.execute(
-      `SELECT * FROM stripe_online_payments WHERE stripe_checkout_session_id = :sessionId LIMIT 1`,
-      { sessionId }
-    );
-    record = rows[0];
+  if (!sessionId) {
+    return;
   }
 
-  if (!record || record.status === "succeeded") return;
+  const pool = getPool();
+  const [rows] = await pool.execute(
+    `SELECT id, status, customer_email
+     FROM stripe_online_payments
+     WHERE stripe_checkout_session_id = :sessionId
+     LIMIT 1`,
+    { sessionId }
+  );
+
+  const record = rows[0];
+  if (!record || record.status === "succeeded") {
+    await pool.execute(
+      `DELETE FROM stripe_online_payments
+       WHERE stripe_checkout_session_id = :sessionId
+         AND status IN ('pending', 'expired')`,
+      { sessionId }
+    );
+    return;
+  }
+
+  if (record.status === "failed") {
+    return;
+  }
 
   await pool.execute(
     `UPDATE stripe_online_payments
@@ -716,23 +780,24 @@ async function markPaymentFailed(sessionOrIntent, failureMessage) {
     { id: record.id, failureMessage: failureMessage || "Payment failed" }
   );
 
-  const [updatedRows] = await pool.execute(
-    `SELECT s.*, o.order_number,
-            COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
-     FROM stripe_online_payments s
-     INNER JOIN orders o ON o.id = s.order_id
-     LEFT JOIN facilities f ON f.id = o.facility_id
-     LEFT JOIN providers p ON p.id = o.provider_id
-     WHERE s.id = :id`,
-    { id: record.id }
-  );
-
-  const email = updatedRows[0]?.customer_email;
-  if (email) {
-    await sendPaymentNotificationEmail(
-      { ...updatedRows[0], failure_message: failureMessage },
-      "failure"
+  if (record.customer_email) {
+    const [updatedRows] = await pool.execute(
+      `SELECT s.*, o.order_number,
+              COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
+       FROM stripe_online_payments s
+       INNER JOIN orders o ON o.id = s.order_id
+       LEFT JOIN facilities f ON f.id = o.facility_id
+       LEFT JOIN providers p ON p.id = o.provider_id
+       WHERE s.id = :id`,
+      { id: record.id }
     );
+
+    if (updatedRows[0]) {
+      await sendPaymentNotificationEmail(
+        { ...updatedRows[0], failure_message: failureMessage },
+        "failure"
+      );
+    }
   }
 }
 
@@ -762,7 +827,13 @@ async function handleStripeWebhook(rawBody, signature) {
       break;
     }
     case "checkout.session.expired": {
-      await markPaymentFailed(event.data.object, "Checkout session expired");
+      const pool = getPool();
+      await pool.execute(
+        `DELETE FROM stripe_online_payments
+         WHERE stripe_checkout_session_id = :sessionId
+           AND status IN ('pending', 'expired')`,
+        { sessionId: event.data.object.id }
+      );
       break;
     }
     case "payment_intent.payment_failed": {
@@ -785,6 +856,23 @@ async function getCheckoutResult(token, sessionId) {
   }
 
   const pool = getPool();
+  const stripe = getStripe();
+
+  let session;
+  try {
+    session = await stripe.checkout.sessions.retrieve(sessionId);
+  } catch (error) {
+    throw new ApiError(404, "Payment session not found");
+  }
+
+  const accessToken = session.metadata?.access_token;
+  if (accessToken && accessToken !== token) {
+    throw new ApiError(404, "Payment session not found");
+  }
+
+  if (session.payment_status === "paid") {
+    await fulfillSuccessfulCheckoutSession(session);
+  }
 
   async function loadPayment() {
     const [rows] = await pool.execute(
@@ -796,6 +884,7 @@ async function getCheckoutResult(token, sessionId) {
        LEFT JOIN facilities f ON f.id = o.facility_id
        LEFT JOIN providers p ON p.id = o.provider_id
        WHERE s.stripe_checkout_session_id = :sessionId
+         AND s.status = 'succeeded'
        LIMIT 1`,
       { sessionId }
     );
@@ -803,52 +892,63 @@ async function getCheckoutResult(token, sessionId) {
   }
 
   let payment = await loadPayment();
-  if (!payment) {
-    throw new ApiError(404, "Payment session not found");
-  }
-
-  if (payment.status === "pending") {
-    try {
-      const stripe = getStripe();
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      if (session.payment_status === "paid") {
-        await fulfillSuccessfulCheckoutSession(session);
-      } else if (session.status === "expired") {
-        await markPaymentFailed(session, "Checkout session expired");
-      }
-      payment = await loadPayment();
-    } catch (error) {
-      logger.warn("Unable to sync checkout session", {
-        sessionId,
-        error: error.message,
-      });
-    }
-  }
-
   const pageData = await getPaymentPageData(token);
   const unpaidInvoices = pageData.invoices.filter((item) => !item.isPaid);
-  const success = payment.status === "succeeded";
+
+  if (payment) {
+    return {
+      success: true,
+      status: "Succeeded",
+      amount: toNumber(payment.amount),
+      amountDisplay: formatMoney(payment.amount),
+      invoiceNumber: payment.invoice_number || "",
+      invoiceType: payment.invoice_type,
+      invoiceTypeLabel:
+        payment.invoice_type === "xray" ? "X-Ray Invoice" : "Regular Invoice",
+      orderNumber: payment.order_number || "",
+      company: payment.company_name || "",
+      applicant: payment.applicant_name || "",
+      caseNo: payment.case_number || "",
+      customerEmail: payment.customer_email || "",
+      failureMessage: "",
+      receiptUrl: payment.receipt_url || "",
+      paidAt: payment.paid_at || null,
+      sessionId: payment.stripe_checkout_session_id,
+      paymentId: payment.id,
+      token,
+      hasAnotherUnpaidInvoice: unpaidInvoices.length > 0,
+      unpaidInvoices,
+    };
+  }
+
+  const invoiceType = session.metadata?.invoice_type || "regular";
+  const invoiceNumber = session.metadata?.invoice_number || "";
+  const amount = toNumber(session.metadata?.amount);
+  const failureMessage =
+    session.status === "expired"
+      ? "Checkout session expired"
+      : "Payment was not completed";
 
   return {
-    success,
-    status: mapStripeStatus(payment.status),
-    amount: toNumber(payment.amount),
-    amountDisplay: formatMoney(payment.amount),
-    invoiceNumber: payment.invoice_number || "",
-    invoiceType: payment.invoice_type,
-    invoiceTypeLabel: payment.invoice_type === "xray" ? "X-Ray Invoice" : "Regular Invoice",
-    orderNumber: payment.order_number || "",
-    company: payment.company_name || "",
-    applicant: payment.applicant_name || "",
-    caseNo: payment.case_number || "",
-    customerEmail: payment.customer_email || "",
-    failureMessage: payment.failure_message || "",
-    receiptUrl: payment.receipt_url || "",
-    paidAt: payment.paid_at || null,
-    sessionId: payment.stripe_checkout_session_id,
-    paymentId: payment.id,
+    success: false,
+    status: "Failed",
+    amount,
+    amountDisplay: formatMoney(amount),
+    invoiceNumber,
+    invoiceType,
+    invoiceTypeLabel: invoiceType === "xray" ? "X-Ray Invoice" : "Regular Invoice",
+    orderNumber: pageData.order?.orderNumber || "",
+    company: pageData.order?.company || "",
+    applicant: pageData.order?.applicant || "",
+    caseNo: pageData.order?.caseNo || "",
+    customerEmail: session.customer_details?.email || "",
+    failureMessage,
+    receiptUrl: "",
+    paidAt: null,
+    sessionId,
+    paymentId: null,
     token,
-    hasAnotherUnpaidInvoice: success && unpaidInvoices.length > 0,
+    hasAnotherUnpaidInvoice: false,
     unpaidInvoices,
   };
 }
