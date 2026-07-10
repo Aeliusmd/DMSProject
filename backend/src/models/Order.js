@@ -11,6 +11,7 @@ const {
 } = require("../utils/rushUtils");
 const { toSqlDateOnly, parseDateOnlyParts } = require("../utils/dateUtils");
 const { likeContains, likePrefix } = require("../utils/sqlSafety");
+const { areAllOrderInvoicesPaid } = require("../utils/orderInvoicePayment");
 
 function toSqlDateTimeStart(value) {
   const dateOnly = toSqlDateOnly(value);
@@ -906,6 +907,10 @@ class Order {
     );
 
     if (!Order.isWorkflowFullyComplete(stageRows)) {
+      return false;
+    }
+
+    if (!(await areAllOrderInvoicesPaid(orderId, db))) {
       return false;
     }
 

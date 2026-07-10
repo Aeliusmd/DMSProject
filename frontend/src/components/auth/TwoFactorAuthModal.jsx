@@ -5,9 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { TWO_FACTOR_AUTH_COUNTDOWN_SECONDS } from "@/lib/constants";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import {
-  resendTwoFactor,
-  saveAuthSession,
-  verifyTwoFactor,
+  resendTwoFactor as defaultResendTwoFactor,
+  saveAuthSession as defaultSaveAuthSession,
+  verifyTwoFactor as defaultVerifyTwoFactor,
 } from "@/lib/auth/authApi";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
@@ -17,6 +17,10 @@ export default function TwoFactorAuthModal({
   onSuccess,
   email,
   sessionToken,
+  verifyFn = defaultVerifyTwoFactor,
+  resendFn = defaultResendTwoFactor,
+  saveSessionFn = defaultSaveAuthSession,
+  subtitle = "Legal Practice Management Portal",
 }) {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [countdown, setCountdown] = useState(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
@@ -72,7 +76,7 @@ export default function TwoFactorAuthModal({
     setError("");
 
     try {
-      const response = await verifyTwoFactor({
+      const response = await verifyFn({
         sessionToken,
         code,
         trustDevice,
@@ -80,7 +84,7 @@ export default function TwoFactorAuthModal({
 
       const payload = response?.data || {};
 
-      saveAuthSession({
+      saveSessionFn({
         accessToken: payload.accessToken,
         refreshToken: payload.refreshToken,
         user: payload.user,
@@ -178,7 +182,7 @@ export default function TwoFactorAuthModal({
     setError("");
 
     try {
-      await resendTwoFactor(sessionToken);
+      await resendFn(sessionToken);
       setOtp(["", "", "", "", "", ""]);
       setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
       inputRefs.current[0]?.focus();
@@ -212,7 +216,7 @@ export default function TwoFactorAuthModal({
           </div>
 
           <p className="text-[12px] text-[#64748B]">
-            Legal Practice Management Portal
+            {subtitle}
           </p>
         </div>
 

@@ -1,6 +1,5 @@
 /**
  * Manual invoice payment recording for the Payments page.
- * Does not modify order workflow or order_payments.
  */
 
 const ApiError = require("../utils/ApiError");
@@ -270,6 +269,7 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
       await connection.execute(
         `UPDATE invoice_xray_details
          SET amount_paid = :amountPaid,
+             status = 'Paid',
              payment_method = 'manual',
              payment_check_number = :checkNumber,
              payment_date = :paymentDate,
@@ -296,6 +296,8 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
   } finally {
     connection.release();
   }
+
+  await Order.syncOrderStatusFromWorkflow(orderId);
 
   return searchOrderInvoices(order.order_number);
 }

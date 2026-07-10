@@ -326,7 +326,7 @@ export default function InvoicesPage() {
             onRefresh={reloadInvoices}
             onSent={() => setActiveTab("resend")}
             invoiceType={isXray ? "xray" : "invoice"}
-            enableWriteOff={!isXray}
+            enableWriteOff
             reportTab="outstanding"
             reportFilters={dateFilters}
           />

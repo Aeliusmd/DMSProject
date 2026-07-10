@@ -33,6 +33,34 @@ function generateRefreshToken(payload) {
   );
 }
 
+function generateCompanyAccessToken(payload) {
+  return jwt.sign(
+    {
+      sub: payload.companyUserId,
+      role: "Company",
+      sessionId: payload.sessionId,
+      type: "company_access",
+      portal: "company",
+    },
+    config.jwt.accessSecret,
+    { expiresIn: config.jwt.accessExpiresIn }
+  );
+}
+
+function generateCompanyRefreshToken(payload) {
+  return jwt.sign(
+    {
+      sub: payload.companyUserId,
+      sessionId: payload.sessionId,
+      sessionToken: payload.sessionToken,
+      type: "company_refresh",
+      portal: "company",
+    },
+    config.jwt.refreshSecret,
+    { expiresIn: config.jwt.refreshExpiresIn }
+  );
+}
+
 function verifyAccessToken(token) {
   const decoded = jwt.verify(token, config.jwt.accessSecret);
 
@@ -47,6 +75,26 @@ function verifyRefreshToken(token) {
   const decoded = jwt.verify(token, config.jwt.refreshSecret);
 
   if (decoded.type !== "refresh") {
+    throw new ApiError(401, "Invalid or expired session. Please sign in again.");
+  }
+
+  return decoded;
+}
+
+function verifyCompanyAccessToken(token) {
+  const decoded = jwt.verify(token, config.jwt.accessSecret);
+
+  if (decoded.type !== "company_access" || decoded.portal !== "company") {
+    throw new ApiError(401, "Invalid or expired session. Please sign in again.");
+  }
+
+  return decoded;
+}
+
+function verifyCompanyRefreshToken(token) {
+  const decoded = jwt.verify(token, config.jwt.refreshSecret);
+
+  if (decoded.type !== "company_refresh" || decoded.portal !== "company") {
     throw new ApiError(401, "Invalid or expired session. Please sign in again.");
   }
 
@@ -97,8 +145,12 @@ module.exports = {
   generateSessionToken,
   generateAccessToken,
   generateRefreshToken,
+  generateCompanyAccessToken,
+  generateCompanyRefreshToken,
   verifyAccessToken,
   verifyRefreshToken,
+  verifyCompanyAccessToken,
+  verifyCompanyRefreshToken,
   getAccessTokenExpiresInSeconds,
   getSessionExpiryDate,
   generateOtpCode,
