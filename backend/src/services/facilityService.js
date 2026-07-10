@@ -242,7 +242,7 @@ async function resolveFacilityFromHints(hints = {}, connection = null) {
 }
 
 async function searchFacilities(query) {
-  const rows = await Facility.search(query);
+  const rows = await Facility.search(sanitizeSearchText(query));
   return rows.map(mapFacilityRow);
 }
 

@@ -155,7 +155,7 @@ async function createNotification({
       notificationType: normalizedType,
       title,
     });
-    throw error;
+    return null;
   }
 }
 

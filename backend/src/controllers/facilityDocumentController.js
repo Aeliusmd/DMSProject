@@ -1,7 +1,12 @@
 const path = require("path");
-const fs = require("fs");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateDocumentUpload } = require("../validators/facilityValidator");
+const {
+  sendFileResponse,
+  pipeStreamToResponse,
+} = require("../utils/responseUtils");
 const facilityDocumentService = require("../services/facilityDocumentService");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
@@ -21,6 +26,7 @@ exports.listDocuments = asyncHandler(async (req, res) => {
 });
 
 exports.uploadDocument = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateDocumentUpload(req.body, req.file));
   const facility = await facilityService.getFacilityById(req.params.id);
   const document = await facilityDocumentService.createDocument(
     req.params.id,
@@ -58,7 +64,7 @@ exports.downloadDocument = asyncHandler(async (req, res) => {
     "Content-Disposition",
     `attachment; filename="${path.basename(document.document_name)}"`
   );
-  res.sendFile(path.resolve(document.storage_path));
+  await sendFileResponse(res, document.storage_path);
 });
 
 exports.previewDocument = asyncHandler(async (req, res) => {
@@ -75,7 +81,8 @@ exports.previewDocument = asyncHandler(async (req, res) => {
     `inline; filename="${path.basename(document.document_name)}"`
   );
 
-  fs.createReadStream(document.storage_path).pipe(res);
+  const fs = require("fs");
+  await pipeStreamToResponse(res, fs.createReadStream(document.storage_path));
 });
 
 exports.deleteDocument = asyncHandler(async (req, res) => {

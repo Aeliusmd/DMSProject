@@ -606,6 +606,10 @@ class Order {
       conditions.push("(i.id IS NULL OR COALESCE(i.total_amount, 0) <= 0)");
     }
 
+    if (filters.rushLevel) {
+      appendRushLevelFilter(conditions, params, filters.rushLevel);
+    }
+
     const whereClause = conditions.length
       ? `WHERE ${conditions.join(" AND ")}`
       : "";

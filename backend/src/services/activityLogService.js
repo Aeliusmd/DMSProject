@@ -13,6 +13,7 @@ const {
   sanitizeText,
 } = require("../utils/sanitize");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
+const { assertReportDateRange } = require("../lib/reportQueryParser");
 
 const MODULES = {
   SECURITY: "Security",
@@ -414,6 +415,8 @@ async function queryLogs(query = {}) {
   if (toDate) {
     filters.toDate = toDate;
   }
+
+  assertReportDateRange(fromDate, toDate);
 
   if (query.search && `${query.search}`.trim()) {
     filters.search = sanitizeSearchText(query.search);

@@ -4,23 +4,11 @@
 
 const { getPool } = require("../config/database");
 const Order = require("../models/Order");
-const {
-  assertPositiveInt,
-  parseOptionalIsoDate,
-} = require("../utils/sqlSafety");
-const { sanitizeSearchText } = require("../utils/sanitize");
-const { calculateOrderRushLevel } = require("../utils/rushUtils");
+const { ACTIVITY_FILTER_VALUES } = require("../lib/reportQueryParser");
 
 const PRODUCED_STATUSES = new Set(["Ready", "Ready to Pickup", "Completed"]);
 
-const ACTIVITY_FILTER_VALUES = new Set([
-  "All",
-  "Invoiced",
-  "Paid",
-  "Unpaid",
-  "Written Off",
-  "Produced",
-]);
+const { calculateOrderRushLevel } = require("../utils/rushUtils");
 
 const RECORD_TITLES = {
   medical: "Medical Records",
@@ -172,19 +160,16 @@ async function getOrdersReport({
   showDuplicates = true,
 } = {}) {
   const rows = await Order.findForReport({
-    orderNo: sanitizeSearchText(orderNo, { maxLength: 100 }) || null,
-    caseNumber: sanitizeSearchText(caseNumber, { maxLength: 100 }) || null,
-    doctor: sanitizeSearchText(doctor, { maxLength: 150 }) || null,
-    dateFrom: parseOptionalIsoDate(dateFrom, "dateFrom"),
-    dateTo: parseOptionalIsoDate(dateTo, "dateTo"),
+    orderNo: orderNo || null,
+    caseNumber: caseNumber || null,
+    doctor: doctor || null,
+    dateFrom,
+    dateTo,
+    rushLevel: rushLevel || null,
     unpaidOnly: Boolean(unpaidOnly),
   });
 
   let orders = rows.map(mapReportOrderRow);
-
-  if (rushLevel) {
-    orders = orders.filter((order) => order.rushLevel === rushLevel);
-  }
 
   if (!showDuplicates) {
     orders = dedupeByOrderNumber(orders);
@@ -277,7 +262,7 @@ async function getActivityReport({
   search = "",
 } = {}) {
   const pool = getPool();
-  const safeSearch = sanitizeSearchText(search, { maxLength: 150 });
+  const safeSearch = search;
   const safeActivity = ACTIVITY_FILTER_VALUES.has(activity) ? activity : "All";
   const conditions = [
     "f.is_active = 1",
@@ -285,26 +270,23 @@ async function getActivityReport({
   ];
   const params = {};
 
-  const validatedDateFrom = parseOptionalIsoDate(dateFrom, "dateFrom");
-  if (validatedDateFrom) {
+  if (dateFrom) {
     conditions.push(
       "DATE(COALESCE(i.invoice_date, x.xray_invoice_date, o.created_at)) >= :dateFrom"
     );
-    params.dateFrom = validatedDateFrom;
+    params.dateFrom = dateFrom;
   }
 
-  const validatedDateTo = parseOptionalIsoDate(dateTo, "dateTo");
-  if (validatedDateTo) {
+  if (dateTo) {
     conditions.push(
       "DATE(COALESCE(i.invoice_date, x.xray_invoice_date, o.created_at)) <= :dateTo"
     );
-    params.dateTo = validatedDateTo;
+    params.dateTo = dateTo;
   }
 
   if (facilityId) {
-    const normalizedFacilityId = assertPositiveInt(facilityId, "facilityId");
     conditions.push("f.id = :facilityId");
-    params.facilityId = normalizedFacilityId;
+    params.facilityId = facilityId;
   }
 
   const [rows] = await pool.execute(

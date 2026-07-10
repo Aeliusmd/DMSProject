@@ -2352,12 +2352,13 @@ function ServeInfoForm({
       </div>
 
       <NewOrderField
-        label="Email"
+        label="Provider email"
         name="email"
         value={formData.email}
         onChange={onChange}
         onBlur={onBlur}
         placeholder="company@email.com"
+        required
         error={getError("email")}
       />
 

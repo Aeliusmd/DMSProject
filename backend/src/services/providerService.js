@@ -3,6 +3,7 @@
  */
 
 const ApiError = require("../utils/ApiError");
+const { stripControlCharacters, sanitizeSearchText } = require("../utils/sanitize");
 const Provider = require("../models/Provider");
 
 function mapProviderRow(row) {
@@ -26,7 +27,7 @@ async function getAllProviders() {
 }
 
 async function searchProviders(query) {
-  const providers = await Provider.search(query);
+  const providers = await Provider.search(sanitizeSearchText(query));
   return providers.map(mapProviderRow);
 }
 
@@ -40,8 +41,12 @@ async function getProviderById(id) {
   return mapProviderRow(provider);
 }
 
+function cleanText(value) {
+  return stripControlCharacters(value).trim();
+}
+
 function buildProviderPayload(data = {}) {
-  const companyName = `${data.companyName ?? data.serveCompanyName ?? ""}`.trim();
+  const companyName = cleanText(data.companyName ?? data.serveCompanyName ?? "");
 
   if (!companyName) {
     throw new ApiError(400, "Provider company name is required");
@@ -49,13 +54,13 @@ function buildProviderPayload(data = {}) {
 
   return {
     companyName,
-    address: `${data.address ?? ""}`.trim(),
-    zipCode: `${data.zipCode ?? data.zip ?? ""}`.trim(),
-    city: `${data.city ?? ""}`.trim(),
-    state: `${data.state ?? ""}`.trim(),
-    phone: `${data.phone ?? ""}`.trim(),
-    fax: `${data.fax ?? ""}`.trim(),
-    email: `${data.email ?? ""}`.trim(),
+    address: cleanText(data.address ?? ""),
+    zipCode: cleanText(data.zipCode ?? data.zip ?? ""),
+    city: cleanText(data.city ?? ""),
+    state: cleanText(data.state ?? ""),
+    phone: cleanText(data.phone ?? ""),
+    fax: cleanText(data.fax ?? ""),
+    email: cleanText(data.email ?? ""),
   };
 }
 

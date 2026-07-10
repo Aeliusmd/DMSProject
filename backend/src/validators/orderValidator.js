@@ -24,7 +24,7 @@ const WORKFLOW_STAGE_NAMES = [
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const MAX_NOTE_LENGTH = FIELD_LIMITS.ORDER_NOTE;
 
-const EMAIL_FIELDS = ["email", "contact1Email", "contact2Email"];
+const EMAIL_FIELDS = ["contact1Email", "contact2Email"];
 const PHONE_FIELDS = [
   "phone",
   "fax",
@@ -89,6 +89,15 @@ function validateOrderPayload(body = {}) {
       body.serveCompanyName,
       FIELD_LIMITS.VARCHAR_255
     );
+  }
+
+  const providerEmail = trimToString(body.email);
+  if (isBlank(body.email)) {
+    errors.push({ field: "email", message: "Provider email is required" });
+  } else if (!isValidEmail(providerEmail)) {
+    errors.push({ field: "email", message: "Enter a valid email address" });
+  } else {
+    addMaxLengthError(errors, "email", providerEmail, FIELD_LIMITS.VARCHAR_255);
   }
 
   if (isBlank(body.specificDoctor)) {

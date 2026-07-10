@@ -11,10 +11,18 @@ const { calculateOrderRushLevel } = require("../utils/rushUtils");
 const { formatDobDisplay } = require("../utils/dateUtils");
 const {
   sanitizeTrimOrNull,
-  sanitizeSearchText,
 } = require("../utils/sanitize");
-const { parseOptionalIsoDate } = require("../utils/sqlSafety");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
+const {
+  parseReportDateFilters,
+  parseInvoiceListFilters,
+  parseInvoiceReportQuery,
+  parseCompanyInvoiceQuery,
+  parseCompanyIdParam,
+  parseOptionalReportType,
+  parseOptionalReportTab,
+  hasCompanyGroupKey,
+} = require("../lib/reportQueryParser");
 
 const ORDER_TYPE_LABELS = {
   medical: "Medical Records",
@@ -29,17 +37,7 @@ function trimOrNull(value, options = {}) {
 }
 
 function parseInvoiceDateFilters(query = {}) {
-  return {
-    dateFrom: parseOptionalIsoDate(query.dateFrom, "dateFrom"),
-    dateTo: parseOptionalIsoDate(query.dateTo, "dateTo"),
-  };
-}
-
-function parseInvoiceListFilters(query = {}) {
-  return {
-    ...parseInvoiceDateFilters(query),
-    search: sanitizeSearchText(query.search, { maxLength: 100 }) || null,
-  };
+  return parseReportDateFilters(query);
 }
 
 function getInvoiceRecipientEmail(row) {
@@ -1679,26 +1677,8 @@ function buildReportGroup(meta, rows, keysetResult = null) {
   };
 }
 
-function hasCompanyGroupKey(query = {}) {
-  const raw = query.companyGroupKey;
-  return raw !== undefined && raw !== null && `${raw}`.trim() !== "";
-}
-
 function parseReportFilters(query = {}) {
-  const filters = {
-    ...parseInvoiceListFilters(query),
-    cursor: trimOrNull(query.cursor),
-    pageSize: Number(query.pageSize) || 10,
-  };
-
-  if (hasCompanyGroupKey(query)) {
-    const key = Number(query.companyGroupKey);
-    if (Number.isFinite(key) && key > 0) {
-      filters.companyGroupKey = key;
-    }
-  }
-
-  return filters;
+  return parseInvoiceReportQuery(query);
 }
 
 function isKeysetQuery(query = {}) {
@@ -2338,15 +2318,18 @@ async function getXrayResendInvoices(query = {}) {
 }
 
 async function getInvoices(query = {}) {
-  if (query.type === "xray") {
-    if (query.tab === "resend") {
+  const reportType = parseOptionalReportType(query.type);
+  const reportTab = parseOptionalReportTab(query.tab);
+
+  if (reportType === "xray") {
+    if (reportTab === "resend") {
       return getXrayResendInvoices(query);
     }
 
     return getXrayOutstandingInvoices(query);
   }
 
-  if (query.tab === "resend") {
+  if (reportTab === "resend") {
     return getResendInvoices(query);
   }
 
@@ -2997,16 +2980,14 @@ async function hydrateCompanyInvoicePage(pageRows = []) {
 }
 
 async function getByCompanyKeyset(companyId, query = {}) {
-  const dateFilters = parseInvoiceListFilters(query);
-  const pageSizeRaw = Number(query.pageSize || 10);
-  const pageSize = Number.isFinite(pageSizeRaw)
-    ? Math.min(Math.max(pageSizeRaw, 1), 100)
-    : 10;
-  const cursor = trimOrNull(query.cursor);
+  const dateFilters = parseCompanyInvoiceQuery(query);
+  const { pageSize, cursor } = dateFilters;
 
   const [keysetResult, summary, referenceRow] = await Promise.all([
     CompanyInvoice.findByProviderKeyset(companyId, {
-      ...dateFilters,
+      dateFrom: dateFilters.dateFrom,
+      dateTo: dateFilters.dateTo,
+      search: dateFilters.search,
       pageSize,
       cursor,
     }),
@@ -3036,11 +3017,7 @@ async function getByCompanyKeyset(companyId, query = {}) {
 }
 
 async function getByCompany(providerId, query = {}) {
-  const companyId = Number(providerId);
-
-  if (!Number.isFinite(companyId)) {
-    throw new ApiError(400, "Invalid company id");
-  }
+  const companyId = parseCompanyIdParam(providerId);
 
   if (String(query.pagination || "").toLowerCase() === "keyset") {
     return getByCompanyKeyset(companyId, query);

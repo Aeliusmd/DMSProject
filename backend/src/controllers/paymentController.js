@@ -1,5 +1,8 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateManualPayment } = require("../validators/paymentValidator");
+const { validatePaymentSearchQuery } = require("../validators/queryValidators");
 const paymentService = require("../services/paymentService");
 const activityLogService = require("../services/activityLogService");
 
@@ -37,12 +40,14 @@ async function logManualPaymentActivity(req, saved = {}, payload = {}) {
 }
 
 exports.searchOrderInvoices = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePaymentSearchQuery(req.query));
   const orderRef = req.query.orderId || req.query.q || "";
   const result = await paymentService.searchOrderInvoices(orderRef);
   return ApiResponse.success(res, result);
 });
 
 exports.recordManualPayment = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateManualPayment(req.body));
   const result = await paymentService.recordManualInvoicePayment(
     req.body,
     req.user?.id

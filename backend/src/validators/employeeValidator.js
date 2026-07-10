@@ -155,4 +155,50 @@ function validateUpdateEmployee(body = {}) {
   };
 }
 
-module.exports = { validateCreateEmployee, validateUpdateEmployee };
+function parseReactivationDateTime(value) {
+  if (!value) return null;
+
+  const normalized = String(value).trim().replace(" ", "T");
+  const date = new Date(normalized);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function validateSuspendEmployee(body = {}) {
+  const errors = [];
+  const reactivatedDate = body.reactivatedDate ?? body.reactivated_date;
+
+  if (!reactivatedDate || `${reactivatedDate}`.trim() === "") {
+    errors.push({
+      field: "reactivatedDate",
+      message: "Reactivation date and time is required",
+    });
+    return { valid: false, errors };
+  }
+
+  const scheduledAt = parseReactivationDateTime(reactivatedDate);
+
+  if (!scheduledAt) {
+    errors.push({
+      field: "reactivatedDate",
+      message: "Invalid reactivation date and time",
+    });
+  } else if (scheduledAt.getTime() <= Date.now()) {
+    errors.push({
+      field: "reactivatedDate",
+      message: "Reactivation date and time must be in the future",
+    });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+module.exports = {
+  validateCreateEmployee,
+  validateUpdateEmployee,
+  validateSuspendEmployee,
+};

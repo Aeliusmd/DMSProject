@@ -1,7 +1,9 @@
 const path = require("path");
-const fs = require("fs");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateFacilityNote } = require("../validators/facilityValidator");
+const { sendFileResponse } = require("../utils/responseUtils");
 const facilityNoteService = require("../services/facilityNoteService");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
@@ -13,6 +15,7 @@ exports.listNotes = asyncHandler(async (req, res) => {
 });
 
 exports.createNote = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateFacilityNote(req.body));
   const facility = await facilityService.getFacilityById(req.params.id);
   const files = Array.isArray(req.files) ? req.files : [];
   const note = await facilityNoteService.createNote(
@@ -63,5 +66,5 @@ exports.downloadAttachment = asyncHandler(async (req, res) => {
     `attachment; filename="${path.basename(attachment.original_filename)}"`
   );
 
-  return res.send(fs.readFileSync(attachment.storage_path));
+  await sendFileResponse(res, attachment.storage_path);
 });

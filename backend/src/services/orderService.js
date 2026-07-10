@@ -24,6 +24,16 @@ const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
 const { getPool } = require("../config/database");
 const { sanitizeText, sanitizeSearchText } = require("../utils/sanitize");
+const {
+  assertPositiveInt,
+  parseOptionalIsoDate,
+} = require("../utils/sqlSafety");
+const {
+  assertReportDateRange,
+  RUSH_LEVEL_VALUES,
+  parseReportPageSize,
+  parseOptionalCursor,
+} = require("../lib/reportQueryParser");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
@@ -1271,7 +1281,7 @@ async function getAllOrders(query = {}) {
   const filters = {};
 
   if (query.facility) {
-    filters.facilityId = Number(query.facility);
+    filters.facilityId = assertPositiveInt(query.facility, "facility");
   }
 
   if (query.company && `${query.company}`.trim()) {
@@ -1288,8 +1298,9 @@ async function getAllOrders(query = {}) {
     filters.excludeCompleted = true;
   }
 
-  if (query.rushLevel && `${query.rushLevel}`.trim()) {
-    filters.rushLevel = `${query.rushLevel}`.trim();
+  const rushRaw = `${query.rushLevel || ""}`.trim();
+  if (rushRaw && RUSH_LEVEL_VALUES.has(rushRaw)) {
+    filters.rushLevel = rushRaw;
   }
 
   const sortDir = `${query.sortDir || query.createdSortDir || ""}`
@@ -1315,14 +1326,16 @@ async function getAllOrders(query = {}) {
     }
   }
 
-  if (query.createdFrom && `${query.createdFrom}`.trim()) {
-    const cleaned = sanitizeText(query.createdFrom, { maxLength: 30, allowEmpty: true });
-    if (cleaned) filters.createdFrom = cleaned;
+  const createdFrom = parseOptionalIsoDate(query.createdFrom, "createdFrom");
+  const createdTo = parseOptionalIsoDate(query.createdTo, "createdTo");
+  assertReportDateRange(createdFrom, createdTo);
+
+  if (createdFrom) {
+    filters.createdFrom = createdFrom;
   }
 
-  if (query.createdTo && `${query.createdTo}`.trim()) {
-    const cleaned = sanitizeText(query.createdTo, { maxLength: 30, allowEmpty: true });
-    if (cleaned) filters.createdTo = cleaned;
+  if (createdTo) {
+    filters.createdTo = createdTo;
   }
 
   if (query.search && `${query.search}`.trim()) {
@@ -1338,14 +1351,8 @@ async function getAllOrders(query = {}) {
 
   const useKeysetPagination =
     String(query.pagination || "").toLowerCase() === "keyset";
-  const pageSizeRaw = Number(query.pageSize || filters.limit || 10);
-  const pageSize = Number.isFinite(pageSizeRaw)
-    ? Math.min(Math.max(pageSizeRaw, 1), 100)
-    : 10;
-  const cursorValue =
-    query.cursor != null && `${query.cursor}`.trim() !== ""
-      ? `${query.cursor}`.trim()
-      : null;
+  const pageSize = parseReportPageSize(query.pageSize || filters.limit);
+  const cursorValue = parseOptionalCursor(query.cursor);
   const cursorRaw = Number(cursorValue);
   const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
 
@@ -2052,7 +2059,7 @@ async function createOrder(data, actorId, files, options = {}) {
           orderNumber
         );
       } catch (error) {
-        throw new ApiError(404, error.message || "Subpoena PDF not found on disk");
+        throw new ApiError(404, error.message || "Subpoena PDF not found");
       }
     } else {
       subpoenaStoragePath = toRelativeStoragePath(subpoenaFile);
@@ -2557,7 +2564,7 @@ async function getOrderSubpoenaFile(orderId) {
   const absolutePath = resolveOrderSubpoenaAbsolutePath(order.subpoena_storage_path);
 
   if (!absolutePath || !fs.existsSync(absolutePath)) {
-    throw new ApiError(404, "Subpoena PDF file not found on disk");
+    throw new ApiError(404, "Subpoena PDF file not found ");
   }
 
   return {

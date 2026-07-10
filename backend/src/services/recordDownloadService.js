@@ -3,6 +3,10 @@ const path = require("path");
 const { randomBytes } = require("crypto");
 const archiver = require("archiver");
 const ApiError = require("../utils/ApiError");
+const {
+  sendFileResponse,
+  streamArchiveToResponse,
+} = require("../utils/responseUtils");
 const Order = require("../models/Order");
 const OrderRecord = require("../models/OrderRecord");
 const RecordDownloadLink = require("../models/RecordDownloadLink");
@@ -165,7 +169,8 @@ async function streamDownloadByToken(token, res) {
       "Content-Disposition",
       `attachment; filename="${file.filename.replace(/"/g, "")}"`
     );
-    return res.sendFile(path.resolve(file.path));
+    await sendFileResponse(res, file.path);
+    return;
   }
 
   const zipName = `${safeOrderNumber}-records.zip`;
@@ -177,17 +182,11 @@ async function streamDownloadByToken(token, res) {
 
   const archive = archiver("zip", { zlib: { level: 9 } });
 
-  archive.on("error", (error) => {
-    throw error;
-  });
-
-  archive.pipe(res);
-
   files.forEach((file) => {
     archive.file(file.path, { name: file.filename });
   });
 
-  await archive.finalize();
+  await streamArchiveToResponse(archive, res);
 }
 
 module.exports = {

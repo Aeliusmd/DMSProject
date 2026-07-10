@@ -1,4 +1,5 @@
 const { getPool } = require("../config/database");
+const { likePrefix } = require("../utils/sqlSafety");
 
 const ORDER_VISIBLE = "o.status NOT IN ('Cancelled', 'Deleted')";
 
@@ -34,10 +35,6 @@ const XRAY_RESEND_CONDITIONS = [
   "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
 ];
 
-function escapeLike(value) {
-  return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
-}
-
 function appendDateFilters(conditions, filters, dateColumn, params) {
   if (filters.dateFrom) {
     conditions.push(`${dateColumn} >= :dateFrom`);
@@ -52,7 +49,7 @@ function appendDateFilters(conditions, filters, dateColumn, params) {
 function buildSearchFilter(filters = {}, params) {
   const trimmed = `${filters.search || ""}`.trim();
   if (!trimmed) return "";
-  params.searchPattern = `${escapeLike(trimmed)}%`;
+  params.searchPattern = likePrefix(trimmed);
   return "o.order_number LIKE :searchPattern";
 }
 

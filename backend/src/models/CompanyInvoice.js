@@ -1,4 +1,5 @@
 const { getPool } = require("../config/database");
+const { likePrefix } = require("../utils/sqlSafety");
 
 const ORDER_VISIBLE = "o.status NOT IN ('Cancelled', 'Deleted')";
 
@@ -24,10 +25,6 @@ const STANDARD_COMPANY_CONDITION = `(
 const XRAY_COMPANY_CONDITION =
   "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0";
 
-function escapeLike(value) {
-  return `${value || ""}`.replace(/[\\%_]/g, (character) => `\\${character}`);
-}
-
 function buildProviderCondition(providerId, params) {
   if (providerId) {
     params.providerId = providerId;
@@ -43,7 +40,7 @@ function buildSearchCondition(search, params) {
     return "";
   }
 
-  params.searchPattern = `${escapeLike(trimmed)}%`;
+  params.searchPattern = likePrefix(trimmed);
   return "o.order_number LIKE :searchPattern";
 }
 
