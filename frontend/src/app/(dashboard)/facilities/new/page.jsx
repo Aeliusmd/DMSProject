@@ -11,6 +11,10 @@ import {
   shouldShowSubmitError,
   hasValidationErrors,
 } from "@/lib/apiErrorUtils";
+import {
+  validateOrganizationName,
+  validatePersonName,
+} from "@/lib/validations/nameValidation";
 
 const initialFormData = {
   facilityName: "",
@@ -569,6 +573,11 @@ function validateFacilityForm(data, managers) {
 
   if (!data.facilityName.trim()) {
     errors.facilityName = "Facility name is required";
+  } else {
+    const facilityNameError = validateOrganizationName(data.facilityName, {
+      fieldLabel: "Facility name",
+    });
+    if (facilityNameError) errors.facilityName = facilityNameError;
   }
 
   if (!data.email.trim()) {
@@ -610,6 +619,13 @@ function validateFacilityField(field, value) {
   if (!value.trim()) {
     if (field === "facilityName") return "Facility name is required";
     if (field === "email") return "Email is required";
+  }
+
+  if (field === "facilityName" && value) {
+    const facilityNameError = validateOrganizationName(value, {
+      fieldLabel: "Facility name",
+    });
+    if (facilityNameError) return facilityNameError;
   }
 
   if (field === "email" && value && !isValidEmail(value)) {

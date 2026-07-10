@@ -7,6 +7,7 @@ const {
   renderInvoiceEmail,
 } = require("../views/emails");
 const logger = require("../utils/logger");
+const { escapeHtml } = require("../utils/sanitize");
 
 let transporter = null;
 
@@ -243,14 +244,6 @@ async function sendInvoiceEmail({
   }
 }
 
-function escapeHtml(value = "") {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function plainTextToHtml(text = "") {
   const lines = String(text).split("\n");
 
@@ -261,6 +254,15 @@ function plainTextToHtml(text = "") {
         .join("")}
     </div>
   `;
+}
+
+function escapeHtmlMultiline(value = "") {
+  return escapeHtml(value).replace(/\r\n/g, "\n").replace(/\n/g, "<br />");
+}
+
+function emailDetailLine(label, value) {
+  if (!value) return "";
+  return `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`;
 }
 
 function formatRecordTypesPhrase(labels = []) {
@@ -449,11 +451,11 @@ async function sendCopyServiceLetterEmail({
   const html = `
     <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
       <p>Dear Copy Service,</p>
-      <p>Attached is the copy service letter for order <strong>${orderNumber}</strong>.</p>
-      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
-      ${facilityName ? `<p><strong>Facility:</strong> ${facilityName}</p>` : ""}
-      <p>Sent on <strong>${sentLabel}</strong>.<br />
-      This letter expires on <strong>${expiresLabel}</strong> (7 days from send date).</p>
+      <p>Attached is the copy service letter for order <strong>${escapeHtml(orderNumber)}</strong>.</p>
+      ${emailDetailLine("Applicant", applicantName)}
+      ${emailDetailLine("Facility", facilityName)}
+      <p>Sent on <strong>${escapeHtml(sentLabel)}</strong>.<br />
+      This letter expires on <strong>${escapeHtml(expiresLabel)}</strong> (7 days from send date).</p>
       <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
     </div>
   `;
@@ -538,17 +540,19 @@ async function sendCnrRecordEmail({
     .filter(Boolean)
     .join("\n");
 
+  const safeDocumentTitle = escapeHtml(String(documentTitle).toLowerCase());
+
   const html = `
     <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
       <p>Dear Copy Service,</p>
-      <p>Attached is the ${documentTitle.toLowerCase()} for order <strong>${orderNumber}</strong>.</p>
-      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
+      <p>Attached is the ${safeDocumentTitle} for order <strong>${escapeHtml(orderNumber)}</strong>.</p>
+      ${emailDetailLine("Applicant", applicantName)}
       ${
         cnrReason
-          ? `<p><strong>Reason:</strong> ${cnrReason.replace(/\n/g, "<br />")}</p>`
+          ? `<p><strong>Reason:</strong> ${escapeHtmlMultiline(cnrReason)}</p>`
           : ""
       }
-      <p>Document date: <strong>${sentLabel}</strong>.</p>
+      <p>Document date: <strong>${escapeHtml(sentLabel)}</strong>.</p>
       <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
     </div>
   `;
@@ -627,9 +631,9 @@ async function sendCnrMemoEmail({
   const html = `
     <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
       <p>Dear Copy Service,</p>
-      <p>Attached is the Certificate of No Records memo for order <strong>${orderNumber}</strong>.</p>
-      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
-      <p>Memo date: <strong>${sentLabel}</strong>.</p>
+      <p>Attached is the Certificate of No Records memo for order <strong>${escapeHtml(orderNumber)}</strong>.</p>
+      ${emailDetailLine("Applicant", applicantName)}
+      <p>Memo date: <strong>${escapeHtml(sentLabel)}</strong>.</p>
       <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
     </div>
   `;
@@ -704,9 +708,9 @@ async function sendCertificateOfRecordsEmail({
   const html = `
     <div style="font-family:Arial,sans-serif;font-size:14px;color:#111827;line-height:1.5;">
       <p>Dear Copy Service,</p>
-      <p>Attached is the certificate of records for order <strong>${orderNumber}</strong>.</p>
-      ${applicantName ? `<p><strong>Applicant:</strong> ${applicantName}</p>` : ""}
-      <p>Document date: <strong>${sentLabel}</strong>.</p>
+      <p>Attached is the certificate of records for order <strong>${escapeHtml(orderNumber)}</strong>.</p>
+      ${emailDetailLine("Applicant", applicantName)}
+      <p>Document date: <strong>${escapeHtml(sentLabel)}</strong>.</p>
       <p style="margin-top:24px;color:#64748B;">DMS Custodian</p>
     </div>
   `;

@@ -11,6 +11,7 @@ import {
 import { API_BASE_URL } from "@/config/api";
 import { buildCallbackLine } from "@/lib/orders/orderNoteUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -38,6 +39,15 @@ function toHistoryItems(notes = []) {
 }
 
 const MAX_NOTE_LENGTH = 1000;
+
+function getNoteTextError(noteText) {
+  const trimmedNote = `${noteText || ""}`.trim();
+  if (!trimmedNote) return "Note text is required.";
+  if (trimmedNote.length > MAX_NOTE_LENGTH) {
+    return `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`;
+  }
+  return validateNoHtmlMarkup(trimmedNote, { fieldLabel: "Note text" }) || "";
+}
 const MAX_FILE_SIZE_MB = 10;
 const ALLOWED_FILE_TYPES = [
   "application/pdf",
@@ -143,13 +153,9 @@ export default function OrderNotesModal({
 
   const noteValidationErrors = useMemo(() => {
     const newErrors = {};
-    const trimmedNote = noteText.trim();
 
-    if (!trimmedNote) {
-      newErrors.noteText = "Note text is required.";
-    } else if (trimmedNote.length > MAX_NOTE_LENGTH) {
-      newErrors.noteText = `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`;
-    }
+    const noteTextError = getNoteTextError(noteText);
+    if (noteTextError) newErrors.noteText = noteTextError;
 
     if (callbackDate) {
       const selectedDate = new Date(callbackDate);
@@ -224,11 +230,8 @@ export default function OrderNotesModal({
     const newErrors = {};
     const trimmedNote = noteText.trim();
 
-    if (!trimmedNote) {
-      newErrors.noteText = "Note text is required.";
-    } else if (trimmedNote.length > MAX_NOTE_LENGTH) {
-      newErrors.noteText = `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`;
-    }
+    const noteTextError = getNoteTextError(noteText);
+    if (noteTextError) newErrors.noteText = noteTextError;
 
     validateCallback(newErrors);
     validateAttachment(newErrors);

@@ -9,6 +9,7 @@ import {
   getFacilityNotes,
 } from "@/lib/facilities/facilityApi";
 import { applyApiFieldErrors, getApiErrorMessage, hasValidationErrors } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 const ALLOWED_FILE_TYPES = [
   "application/pdf",
@@ -45,6 +46,9 @@ export default function FacilityAddNoteModal({
     const nextErrors = {};
     if (!note.trim()) {
       nextErrors.note = "Note is required";
+    } else {
+      const markupError = validateNoHtmlMarkup(note, { fieldLabel: "Note" });
+      if (markupError) nextErrors.note = markupError;
     }
     return nextErrors;
   }, [note]);

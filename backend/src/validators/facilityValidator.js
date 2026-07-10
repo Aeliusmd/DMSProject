@@ -3,6 +3,11 @@ const {
   validateDoctorsPayload,
 } = require("../lib/facilityValidation");
 const { trimToString, isBlank, isValidPositiveIntId, addMaxLengthError } = require("./validationHelpers");
+const {
+  addNoHtmlMarkupError,
+  addOrganizationNameFormatError,
+  addPersonNameFormatError,
+} = require("../utils/nameValidation");
 
 const DOCUMENT_TYPES = new Set([
   "Standard",
@@ -33,6 +38,7 @@ function validateResolveFacility(body = {}) {
     });
   } else {
     addMaxLengthError(errors, "facilityName", facilityName, 200);
+    addOrganizationNameFormatError(errors, "facilityName", facilityName);
   }
 
   addMaxLengthError(errors, "address", body.address, 255);
@@ -71,6 +77,8 @@ function validateCreateFacilityNote(body = {}) {
       field: "note",
       message: `Note must be ${MAX_FACILITY_NOTE_LENGTH} characters or less`,
     });
+  } else {
+    addNoHtmlMarkupError(errors, "note", note);
   }
 
   return { valid: errors.length === 0, errors };
@@ -91,6 +99,7 @@ function validateResolveDoctor(body = {}) {
 
   if (doctorName) {
     addMaxLengthError(errors, "doctorName", doctorName, 200);
+    addPersonNameFormatError(errors, "doctorName", doctorName);
   }
 
   return { valid: errors.length === 0, errors, doctorName };

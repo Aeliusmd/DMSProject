@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
   const mounted = useIsClient();
@@ -50,6 +51,9 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
     if (!sentDate) {
       nextErrors.sentDate = "Date sent is required";
     }
+
+    const notesError = validateNoHtmlMarkup(notes, { fieldLabel: "Fax notes" });
+    if (notesError) nextErrors.notes = notesError;
 
     setFieldErrors(nextErrors);
 

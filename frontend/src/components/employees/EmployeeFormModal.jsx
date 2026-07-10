@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import { mapApiErrors, mergeApiFieldErrors, hasValidationErrors } from "@/lib/apiErrorUtils";
+import { validatePersonName } from "@/lib/validations/nameValidation";
 
 const emptyForm = {
   name: "",
@@ -321,6 +322,9 @@ function validateEmployeeForm(data, isEditMode = false) {
 
   if (!data.name.trim()) {
     errors.name = "Name is required";
+  } else {
+    const nameError = validatePersonName(data.name, { fieldLabel: "Name" });
+    if (nameError) errors.name = nameError;
   }
 
   if (!data.userName.trim()) {
@@ -355,6 +359,11 @@ function validateField(field, value, isEditMode = false) {
     if (field === "email") return "Email is required";
     if (field === "role") return "Role is required";
 
+  }
+
+  if (field === "name" && value) {
+    const nameError = validatePersonName(value, { fieldLabel: "Name" });
+    if (nameError) return nameError;
   }
 
   if (field === "password" && value && value.length < 8) {

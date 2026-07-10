@@ -1,5 +1,7 @@
 import { API_BASE_URL } from "@/config/api";
 
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
+
 export const MAX_NOTE_LENGTH = 1000;
 export const MAX_FILE_SIZE_MB = 10;
 export const ALLOWED_FILE_TYPES = [
@@ -95,6 +97,11 @@ export function validateNoteForm({
     errors.noteText = "Note text is required.";
   } else if (trimmedNote.length > MAX_NOTE_LENGTH) {
     errors.noteText = `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`;
+  } else {
+    const markupError = validateNoHtmlMarkup(trimmedNote, {
+      fieldLabel: "Note text",
+    });
+    if (markupError) errors.noteText = markupError;
   }
 
   if (callbackDate) {

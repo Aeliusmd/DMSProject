@@ -7,6 +7,7 @@ const {
   addMaxLengthError,
   addRequiredDateOnlyError,
 } = require("./validationHelpers");
+const { addNoHtmlMarkupError } = require("../utils/nameValidation");
 
 const ALLOWED_INVOICE_TYPES = new Set(["regular", "xray"]);
 
@@ -41,6 +42,7 @@ function validateManualPayment(body = {}) {
     "Payment date is required"
   );
   addMaxLengthError(errors, "note", body.note, FIELD_LIMITS.TEXT);
+  addNoHtmlMarkupError(errors, "note", body.note);
 
   return { valid: errors.length === 0, errors };
 }

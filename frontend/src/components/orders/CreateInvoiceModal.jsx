@@ -27,6 +27,7 @@ import {
   getApiErrorMessage,
   hasValidationErrors,
 } from "@/lib/apiErrorUtils";
+import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
 const initialFormData = {
   invoiceDate: "",
@@ -919,39 +920,44 @@ function validateInvoiceForm(data, { requirePositiveTotal = false } = {}) {
   const errors = {};
 
   if (!data.invoiceDate) {
-    errors.invoiceDate = "Required";
+    errors.invoiceDate = "Invoice date is required";
   }
 
   const moneyFields = [
-    "storageFee",
-    "perPageAmount",
-    "clericalHourlyRate",
-    "shippingHandling",
+    { field: "storageFee", label: "Storage fee" },
+    { field: "perPageAmount", label: "Per page amount" },
+    { field: "clericalHourlyRate", label: "Clerical hourly rate" },
+    { field: "shippingHandling", label: "Shipping and handling" },
   ];
 
-  moneyFields.forEach((field) => {
+  moneyFields.forEach(({ field, label }) => {
     if (data[field] === "") {
-      errors[field] = "Required";
+      errors[field] = `${label} is required`;
     } else if (Number.isNaN(Number(data[field]))) {
-      errors[field] = "Invalid";
+      errors[field] = `Enter a valid ${label.toLowerCase()}`;
     }
   });
 
   if (data.pages === "") {
-    errors.pages = "Required";
+    errors.pages = "Page count is required";
   } else if (Number(data.pages) < 0) {
-    errors.pages = "Invalid";
+    errors.pages = "Enter a valid page count (0 or greater)";
   }
 
   if (data.clericalTimeHours === "") {
-    errors.clericalTimeHours = "Required";
+    errors.clericalTimeHours = "Clerical time is required";
   } else if (Number(data.clericalTimeHours) < 0) {
-    errors.clericalTimeHours = "Invalid";
+    errors.clericalTimeHours = "Enter a valid clerical time (0 or greater)";
   }
 
   if (requirePositiveTotal && calculateInvoiceTotal(data) <= 0) {
     errors.totalAmount = "Invoice total must be greater than zero";
   }
+
+  const notesError = validateNoHtmlMarkup(data.notes, {
+    fieldLabel: "Invoice notes",
+  });
+  if (notesError) errors.notes = notesError;
 
   return errors;
 }

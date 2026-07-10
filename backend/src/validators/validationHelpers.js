@@ -1,4 +1,5 @@
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
+const { formatFieldLabel } = require("../utils/nameValidation");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -71,7 +72,7 @@ function addMaxLengthError(errors, field, value, max) {
   if (trimmed && trimmed.length > max) {
     errors.push({
       field,
-      message: `${field} must be ${max} characters or less`,
+      message: `${formatFieldLabel(field)} must be ${max} characters or less`,
     });
   }
 }
