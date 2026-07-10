@@ -23,6 +23,9 @@ const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
 const invoiceService = require("./invoiceService");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
+const {
+  areAllOrderInvoicesWrittenOffFromRows,
+} = require("../utils/orderInvoicePayment");
 const { getPool } = require("../config/database");
 const { sanitizeText, sanitizeSearchText } = require("../utils/sanitize");
 const {
@@ -223,6 +226,27 @@ function readHasSubpoena(row = {}) {
 
 function readIsWriteOffs(row = {}) {
   return row.status === "Write Offs";
+}
+
+function resolveOrderWriteOffState(row, invoiceRow, xrayRow) {
+  const isWriteOffs = areAllOrderInvoicesWrittenOffFromRows(invoiceRow, xrayRow);
+  let status = row.status || "Active";
+
+  if (isWriteOffs && status !== "Completed") {
+    status = "Write Offs";
+  } else if (!isWriteOffs && status === "Write Offs") {
+    status = "Active";
+  }
+
+  return {
+    isWriteOffs,
+    status,
+    displayStatus: deriveDisplayOrderStatus(status, row.created_at),
+    filterStatus:
+      isWriteOffs && status !== "Completed"
+        ? "writeoffs"
+        : deriveFilterStatus(status),
+  };
 }
 
 function resolveOrderFlags(data, hasSubpoenaFile) {
@@ -920,6 +944,7 @@ function mapOrderListRow(
   const dobSsn = [dob, ssn, doiDisplay].filter(Boolean);
 
   const rush = calculateOrderRushLevel(row.created_at);
+  const writeOffState = resolveOrderWriteOffState(row, invoiceRow, xrayRow);
 
   const mapped = {
     id: row.order_number,
@@ -929,13 +954,13 @@ function mapOrderListRow(
     doctor: row.specific_doctor || "",
     facilityInfo: buildFacilityBlock(row),
     year: orderYear,
-    status: row.status,
+    status: writeOffState.status,
     statusBeforeInactive: row.status_before_inactive || "",
     cancelReason: row.cancel_reason || "",
     cancelledAt: row.cancelled_at || null,
     deletedAt: row.deleted_at || null,
-    displayStatus: deriveDisplayOrderStatus(row.status, row.created_at),
-    filterStatus: deriveFilterStatus(row.status),
+    displayStatus: writeOffState.displayStatus,
+    filterStatus: writeOffState.filterStatus,
     workflowStages: workflowStages.map(mapWorkflowStage),
     note: Boolean(row.has_note),
     subpoena: readHasSubpoena(row),
@@ -943,7 +968,7 @@ function mapOrderListRow(
     hasSubpoenaFile: Boolean(row.subpoena_storage_path),
     subpoenaUrl: buildSubpoenaUrl(row.subpoena_storage_path),
     isRecords: hasAnyRecordsRequested(orderRecords),
-    isWriteOffs: readIsWriteOffs(row),
+    isWriteOffs: writeOffState.isWriteOffs,
     court: row.court || "",
     applicant: buildFullName(
       row.applicant_first_name,
@@ -1153,14 +1178,15 @@ function mapOrderDetail(
   const mappedRecords = mapOrderRecords(orderRecords);
   const primaryUploaded = mappedRecords.find((record) => record.hasFile);
   const rush = calculateOrderRushLevel(row.created_at);
+  const writeOffState = resolveOrderWriteOffState(row, invoiceRow, xrayRow);
 
   const mapped = {
     id: row.id,
     orderNumber: row.order_number || "",
-    status: row.status || "",
+    status: writeOffState.status,
     isSubpoena: readHasSubpoena(row),
     isRecords: hasAnyRecordsRequested(orderRecords),
-    isWriteOffs: readIsWriteOffs(row),
+    isWriteOffs: writeOffState.isWriteOffs,
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
     facility: row.facility_id ? String(row.facility_id) : "",

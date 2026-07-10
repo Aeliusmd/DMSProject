@@ -29,6 +29,7 @@ function buildWriteOffInvoice(group, row) {
     id: row.id,
     invoiceId: row.invoiceId,
     orderId: row.orderId,
+    invoiceType: row.invoiceType === "xray" ? "xray" : "regular",
     caseNo: row.caseNo,
     company: group.company,
     sentDate: row.sentDate,

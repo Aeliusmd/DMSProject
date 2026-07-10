@@ -2,6 +2,14 @@ const { getPool } = require("../config/database");
 
 const ORDER_VISIBLE = "o.status NOT IN ('Cancelled', 'Deleted')";
 
+const XRAY_AMOUNT_DUE_CONDITION =
+  "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0) - COALESCE(x.writeoff_amount, 0)) > 0";
+
+const XRAY_OPEN_CONDITION = `(
+  x.status <> 'Written Off'
+  AND ${XRAY_AMOUNT_DUE_CONDITION}
+)`;
+
 const XRAY_INVOICE_SELECT = `
   SELECT x.*,
          o.order_number,
@@ -74,7 +82,7 @@ class InvoiceXray {
     const conditions = [
       ORDER_VISIBLE,
       "x.sent_date IS NULL",
-      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+      XRAY_OPEN_CONDITION,
     ];
     const params = {};
 
@@ -106,7 +114,7 @@ class InvoiceXray {
       ORDER_VISIBLE,
       "o.facility_id = :facilityId",
       "x.sent_date IS NULL",
-      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+      XRAY_OPEN_CONDITION,
     ];
     const params = { facilityId };
 
@@ -138,7 +146,7 @@ class InvoiceXray {
       ORDER_VISIBLE,
       "o.facility_id = :facilityId",
       "x.sent_date IS NOT NULL",
-      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+      XRAY_OPEN_CONDITION,
     ];
     const params = { facilityId };
 
@@ -169,7 +177,7 @@ class InvoiceXray {
     const conditions = [
       ORDER_VISIBLE,
       "x.sent_date IS NULL",
-      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+      XRAY_OPEN_CONDITION,
     ];
     const params = {};
 
@@ -207,7 +215,7 @@ class InvoiceXray {
     const conditions = [
       ORDER_VISIBLE,
       "x.sent_date IS NOT NULL",
-      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+      XRAY_OPEN_CONDITION,
     ];
     const params = {};
 
@@ -245,7 +253,7 @@ class InvoiceXray {
     const conditions = [
       ORDER_VISIBLE,
       "x.sent_date IS NOT NULL",
-      "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+      XRAY_OPEN_CONDITION,
     ];
     const params = {};
 
@@ -343,6 +351,22 @@ class InvoiceXray {
     );
 
     return result.affectedRows;
+  }
+
+  static async writeOff(connection, orderId, data) {
+    const db = connection || getPool();
+
+    await db.execute(
+      `UPDATE invoice_xray_details SET
+         status = :status,
+         writeoff_amount = :writeoffAmount,
+         writeoff_date = CURDATE(),
+         writeoff_by = :writeoffBy,
+         writeoff_reason = :writeoffReason,
+         updated_at = NOW()
+       WHERE order_id = :orderId`,
+      { ...data, orderId }
+    );
   }
 }
 

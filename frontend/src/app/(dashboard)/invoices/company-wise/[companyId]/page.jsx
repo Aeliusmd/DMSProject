@@ -37,6 +37,7 @@ function buildWriteOffInvoice(company, invoice) {
     id: invoice.id,
     invoiceId: invoice.invoiceDbId || invoice.id,
     orderId: invoice.orderId,
+    invoiceType: invoice.invoiceType === "xray" ? "xray" : "regular",
     caseNo: invoice.invoiceId,
     company: company.name,
     email: company.email,
@@ -188,11 +189,13 @@ export default function CompanyInvoiceDetailsPage() {
     return selectedInvoices.filter((invoice) => canResendInvoice(invoice));
   }, [selectedInvoices]);
 
-  const filteredInvoiceIds = invoices.map((invoice) => invoice.id);
+  const selectableInvoiceIds = invoices
+    .filter((invoice) => !invoice.isPaid && !invoice.isWrittenOff)
+    .map((invoice) => invoice.id);
 
   const allSelected =
-    invoices.length > 0 &&
-    filteredInvoiceIds.every((id) => selectedIds.includes(id));
+    selectableInvoiceIds.length > 0 &&
+    selectableInvoiceIds.every((id) => selectedIds.includes(id));
 
   const selectedCount = selectedIds.length;
   const writableSelectedCount = writableSelectedInvoices.length;
@@ -229,7 +232,7 @@ export default function CompanyInvoiceDetailsPage() {
   const handleToggleAll = () => {
     if (allSelected) {
       setSelectedIds((prev) =>
-        prev.filter((id) => !filteredInvoiceIds.includes(id))
+        prev.filter((id) => !selectableInvoiceIds.includes(id))
       );
       return;
     }
@@ -237,7 +240,7 @@ export default function CompanyInvoiceDetailsPage() {
     setSelectedIds((prev) => {
       const nextIds = new Set(prev);
 
-      filteredInvoiceIds.forEach((id) => {
+      selectableInvoiceIds.forEach((id) => {
         nextIds.add(id);
       });
 
@@ -769,9 +772,12 @@ function CompanyInvoiceTable({
             {!loading &&
               invoices.map((invoice) => {
               const selected = selectedIds.includes(invoice.id);
+              const isPaidRow = invoice.isPaid && !invoice.isWrittenOff;
               const rowClassName = invoice.isWrittenOff
                 ? "border-b border-[#F1F5F9] last:border-b-0 bg-[#FAFAFA] text-[#94A3B8] line-through decoration-[#94A3B8] [&_a]:text-[#94A3B8] [&_button:not(:disabled)]:text-[#94A3B8]"
-                : "border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]";
+                : isPaidRow
+                  ? "border-b border-[#A7F3D0] last:border-b-0 bg-[#ECFDF5] text-[#065F46] hover:bg-[#D1FAE5] [&_a]:text-[#047857] [&_button]:text-[#047857]"
+                  : "border-b border-[#F1F5F9] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]";
 
               return (
                 <tr key={invoice.id} className={rowClassName}>
@@ -780,7 +786,8 @@ function CompanyInvoiceTable({
                       type="checkbox"
                       checked={selected}
                       onChange={() => onToggleInvoice(invoice.id)}
-                      className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
+                      disabled={invoice.isPaid || invoice.isWrittenOff}
+                      className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2] disabled:cursor-not-allowed disabled:opacity-40"
                     />
                   </td>
 
@@ -832,7 +839,7 @@ function CompanyInvoiceTable({
                   </td>
 
                   <td className="px-4 py-4 text-center align-middle">
-                    {!invoice.isWrittenOff && (
+                    {!invoice.isWrittenOff && !invoice.isPaid ? (
                       <div className="flex flex-col items-center gap-2">
                         {canResendInvoice(invoice) && (
                           <button
@@ -858,7 +865,11 @@ function CompanyInvoiceTable({
                           Write Off
                         </button>
                       </div>
-                    )}
+                    ) : isPaidRow ? (
+                      <span className="text-[11px] font-semibold text-[#059669]">
+                        Paid
+                      </span>
+                    ) : null}
                   </td>
                 </tr>
               );

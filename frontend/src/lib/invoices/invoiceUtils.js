@@ -63,7 +63,7 @@ export function parseInvoiceDueAmount(value) {
 }
 
 export function canWriteOffInvoice(invoice) {
-  if (!invoice || invoice.invoiceType === "xray") {
+  if (!invoice) {
     return false;
   }
 

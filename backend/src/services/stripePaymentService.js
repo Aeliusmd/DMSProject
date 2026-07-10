@@ -120,8 +120,10 @@ function mapPublicInvoiceItem(type, row, order) {
 
   const total = toNumber(row.payment);
   const amountPaid = toNumber(row.amount_paid);
-  const amountDue = Math.max(0, total - amountPaid);
+  const writeoff = toNumber(row.writeoff_amount);
+  const amountDue = Math.max(0, total - amountPaid - writeoff);
   const isPaid = amountDue <= 0 && total > 0;
+  const isWrittenOff = row.status === "Written Off";
 
   return {
     type: "xray",
@@ -131,7 +133,7 @@ function mapPublicInvoiceItem(type, row, order) {
     amountDue,
     amountDueDisplay: formatMoney(amountDue),
     amountDisplay: formatMoney(total),
-    status: isPaid ? "Paid" : "Unpaid",
+    status: isWrittenOff ? "Written Off" : isPaid ? "Paid" : row.status || "Unpaid",
     isPaid,
     paymentMethod: row.payment_method || null,
   };
@@ -203,7 +205,9 @@ async function orderHasUnpaidInvoices(orderId) {
   if (xray && hasXrayInvoiceFields(xray)) {
     const total = toNumber(xray.payment);
     const paid = toNumber(xray.amount_paid);
-    if (total > 0 && paid < total) return true;
+    const writeoff = toNumber(xray.writeoff_amount);
+    const due = Math.max(0, total - paid - writeoff);
+    if (xray.status !== "Written Off" && due > 0) return true;
   }
 
   return false;
@@ -291,9 +295,14 @@ async function assertInvoicePayable(orderId, invoiceType) {
       throw new ApiError(404, "X-Ray invoice not found");
     }
 
+    if (xray.status === "Written Off") {
+      throw new ApiError(400, "This X-Ray invoice is written off");
+    }
+
     const total = toNumber(xray.payment);
     const paid = toNumber(xray.amount_paid);
-    const due = Math.max(0, total - paid);
+    const writeoff = toNumber(xray.writeoff_amount);
+    const due = Math.max(0, total - paid - writeoff);
 
     if (due <= 0) {
       throw new ApiError(400, "This X-Ray invoice is already paid");
@@ -553,6 +562,7 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
   await connection.execute(
     `UPDATE invoice_xray_details
      SET amount_paid = :amountPaid,
+         status = 'Paid',
          payment_method = 'online',
          payment_date = CURDATE(),
          payment_recorded_at = NOW(),
@@ -730,6 +740,8 @@ async function fulfillSuccessfulCheckoutSession(session) {
   } finally {
     connection.release();
   }
+
+  await Order.syncOrderStatusFromWorkflow(orderId);
 
   const [updatedRows] = await pool.execute(
     `SELECT s.*, o.order_number,

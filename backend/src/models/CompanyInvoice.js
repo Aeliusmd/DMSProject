@@ -23,15 +23,21 @@ const STANDARD_COMPANY_CONDITION = `(
 )`;
 
 const XRAY_COMPANY_CONDITION =
-  "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0";
+  "x.status <> 'Written Off' AND GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0) - COALESCE(x.writeoff_amount, 0)) > 0";
 
 function buildProviderCondition(providerId, params) {
-  if (providerId) {
-    params.providerId = providerId;
+  const id = Number(providerId);
+  if (Number.isFinite(id) && id > 0) {
+    params.providerId = id;
     return "o.provider_id = :providerId";
   }
 
   return "o.provider_id IS NULL";
+}
+
+function normalizeProviderKey(providerId) {
+  const id = Number(providerId);
+  return Number.isFinite(id) && id > 0 ? String(id) : "0";
 }
 
 function buildSearchCondition(search, params) {
@@ -44,21 +50,25 @@ function buildSearchCondition(search, params) {
   return "o.order_number LIKE :searchPattern";
 }
 
-function buildAllStandardConditions(providerId, filters = {}) {
+function buildAllStandardConditions(providerId, filters = {}, { allProviders = false } = {}) {
   const params = {};
   const conditions = [
     ORDER_VISIBLE,
     "i.status <> 'Written Off'",
-    buildProviderCondition(providerId, params),
-    `(
+  ];
+
+  if (!allProviders) {
+    conditions.push(buildProviderCondition(providerId, params));
+  }
+
+  conditions.push(`(
       i.invoice_date IS NOT NULL
       OR COALESCE(i.page_count, 0) > 0
       OR COALESCE(i.clerical_time_hours, 0) > 0
       OR COALESCE(i.clerical_hourly_rate, 0) > 0
       OR COALESCE(i.shipping_handling, 0) > 0
       OR COALESCE(i.storage_fee, 0) > 0
-    )`,
-  ];
+    )`);
 
   if (filters.dateFrom) {
     conditions.push("i.invoice_date >= :dateFrom");
@@ -78,17 +88,21 @@ function buildAllStandardConditions(providerId, filters = {}) {
   return { conditions, params };
 }
 
-function buildAllXrayConditions(providerId, filters = {}) {
+function buildAllXrayConditions(providerId, filters = {}, { allProviders = false } = {}) {
   const params = {};
   const conditions = [
     ORDER_VISIBLE,
-    buildProviderCondition(providerId, params),
-    `(
+  ];
+
+  if (!allProviders) {
+    conditions.push(buildProviderCondition(providerId, params));
+  }
+
+  conditions.push(`(
       x.xray_invoice_date IS NOT NULL
       OR COALESCE(x.view_count, 0) > 0
       OR COALESCE(x.payment, 0) > 0
-    )`,
-  ];
+    )`);
 
   if (filters.dateFrom) {
     conditions.push("x.xray_invoice_date >= :dateFrom");
@@ -199,8 +213,9 @@ function encodeCursor(row) {
 }
 
 function buildMergedQuery(providerId, filters = {}) {
-  const standard = buildStandardConditions(providerId, filters);
-  const xray = buildXrayConditions(providerId, filters);
+  const standard = buildAllStandardConditions(providerId, filters);
+  const xray = buildAllXrayConditions(providerId, filters);
+  xray.conditions.push("x.status <> 'Written Off'");
 
   return {
     sql: `
@@ -292,6 +307,22 @@ class CompanyInvoice {
     };
   }
 
+  static async findAllByProviderList(providerId, filters = {}) {
+    const pool = getPool();
+    const mergedQuery = buildMergedQuery(providerId, filters);
+
+    const [rows] = await pool.execute(
+      `
+      SELECT merged.source_type, merged.source_id, merged.sort_date, merged.order_number
+      FROM (${mergedQuery.sql}) merged
+      ORDER BY merged.sort_date DESC, merged.order_number ASC, merged.source_type ASC, merged.source_id DESC
+      `,
+      mergedQuery.params
+    );
+
+    return rows;
+  }
+
   static async getOpenSummaryByProvider(providerId, filters = {}) {
     const pool = getPool();
     const standard = buildStandardConditions(providerId, filters);
@@ -327,7 +358,13 @@ class CompanyInvoice {
         SUM(
           CASE
             WHEN x.sent_date IS NOT NULL
-              AND GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0
+              AND x.status <> 'Written Off'
+              AND GREATEST(
+                0,
+                COALESCE(x.payment, 0)
+                  - COALESCE(x.amount_paid, 0)
+                  - COALESCE(x.writeoff_amount, 0)
+              ) > 0
             THEN 1
             ELSE 0
           END
@@ -378,7 +415,12 @@ class CompanyInvoice {
         SUM(COALESCE(x.payment, 0)) AS totalInvoiced,
         SUM(COALESCE(x.amount_paid, 0)) AS totalPaid,
         SUM(
-          GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))
+          GREATEST(
+            0,
+            COALESCE(x.payment, 0)
+              - COALESCE(x.amount_paid, 0)
+              - COALESCE(x.writeoff_amount, 0)
+          )
         ) AS totalDue
       FROM invoice_xray_details x
       INNER JOIN orders o ON o.id = x.order_id
@@ -407,8 +449,8 @@ class CompanyInvoice {
 
   static async getFinancialTotalsGroupedByProvider() {
     const pool = getPool();
-    const standard = buildAllStandardConditions(null, {});
-    const xray = buildAllXrayConditions(null, {});
+    const standard = buildAllStandardConditions(null, {}, { allProviders: true });
+    const xray = buildAllXrayConditions(null, {}, { allProviders: true });
 
     const [standardRows] = await pool.execute(
       `
@@ -434,7 +476,12 @@ class CompanyInvoice {
         SUM(COALESCE(x.payment, 0)) AS totalInvoiced,
         SUM(COALESCE(x.amount_paid, 0)) AS totalPaid,
         SUM(
-          GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))
+          GREATEST(
+            0,
+            COALESCE(x.payment, 0)
+              - COALESCE(x.amount_paid, 0)
+              - COALESCE(x.writeoff_amount, 0)
+          )
         ) AS totalDue
       FROM invoice_xray_details x
       INNER JOIN orders o ON o.id = x.order_id
@@ -447,7 +494,7 @@ class CompanyInvoice {
     const totalsByProvider = new Map();
 
     const ensureEntry = (providerId) => {
-      const key = providerId == null ? "null" : String(providerId);
+      const key = normalizeProviderKey(providerId);
       if (!totalsByProvider.has(key)) {
         totalsByProvider.set(key, {
           totalCases: 0,
@@ -525,3 +572,4 @@ class CompanyInvoice {
 }
 
 module.exports = CompanyInvoice;
+module.exports.normalizeProviderKey = normalizeProviderKey;

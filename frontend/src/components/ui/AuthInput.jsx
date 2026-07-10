@@ -28,7 +28,9 @@ export default function AuthInput({
           value={value}
           onChange={onChange}
           onBlur={onBlur}
-          className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] pl-[42px] pr-[42px] text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:bg-white focus:ring-2 ${
+          className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:bg-white focus:ring-2 ${
+            leftIcon ? "pl-[42px]" : "pl-[14px]"
+          } ${rightIcon ? "pr-[42px]" : "pr-[14px]"} ${
             error
               ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
               : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"

@@ -24,6 +24,7 @@ const {
   parseOptionalReportTab,
   hasCompanyGroupKey,
 } = require("../lib/reportQueryParser");
+const { areAllOrderInvoicesWrittenOff } = require("../utils/orderInvoicePayment");
 
 const ORDER_TYPE_LABELS = {
   medical: "Medical Records",
@@ -833,11 +834,8 @@ function hasStandardInvoiceFields(row) {
 function mapXrayReviewAmount(xrayRow, orderPayments = []) {
   if (!xrayRow) return null;
 
-  const payment = getXrayPayment(xrayRow);
-  const xrayPaidEarlier = getOrderPaymentAmount(orderPayments, "xray");
-  const balanceDue = Math.max(0, payment - xrayPaidEarlier);
-
-  return formatMoney(balanceDue);
+  const { amountDue } = resolveXrayRowFinancials(xrayRow, orderPayments);
+  return formatMoney(amountDue);
 }
 
 function mapOrderPaymentsSummary(payments = []) {
@@ -1098,10 +1096,7 @@ function resolveXrayPaymentDue(xrayRow, orderPayments = []) {
     return 0;
   }
 
-  const xrayFee = toNumber(xrayRow.payment);
-  const xrayPaid = getOrderPaymentAmount(orderPayments, "xray");
-
-  return Math.max(0, xrayFee - xrayPaid);
+  return resolveXrayRowFinancials(xrayRow, orderPayments).amountDue;
 }
 
 async function upsertOrderPaymentDue(
@@ -1316,14 +1311,47 @@ function resolveXrayRowFinancials(xrayRow, orderPayments = []) {
   const totalAmount = getXrayPayment(xrayRow);
   const fromOrderPayments = getOrderPaymentAmount(orderPayments, "xray");
   const fromInvoice = toNumber(xrayRow?.amount_paid);
-  const amountPaid = Math.max(fromOrderPayments, fromInvoice);
-  const amountDue = Math.max(0, totalAmount - amountPaid);
+  const amountPaid =
+    xrayRow?.payment_method === "manual" || xrayRow?.payment_method === "online"
+      ? Math.max(fromInvoice, fromOrderPayments)
+      : orderPayments.length
+        ? fromOrderPayments
+        : fromInvoice;
+  const writeoffAmount = toNumber(xrayRow?.writeoff_amount);
+  const amountDue = Math.max(0, totalAmount - amountPaid - writeoffAmount);
 
   return {
     totalAmount,
     amountPaid,
     amountDue,
+    writeoffAmount,
   };
+}
+
+function deriveXrayInvoiceStatus(xrayRow, financials, { isSent = false } = {}) {
+  const storedStatus = trimOrNull(xrayRow?.status);
+
+  if (storedStatus === "Written Off") {
+    return "Written Off";
+  }
+
+  if (financials.amountDue <= 0) {
+    if (financials.writeoffAmount > 0 && financials.amountPaid < financials.totalAmount) {
+      return "Written Off";
+    }
+
+    return "Paid";
+  }
+
+  if (storedStatus === "Partial" || financials.amountPaid > 0 || financials.writeoffAmount > 0) {
+    return "Partial";
+  }
+
+  if (isSent || storedStatus === "Needs Resend") {
+    return "Needs Resend";
+  }
+
+  return storedStatus || "Unpaid";
 }
 
 function getXrayRecipientEmail(row) {
@@ -1339,16 +1367,19 @@ function mapXrayOutstandingRow(row, orderPayments = []) {
   const displayDate = isSent ? row.sent_date : row.xray_invoice_date;
   const orderId = normalizeOrderId(row.order_id);
   const financials = resolveXrayRowFinancials(row, orderPayments);
+  const status = deriveXrayInvoiceStatus(row, financials, { isSent });
+  const isWrittenOff = status === "Written Off";
 
   return {
     id: `${row.facility_id}-${row.order_number}-xray-${orderId}`,
     invoiceId: orderId,
     invoiceNumber: resolveXrayInvoiceNumber(row),
     orderId,
+    invoiceType: "xray",
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
-    status: financials.amountDue <= 0 ? "Paid" : financials.amountPaid > 0 ? "Partial" : "Unpaid",
-    isWrittenOff: false,
+    status,
+    isWrittenOff,
     isSent,
     sentDate: toShortDate(displayDate),
     days: daysSince(displayDate),
@@ -1356,6 +1387,10 @@ function mapXrayOutstandingRow(row, orderPayments = []) {
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
     due: formatMoney(financials.amountDue),
+    writeoffAmount:
+      financials.writeoffAmount > 0
+        ? formatMoney(financials.writeoffAmount)
+        : null,
   };
 }
 
@@ -1364,16 +1399,21 @@ function mapXrayResendRow(row, orderPayments = []) {
   const displayDate = isSent ? row.sent_date : row.xray_invoice_date;
   const orderId = normalizeOrderId(row.order_id);
   const financials = resolveXrayRowFinancials(row, orderPayments);
+  const status = deriveXrayInvoiceStatus(row, financials, { isSent });
+  const isWrittenOff = status === "Written Off";
 
   return {
     id: orderId || row.order_id,
     invoiceId: orderId,
     invoiceNumber: resolveXrayInvoiceNumber(row),
     orderId,
+    invoiceType: "xray",
     company: getInvoiceCompanyName(row),
     email: getXrayRecipientEmail(row) || "",
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
+    status,
+    isWrittenOff,
     isSent,
     sentDate: toShortDate(displayDate),
     days: daysSince(displayDate),
@@ -1381,6 +1421,10 @@ function mapXrayResendRow(row, orderPayments = []) {
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
     due: formatMoney(financials.amountDue),
+    writeoffAmount:
+      financials.writeoffAmount > 0
+        ? formatMoney(financials.writeoffAmount)
+        : null,
     ...mapInvoiceReminderFields(row),
   };
 }
@@ -2685,7 +2729,12 @@ function isStandardNeedsResend(row) {
 }
 
 function isXrayNeedsResend(row) {
-  if (toNumber(row.amount_paid) >= toNumber(row.payment) && toNumber(row.payment) > 0) {
+  if (row?.status === "Written Off") {
+    return false;
+  }
+
+  const financials = resolveXrayRowFinancials(row, []);
+  if (financials.amountDue <= 0) {
     return false;
   }
 
@@ -2805,7 +2854,7 @@ async function getCompanyWise() {
   });
 
   const resolveFinancialTotals = (companyId) => {
-    const key = companyId == null ? "null" : String(companyId);
+    const key = CompanyInvoice.normalizeProviderKey(companyId);
     return (
       financialTotalsByProvider.get(key) || {
         totalCases: 0,
@@ -2826,30 +2875,34 @@ async function getCompanyWise() {
         invoiced: formatMoney(financialTotals.totalInvoiced),
         paid: formatMoney(financialTotals.totalPaid),
         due: formatMoney(financialTotals.totalDue),
+        _financialTotals: financialTotals,
       };
     })
     .sort((a, b) => a.company.localeCompare(b.company));
 
-  const overallFinancials = Array.from(financialTotalsByProvider.values()).reduce(
-    (totals, entry) => ({
-      totalCases: totals.totalCases + Number(entry.totalCases || 0),
-      totalInvoiced: totals.totalInvoiced + Number(entry.totalInvoiced || 0),
-      totalPaid: totals.totalPaid + Number(entry.totalPaid || 0),
-      totalDue: totals.totalDue + Number(entry.totalDue || 0),
+  const overallFinancials = companies.reduce(
+    (totals, company) => ({
+      totalCases: totals.totalCases + Number(company._financialTotals.totalCases || 0),
+      totalInvoiced:
+        totals.totalInvoiced + Number(company._financialTotals.totalInvoiced || 0),
+      totalPaid: totals.totalPaid + Number(company._financialTotals.totalPaid || 0),
+      totalDue: totals.totalDue + Number(company._financialTotals.totalDue || 0),
     }),
     { totalCases: 0, totalInvoiced: 0, totalPaid: 0, totalDue: 0 }
   );
 
+  const publicCompanies = companies.map(({ _financialTotals, ...company }) => company);
+
   const summary = {
-    companies: companies.length,
+    companies: publicCompanies.length,
     totalCases: overallFinancials.totalCases,
-    needsResend: companies.reduce((sum, company) => sum + company.needsResend, 0),
+    needsResend: publicCompanies.reduce((sum, company) => sum + company.needsResend, 0),
     invoiced: formatMoney(overallFinancials.totalInvoiced),
     paid: formatMoney(overallFinancials.totalPaid),
     due: formatMoney(overallFinancials.totalDue),
   };
 
-  return { companies, summary };
+  return { companies: publicCompanies, summary };
 }
 
 function mapCompanyInvoiceRow(row, orderPayments = []) {
@@ -2857,6 +2910,10 @@ function mapCompanyInvoiceRow(row, orderPayments = []) {
   const displayDate = isSent ? row.sent_date : row.invoice_date;
   const isWrittenOff = row.status === "Written Off";
   const financials = resolveRowFinancials(row, orderPayments);
+  const isPaid =
+    !isWrittenOff &&
+    (row.status === "Paid" ||
+      (financials.amountDue <= 0 && financials.totalAmount > 0));
 
   return {
     id: row.id,
@@ -2869,6 +2926,7 @@ function mapCompanyInvoiceRow(row, orderPayments = []) {
     status: row.status || "Unpaid",
     needsResend: isStandardNeedsResend(row),
     isWrittenOff,
+    isPaid,
     isSent,
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
@@ -2881,15 +2939,12 @@ function mapCompanyXrayInvoiceRow(row, orderPayments = []) {
   const displayDate = isSent ? row.sent_date : row.xray_invoice_date;
   const financials = resolveXrayRowFinancials(row, orderPayments);
   const orderId = row.order_id;
-  const status = isSent
-    ? financials.amountDue <= 0
-      ? "Paid"
-      : "Needs Resend"
-    : financials.amountDue <= 0
-      ? "Paid"
-      : financials.amountPaid > 0
-        ? "Partial"
-        : "Unpaid";
+  const status = deriveXrayInvoiceStatus(row, financials, { isSent });
+  const isWrittenOff = status === "Written Off";
+  const isPaid =
+    !isWrittenOff &&
+    (status === "Paid" ||
+      (financials.amountDue <= 0 && financials.totalAmount > 0));
 
   return {
     id: `xray-${orderId}`,
@@ -2901,11 +2956,16 @@ function mapCompanyXrayInvoiceRow(row, orderPayments = []) {
     days: daysSince(displayDate),
     status,
     needsResend: isXrayNeedsResend(row),
-    isWrittenOff: false,
+    isWrittenOff,
+    isPaid,
     isSent,
     invoiced: formatMoney(financials.totalAmount),
     paid: formatMoney(financials.amountPaid),
     due: formatMoney(financials.amountDue),
+    writeoffAmount:
+      financials.writeoffAmount > 0
+        ? formatMoney(financials.writeoffAmount)
+        : null,
   };
 }
 
@@ -3052,47 +3112,21 @@ async function getByCompany(providerId, query = {}) {
 
   const dateFilters = parseInvoiceListFilters(query);
 
-  const [
-    standardOutstanding,
-    standardResend,
-    xrayOutstanding,
-    xrayResend,
-  ] = await Promise.all([
-    Invoice.findByProviderId(companyId, dateFilters),
-    Invoice.findResendByProviderId(companyId, dateFilters),
-    InvoiceXray.findByProviderId(companyId, dateFilters),
-    InvoiceXray.findResendByProviderId(companyId, dateFilters),
-  ]);
-
-  const standardRows = [...standardOutstanding, ...standardResend];
-  const xrayRows = [...xrayOutstanding, ...xrayResend];
-
-  const [summary, referenceRow] = await Promise.all([
+  const [summary, referenceRow, listRows] = await Promise.all([
     CompanyInvoice.getSummaryByProvider(companyId, dateFilters),
     CompanyInvoice.findCompanyReference(companyId),
+    CompanyInvoice.findAllByProviderList(companyId, dateFilters),
   ]);
 
-  if (!standardRows.length && !xrayRows.length) {
+  if (!listRows.length) {
     return buildCompanyResponse(companyId, referenceRow, [], summary);
   }
 
-  const orderIds = [
-    ...new Set([
-      ...standardRows.map((row) => row.order_id),
-      ...xrayRows.map((row) => row.order_id),
-    ]),
-  ];
-  const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
-  const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
-  const invoices = buildCompanyInvoiceList(
-    standardRows,
-    xrayRows,
-    paymentsByOrderId
-  );
+  const invoices = await hydrateCompanyInvoicePage(listRows);
 
   return buildCompanyResponse(
     companyId,
-    referenceRow || standardRows[0] || xrayRows[0],
+    referenceRow,
     invoices,
     summary
   );
@@ -3597,6 +3631,8 @@ async function sendXrayInvoices(orderIds = [], options = {}) {
       { recipientEmails: deliveredTo, orderId }
     );
 
+    await Order.upsertWorkflowStage(orderId, "SENT", "sent", new Date());
+
     sent.push({ orderId, recipient: deliveredTo });
   }
 
@@ -3706,6 +3742,40 @@ async function emailXrayInvoiceByOrderId(orderId, options = {}) {
   };
 }
 
+async function syncOrderWriteOffStatus(connection, orderId, orderAction = "keep_write_off") {
+  const allWrittenOff = await areAllOrderInvoicesWrittenOff(orderId, connection);
+
+  if (!allWrittenOff) {
+    await connection.execute(
+      `UPDATE orders
+       SET is_write_offs = 0,
+           status = CASE WHEN status = 'Write Offs' THEN 'Active' ELSE status END,
+           updated_at = NOW()
+       WHERE id = :orderId`,
+      { orderId }
+    );
+    return null;
+  }
+
+  const newStatus =
+    orderAction === "close_order" ? "Completed" : "Write Offs";
+
+  await connection.execute(
+    `UPDATE orders
+     SET status = :status,
+         is_write_offs = :isWriteOffs,
+         updated_at = NOW()
+     WHERE id = :orderId`,
+    {
+      status: newStatus,
+      isWriteOffs: orderAction === "close_order" ? 0 : 1,
+      orderId,
+    }
+  );
+
+  return newStatus;
+}
+
 async function writeOffInvoices(body = {}, userId) {
   const items = Array.isArray(body.invoices) ? body.invoices : [];
 
@@ -3723,6 +3793,114 @@ async function writeOffInvoices(body = {}, userId) {
     const writtenOff = [];
 
     for (const item of items) {
+      const invoiceType = item.invoiceType === "xray" ? "xray" : "regular";
+
+      if (invoiceType === "xray") {
+        const orderId = normalizeOrderId(
+          item.orderId || item.invoiceId || item.invoiceDbId || item.id
+        );
+
+        if (!orderId) {
+          continue;
+        }
+
+        const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
+
+        if (!xrayRow) {
+          throw new ApiError(404, `X-Ray invoice for order ${orderId} not found`);
+        }
+
+        if (xrayRow.status === "Written Off") {
+          throw new ApiError(400, "X-Ray invoice is already written off");
+        }
+
+        const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
+        const financials = resolveXrayRowFinancials(xrayRow, orderPayments);
+        const currentDue = financials.amountDue;
+        const requestedWriteOff = toNumber(
+          item.writeOffAmount ?? item.dueAmount ?? body.amount
+        );
+
+        if (currentDue <= 0 || body.isZeroDue) {
+          if (xrayRow.status !== "Paid") {
+            await InvoiceXray.writeOff(connection, orderId, {
+              status: currentDue <= 0 ? "Paid" : "Written Off",
+              writeoffAmount: toNumber(xrayRow.writeoff_amount),
+              writeoffBy: userId || null,
+              writeoffReason:
+                orderAction === "close_order"
+                  ? "Order closed with no remaining due"
+                  : "Order marked as write off with no remaining due",
+            });
+          }
+
+          const newOrderStatus = await syncOrderWriteOffStatus(
+            connection,
+            orderId,
+            orderAction
+          );
+
+          writtenOff.push({
+            invoiceId: orderId,
+            orderId,
+            invoiceType: "xray",
+            writeOffAmount: 0,
+            amountDue: 0,
+            status: newOrderStatus || xrayRow.status,
+            orderStatus: newOrderStatus,
+          });
+
+          await syncOrderPaymentDuesFromInvoice(connection, orderId);
+          continue;
+        }
+
+        const writeOffAmount = requestedWriteOff;
+
+        if (writeOffAmount <= 0) {
+          continue;
+        }
+
+        const appliedAmount = Math.min(writeOffAmount, currentDue);
+
+        if (appliedAmount <= 0) {
+          throw new ApiError(400, "There is no due amount available to write off");
+        }
+
+        const newDue = Math.max(0, currentDue - appliedAmount);
+        const totalWriteoff = toNumber(xrayRow.writeoff_amount) + appliedAmount;
+        const newStatus = newDue <= 0 ? "Written Off" : "Partial";
+        const writeoffReason =
+          body.writeOffType === "specified"
+            ? `Specified write off of ${formatMoney(appliedAmount)}`
+            : `Full write off of ${formatMoney(appliedAmount)}`;
+
+        await InvoiceXray.writeOff(connection, orderId, {
+          status: newStatus,
+          writeoffAmount: totalWriteoff,
+          writeoffBy: userId || null,
+          writeoffReason,
+        });
+
+        const newOrderStatus = await syncOrderWriteOffStatus(
+          connection,
+          orderId,
+          orderAction
+        );
+
+        writtenOff.push({
+          invoiceId: orderId,
+          orderId,
+          invoiceType: "xray",
+          writeOffAmount: appliedAmount,
+          amountDue: newDue,
+          status: newStatus,
+          orderStatus: newOrderStatus,
+        });
+
+        await syncOrderPaymentDuesFromInvoice(connection, orderId);
+        continue;
+      }
+
       const invoiceId = normalizeInvoiceId(
         item.invoiceId || item.invoiceDbId || item.id
       );
@@ -3752,19 +3930,6 @@ async function writeOffInvoices(body = {}, userId) {
       );
 
       if (currentDue <= 0 || body.isZeroDue) {
-        const newOrderStatus =
-          orderAction === "close_order" ? "Completed" : "Write Offs";
-
-        await connection.execute(
-          `UPDATE orders
-           SET status = :status, updated_at = NOW()
-           WHERE id = :orderId`,
-          {
-            status: newOrderStatus,
-            orderId: invoice.order_id,
-          }
-        );
-
         if (invoice.status !== "Paid") {
           await Invoice.writeOff(connection, invoiceId, {
             status: currentDue <= 0 ? "Paid" : "Written Off",
@@ -3778,13 +3943,19 @@ async function writeOffInvoices(body = {}, userId) {
           });
         }
 
+        const newOrderStatus = await syncOrderWriteOffStatus(
+          connection,
+          invoice.order_id,
+          orderAction
+        );
+
         writtenOff.push({
           invoiceId,
           orderId: invoice.order_id,
+          invoiceType: "regular",
           writeOffAmount: 0,
           amountDue: 0,
-          status:
-            orderAction === "close_order" ? "Completed" : "Write Offs",
+          status: newOrderStatus || invoice.status,
           orderStatus: newOrderStatus,
         });
 
@@ -3820,28 +3991,20 @@ async function writeOffInvoices(body = {}, userId) {
         writeoffReason,
       });
 
-      if (newDue <= 0) {
-        const newOrderStatus =
-          orderAction === "close_order" ? "Completed" : "Write Offs";
-
-        await connection.execute(
-          `UPDATE orders
-           SET status = :status, updated_at = NOW()
-           WHERE id = :orderId`,
-          {
-            status: newOrderStatus,
-            orderId: invoice.order_id,
-          }
-        );
-      }
+      const newOrderStatus = await syncOrderWriteOffStatus(
+        connection,
+        invoice.order_id,
+        orderAction
+      );
 
       writtenOff.push({
         invoiceId,
         orderId: invoice.order_id,
+        invoiceType: "regular",
         writeOffAmount: appliedAmount,
         amountDue: newDue,
         status: newStatus,
-        orderStatus: newDue <= 0 ? orderAction === "close_order" ? "Completed" : "Write Offs" : null,
+        orderStatus: newOrderStatus,
       });
 
       await syncOrderPaymentDuesFromInvoice(connection, invoice.order_id);
@@ -3888,6 +4051,8 @@ function canSendXrayInvoiceReminder(row, orderPayments, reminderLevel) {
 
   if (reminderLevel === 2 && !row.reminder_1_sent_at) return false;
   if (reminderLevel === 3 && !row.reminder_2_sent_at) return false;
+
+  if (row.status === "Written Off") return false;
 
   const financials = resolveXrayRowFinancials(row, orderPayments);
   return financials.amountDue > 0;

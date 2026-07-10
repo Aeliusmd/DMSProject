@@ -23,16 +23,21 @@ const STANDARD_RESEND_CONDITIONS = [
   )`,
 ];
 
+const XRAY_AMOUNT_DUE_EXPR =
+  "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0) - COALESCE(x.writeoff_amount, 0))";
+
 const XRAY_OUTSTANDING_CONDITIONS = [
   ORDER_VISIBLE,
+  "x.status <> 'Written Off'",
   "x.sent_date IS NULL",
-  "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+  `${XRAY_AMOUNT_DUE_EXPR} > 0`,
 ];
 
 const XRAY_RESEND_CONDITIONS = [
   ORDER_VISIBLE,
+  "x.status <> 'Written Off'",
   "x.sent_date IS NOT NULL",
-  "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0)) > 0",
+  `${XRAY_AMOUNT_DUE_EXPR} > 0`,
 ];
 
 function appendDateFilters(conditions, filters, dateColumn, params) {
@@ -460,7 +465,7 @@ class InvoiceReport {
       amountColumns: {
         invoiced: "COALESCE(x.payment, 0)",
         paid: "COALESCE(x.amount_paid, 0)",
-        due: "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))",
+        due: XRAY_AMOUNT_DUE_EXPR,
       },
       filters,
     });
@@ -498,7 +503,7 @@ class InvoiceReport {
       amountColumns: {
         invoiced: "COALESCE(x.payment, 0)",
         paid: "COALESCE(x.amount_paid, 0)",
-        due: "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))",
+        due: XRAY_AMOUNT_DUE_EXPR,
       },
       filters,
     });
@@ -566,7 +571,7 @@ class InvoiceReport {
       amountColumns: {
         invoiced: "COALESCE(x.payment, 0)",
         paid: "COALESCE(x.amount_paid, 0)",
-        due: "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))",
+        due: XRAY_AMOUNT_DUE_EXPR,
       },
       filters,
       companyGroupKey,
@@ -589,7 +594,7 @@ class InvoiceReport {
       amountColumns: {
         invoiced: "COALESCE(x.payment, 0)",
         paid: "COALESCE(x.amount_paid, 0)",
-        due: "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))",
+        due: XRAY_AMOUNT_DUE_EXPR,
       },
       filters,
       companyGroupKey,
@@ -792,7 +797,7 @@ class InvoiceReport {
       amountColumns: {
         invoiced: "COALESCE(x.payment, 0)",
         paid: "COALESCE(x.amount_paid, 0)",
-        due: "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))",
+        due: XRAY_AMOUNT_DUE_EXPR,
       },
     });
   }
@@ -815,7 +820,7 @@ class InvoiceReport {
       amountColumns: {
         invoiced: "COALESCE(x.payment, 0)",
         paid: "COALESCE(x.amount_paid, 0)",
-        due: "GREATEST(0, COALESCE(x.payment, 0) - COALESCE(x.amount_paid, 0))",
+        due: XRAY_AMOUNT_DUE_EXPR,
       },
     });
   }
