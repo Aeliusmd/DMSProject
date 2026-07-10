@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import StatCard from "@/components/dashboard/StatCard";
 import { getOrderStats } from "@/lib/orders/orderApi";
 
@@ -12,16 +13,23 @@ function formatCount(value) {
 export default function OrderStatsGrid() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
 
     getOrderStats()
       .then((data) => {
-        if (active) setStats(data);
+        if (active) {
+          setStats(data);
+          setError("");
+        }
       })
-      .catch(() => {
-        if (active) setStats(null);
+      .catch((err) => {
+        if (active) {
+          setStats(null);
+          setError(getApiErrorMessage(err, "Failed to load order stats"));
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -33,7 +41,14 @@ export default function OrderStatsGrid() {
   }, []);
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-3">
+      {error && (
+        <p className="rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[11px] font-medium text-red-600">
+          {error}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatCard
         layout="horizontal"
         icon={<TotalIcon />}
@@ -69,6 +84,7 @@ export default function OrderStatsGrid() {
         iconBg="#475569"
         iconColor="#FFFFFF"
       />
+      </div>
     </div>
   );
 }

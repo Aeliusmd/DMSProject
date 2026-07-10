@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { searchProviders } from "@/lib/providers/providerApi";
 
 export default function ProviderSearchField({
@@ -44,7 +45,7 @@ export default function ProviderSearchField({
         .catch((err) => {
           if (!active) return;
           setSuggestions([]);
-          setSearchError(err.message || "Failed to search providers");
+          setSearchError(getApiErrorMessage(err, "Failed to search providers"));
         })
         .finally(() => {
           if (active) setLoading(false);

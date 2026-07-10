@@ -8,6 +8,7 @@ import PrimaryButton from "@/components/ui/PrimaryButton";
 import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
 import { login } from "@/lib/auth/authApi";
 import { isAuthenticated } from "@/lib/auth/authStorage";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [isTwoFactorOpen, setIsTwoFactorOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [apiFieldErrors, setApiFieldErrors] = useState({});
 
   const [sessionToken, setSessionToken] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
@@ -34,8 +36,8 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  const emailError = validateEmail(email);
-  const passwordError = validatePassword(password);
+  const emailError = apiFieldErrors.email || validateEmail(email);
+  const passwordError = apiFieldErrors.password || validatePassword(password);
 
   const isFormValid = !emailError && !passwordError;
 
@@ -51,6 +53,7 @@ export default function LoginPage() {
 
     setIsSubmitting(true);
     setLoginError("");
+    setApiFieldErrors({});
 
     try {
       const response = await login({
@@ -64,7 +67,16 @@ export default function LoginPage() {
       setMaskedEmail(payload.email || email.trim());
       setIsTwoFactorOpen(true);
     } catch (error) {
-      setLoginError(error.message || "Unable to sign in. Please try again.");
+      const { fieldErrors, message } = applyApiFieldErrors(error, {
+        identifier: "email",
+      });
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setApiFieldErrors(fieldErrors);
+        setTouched({ email: true, password: true });
+      }
+
+      setLoginError(message || getApiErrorMessage(error, "Unable to sign in. Please try again."));
     } finally {
       setIsSubmitting(false);
     }
@@ -120,7 +132,15 @@ export default function LoginPage() {
                   type="email"
                   placeholder="Enter your email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setApiFieldErrors((prev) => {
+                      if (!prev.email) return prev;
+                      const next = { ...prev };
+                      delete next.email;
+                      return next;
+                    });
+                  }}
                   onBlur={() =>
                     setTouched((prev) => ({
                       ...prev,
@@ -136,7 +156,15 @@ export default function LoginPage() {
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setApiFieldErrors((prev) => {
+                      if (!prev.password) return prev;
+                      const next = { ...prev };
+                      delete next.password;
+                      return next;
+                    });
+                  }}
                   onBlur={() =>
                     setTouched((prev) => ({
                       ...prev,

@@ -82,6 +82,25 @@ function addOptionalIsoDateError(errors, field, value) {
   }
 }
 
+function isValidDateOnly(value) {
+  const { parseDateOnlyParts } = require("../utils/dateUtils");
+  return parseDateOnlyParts(value) !== null;
+}
+
+function addOptionalDateOnlyError(errors, field, value) {
+  if (!isBlank(value) && !isValidDateOnly(value)) {
+    errors.push({ field, message: "Enter a valid date" });
+  }
+}
+
+function addRequiredDateOnlyError(errors, field, value, message) {
+  if (isBlank(value)) {
+    errors.push({ field, message: message || "Date is required" });
+  } else if (!isValidDateOnly(value)) {
+    errors.push({ field, message: "Enter a valid date" });
+  }
+}
+
 module.exports = {
   FIELD_LIMITS,
   EMAIL_PATTERN,
@@ -97,4 +116,7 @@ module.exports = {
   isValidPositiveIntId,
   addMaxLengthError,
   addOptionalIsoDateError,
+  isValidDateOnly,
+  addOptionalDateOnlyError,
+  addRequiredDateOnlyError,
 };

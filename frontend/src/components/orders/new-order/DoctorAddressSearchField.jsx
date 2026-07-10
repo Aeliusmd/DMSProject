@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { searchOrderDoctorAddresses } from "@/lib/orders/orderApi";
 
 export default function DoctorAddressSearchField({
@@ -42,7 +43,7 @@ export default function DoctorAddressSearchField({
         .catch((err) => {
           if (!active) return;
           setSuggestions([]);
-          setSearchError(err.message || "Failed to search doctor addresses");
+          setSearchError(getApiErrorMessage(err, "Failed to search doctor addresses"));
         })
         .finally(() => {
           if (active) setLoading(false);

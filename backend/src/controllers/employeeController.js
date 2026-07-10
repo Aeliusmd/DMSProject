@@ -8,7 +8,10 @@ const notificationService = require("../services/notificationService");
 const {
   validateCreateEmployee,
   validateUpdateEmployee,
+  validateSuspendEmployee,
 } = require("../validators/employeeValidator");
+const { validateMilestoneStatsQuery } = require("../validators/queryValidators");
+const { throwIfInvalid } = require("../utils/validationUtils");
 
 exports.getAll = asyncHandler(async (req, res) => {
   const result = await employeeService.getAllEmployees(req.query);
@@ -121,11 +124,9 @@ exports.activate = asyncHandler(async (req, res) => {
 });
 
 exports.suspend = asyncHandler(async (req, res) => {
-  const reactivatedDate = req.body?.reactivatedDate || req.body?.reactivated_date;
+  throwIfInvalid(validateSuspendEmployee(req.body));
 
-  if (!reactivatedDate) {
-    throw new ApiError(400, "Reactivation date and time is required");
-  }
+  const reactivatedDate = req.body?.reactivatedDate || req.body?.reactivated_date;
 
   const employee = await employeeService.suspendEmployee(
     req.params.id,
@@ -180,6 +181,7 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.getMyMilestoneStats = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMilestoneStatsQuery(req.query));
   const stats = await employeeService.getEmployeeMilestoneStats(
     req.user.id,
     {
@@ -193,6 +195,7 @@ exports.getMyMilestoneStats = asyncHandler(async (req, res) => {
 });
 
 exports.getMilestoneStats = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMilestoneStatsQuery(req.query));
   const stats = await employeeService.getEmployeeMilestoneStats(
     req.params.id,
     {

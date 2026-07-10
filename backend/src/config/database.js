@@ -1,6 +1,8 @@
 const mysql = require("mysql2/promise");
 const config = require("./index");
 const logger = require("../utils/logger");
+const ApiError = require("../utils/ApiError");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 
 let pool = null;
 
@@ -38,13 +40,13 @@ async function connectDatabase() {
       error: error.message,
       code: error.code,
     });
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
 function getPool() {
   if (!pool) {
-    throw new Error("Database pool is not initialized. Call connectDatabase() first.");
+    throw new ApiError(503, "Database is not initialized. Call connectDatabase() first.");
   }
 
   return pool;
@@ -56,7 +58,7 @@ async function query(sql, params = {}) {
     return rows;
   } catch (error) {
     error.sql = sql;
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -70,7 +72,7 @@ async function withTransaction(callback) {
     return result;
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { applyApiFieldErrors, getApiErrorMessage, hasValidationErrors } from "@/lib/apiErrorUtils";
 
 function parseCurrency(value) {
   if (typeof value === "number") return value;
@@ -25,7 +26,9 @@ export default function WriteOffInvoiceModal({
   const [writeOffType, setWriteOffType] = useState("full");
   const [specifiedAmount, setSpecifiedAmount] = useState("");
   const [orderAction, setOrderAction] = useState("keep_write_off");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const totalDue = useMemo(() => {
     return invoices.reduce(
@@ -57,9 +60,52 @@ export default function WriteOffInvoiceModal({
       setWriteOffType("full");
       setSpecifiedAmount("");
       setOrderAction("keep_write_off");
+      setFieldErrors({});
       setError("");
+      setSubmitting(false);
     }
   }
+
+  const clientValidationErrors = useMemo(() => {
+    const nextErrors = {};
+
+    if (!hasDue) {
+      if (!orderAction) {
+        nextErrors.orderAction =
+          "Please choose whether to close the order or keep it as write off.";
+      }
+      return nextErrors;
+    }
+
+    if (!isBulkWriteOff && writeOffType === "specified") {
+      const amountToWriteOff = Number(specifiedAmount);
+      if (!specifiedAmount || !Number.isFinite(amountToWriteOff) || amountToWriteOff <= 0) {
+        nextErrors.amount = "Please enter a valid write off amount.";
+      }
+    }
+
+    const amountToWriteOff =
+      isBulkWriteOff || writeOffType === "full"
+        ? totalDue
+        : Number(specifiedAmount);
+    const isFullWriteOff = amountToWriteOff >= totalDue;
+
+    if (isFullWriteOff && !orderAction) {
+      nextErrors.orderAction =
+        "Please choose whether to close the order or keep it as write off.";
+    }
+
+    return nextErrors;
+  }, [
+    hasDue,
+    isBulkWriteOff,
+    writeOffType,
+    specifiedAmount,
+    totalDue,
+    orderAction,
+  ]);
+
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   if (!isOpen) return null;
 
@@ -78,24 +124,20 @@ export default function WriteOffInvoiceModal({
 
     if (numericValue > totalDue) {
       setSpecifiedAmount(String(totalDue));
-      setError(`Amount cannot be higher than ${formatCurrency(totalDue)}.`);
+      setFieldErrors({
+        amount: `Amount cannot be higher than ${formatCurrency(totalDue)}.`,
+      });
       return;
     }
 
     setSpecifiedAmount(value);
+    setFieldErrors({});
     setError("");
   };
 
-  const handleSubmit = () => {
-    setError("");
-
+  const buildPayload = () => {
     if (!hasDue) {
-      if (!orderAction) {
-        setError("Please choose whether to close the order or keep it as write off.");
-        return;
-      }
-
-      onSubmit?.({
+      return {
         mode: isBulkWriteOff ? "bulk" : "single",
         writeOffType: "full",
         orderAction,
@@ -108,35 +150,16 @@ export default function WriteOffInvoiceModal({
           dueAmount: parseCurrency(invoice.due),
           writeOffAmount: 0,
         })),
-      });
-
-      onClose?.();
-      return;
+      };
     }
 
     const amountToWriteOff =
       isBulkWriteOff || writeOffType === "full"
         ? totalDue
         : Number(specifiedAmount);
-
-    if (!Number.isFinite(amountToWriteOff) || amountToWriteOff <= 0) {
-      setError("Please enter a valid write off amount.");
-      return;
-    }
-
-    if (amountToWriteOff > totalDue) {
-      setError(`Amount cannot be higher than ${formatCurrency(totalDue)}.`);
-      return;
-    }
-
     const isFullWriteOff = amountToWriteOff >= totalDue;
 
-    if (isFullWriteOff && !orderAction) {
-      setError("Please choose whether to close the order or keep it as write off.");
-      return;
-    }
-
-    onSubmit?.({
+    return {
       mode: isBulkWriteOff ? "bulk" : "single",
       writeOffType: isBulkWriteOff ? "full" : writeOffType,
       orderAction: isFullWriteOff ? orderAction : null,
@@ -152,9 +175,45 @@ export default function WriteOffInvoiceModal({
           writeOffAmount: isBulkWriteOff ? dueAmount : amountToWriteOff,
         };
       }),
-    });
+    };
+  };
 
-    onClose?.();
+  const handleSubmit = async () => {
+    setError("");
+    setFieldErrors(clientValidationErrors);
+
+    if (Object.keys(clientValidationErrors).length > 0) {
+      return;
+    }
+
+    if (!onSubmit) {
+      onClose?.();
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      await onSubmit(buildPayload());
+      onClose?.();
+    } catch (err) {
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err);
+
+      if (apiErrors.orderAction) {
+        setFieldErrors((prev) => ({ ...prev, orderAction: apiErrors.orderAction }));
+      }
+
+      if (apiErrors.amount || apiErrors["invoices.0.writeOffAmount"]) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          amount: apiErrors.amount || apiErrors["invoices.0.writeOffAmount"],
+        }));
+      }
+
+      setError(message || getApiErrorMessage(err, "Failed to write off invoices"));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -257,13 +316,23 @@ export default function WriteOffInvoiceModal({
                     value={specifiedAmount}
                     onChange={handleAmountChange}
                     placeholder="0.00"
-                    className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
+                    className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                      fieldErrors.amount
+                        ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                        : "border-[#CBD5E1] focus:border-red-500 focus:ring-red-500/10"
+                    }`}
                   />
 
-                  <p className="mt-2 text-[11px] text-[#64748B]">
-                    Amount must be equal to or lower than{" "}
-                    {formatCurrency(totalDue)}.
-                  </p>
+                  {fieldErrors.amount ? (
+                    <p className="mt-2 text-[11px] font-medium text-red-600">
+                      {fieldErrors.amount}
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-[11px] text-[#64748B]">
+                      Amount must be equal to or lower than{" "}
+                      {formatCurrency(totalDue)}.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -308,6 +377,10 @@ export default function WriteOffInvoiceModal({
             )}
           </div>
 
+          {fieldErrors.orderAction ? (
+            <p className="text-[11px] font-medium text-red-600">{fieldErrors.orderAction}</p>
+          ) : null}
+
           {error && (
             <div className="rounded-[8px] border border-red-200 bg-red-50 px-4 py-3 text-[12px] font-medium text-red-600">
               {error}
@@ -327,9 +400,14 @@ export default function WriteOffInvoiceModal({
           <button
             type="button"
             onClick={handleSubmit}
-            className="h-[36px] rounded-[6px] bg-red-500 px-5 text-[12px] font-semibold text-white hover:bg-red-600"
+            disabled={submitting || isFormInvalid}
+            className="h-[36px] rounded-[6px] bg-red-500 px-5 text-[12px] font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Confirm {hasDue ? "Write Off" : "Update Order"}
+            {submitting
+              ? "Processing..."
+              : hasDue
+                ? "Confirm Write Off"
+                : "Confirm Update Order"}
           </button>
         </div>
       </div>

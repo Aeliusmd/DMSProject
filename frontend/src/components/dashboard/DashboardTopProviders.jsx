@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTopProviders } from "@/lib/dashboard/dashboardApi";
 
 export default function DashboardTopProviders() {
@@ -19,7 +20,7 @@ export default function DashboardTopProviders() {
       .catch((err) => {
         if (active) {
           setProviders([]);
-          setError(err.message || "Failed to load top providers");
+          setError(getApiErrorMessage(err, "Failed to load top providers"));
         }
       })
       .finally(() => {

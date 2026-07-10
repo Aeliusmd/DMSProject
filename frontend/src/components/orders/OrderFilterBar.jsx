@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getOrderFilterCompanies } from "@/lib/orders/orderApi";
 import { ORDER_PERIOD_OPTIONS } from "@/lib/orders/orderFilterConstants";
@@ -19,6 +20,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
   const [searchDraft, setSearchDraft] = useState("");
   const [facilities, setFacilities] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const [facilitiesLoadError, setFacilitiesLoadError] = useState("");
+  const [companiesLoadError, setCompaniesLoadError] = useState("");
 
   const appliedFilters = filters || defaultOrderFilters;
 
@@ -51,18 +54,30 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
 
     getFacilities()
       .then((data) => {
-        if (active) setFacilities(data);
+        if (!active) return;
+        setFacilities(data);
+        setFacilitiesLoadError("");
       })
-      .catch(() => {
-        if (active) setFacilities([]);
+      .catch((err) => {
+        if (!active) return;
+        setFacilities([]);
+        setFacilitiesLoadError(
+          getApiErrorMessage(err, "Failed to load facilities")
+        );
       });
 
     getOrderFilterCompanies()
       .then((data) => {
-        if (active) setCompanies(data);
+        if (!active) return;
+        setCompanies(data);
+        setCompaniesLoadError("");
       })
-      .catch(() => {
-        if (active) setCompanies([]);
+      .catch((err) => {
+        if (!active) return;
+        setCompanies([]);
+        setCompaniesLoadError(
+          getApiErrorMessage(err, "Failed to load companies")
+        );
       });
 
     return () => {
@@ -111,31 +126,51 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
       </h2>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_auto_auto]">
-        <select
-          value={draftFilters.facility}
-          onChange={(e) => updateDraftFilter("facility", e.target.value)}
-          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-        >
-          <option value="">All Facility</option>
-          {facilities.map((facility) => (
-            <option key={facility.id} value={String(facility.id)}>
-              {facility.facility || facility.facilityName || facility.name}
+        <div>
+          <select
+            value={draftFilters.facility}
+            onChange={(e) => updateDraftFilter("facility", e.target.value)}
+            disabled={Boolean(facilitiesLoadError)}
+            className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="">
+              {facilitiesLoadError ? "Facilities unavailable" : "All Facility"}
             </option>
-          ))}
-        </select>
+            {facilities.map((facility) => (
+              <option key={facility.id} value={String(facility.id)}>
+                {facility.facility || facility.facilityName || facility.name}
+              </option>
+            ))}
+          </select>
+          {facilitiesLoadError && (
+            <p className="mt-1 text-[10px] font-medium text-red-600">
+              {facilitiesLoadError}
+            </p>
+          )}
+        </div>
 
-        <select
-          value={draftFilters.company}
-          onChange={(e) => updateDraftFilter("company", e.target.value)}
-          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-        >
-          <option value="">All Company</option>
-          {companies.map((company) => (
-            <option key={company} value={company}>
-              {company}
+        <div>
+          <select
+            value={draftFilters.company}
+            onChange={(e) => updateDraftFilter("company", e.target.value)}
+            disabled={Boolean(companiesLoadError)}
+            className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="">
+              {companiesLoadError ? "Companies unavailable" : "All Company"}
             </option>
-          ))}
-        </select>
+            {companies.map((company) => (
+              <option key={company} value={company}>
+                {company}
+              </option>
+            ))}
+          </select>
+          {companiesLoadError && (
+            <p className="mt-1 text-[10px] font-medium text-red-600">
+              {companiesLoadError}
+            </p>
+          )}
+        </div>
 
         <select
           value={draftFilters.year}

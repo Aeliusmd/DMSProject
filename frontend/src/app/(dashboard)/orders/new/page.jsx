@@ -57,6 +57,7 @@ import { getProviders, updateProvider } from "@/lib/providers/providerApi";
 import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
 import { API_BASE_URL } from "@/config/api";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -245,11 +246,13 @@ function NewOrderPageContent() {
   const [fileErrors, setFileErrors] = useState({});
 
   const [facilities, setFacilities] = useState([]);
+  const [facilitiesLoadError, setFacilitiesLoadError] = useState("");
 
   const [loadingOrder, setLoadingOrder] = useState(isEditMode);
   const [loadError, setLoadError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [extractingSubpoena, setExtractingSubpoena] = useState(false);
   const [extractError, setExtractError] = useState("");
   const [extractionMeta, setExtractionMeta] = useState({
@@ -451,10 +454,14 @@ function NewOrderPageContent() {
       .then((facilityList) => {
         if (!active) return;
         setFacilities(facilityList);
+        setFacilitiesLoadError("");
       })
-      .catch(() => {
+      .catch((err) => {
         if (active) {
           setFacilities([]);
+          setFacilitiesLoadError(
+            getApiErrorMessage(err, "Failed to load facilities")
+          );
         }
       });
 
@@ -1066,8 +1073,9 @@ function NewOrderPageContent() {
     () => ({
       ...validateNewOrderForm(formData, fileErrors),
       ...validateOrderPaymentAmounts(formData, formData.invoiceFees),
+      ...apiFieldErrors,
     }),
-    [formData, fileErrors]
+    [formData, fileErrors, apiFieldErrors]
   );
 
   const hasImmediateRequiredErrors = immediateRequiredFields.some(
@@ -1411,8 +1419,22 @@ function NewOrderPageContent() {
         fax: data.fax,
         email: data.email,
       });
-    } catch {
-      // Provider is still synced when the order is saved.
+
+      setApiFieldErrors((prev) => {
+        const next = { ...prev };
+        PROVIDER_SYNC_FIELDS.forEach((field) => {
+          delete next[field];
+        });
+        return next;
+      });
+    } catch (err) {
+      const { fieldErrors } = applyApiFieldErrors(err, {
+        companyName: "serveCompanyName",
+      });
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setApiFieldErrors((prev) => ({ ...prev, ...fieldErrors }));
+      }
     }
   };
 
@@ -1499,6 +1521,13 @@ function NewOrderPageContent() {
         ? { specificDoctorIsDefault: false, specificDoctorId: "" }
         : {}),
     }));
+
+    setApiFieldErrors((prev) => {
+      if (!prev[name]) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
 
     if (name === "facility") {
       setExtractionMeta((prev) => ({ ...prev, facilityName: "", facilityCreated: false }));
@@ -1600,6 +1629,7 @@ function NewOrderPageContent() {
   const handleSaveOrder = async () => {
     setSubmitAttempted(true);
     setSaveError("");
+    setApiFieldErrors({});
 
     const resolvedFacility = await syncFacilityFromForm(formDataRef.current);
 
@@ -1676,7 +1706,13 @@ function NewOrderPageContent() {
       setSaveError("Order was saved but could not return to the orders list. Please refresh and try again.");
       setSaving(false);
     } catch (err) {
-      setSaveError(err.message || "Failed to save order");
+      const { fieldErrors, message } = applyApiFieldErrors(err);
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setApiFieldErrors(fieldErrors);
+      }
+
+      setSaveError(message || getApiErrorMessage(err, "Failed to save order"));
       setSaving(false);
     }
   };
@@ -1711,6 +1747,12 @@ function NewOrderPageContent() {
   return (
     <DashboardShell>
       <div className="flex h-[calc(100vh-92px)] flex-col gap-4 overflow-hidden">
+        {facilitiesLoadError && (
+          <div className="shrink-0 rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-red-600">
+            {facilitiesLoadError}
+          </div>
+        )}
+
         <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-[20px] font-semibold text-[#111827]">
@@ -2352,12 +2394,13 @@ function ServeInfoForm({
       </div>
 
       <NewOrderField
-        label="Email"
+        label="Provider email"
         name="email"
         value={formData.email}
         onChange={onChange}
         onBlur={onBlur}
         placeholder="company@email.com"
+        required
         error={getError("email")}
       />
 

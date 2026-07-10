@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export const DOCUMENT_TYPES = [
   "Standard",
@@ -23,6 +24,7 @@ export default function UploadDocumentsModal({
   const mounted = useIsClient();
   const [documentType, setDocumentType] = useState("Standard");
   const [files, setFiles] = useState([]);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [localError, setLocalError] = useState("");
   const openSession = open ? "open" : null;
   const [prevOpenSession, setPrevOpenSession] = useState(null);
@@ -33,6 +35,7 @@ export default function UploadDocumentsModal({
     if (openSession) {
       setDocumentType("Standard");
       setFiles([]);
+      setFieldErrors({});
       setLocalError("");
     }
   }
@@ -53,28 +56,40 @@ export default function UploadDocumentsModal({
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files || []);
     setFiles(selectedFiles);
+    setFieldErrors({});
     setLocalError("");
   };
 
+  const isFormInvalid = files.length === 0;
+
   const handleUpload = async () => {
     if (files.length === 0) {
-      setLocalError("Please select a file to upload");
+      setFieldErrors({ file: "Please select a file to upload" });
+      setLocalError("");
       return;
     }
 
     setLocalError("");
+    setFieldErrors({});
 
     try {
       await onUpload?.({
         documentType,
         files,
       });
-    } catch {
-      // Parent handles and passes uploadError.
+    } catch (err) {
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err);
+
+      if (Object.keys(apiErrors).length > 0) {
+        setFieldErrors(apiErrors);
+      }
+
+      setLocalError(message || getApiErrorMessage(err, "Failed to upload document"));
     }
   };
 
   const displayError = localError || uploadError;
+  const fileError = fieldErrors.file || fieldErrors.documentType;
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-[2px]">
@@ -123,8 +138,14 @@ export default function UploadDocumentsModal({
               multiple
               onChange={handleFileChange}
               disabled={uploading}
-              className="block w-full text-[11px] text-[#64748B] file:mr-3 file:h-[30px] file:rounded-[5px] file:border file:border-[#E2E8F0] file:bg-[#F8FAFC] file:px-3 file:text-[11px] file:font-medium file:text-[#334155] hover:file:bg-[#F1F5F9] disabled:opacity-60"
+              className={`block w-full text-[11px] text-[#64748B] file:mr-3 file:h-[30px] file:rounded-[5px] file:border file:border-[#E2E8F0] file:bg-[#F8FAFC] file:px-3 file:text-[11px] file:font-medium file:text-[#334155] hover:file:bg-[#F1F5F9] disabled:opacity-60 ${
+                fileError ? "rounded-[6px] border border-red-500 px-2 py-1" : ""
+              }`}
             />
+
+            {fileError ? (
+              <p className="mt-1 text-[11px] font-semibold text-red-600">{fileError}</p>
+            ) : null}
 
             {files.length > 0 && (
               <p className="mt-2 text-[10px] text-[#64748B]">
@@ -153,7 +174,7 @@ export default function UploadDocumentsModal({
           <button
             type="button"
             onClick={handleUpload}
-            disabled={uploading}
+            disabled={uploading || isFormInvalid}
             className="inline-flex h-[32px] items-center justify-center gap-2 rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <UploadIcon />

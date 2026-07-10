@@ -1,5 +1,8 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateManualPayment } = require("../validators/paymentValidator");
+const { validatePaymentSearchQuery, validatePaymentListQuery } = require("../validators/queryValidators");
 const paymentService = require("../services/paymentService");
 const activityLogService = require("../services/activityLogService");
 
@@ -37,12 +40,14 @@ async function logManualPaymentActivity(req, saved = {}, payload = {}) {
 }
 
 exports.searchOrderInvoices = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePaymentSearchQuery(req.query));
   const orderRef = req.query.orderId || req.query.q || "";
   const result = await paymentService.searchOrderInvoices(orderRef);
   return ApiResponse.success(res, result);
 });
 
 exports.recordManualPayment = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateManualPayment(req.body));
   const result = await paymentService.recordManualInvoicePayment(
     req.body,
     req.user?.id
@@ -52,11 +57,13 @@ exports.recordManualPayment = asyncHandler(async (req, res) => {
 });
 
 exports.getManualPayments = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePaymentListQuery(req.query));
   const payments = await paymentService.getManualPayments(req.query);
   return ApiResponse.success(res, { payments });
 });
 
 exports.getOnlinePayments = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePaymentListQuery(req.query));
   const payments = await paymentService.getOnlinePayments(req.query);
   return ApiResponse.success(res, { payments });
 });

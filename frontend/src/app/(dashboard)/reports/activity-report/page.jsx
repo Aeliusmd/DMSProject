@@ -7,6 +7,7 @@ import DashboardShell from "@/components/layout/DashboardShell";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getActivityReport, downloadActivityReportPdf } from "@/lib/reports/reportApi";
 
 function formatDateInput(date) {
@@ -66,6 +67,7 @@ export default function ActivityReportPage() {
   const [draftFilters, setDraftFilters] = useState(getDefaultFilters);
   const [appliedFilters, setAppliedFilters] = useState(getDefaultFilters);
   const [facilities, setFacilities] = useState([]);
+  const [facilitiesLoadError, setFacilitiesLoadError] = useState("");
   const [companies, setCompanies] = useState([]);
   const [summary, setSummary] = useState({ facilityCount: 0, totalCases: 0 });
   const [loading, setLoading] = useState(true);
@@ -80,8 +82,16 @@ export default function ActivityReportPage() {
 
   useEffect(() => {
     getFacilities()
-      .then(setFacilities)
-      .catch(() => setFacilities([]));
+      .then((data) => {
+        setFacilities(data);
+        setFacilitiesLoadError("");
+      })
+      .catch((err) => {
+        setFacilities([]);
+        setFacilitiesLoadError(
+          getApiErrorMessage(err, "Failed to load facilities")
+        );
+      });
   }, []);
 
   useEffect(() => {
@@ -111,7 +121,7 @@ export default function ActivityReportPage() {
         if (!active) return;
         setCompanies([]);
         setSummary({ facilityCount: 0, totalCases: 0 });
-        setError(err.message || "Failed to load activity report");
+        setError(getApiErrorMessage(err, "Failed to load activity report"));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -249,7 +259,7 @@ export default function ActivityReportPage() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setExportError(err.message || "Failed to export activity report PDF");
+      setExportError(getApiErrorMessage(err, "Failed to export activity report PDF"));
     } finally {
       setExporting(false);
     }
@@ -313,6 +323,7 @@ export default function ActivityReportPage() {
               value={draftFilters.facility}
               onChange={handleChange}
               options={facilityOptions}
+              disabled={Boolean(facilitiesLoadError)}
             />
 
             <ReportField
@@ -331,6 +342,12 @@ export default function ActivityReportPage() {
               ]}
             />
           </div>
+
+          {facilitiesLoadError && (
+            <p className="mt-3 rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[11px] font-medium text-red-600">
+              {facilitiesLoadError}
+            </p>
+          )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
@@ -602,6 +619,7 @@ function ReportField({
   onChange,
   type = "text",
   options = [],
+  disabled = false,
 }) {
   return (
     <div>
@@ -614,7 +632,8 @@ function ReportField({
           name={name}
           value={value}
           onChange={onChange}
-          className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+          disabled={disabled}
+          className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {options.map((option) => {
             const optionValue =

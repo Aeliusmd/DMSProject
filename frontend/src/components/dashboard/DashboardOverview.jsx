@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getDashboardStats } from "@/lib/dashboard/dashboardApi";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getStoredUser } from "@/lib/auth/authStorage";
@@ -60,7 +61,7 @@ export default function DashboardOverview() {
       .catch((err) => {
         if (active) {
           setStats(null);
-          setError(err.message || "Failed to load dashboard stats");
+          setError(getApiErrorMessage(err, "Failed to load dashboard stats"));
         }
       })
       .finally(() => {

@@ -1,9 +1,13 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateNotificationQuery } = require("../validators/queryValidators");
 const notificationService = require("../services/notificationService");
 
 exports.getAll = asyncHandler(async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+
+  throwIfInvalid(validateNotificationQuery(req.query));
 
   const data = await notificationService.getNotificationsForEmployee(
     req.user.id,

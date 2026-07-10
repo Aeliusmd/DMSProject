@@ -1,6 +1,10 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateStripeCheckout, validateStripeReceiptDownload } = require("../validators/stripeValidator");
+const { validateStripeCheckoutResult } = require("../validators/queryValidators");
 const stripePaymentService = require("../services/stripePaymentService");
+const { sendBufferResponse } = require("../utils/responseUtils");
 
 exports.getPaymentPage = asyncHandler(async (req, res) => {
   const data = await stripePaymentService.getPaymentPageData(req.params.token);
@@ -8,6 +12,7 @@ exports.getPaymentPage = asyncHandler(async (req, res) => {
 });
 
 exports.createCheckout = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateStripeCheckout(req.body));
   const invoiceType = `${req.body?.invoiceType || ""}`.trim().toLowerCase();
   const result = await stripePaymentService.createCheckoutSession(
     req.params.token,
@@ -17,6 +22,7 @@ exports.createCheckout = asyncHandler(async (req, res) => {
 });
 
 exports.getCheckoutResult = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateStripeCheckoutResult(req.query));
   const sessionId = req.query.session_id || req.query.sessionId || "";
   const result = await stripePaymentService.getCheckoutResult(
     req.params.token,
@@ -26,6 +32,8 @@ exports.getCheckoutResult = asyncHandler(async (req, res) => {
 });
 
 exports.downloadReceipt = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateStripeReceiptDownload(req.params, req.query));
+
   const sessionId = req.params.sessionId;
   const token = req.query.token || "";
 
@@ -34,10 +42,8 @@ exports.downloadReceipt = asyncHandler(async (req, res) => {
     token
   );
 
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="payment-receipt-${sessionId}.pdf"`
-  );
-  return res.send(pdfBuffer);
+  sendBufferResponse(res, pdfBuffer, {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `attachment; filename="payment-receipt-${sessionId}.pdf"`,
+  });
 });

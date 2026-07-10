@@ -22,6 +22,11 @@ import {
 } from "@/lib/orders/rushUtils";
 import { getOrder } from "@/lib/orders/orderApi";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import {
+  applyApiFieldErrors,
+  getApiErrorMessage,
+  hasValidationErrors,
+} from "@/lib/apiErrorUtils";
 
 const initialFormData = {
   invoiceDate: "",
@@ -192,6 +197,23 @@ export default function CreateInvoiceModal({
     [totalAmount, amountPaid, persistedInvoiceMeta]
   );
 
+  const invoiceIdForValidation =
+    order?.invoiceId || order?.invoice?.invoiceId;
+  const completingXrayOnlyStub =
+    !isEditMode && invoiceIdForValidation && order?.invoice?.createOnly;
+  const willCreateInvoice = !(
+    (isEditMode || completingXrayOnlyStub) && invoiceIdForValidation
+  );
+
+  const clientValidationErrors = useMemo(
+    () =>
+      validateInvoiceForm(formData, {
+        requirePositiveTotal: willCreateInvoice,
+      }),
+    [formData, willCreateInvoice]
+  );
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
+
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
     invoiceTotals;
 
@@ -332,14 +354,13 @@ export default function CreateInvoiceModal({
       onSaved?.();
       onClose();
     } catch (error) {
-      if (Array.isArray(error?.errors) && error.errors.length > 0) {
-        const nextErrors = {};
-        error.errors.forEach(({ field, message }) => {
-          if (field) nextErrors[field] = message;
-        });
-        setErrors((prev) => ({ ...prev, ...nextErrors }));
+      const { fieldErrors, message } = applyApiFieldErrors(error);
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors((prev) => ({ ...prev, ...fieldErrors }));
       }
-      setSubmitError(error.message || "Failed to save invoice");
+
+      setSubmitError(message || getApiErrorMessage(error, "Failed to save invoice"));
     } finally {
       setSubmitting(false);
     }
@@ -596,7 +617,7 @@ export default function CreateInvoiceModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || loadingInvoice}
+                disabled={submitting || loadingInvoice || isFormInvalid}
                 className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting

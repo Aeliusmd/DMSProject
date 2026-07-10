@@ -1,5 +1,6 @@
 const { getPool } = require("../config/database");
 const { likeContains } = require("../utils/sqlSafety");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 
 class FacilityDoctor {
   static async findByFacilityId(facilityId, { activeOnly = false } = {}) {
@@ -103,7 +104,7 @@ class FacilityDoctor {
       await connection.commit();
     } catch (error) {
       await connection.rollback();
-      throw error;
+      rethrowServiceError(error);
     } finally {
       connection.release();
     }

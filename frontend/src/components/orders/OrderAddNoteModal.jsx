@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { createOrderNote } from "@/lib/orders/orderApi";
 import { validateNoteForm } from "@/lib/orders/orderNoteUtils";
 import OrderNoteFormFields from "@/components/orders/OrderNoteFormFields";
+import { applyApiFieldErrors, getApiErrorMessage, hasValidationErrors } from "@/lib/apiErrorUtils";
 
 export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
   const mounted = useIsClient();
@@ -33,6 +34,18 @@ export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
       document.body.style.overflow = originalOverflow;
     };
   }, [isOpen]);
+
+  const noteValidationErrors = useMemo(
+    () =>
+      validateNoteForm({
+        noteText,
+        callbackDate,
+        attachment,
+      }),
+    [noteText, callbackDate, attachment]
+  );
+
+  const isNoteInvalid = hasValidationErrors(noteValidationErrors);
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -64,7 +77,22 @@ export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
       onSaved?.();
       onClose?.();
     } catch (err) {
-      setErrors({ noteText: err.message || "Failed to save note" });
+      const { fieldErrors, message } = applyApiFieldErrors(err, {
+        note: "noteText",
+        file: "attachment",
+      });
+
+      setErrors((prev) => ({
+        ...prev,
+        ...fieldErrors,
+        ...(Object.keys(fieldErrors).length === 0
+          ? { noteText: getApiErrorMessage(err, "Failed to save note") }
+          : {}),
+      }));
+
+      if (message && Object.keys(fieldErrors).length > 0) {
+        setErrors((prev) => ({ ...prev, submit: message }));
+      }
     } finally {
       setSaving(false);
     }
@@ -99,7 +127,7 @@ export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || isNoteInvalid}
               className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save Note"}

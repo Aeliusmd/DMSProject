@@ -89,6 +89,27 @@ function mapAuthError(error) {
   return null;
 }
 
+function mapStripeError(error) {
+  if (!error || typeof error !== "object") return null;
+
+  const type = `${error.type || ""}`;
+  if (!type.startsWith("Stripe")) {
+    return null;
+  }
+
+  const statusCode =
+    Number.isFinite(error.statusCode) &&
+    error.statusCode >= 400 &&
+    error.statusCode < 600
+      ? error.statusCode
+      : 400;
+
+  return new ApiError(
+    statusCode,
+    error.message || "Payment request could not be completed."
+  );
+}
+
 /**
  * Convert unknown runtime/I/O errors into safe ApiError responses for the client.
  */
@@ -108,7 +129,8 @@ function normalizeError(error) {
   const mapped =
     mapMysqlError(error) ||
     mapFileSystemError(error) ||
-    mapAuthError(error);
+    mapAuthError(error) ||
+    mapStripeError(error);
 
   if (mapped) {
     mapped.cause = error;

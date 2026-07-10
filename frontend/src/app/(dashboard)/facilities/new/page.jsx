@@ -1,11 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import { createFacility } from "@/lib/facilities/facilityApi";
 import { ApiRequestError } from "@/lib/auth/authApi";
+import {
+  mapApiErrors,
+  shouldShowSubmitError,
+  hasValidationErrors,
+} from "@/lib/apiErrorUtils";
 
 const initialFormData = {
   facilityName: "",
@@ -40,6 +45,12 @@ export default function NewFacilityPage() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  const clientValidationErrors = useMemo(
+    () => validateFacilityForm(formData, managers),
+    [formData, managers]
+  );
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -389,7 +400,7 @@ export default function NewFacilityPage() {
                 <button
                   type="button"
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || isFormInvalid}
                   className="inline-flex h-[38px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "Saving..." : "Save"}
@@ -550,37 +561,6 @@ function FacilityField({
         ) : null}
       </div>
     </div>
-  );
-}
-
-function mapApiErrors(errors) {
-  const mapped = {};
-
-  errors.forEach(({ field, message }) => {
-    if (field?.startsWith("managers.")) {
-      mapped[field.replace("managers.", "managers.")] = message;
-    } else {
-      mapped[field] = message;
-    }
-  });
-
-  return mapped;
-}
-
-function shouldShowSubmitError(message, fieldErrors = {}) {
-  const normalized = `${message || ""}`.trim().toLowerCase();
-  if (!normalized) return false;
-  const hasFieldErrors = Object.keys(fieldErrors).length > 0;
-
-  if (
-    hasFieldErrors &&
-    ["validation failed", "invalid data", "request failed"].includes(normalized)
-  ) {
-    return false;
-  }
-
-  return !Object.values(fieldErrors).some(
-    (value) => `${value || ""}`.trim().toLowerCase() === normalized
   );
 }
 

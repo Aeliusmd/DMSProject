@@ -64,6 +64,11 @@ const REQUIRED_FIELD_RULES = [
     check: (data) => Boolean(`${data.serveCompanyName || ""}`.trim()),
   },
   {
+    key: "email",
+    label: "Provider email",
+    check: (data) => Boolean(`${data.email || ""}`.trim()),
+  },
+  {
     key: "specificDoctor",
     label: "Specific doctor",
     check: (data) => Boolean(`${data.specificDoctor || ""}`.trim()),
@@ -100,6 +105,7 @@ function mapOrderRowToRequiredFieldData(row = {}, orderRecords = []) {
     firstName: row.applicant_first_name || "",
     lastName: row.applicant_last_name || "",
     serveCompanyName: row.serve_company_name || "",
+    email: row.serve_email || row.provider_email || "",
     specificDoctor: row.specific_doctor || "",
     injuryType: row.injury_type || "",
     injuryDate: row.injury_date || "",

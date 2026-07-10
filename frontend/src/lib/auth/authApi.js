@@ -1,5 +1,9 @@
 import { API_BASE_URL } from "@/config/api";
 import {
+  isNetworkError,
+  NETWORK_UNAVAILABLE_MESSAGE,
+} from "@/lib/networkErrors";
+import {
   clearAuth,
   getAccessToken,
   getRefreshToken,
@@ -20,6 +24,17 @@ async function parseResponse(response) {
     return await response.json();
   } catch {
     return null;
+  }
+}
+
+async function safeFetch(url, options) {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    if (isNetworkError(error)) {
+      throw new ApiRequestError(NETWORK_UNAVAILABLE_MESSAGE, 0);
+    }
+    throw error;
   }
 }
 
@@ -162,7 +177,7 @@ export async function authFetch(path, options = {}, _isRetry = false) {
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await safeFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers,
   });
@@ -208,7 +223,7 @@ export async function request(
     requestBody = isFormData ? body : JSON.stringify(body);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await safeFetch(`${API_BASE_URL}${path}`, {
     method,
     headers,
     body: requestBody,

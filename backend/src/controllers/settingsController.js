@@ -1,5 +1,11 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const {
+  validateUpdateProfile,
+  validateUpdateNotifications,
+  validateChangePassword,
+} = require("../validators/settingsValidator");
 const settingsService = require("../services/settingsService");
 const activityLogService = require("../services/activityLogService");
 
@@ -9,6 +15,7 @@ exports.getSettings = asyncHandler(async (req, res) => {
 });
 
 exports.updateProfile = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateUpdateProfile(req.body));
   const settings = await settingsService.updateProfile(req.user.id, req.body);
 
   await activityLogService.recordFromRequest(req, {
@@ -23,6 +30,7 @@ exports.updateProfile = asyncHandler(async (req, res) => {
 });
 
 exports.updateNotifications = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateUpdateNotifications(req.body));
   const settings = await settingsService.updateNotifications(
     req.user.id,
     req.body
@@ -44,6 +52,7 @@ exports.updateNotifications = asyncHandler(async (req, res) => {
 });
 
 exports.changePassword = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateChangePassword(req.body));
   const result = await settingsService.changePassword(req.user.id, req.body);
 
   await activityLogService.recordFromRequest(req, {

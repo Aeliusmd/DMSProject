@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ConfirmModal from "@/components/ui/ConfirmModal";
@@ -10,6 +10,11 @@ import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
 import DocumentPreviewModal from "@/components/facilities/DocumentPreviewModal";
 import FacilityAddNoteModal from "@/components/facilities/FacilityAddNoteModal";
 import { ApiRequestError } from "@/lib/auth/authApi";
+import {
+  mapApiErrors,
+  shouldShowSubmitError,
+  hasValidationErrors,
+} from "@/lib/apiErrorUtils";
 import {
   createDoctors,
   deactivateDoctor,
@@ -618,6 +623,12 @@ export default function FacilityDetailsPage() {
     }
   };
 
+  const clientValidationErrors = useMemo(
+    () => (formData ? validateFacilityForm(formData) : {}),
+    [formData]
+  );
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
+
   const handleSaveFacility = () => {
     if (!formData) return;
 
@@ -806,6 +817,7 @@ export default function FacilityDetailsPage() {
         title: "Upload Failed",
         message,
       });
+      throw err;
       throw err;
     } finally {
       setUploadingDocument(false);
@@ -1061,7 +1073,7 @@ export default function FacilityDetailsPage() {
           <button
             type="button"
             onClick={handleSaveFacility}
-            disabled={saving}
+            disabled={saving || isFormInvalid}
             className="mt-5 inline-flex h-[38px] items-center justify-center rounded-[6px] bg-[#0097B2] px-6 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? "Saving..." : "Save"}
@@ -2003,33 +2015,6 @@ function InactivePill() {
     <span className="inline-flex h-[24px] items-center rounded-full bg-[#FEF2F2] px-3 text-[11px] font-semibold text-[#DC2626]">
       Inactive
     </span>
-  );
-}
-
-function mapApiErrors(errors) {
-  const mapped = {};
-
-  errors.forEach(({ field, message }) => {
-    mapped[field] = message;
-  });
-
-  return mapped;
-}
-
-function shouldShowSubmitError(message, fieldErrors = {}) {
-  const normalized = `${message || ""}`.trim().toLowerCase();
-  if (!normalized) return false;
-  const hasFieldErrors = Object.keys(fieldErrors).length > 0;
-
-  if (
-    hasFieldErrors &&
-    ["validation failed", "invalid data", "request failed"].includes(normalized)
-  ) {
-    return false;
-  }
-
-  return !Object.values(fieldErrors).some(
-    (value) => `${value || ""}`.trim().toLowerCase() === normalized
   );
 }
 

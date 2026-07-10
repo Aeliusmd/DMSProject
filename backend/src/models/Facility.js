@@ -1,4 +1,5 @@
 const { getPool } = require("../config/database");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const {
   normalizeFacilityName,
   normalizeZip,
@@ -137,7 +138,7 @@ class Facility {
         return null;
       }
 
-      throw error;
+      rethrowServiceError(error);
     }
   }
 
@@ -245,7 +246,7 @@ class Facility {
       return result.insertId;
     } catch (error) {
       if (error.code !== "ER_BAD_FIELD_ERROR") {
-        throw error;
+        rethrowServiceError(error);
       }
 
       const [result] = await connection.execute(
@@ -295,7 +296,7 @@ class Facility {
       );
     } catch (error) {
       if (error.code !== "ER_BAD_FIELD_ERROR") {
-        throw error;
+        rethrowServiceError(error);
       }
 
       const legacyPayload = { ...payload };

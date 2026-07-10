@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ApiRequestError } from "@/lib/auth/authApi";
+import { mapApiErrors, mergeApiFieldErrors, hasValidationErrors } from "@/lib/apiErrorUtils";
 
 const emptyForm = {
   name: "",
@@ -50,6 +51,12 @@ function EmployeeFormModalContent({ onClose, onCreate, onUpdate, mode, employee 
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  const clientValidationErrors = useMemo(
+    () => validateEmployeeForm(formData, isEditMode),
+    [formData, isEditMode]
+  );
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -104,14 +111,10 @@ function EmployeeFormModalContent({ onClose, onCreate, onUpdate, mode, employee 
       }
     } catch (error) {
       if (error instanceof ApiRequestError && error.errors?.length) {
-        const apiErrors = {};
-
-        error.errors.forEach((item) => {
-          const field = item.field === "logon" ? "userName" : item.field;
-          apiErrors[field] = item.message;
-        });
-
-        setErrors((prev) => ({ ...prev, ...apiErrors }));
+        setErrors((prev) => ({
+          ...prev,
+          ...mapApiErrors(error.errors, { logon: "userName" }),
+        }));
       }
 
       setSubmitError(
@@ -229,7 +232,7 @@ function EmployeeFormModalContent({ onClose, onCreate, onUpdate, mode, employee 
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isFormInvalid}
             className="h-[34px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting

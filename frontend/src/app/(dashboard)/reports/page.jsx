@@ -8,6 +8,7 @@ import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { RUSH_LEVEL_LEGEND } from "@/lib/orders/rushUtils";
 
 const STATUS_OPTIONS = [
@@ -83,7 +84,7 @@ export default function ReportsPage() {
       .catch((err) => {
         if (!active) return;
         setFacilities([]);
-        setFacilitiesError(err?.message || "Failed to load facilities");
+        setFacilitiesError(getApiErrorMessage(err, "Failed to load facilities"));
       })
       .finally(() => {
         if (active) setFacilitiesLoading(false);
@@ -238,11 +239,14 @@ export default function ReportsPage() {
               <select
                 value={draftFilters.facility}
                 onChange={(e) => updateDraftFilter("facility", e.target.value)}
-                disabled={facilitiesLoading || facilities.length === 0}
+                disabled={facilitiesLoading || Boolean(facilitiesError) || facilities.length === 0}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:opacity-60"
               >
                 {facilitiesLoading && <option value="">Loading...</option>}
-                {!facilitiesLoading && facilities.length === 0 && (
+                {!facilitiesLoading && facilitiesError && (
+                  <option value="">Facilities unavailable</option>
+                )}
+                {!facilitiesLoading && !facilitiesError && facilities.length === 0 && (
                   <option value="">No facilities</option>
                 )}
                 {facilities.map((facility) => (

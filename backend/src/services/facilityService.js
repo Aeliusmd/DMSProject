@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const ApiError = require("../utils/ApiError");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const { slugify } = require("../utils/slugify");
 const {
   normalizeFacilityName,
@@ -17,7 +18,7 @@ const Facility = require("../models/Facility");
 const OfficeManager = require("../models/OfficeManager");
 const FacilityDoctor = require("../models/FacilityDoctor");
 const { getPool } = require("../config/database");
-const { sanitizeSearchText } = require("../utils/sanitize");
+const { sanitizeSearchText, sanitizeText } = require("../utils/sanitize");
 
 function formatDoctorName(doctor) {
   return [doctor.first_name, doctor.middle_name, doctor.last_name]
@@ -242,7 +243,7 @@ async function resolveFacilityFromHints(hints = {}, connection = null) {
 }
 
 async function searchFacilities(query) {
-  const rows = await Facility.search(query);
+  const rows = await Facility.search(sanitizeSearchText(query));
   return rows.map(mapFacilityRow);
 }
 
@@ -436,7 +437,7 @@ async function createFacility(data) {
     return getFacilityById(facilityId);
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -569,7 +570,7 @@ async function createDoctors(facilityId, doctorsInput = []) {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -710,7 +711,7 @@ async function updateDoctor(facilityId, doctorId, doctorInput = {}) {
     await connection.commit();
   } catch (error) {
     await connection.rollback();
-    throw error;
+    rethrowServiceError(error);
   } finally {
     connection.release();
   }
@@ -756,7 +757,7 @@ async function resolveFacilityDoctor(
     }
   }
 
-  const trimmedName = `${doctorName || ""}`.trim();
+  const trimmedName = sanitizeText(doctorName, { maxLength: 200, allowEmpty: true });
 
   if (trimmedName) {
     const match = findDoctorByNameMatch(trimmedName, existingDoctors);
@@ -811,7 +812,7 @@ async function resolveFacilityDoctor(
       };
     } catch (error) {
       await connection.rollback();
-      throw error;
+      rethrowServiceError(error);
     } finally {
       connection.release();
     }

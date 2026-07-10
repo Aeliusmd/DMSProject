@@ -360,25 +360,17 @@ export default function CompanyInvoiceDetailsPage() {
   }
 
   const handleSubmitWriteOff = async (payload) => {
-    setWriteOffError("");
+    await submitWriteOffInvoices(payload);
 
-    try {
-      await submitWriteOffInvoices(payload);
+    setSelectedIds((prev) =>
+      prev.filter(
+        (selectedId) =>
+          !payload.invoices.some((invoice) => invoice.id === selectedId)
+      )
+    );
 
-      setSelectedIds((prev) =>
-        prev.filter(
-          (selectedId) =>
-            !payload.invoices.some((invoice) => invoice.id === selectedId)
-        )
-      );
-
-      setWriteOffInvoices([]);
-
-      await reloadCompanyInvoices();
-    } catch (error) {
-      setWriteOffError(error?.message || "Failed to write off invoices");
-      console.error("Failed to write off invoices:", error);
-    }
+    setWriteOffInvoices([]);
+    await reloadCompanyInvoices();
   };
 
   const handleOpenEditInvoice = (invoice) => {

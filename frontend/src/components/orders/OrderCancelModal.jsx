@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 
 export default function OrderCancelModal({
@@ -12,12 +12,16 @@ export default function OrderCancelModal({
 }) {
   const [reason, setReason] = useState("");
   const [step, setStep] = useState("reason");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
+
+  const isReasonInvalid = useMemo(() => !reason.trim(), [reason]);
 
   useEffect(() => {
     if (open) {
       setReason("");
       setStep("reason");
+      setFieldErrors({});
       setError("");
     }
   }, [open, order?.dbId]);
@@ -59,12 +63,21 @@ export default function OrderCancelModal({
           value={reason}
           onChange={(event) => {
             setReason(event.target.value);
+            setFieldErrors({});
             if (error) setError("");
           }}
           rows={4}
           placeholder="Enter cancellation reason..."
-          className="mt-4 w-full resize-none rounded-[6px] border border-[#E2E8F0] px-3 py-2 text-[12px] text-[#334155] outline-none focus:border-[#007F96]"
+          className={`mt-4 w-full resize-none rounded-[6px] border px-3 py-2 text-[12px] text-[#334155] outline-none focus:ring-2 ${
+            fieldErrors.reason
+              ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+              : "border-[#E2E8F0] focus:border-[#007F96] focus:ring-[#007F96]/10"
+          }`}
         />
+
+        {fieldErrors.reason ? (
+          <p className="mt-2 text-[11px] font-medium text-red-500">{fieldErrors.reason}</p>
+        ) : null}
 
         {error ? (
           <p className="mt-2 text-[11px] font-medium text-red-500">{error}</p>
@@ -83,12 +96,15 @@ export default function OrderCancelModal({
             type="button"
             onClick={() => {
               if (!reason.trim()) {
-                setError("Cancellation reason is required.");
+                setFieldErrors({ reason: "Cancellation reason is required." });
+                setError("");
                 return;
               }
+              setFieldErrors({});
               setStep("confirm");
             }}
-            className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold text-white"
+            disabled={isReasonInvalid}
+            className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             style={{ backgroundColor: "#F59E0B" }}
           >
             Continue

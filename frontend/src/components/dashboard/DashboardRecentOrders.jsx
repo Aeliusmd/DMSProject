@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getOrders } from "@/lib/orders/orderApi";
 import { resolveRushLabel } from "@/lib/orders/rushUtils";
 
@@ -22,7 +23,7 @@ export default function DashboardRecentOrders() {
       .catch((err) => {
         if (active) {
           setOrders([]);
-          setError(err.message || "Failed to load orders");
+          setError(getApiErrorMessage(err, "Failed to load orders"));
         }
       })
       .finally(() => {

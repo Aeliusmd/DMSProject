@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/lib/orders/orderApi";
 import { API_BASE_URL } from "@/config/api";
 import { buildCallbackLine } from "@/lib/orders/orderNoteUtils";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -140,6 +141,44 @@ export default function OrderNotesModal({
     setErrors({});
   }, [isOpen, initialNoteId, history]);
 
+  const noteValidationErrors = useMemo(() => {
+    const newErrors = {};
+    const trimmedNote = noteText.trim();
+
+    if (!trimmedNote) {
+      newErrors.noteText = "Note text is required.";
+    } else if (trimmedNote.length > MAX_NOTE_LENGTH) {
+      newErrors.noteText = `Note cannot be more than ${MAX_NOTE_LENGTH} characters.`;
+    }
+
+    if (callbackDate) {
+      const selectedDate = new Date(callbackDate);
+      const today = new Date();
+
+      today.setHours(0, 0, 0, 0);
+      selectedDate.setHours(0, 0, 0, 0);
+
+      if (selectedDate < today) {
+        newErrors.callbackDate = "Callback date cannot be in the past.";
+      }
+    }
+
+    if (attachment) {
+      const fileSizeMb = attachment.size / (1024 * 1024);
+
+      if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
+        newErrors.attachment =
+          "Only PDF, Word, JPG, and PNG files are allowed.";
+      } else if (fileSizeMb > MAX_FILE_SIZE_MB) {
+        newErrors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
+      }
+    }
+
+    return newErrors;
+  }, [noteText, callbackDate, attachment]);
+
+  const isNoteInvalid = Object.keys(noteValidationErrors).length > 0;
+
   if (!mounted || !isOpen || !order) return null;
 
   const clearError = (field) => {
@@ -214,10 +253,22 @@ export default function OrderNotesModal({
       setHistory(toHistoryItems(notes));
       resetForm();
     } catch (err) {
+      const { fieldErrors, message } = applyApiFieldErrors(err, {
+        note: "noteText",
+        file: "attachment",
+      });
+
       setErrors((prev) => ({
         ...prev,
-        noteText: err.message || "Failed to save note",
+        ...fieldErrors,
+        ...(Object.keys(fieldErrors).length === 0
+          ? { noteText: getApiErrorMessage(err, "Failed to save note") }
+          : {}),
       }));
+
+      if (message && Object.keys(fieldErrors).length > 0) {
+        setLoadError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -244,10 +295,22 @@ export default function OrderNotesModal({
       setHistory(toHistoryItems(result.notes));
       resetForm();
     } catch (err) {
+      const { fieldErrors, message } = applyApiFieldErrors(err, {
+        note: "noteText",
+        file: "attachment",
+      });
+
       setErrors((prev) => ({
         ...prev,
-        noteText: err.message || "Failed to update note",
+        ...fieldErrors,
+        ...(Object.keys(fieldErrors).length === 0
+          ? { noteText: getApiErrorMessage(err, "Failed to update note") }
+          : {}),
       }));
+
+      if (message && Object.keys(fieldErrors).length > 0) {
+        setLoadError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -441,7 +504,7 @@ export default function OrderNotesModal({
                 <button
                   type="button"
                   onClick={handleUpdateNote}
-                  disabled={saving}
+                  disabled={saving || isNoteInvalid}
                   className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "Saving..." : "Save Note"}
@@ -460,7 +523,7 @@ export default function OrderNotesModal({
               <button
                 type="button"
                 onClick={handleSaveNewNote}
-                disabled={saving}
+                disabled={saving || isNoteInvalid}
                 className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving ? "Saving..." : "Save Note"}

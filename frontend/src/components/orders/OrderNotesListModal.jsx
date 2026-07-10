@@ -12,6 +12,11 @@ import {
   validateNoteForm,
 } from "@/lib/orders/orderNoteUtils";
 import OrderNoteFormFields from "@/components/orders/OrderNoteFormFields";
+import {
+  applyApiFieldErrors,
+  getApiErrorMessage,
+  hasValidationErrors,
+} from "@/lib/apiErrorUtils";
 
 const EMPTY_DATE_FILTERS = {
   from: "",
@@ -140,6 +145,19 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
     };
   }, [isOpen]);
 
+  const noteValidationErrors = useMemo(
+    () =>
+      validateNoteForm({
+        noteText,
+        callbackDate,
+        attachment,
+        existingAttachmentUrl,
+      }),
+    [noteText, callbackDate, attachment, existingAttachmentUrl]
+  );
+
+  const isNoteInvalid = hasValidationErrors(noteValidationErrors);
+
   if (!mounted || !isOpen || !order) return null;
 
   const clearError = (field) => {
@@ -235,7 +253,22 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
       applyExpandedNote(savedNote);
       onSaved?.();
     } catch (err) {
-      setErrors({ noteText: err.message || "Failed to update note" });
+      const { fieldErrors, message } = applyApiFieldErrors(err, {
+        note: "noteText",
+        file: "attachment",
+      });
+
+      setErrors((prev) => ({
+        ...prev,
+        ...fieldErrors,
+        ...(Object.keys(fieldErrors).length === 0
+          ? { noteText: getApiErrorMessage(err, "Failed to update note") }
+          : {}),
+      }));
+
+      if (message && Object.keys(fieldErrors).length > 0) {
+        setLoadError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -413,7 +446,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
                             <button
                               type="button"
                               onClick={handleSave}
-                              disabled={saving}
+                              disabled={saving || isNoteInvalid}
                               className="inline-flex h-[32px] items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                             >
                               {saving ? "Saving..." : "Save"}

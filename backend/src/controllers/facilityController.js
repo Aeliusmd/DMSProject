@@ -1,5 +1,15 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const {
+  validateCreateFacility,
+  validateUpdateFacility,
+  validateResolveFacility,
+  validateResolveDoctor,
+  validateCreateDoctors,
+  validateUpdateDoctor,
+} = require("../validators/facilityValidator");
+const { validateSearchQuery, validatePositiveIntRouteParam } = require("../validators/queryValidators");
 const facilityService = require("../services/facilityService");
 const activityLogService = require("../services/activityLogService");
 const notificationService = require("../services/notificationService");
@@ -74,11 +84,13 @@ exports.getAll = asyncHandler(async (req, res) => {
 });
 
 exports.search = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateSearchQuery(req.query));
   const facilities = await facilityService.searchFacilities(req.query.q);
   return ApiResponse.success(res, { facilities });
 });
 
 exports.resolve = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateResolveFacility(req.body));
   const { facility, created } = await facilityService.resolveFacilityByName(req.body);
   return ApiResponse.success(res, { facility, created });
 });
@@ -89,6 +101,7 @@ exports.getById = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateCreateFacility(req.body));
   const facility = await facilityService.createFacility(req.body);
   const logBase = buildFacilityLogBase(req, facility);
 
@@ -111,6 +124,7 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateUpdateFacility(req.body));
   const before = await facilityService.getFacilityById(req.params.id);
   const facility = await facilityService.updateFacility(
     req.params.id,
@@ -158,6 +172,9 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.resolveDoctor = asyncHandler(async (req, res) => {
+  throwIfInvalid(validatePositiveIntRouteParam(req.params.id, "id"));
+  throwIfInvalid(validateResolveDoctor(req.body || {}));
+
   const result = await facilityService.resolveFacilityDoctor(
     req.params.id,
     req.body || {}
@@ -167,6 +184,7 @@ exports.resolveDoctor = asyncHandler(async (req, res) => {
 });
 
 exports.createDoctors = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateCreateDoctors(req.body));
   const facility = await facilityService.getFacilityById(req.params.id);
   const doctors = await facilityService.createDoctors(
     req.params.id,
@@ -190,6 +208,7 @@ exports.createDoctors = asyncHandler(async (req, res) => {
 });
 
 exports.updateDoctor = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateUpdateDoctor(req.body || {}));
   const facility = await facilityService.getFacilityById(req.params.id);
   const doctor = await facilityService.updateDoctor(
     req.params.id,

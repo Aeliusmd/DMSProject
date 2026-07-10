@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import {
@@ -8,6 +8,7 @@ import {
   downloadFacilityNoteAttachment,
   getFacilityNotes,
 } from "@/lib/facilities/facilityApi";
+import { applyApiFieldErrors, getApiErrorMessage, hasValidationErrors } from "@/lib/apiErrorUtils";
 
 const ALLOWED_FILE_TYPES = [
   "application/pdf",
@@ -35,9 +36,20 @@ export default function FacilityAddNoteModal({
   const [attachments, setAttachments] = useState([]);
   const [notes, setNotes] = useState([]);
   const [loadingNotes, setLoadingNotes] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [attachmentError, setAttachmentError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const clientValidationErrors = useMemo(() => {
+    const nextErrors = {};
+    if (!note.trim()) {
+      nextErrors.note = "Note is required";
+    }
+    return nextErrors;
+  }, [note]);
+
+  const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const loadNotes = useCallback(async () => {
     if (!facilityId) return;
@@ -59,6 +71,7 @@ export default function FacilityAddNoteModal({
 
     setNote("");
     setAttachments([]);
+    setFieldErrors({});
     setError("");
     setAttachmentError("");
     setSaving(false);
@@ -81,7 +94,13 @@ export default function FacilityAddNoteModal({
   const handleNoteChange = (e) => {
     const value = e.target.value.slice(0, 500);
     setNote(value);
-    if (error && value.trim()) {
+    setFieldErrors((prev) => {
+      if (!prev.note) return prev;
+      const next = { ...prev };
+      delete next.note;
+      return next;
+    });
+    if (error) {
       setError("");
     }
   };
@@ -124,13 +143,17 @@ export default function FacilityAddNoteModal({
   };
 
   const handleSave = async () => {
-    if (!note.trim()) {
-      setError("Note is required");
+    const nextErrors = { ...clientValidationErrors };
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError("");
       return;
     }
 
     setSaving(true);
     setError("");
+    setFieldErrors({});
 
     try {
       const created = await createFacilityNote(facilityId, {
@@ -144,7 +167,13 @@ export default function FacilityAddNoteModal({
       onSaved?.(created);
       onClose();
     } catch (err) {
-      setError(err.message || "Failed to save note");
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err);
+
+      if (Object.keys(apiErrors).length > 0) {
+        setFieldErrors(apiErrors);
+      }
+
+      setError(message || getApiErrorMessage(err, "Failed to save note"));
     } finally {
       setSaving(false);
     }
@@ -204,14 +233,16 @@ export default function FacilityAddNoteModal({
                   value={note}
                   onChange={handleNoteChange}
                   className={`h-[130px] w-full resize-none rounded-[6px] border bg-white px-3 py-3 text-[12px] leading-[20px] text-[#111827] outline-none focus:ring-2 ${
-                    error
+                    fieldErrors.note || error
                       ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
                       : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
                   }`}
                 />
 
                 <div className="mt-1 flex items-center justify-between">
-                  <p className="text-[11px] font-medium text-red-500">{error}</p>
+                  <p className="text-[11px] font-medium text-red-500">
+                    {fieldErrors.note || error}
+                  </p>
                   <p className="text-[11px] text-[#94A3B8]">{note.length}/500</p>
                 </div>
               </div>
@@ -267,7 +298,7 @@ export default function FacilityAddNoteModal({
                 <button
                   type="button"
                   onClick={handleSave}
-                  disabled={saving}
+                  disabled={saving || isFormInvalid}
                   className="inline-flex h-[36px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "Saving..." : "Save"}

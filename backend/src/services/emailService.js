@@ -1,5 +1,7 @@
 const nodemailer = require("nodemailer");
 const config = require("../config");
+const ApiError = require("../utils/ApiError");
+const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const {
   renderTwoFactorEmail,
   renderInvoiceEmail,
@@ -103,7 +105,7 @@ async function sendTwoFactorCode({ to, name, code }) {
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const subject = "Your DMS verification code";
@@ -127,7 +129,7 @@ async function sendTwoFactorCode({ to, name, code }) {
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -204,7 +206,7 @@ async function sendInvoiceEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({
@@ -237,7 +239,7 @@ async function sendInvoiceEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -383,7 +385,7 @@ async function sendOrderCompletedMail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({ to, subject, text, html });
@@ -412,7 +414,7 @@ async function sendOrderCompletedMail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -464,7 +466,7 @@ async function sendCopyServiceLetterEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({
@@ -496,7 +498,7 @@ async function sendCopyServiceLetterEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -563,7 +565,7 @@ async function sendCnrRecordEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({
@@ -595,7 +597,7 @@ async function sendCnrRecordEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -640,7 +642,7 @@ async function sendCnrMemoEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({
@@ -672,7 +674,7 @@ async function sendCnrMemoEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -717,7 +719,7 @@ async function sendCertificateOfRecordsEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({
@@ -749,7 +751,7 @@ async function sendCertificateOfRecordsEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 
@@ -797,7 +799,7 @@ async function sendPaymentResultEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw new Error("SMTP is not configured");
+    throw new ApiError(503, "Email service is not configured");
   }
 
   const mailOptions = buildMailOptions({
@@ -822,7 +824,7 @@ async function sendPaymentResultEmail({
       return { delivered: false, devLogged: true };
     }
 
-    throw error;
+    rethrowServiceError(error);
   }
 }
 

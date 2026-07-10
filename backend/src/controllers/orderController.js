@@ -1,6 +1,11 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const {
+  sendFileResponse,
+  sendBufferResponse,
+} = require("../utils/responseUtils");
 const orderService = require("../services/orderService");
 const batchScanService = require("../services/batchScanService");
 const activityLogService = require("../services/activityLogService");
@@ -12,6 +17,22 @@ const {
   validateOrderNote,
   validateWorkflowStageUpdate,
 } = require("../validators/orderValidator");
+const {
+  validateCancelOrder,
+  validateMailWithOptionalDate,
+  validateMailWithSentDate,
+  validateCopyServiceLetter,
+  validateRecordPickup,
+  validateRecordFax,
+  validateScanMedicalRecords,
+  validateRemoveMedicalRecords,
+  validateMedicalRecordTypeQuery,
+  validateBatchScan,
+} = require("../validators/orderActionValidator");
+const {
+  validateOrderNotesQuery,
+  validateSearchQuery,
+} = require("../validators/queryValidators");
 
 function getOrderLogContext(order) {
   const facilityId = order?.facility ? Number(order.facility) : null;
@@ -137,6 +158,7 @@ exports.getFilterCompanies = asyncHandler(async (req, res) => {
 });
 
 exports.searchDoctors = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateSearchQuery(req.query));
   const doctors = await orderService.searchOrderDoctors(
     req.query.q,
     req.query.facility
@@ -145,6 +167,7 @@ exports.searchDoctors = asyncHandler(async (req, res) => {
 });
 
 exports.searchDoctorAddresses = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateSearchQuery(req.query));
   const addresses = await orderService.searchOrderDoctorAddresses(req.query.q);
   return ApiResponse.success(res, { addresses });
 });
@@ -174,10 +197,13 @@ exports.getUnprocessedFile = asyncHandler(async (req, res) => {
     "Content-Disposition",
     `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
   );
-  return res.sendFile(fileInfo.absolutePath);
+  await sendFileResponse(res, fileInfo.absolutePath);
 });
 
 exports.batchScan = asyncHandler(async (req, res) => {
+  throwIfInvalid(
+    validateBatchScan(req.body, req.file, req.user?.id)
+  );
   const result = await batchScanService.processBatchScan(
     req.file,
     req.body.uploadedBy || req.user?.id
@@ -186,6 +212,7 @@ exports.batchScan = asyncHandler(async (req, res) => {
 });
 
 exports.uploadSubpoena = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateBatchScan(req.body, req.file, req.user?.id));
   const result = await batchScanService.processSingleSubpoena(
     req.file,
     req.user?.id
@@ -210,13 +237,13 @@ exports.getSubpoenaFile = asyncHandler(async (req, res) => {
     "Content-Disposition",
     `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
   );
-  return res.sendFile(fileInfo.absolutePath);
+  await sendFileResponse(res, fileInfo.absolutePath);
 });
 
 exports.scanMedicalRecords = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    throw new ApiError(400, "PDF file is required");
-  }
+  throwIfInvalid(
+    validateScanMedicalRecords(req.body, req.query, req.file)
+  );
 
   const replace = req.query.replace === "true";
   const recordType = req.query.recordType || req.body?.recordType || "medical";
@@ -236,6 +263,8 @@ exports.scanMedicalRecords = asyncHandler(async (req, res) => {
 });
 
 exports.removeMedicalRecords = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateRemoveMedicalRecords(req.query));
+
   const recordType = req.query.recordType || null;
 
   const order = await orderService.removeMedicalRecords(
@@ -248,6 +277,8 @@ exports.removeMedicalRecords = asyncHandler(async (req, res) => {
 });
 
 exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMedicalRecordTypeQuery(req.query));
+
   const recordType = req.query.recordType || "medical";
   const fileInfo = await orderService.getOrderMedicalRecordsFile(req.params.id, {
     recordType,
@@ -258,7 +289,7 @@ exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
     "Content-Disposition",
     `inline; filename="${fileInfo.fileName.replace(/"/g, "")}"`
   );
-  return res.sendFile(fileInfo.absolutePath);
+  await sendFileResponse(res, fileInfo.absolutePath);
 });
 
 exports.getPrintInvoiceFile = asyncHandler(async (req, res) => {
@@ -270,12 +301,10 @@ exports.getPrintInvoiceFile = asyncHandler(async (req, res) => {
     details: `Print invoice generated for order ${order.orderNumber}`,
   });
 
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `inline; filename="${result.fileName.replace(/"/g, "")}"`
-  );
-  return res.send(result.pdfBuffer);
+  sendBufferResponse(res, result.pdfBuffer, {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `inline; filename="${result.fileName.replace(/"/g, "")}"`,
+  });
 });
 
 exports.getPrintXrayInvoiceFile = asyncHandler(async (req, res) => {
@@ -287,12 +316,10 @@ exports.getPrintXrayInvoiceFile = asyncHandler(async (req, res) => {
     details: `Print X-Ray invoice generated for order ${order.orderNumber}`,
   });
 
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `inline; filename="${result.fileName.replace(/"/g, "")}"`
-  );
-  return res.send(result.pdfBuffer);
+  sendBufferResponse(res, result.pdfBuffer, {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `inline; filename="${result.fileName.replace(/"/g, "")}"`,
+  });
 });
 
 exports.getReminders = asyncHandler(async (req, res) => {
@@ -409,6 +436,7 @@ exports.remove = asyncHandler(async (req, res) => {
 });
 
 exports.cancel = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateCancelOrder(req.body));
   const order = await orderService.cancelOrder(req.params.id, {
     reason: req.body.reason,
     actorId: req.user.id,
@@ -450,6 +478,7 @@ exports.restore = asyncHandler(async (req, res) => {
 });
 
 exports.getNotes = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateOrderNotesQuery(req.query));
   const result = await orderService.getOrderNotes(req.params.id, {
     includeCalled:
       String(req.query.includeCalled || "").toLowerCase() === "true" ||
@@ -563,6 +592,7 @@ exports.updateWorkflowStage = asyncHandler(async (req, res) => {
 });
 
 exports.mailCompletedOrder = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMailWithOptionalDate(req.body, "deliveryDate"));
   const result = await orderService.mailCompletedOrder(req.params.id, {
     emails: req.body.emails,
     email: req.body.email,
@@ -581,6 +611,7 @@ exports.mailCompletedOrder = asyncHandler(async (req, res) => {
 });
 
 exports.sendCnrRecord = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMailWithSentDate(req.body));
   const result = await orderService.sendCnrRecord(req.params.id, {
     emails: req.body.emails,
     email: req.body.email,
@@ -599,6 +630,7 @@ exports.sendCnrRecord = asyncHandler(async (req, res) => {
 });
 
 exports.sendCertificateOfRecords = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateMailWithSentDate(req.body));
   const result = await orderService.sendCertificateOfRecords(req.params.id, {
     emails: req.body.emails,
     email: req.body.email,
@@ -617,6 +649,7 @@ exports.sendCertificateOfRecords = asyncHandler(async (req, res) => {
 });
 
 exports.sendCopyServiceLetter = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateCopyServiceLetter(req.body));
   const result = await orderService.sendCopyServiceLetter(req.params.id, {
     email: req.body.email,
     additionalEmails: req.body.additionalEmails,
@@ -633,6 +666,7 @@ exports.sendCopyServiceLetter = asyncHandler(async (req, res) => {
 });
 
 exports.recordPickup = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateRecordPickup(req.body));
   const result = await orderService.recordOrderPickup(req.params.id, {
     pickupDate: req.body.pickupDate,
     pickupPersonName: req.body.pickupPersonName,
@@ -651,6 +685,7 @@ exports.recordPickup = asyncHandler(async (req, res) => {
 });
 
 exports.recordFax = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateRecordFax(req.body));
   const result = await orderService.recordOrderFax(req.params.id, {
     faxNumber: req.body.faxNumber,
     sentDate: req.body.sentDate,

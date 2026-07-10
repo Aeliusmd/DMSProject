@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
+import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
   const mounted = useIsClient();
   const [faxNumber, setFaxNumber] = useState("");
   const [sentDate, setSentDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -19,6 +21,7 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
     setFaxNumber(order.company?.faxNumber || "");
     setSentDate(getTodayInputDate());
     setNotes("");
+    setFieldErrors({});
     setError("");
   }, [isOpen, order]);
 
@@ -35,25 +38,41 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
 
   if (!mounted || !isOpen || !order) return null;
 
+  const isFormInvalid = !faxNumber.trim() || !sentDate;
+
   const handleSubmit = async () => {
+    const nextErrors = {};
+
     if (!faxNumber.trim()) {
-      setError("Fax number is required");
-      return;
+      nextErrors.faxNumber = "Fax number is required";
     }
 
     if (!sentDate) {
-      setError("Date sent is required");
+      nextErrors.sentDate = "Date sent is required";
+    }
+
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      setError("");
       return;
     }
 
     setSubmitting(true);
     setError("");
+    setFieldErrors({});
 
     try {
       await onConfirm?.({ faxNumber: faxNumber.trim(), sentDate, notes });
       onClose();
     } catch (err) {
-      setError(err.message || "Failed to record fax");
+      const { fieldErrors: apiErrors, message } = applyApiFieldErrors(err);
+
+      if (Object.keys(apiErrors).length > 0) {
+        setFieldErrors(apiErrors);
+      }
+
+      setError(message || getApiErrorMessage(err, "Failed to record fax"));
     } finally {
       setSubmitting(false);
     }
@@ -79,11 +98,24 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
               value={faxNumber}
               onChange={(e) => {
                 setFaxNumber(e.target.value);
+                setFieldErrors((prev) => {
+                  if (!prev.faxNumber) return prev;
+                  const next = { ...prev };
+                  delete next.faxNumber;
+                  return next;
+                });
                 setError("");
               }}
               placeholder="Enter fax number"
-              className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                fieldErrors.faxNumber
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                  : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+              }`}
             />
+            {fieldErrors.faxNumber ? (
+              <p className="mt-1 text-[11px] text-red-500">{fieldErrors.faxNumber}</p>
+            ) : null}
           </div>
 
           <div>
@@ -95,10 +127,23 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
               value={sentDate}
               onChange={(e) => {
                 setSentDate(e.target.value);
+                setFieldErrors((prev) => {
+                  if (!prev.sentDate) return prev;
+                  const next = { ...prev };
+                  delete next.sentDate;
+                  return next;
+                });
                 setError("");
               }}
-              className="h-[36px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                fieldErrors.sentDate
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                  : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+              }`}
             />
+            {fieldErrors.sentDate ? (
+              <p className="mt-1 text-[11px] text-red-500">{fieldErrors.sentDate}</p>
+            ) : null}
           </div>
 
           <div>
@@ -128,7 +173,7 @@ export default function OrderFaxModal({ isOpen, order, onClose, onConfirm }) {
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || isFormInvalid}
             className="h-[34px] rounded-[6px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:opacity-60"
           >
             {submitting ? "Saving..." : "Confirm Fax"}

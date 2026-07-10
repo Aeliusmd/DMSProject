@@ -115,7 +115,10 @@ export async function sendInvoices(invoiceIds = [], emails = null) {
 }
 
 export async function getCompanyWiseInvoices() {
-  const data = await request("/invoices/company-wise", { auth: true });
+  const data = await request("/invoices/company-wise", {
+    auth: true,
+    cache: "no-store",
+  });
   return {
     companies: data?.data?.companies || [],
     summary: data?.data?.summary || {

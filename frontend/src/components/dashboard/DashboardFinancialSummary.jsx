@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getDashboardStats } from "@/lib/dashboard/dashboardApi";
 
 export default function DashboardFinancialSummary() {
@@ -19,7 +20,7 @@ export default function DashboardFinancialSummary() {
       .catch((err) => {
         if (active) {
           setFinancial(null);
-          setError(err.message || "Failed to load financial summary");
+          setError(getApiErrorMessage(err, "Failed to load financial summary"));
         }
       })
       .finally(() => {
