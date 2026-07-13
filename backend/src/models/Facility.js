@@ -196,7 +196,7 @@ class Facility {
     const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
 
     const [rows] = await pool.execute(
-      `SELECT id, facility_name, city, zip_code, state, email, phone, is_active, is_auto_created
+      `SELECT id, facility_name, address, city, zip_code, state, email, phone, is_active, is_auto_created
        FROM facilities
        WHERE is_active = 1
          AND facility_name LIKE :queryPrefix

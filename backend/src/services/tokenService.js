@@ -141,6 +141,48 @@ function maskEmail(email) {
   return `${visible}${"*".repeat(Math.max(local.length - 2, 1))}@${domain}`;
 }
 
+function generatePersonalPortalEmailToken(email) {
+  return jwt.sign(
+    {
+      email: `${email || ""}`.trim().toLowerCase(),
+      type: "personal_portal_email",
+    },
+    config.jwt.accessSecret,
+    { expiresIn: "2h" }
+  );
+}
+
+function verifyPersonalPortalEmailToken(token) {
+  try {
+    const decoded = jwt.verify(token, config.jwt.accessSecret);
+
+    if (decoded.type !== "personal_portal_email" || !decoded.email) {
+      throw new ApiError(
+        401,
+        "Email verification is invalid. Please verify your email again."
+      );
+    }
+
+    return decoded.email;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error?.name === "TokenExpiredError") {
+      throw new ApiError(
+        401,
+        "Email verification expired. Please verify your email again."
+      );
+    }
+
+    throw new ApiError(
+      401,
+      "Email verification is invalid. Please verify your email again."
+    );
+  }
+}
+
 module.exports = {
   generateSessionToken,
   generateAccessToken,
@@ -155,4 +197,6 @@ module.exports = {
   getSessionExpiryDate,
   generateOtpCode,
   maskEmail,
+  generatePersonalPortalEmailToken,
+  verifyPersonalPortalEmailToken,
 };

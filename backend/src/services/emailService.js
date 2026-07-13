@@ -92,7 +92,7 @@ function logDevCode(to, code) {
   });
 }
 
-async function sendTwoFactorCode({ to, name, code }) {
+async function sendTwoFactorCode({ to, name, code, subtitle }) {
   if (config.twoFactor.devLogCode) {
     logDevCode(to, code);
     return { delivered: false, devLogged: true };
@@ -114,6 +114,7 @@ async function sendTwoFactorCode({ to, name, code }) {
     name: name || "User",
     code,
     expiresInMinutes: config.twoFactor.expiresMinutes,
+    subtitle: subtitle || "Legal Practice Management Portal",
   });
 
   const mailOptions = buildMailOptions({ to, subject, text, html });
@@ -832,6 +833,72 @@ async function sendPaymentResultEmail({
   }
 }
 
+async function sendPersonalPortalConfirmation({
+  to,
+  name,
+  confirmationReference,
+  lookupExpiresAt,
+}) {
+  const portalUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/personalrequest`;
+  const expiresText = lookupExpiresAt
+    ? new Date(lookupExpiresAt).toLocaleDateString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "7 days";
+
+  const subject = `Personal records request confirmed — ${confirmationReference}`;
+  const text = [
+    `Hello ${name || "Patient"},`,
+    "",
+    "Your personal records request has been received and payment confirmed.",
+    "",
+    `Confirmation reference: ${confirmationReference}`,
+    "",
+    `You can check your request status at ${portalUrl} using your confirmation reference or driver's license number.`,
+    `Status lookup is available until ${expiresText}.`,
+    "",
+    "— DMS Document Management System",
+  ].join("\n");
+
+  const mailTransporter = getTransporter();
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Personal portal confirmation email", { to, text });
+      return { delivered: false, devLogged: true };
+    }
+    throw new ApiError(503, "Email service is not configured");
+  }
+
+  const safeName = escapeHtml(name || "Patient");
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827;">
+      <h2 style="color:#0097B2;">Request Confirmed</h2>
+      <p>Hi ${safeName}, your personal records request has been received and your processing fee payment was confirmed.</p>
+      <p style="font-size:18px;font-weight:700;">Reference: ${escapeHtml(confirmationReference)}</p>
+      <p>Check status at <a href="${escapeHtml(portalUrl)}">${escapeHtml(portalUrl)}</a> using your confirmation reference or driver's license number.</p>
+      <p style="color:#64748B;font-size:13px;">Status lookup available until ${escapeHtml(expiresText)}.</p>
+    </div>`;
+
+  try {
+    await mailTransporter.sendMail(
+      buildMailOptions({ to, subject, text, html })
+    );
+    return { delivered: true };
+  } catch (error) {
+    logger.error("Failed to send personal portal confirmation", {
+      to,
+      error: error.message,
+    });
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Personal portal confirmation fallback", { to, text });
+      return { delivered: false, devLogged: true };
+    }
+    rethrowServiceError(error);
+  }
+}
+
 module.exports = {
   sendTwoFactorCode,
   sendInvoiceEmail,
@@ -841,4 +908,5 @@ module.exports = {
   sendCnrRecordEmail,
   sendCnrMemoEmail,
   sendCertificateOfRecordsEmail,
+  sendPersonalPortalConfirmation,
 };

@@ -102,6 +102,7 @@ function mapFacilityRow(row) {
     id: row.id,
     facility: row.facility_name,
     facilityName: row.facility_name,
+    address: row.address || "",
     city: row.city || "",
     zip: row.zip_code || "",
     state: row.state || "",
@@ -109,6 +110,40 @@ function mapFacilityRow(row) {
     isAutoCreated: Boolean(Number(row.is_auto_created)),
     isProfileIncomplete: isFacilityProfileIncomplete(row),
   };
+}
+
+function formatFacilityAddress(row = {}) {
+  const street = `${row.address || ""}`.trim();
+  const city = `${row.city || ""}`.trim();
+  const state = `${row.state || ""}`.trim();
+  const zip = `${row.zip_code || row.zip || ""}`.trim();
+  const cityStateZip = [city, [state, zip].filter(Boolean).join(" ")]
+    .filter(Boolean)
+    .join(", ");
+
+  return [street, cityStateZip].filter(Boolean).join(", ");
+}
+
+function mapPublicFacilitySearchRow(row) {
+  return {
+    id: row.id,
+    facilityName: row.facility_name || row.facilityName || "",
+    address: formatFacilityAddress(row),
+    streetAddress: row.address || "",
+    city: row.city || "",
+    state: row.state || "",
+    zip: row.zip_code || "",
+  };
+}
+
+async function searchFacilities(query) {
+  const rows = await Facility.search(sanitizeSearchText(query));
+  return rows.map(mapFacilityRow);
+}
+
+async function searchFacilitiesForPublic(query) {
+  const rows = await Facility.search(sanitizeSearchText(query));
+  return rows.map(mapPublicFacilitySearchRow);
 }
 
 function mapFacilityListRow(row) {
@@ -240,11 +275,6 @@ async function resolveFacilityFromHints(hints = {}, connection = null) {
   );
 
   return { facility, created };
-}
-
-async function searchFacilities(query) {
-  const rows = await Facility.search(sanitizeSearchText(query));
-  return rows.map(mapFacilityRow);
 }
 
 async function resolveFacilityByName(data = {}) {
@@ -874,6 +904,7 @@ module.exports = {
   reactivateDoctor,
   setDefaultDoctor,
   searchFacilities,
+  searchFacilitiesForPublic,
   resolveFacilityByName,
   findOrCreateFacility,
   resolveFacilityFromHints,

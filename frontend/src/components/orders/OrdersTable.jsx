@@ -1356,6 +1356,11 @@ export default function OrdersTable({
                           Unprocessed
                         </p>
                       )}
+                      {order.creationSource === "personal_portal" && (
+                        <p className="mt-1 text-[10px] font-medium text-[#0097B2]">
+                          Personal Portal
+                        </p>
+                      )}
 
                       {order.year && (
                         <p className="mt-1 text-[10px] font-medium text-[#64748B]">

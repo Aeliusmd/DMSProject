@@ -72,7 +72,7 @@ export default function LandingPage() {
             </Link>
 
             <Link
-              href="/personal-request-portal"
+              href="/personalrequest"
               className={`${styles.cta} ${styles.ctaSecondary}`}
             >
               <span className={`${styles.sheen} ${styles.sheenLight}`} aria-hidden />

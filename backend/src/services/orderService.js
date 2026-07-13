@@ -445,7 +445,12 @@ function buildOrderDbPayload(data) {
     cnrDateSent: dateOrNull(data.cnrDateSent),
     cnrMemo: boolToInt(data.cnrMemo),
     subpoenaStoragePath: null,
-    creationSource: data.creationSource === "auto" ? "auto" : "manual",
+    creationSource:
+      data.creationSource === "auto"
+        ? "auto"
+        : data.creationSource === "personal_portal"
+          ? "personal_portal"
+          : "manual",
   };
 }
 
