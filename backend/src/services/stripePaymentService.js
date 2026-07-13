@@ -699,6 +699,12 @@ async function insertSuccessfulPaymentRecord(connection, session, stripeDetails)
 }
 
 async function fulfillSuccessfulCheckoutSession(session) {
+  if (session.metadata?.payment_kind === "personal_portal") {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.fulfillPersonalPortalPayment(session);
+    return;
+  }
+
   const orderId = Number(session.metadata?.order_id);
   const invoiceType = session.metadata?.invoice_type;
 

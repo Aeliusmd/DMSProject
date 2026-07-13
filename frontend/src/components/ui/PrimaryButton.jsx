@@ -3,6 +3,7 @@ export default function PrimaryButton({
   type = "button",
   disabled,
   onClick,
+  className = "",
 }) {
   return (
     <button
@@ -13,7 +14,7 @@ export default function PrimaryButton({
         disabled
           ? "cursor-not-allowed bg-[#0097B2]/45"
           : "bg-[#0097B2] hover:bg-[#0086A0] active:bg-[#00748A]"
-      }`}
+      } ${className}`}
     >
       {children}
     </button>

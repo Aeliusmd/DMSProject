@@ -28,6 +28,7 @@ const ORDER_UPLOAD_DIRS = {
   additionalDocuments: path.join(ORDER_UPLOADS_ROOT, "additional-documents"),
   orderNotes: path.join(ORDER_UPLOADS_ROOT, "notes_attachments"),
   medicalRecords: path.join(ORDER_UPLOADS_ROOT, "medical-records"),
+  personalPortalLicenses: path.join(ORDER_UPLOADS_ROOT, "personal-portal", "licenses"),
 };
 
 const FIELD_DESTINATIONS = {
@@ -234,6 +235,39 @@ function uploadSinglePdf(fieldName = "file") {
   return memoryUpload.single(fieldName);
 }
 
+const DRIVER_LICENSE_MIME_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+]);
+
+const personalPortalLicenseStorage = multer.diskStorage({
+  destination(_req, _file, cb) {
+    fs.mkdirSync(ORDER_UPLOAD_DIRS.personalPortalLicenses, { recursive: true });
+    cb(null, ORDER_UPLOAD_DIRS.personalPortalLicenses);
+  },
+  filename(_req, file, cb) {
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    cb(null, `${unique}-${sanitizeFileName(file.originalname)}`);
+  },
+});
+
+const uploadPersonalPortalLicense = multer({
+  storage: personalPortalLicenseStorage,
+  fileFilter(_req, file, cb) {
+    if (DRIVER_LICENSE_MIME_TYPES.has(file.mimetype)) {
+      cb(null, true);
+      return;
+    }
+    cb(
+      new ApiError(400, "Driver's license must be a PDF, JPG, or PNG image")
+    );
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+}).single("driverLicenseFile");
+
 module.exports = {
   facilityDocumentUpload,
   facilityNoteAttachmentUpload,
@@ -246,4 +280,5 @@ module.exports = {
   toRelativeStoragePath,
   uploadSinglePdf,
   uploadMedicalRecordsScan,
+  uploadPersonalPortalLicense,
 };

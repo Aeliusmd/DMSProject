@@ -61,4 +61,9 @@ module.exports = {
     webhookSecret: (process.env.STRIPE_WEBHOOK_SECRET || "").trim(),
     currency: (process.env.STRIPE_CURRENCY || "usd").trim().toLowerCase(),
   },
+
+  personalPortal: {
+    processingFeeCents: Number(process.env.PERSONAL_PORTAL_FEE_CENTS) || 3500,
+    lookupDays: Number(process.env.PERSONAL_PORTAL_LOOKUP_DAYS) || 7,
+  },
 };
