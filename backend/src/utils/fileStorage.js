@@ -53,6 +53,36 @@ function saveBatchScanFile(userId, fileName, buffer) {
   };
 }
 
+function getCompanyPortalOrderDir(companyUserId) {
+  return path
+    .join("Order", "CompanyPortal", String(companyUserId))
+    .replace(/\\/g, "/");
+}
+
+/**
+ * Save a company-portal subpoena PDF under Order/CompanyPortal/{companyUserId}/
+ */
+function saveCompanyPortalSubpoena(companyUserId, fileName, buffer) {
+  ensureFileServerReady();
+  const root = getFileServerRoot();
+  const relativeDir = getCompanyPortalOrderDir(companyUserId);
+  const absoluteDir = path.join(root, ...relativeDir.split("/"));
+  ensureDir(absoluteDir);
+
+  const stamp = Date.now();
+  const stem = sanitizeFileStem(fileName);
+  const safeName = `${stamp}-${stem}.pdf`;
+  const absolutePath = path.join(absoluteDir, safeName);
+  fs.writeFileSync(absolutePath, buffer);
+
+  return {
+    absolutePath,
+    relativePath: `${relativeDir}/${safeName}`.replace(/\\/g, "/"),
+    fileName: safeName,
+    originalName: path.basename(fileName),
+  };
+}
+
 function resolveAbsolutePath(relativePath) {
   return path.join(getFileServerRoot(), ...relativePath.split("/"));
 }
@@ -108,6 +138,8 @@ module.exports = {
   getBatchScanDir,
   sanitizeFileStem,
   saveBatchScanFile,
+  getCompanyPortalOrderDir,
+  saveCompanyPortalSubpoena,
   resolveAbsolutePath,
   isUploadsRelativePath,
   resolveOrderStorageAbsolutePath,
