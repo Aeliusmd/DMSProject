@@ -391,8 +391,18 @@ function mapStripeStatus(status) {
 }
 
 function mapOnlinePaymentRow(row) {
-  const paymentType = row.invoice_type === "xray" ? "xray" : "regular";
-  const paymentTypeLabel = paymentType === "xray" ? "X-Ray" : "Regular";
+  const paymentType =
+    row.invoice_type === "xray"
+      ? "xray"
+      : row.invoice_type === "personal_portal"
+        ? "personal_portal"
+        : "regular";
+  const paymentTypeLabel =
+    paymentType === "xray"
+      ? "X-Ray"
+      : paymentType === "personal_portal"
+        ? "Personal"
+        : "Regular";
   const uiStatus = mapStripeStatus(row.status);
 
   return {
@@ -859,29 +869,49 @@ async function fulfillSuccessfulCheckoutSession(session) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
-  try {
-    const {
-      maybeAdvanceCompanyPortalAfterInvoicesPaid,
-    } = require("./companyPortalStageHooks");
-    await maybeAdvanceCompanyPortalAfterInvoicesPaid(orderId);
-  } catch (error) {
-    console.warn(
-      "[company-portal] Paid-stage advance skipped:",
-      error.message || error
-    );
-  }
+ await Order.syncOrderStatusFromWorkflow(orderId);
 
-  const [updatedRows] = await pool.execute(
-    `SELECT s.*, o.order_number,
-            COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
-     FROM stripe_online_payments s
-     INNER JOIN orders o ON o.id = s.order_id
-     LEFT JOIN facilities f ON f.id = o.facility_id
-     LEFT JOIN providers p ON p.id = o.provider_id
-     WHERE s.id = :id`,
-    { id: paymentRecordId }
+// Advance the company portal workflow after invoices are paid.
+try {
+  const {
+    maybeAdvanceCompanyPortalAfterInvoicesPaid,
+  } = require("./companyPortalStageHooks");
+
+  await maybeAdvanceCompanyPortalAfterInvoicesPaid(orderId);
+} catch (error) {
+  console.warn(
+    "[company-portal] Paid-stage advance skipped:",
+    error.message || error
   );
+}
 
+// Synchronize the personal portal order status.
+try {
+  const personalPortalService = require("./personalPortalService");
+
+  await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+} catch (error) {
+  console.warn(
+    "[personal-portal] Status sync after online payment skipped:",
+    error.message || error
+  );
+}
+
+const [updatedRows] = await pool.execute(
+  `SELECT s.*, o.order_number,
+          COALESCE(
+            p.company_name,
+            o.serve_company_name,
+            f.facility_name,
+            '—'
+          ) AS company_name
+   FROM stripe_online_payments s
+   INNER JOIN orders o ON o.id = s.order_id
+   LEFT JOIN facilities f ON f.id = o.facility_id
+   LEFT JOIN providers p ON p.id = o.provider_id
+   WHERE s.id = :id`,
+  { id: paymentRecordId }
+);
   if (updatedRows[0]?.customer_email) {
     await sendPaymentNotificationEmail(updatedRows[0], "success");
   }
@@ -1139,6 +1169,176 @@ async function generatePaymentReceiptPdf(sessionId, token) {
   return buildReceiptPdf(payment);
 }
 
+async function recordPersonalPortalStripePayment(session) {
+  const PersonalRequestOrder = require("../models/PersonalRequestOrder");
+  const PersonalRequestStripePayment = require("../models/PersonalRequestStripePayment");
+
+  const requestId = Number(session.metadata?.personal_request_id);
+  if (!requestId) {
+    return;
+  }
+
+  const request = await PersonalRequestOrder.findById(requestId);
+  if (!request) {
+    logger.warn("Personal portal payment record skipped; request missing", {
+      requestId,
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  const stripeDetails = await extractStripePaymentDetails(session);
+  const amount =
+    toNumber(session.metadata?.amount) ||
+    (session.amount_total != null ? session.amount_total / 100 : 0) ||
+    (config.personalPortal?.processingFeeCents || 3500) / 100;
+  const currency =
+    session.metadata?.currency ||
+    session.currency ||
+    config.stripe.currency ||
+    "usd";
+  const paidAt = new Date();
+  const customerEmail =
+    stripeDetails.customerEmail || request.email || null;
+  const customerName =
+    stripeDetails.customerName ||
+    `${request.first_name || ""} ${request.last_name || ""}`.trim() ||
+    null;
+
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const existing = await PersonalRequestStripePayment.findByCheckoutSessionId(
+      session.id,
+      connection
+    );
+
+    if (existing?.status === "succeeded") {
+      await connection.commit();
+      return;
+    }
+
+    if (existing) {
+      await PersonalRequestStripePayment.markSucceeded(connection, existing.id, {
+        orderId: request.order_id || null,
+        amount,
+        currency,
+        stripePaymentIntentId: stripeDetails.stripePaymentIntentId,
+        stripeChargeId: stripeDetails.stripeChargeId,
+        stripeCustomerId: stripeDetails.stripeCustomerId,
+        paymentMethodType: stripeDetails.paymentMethodType,
+        cardBrand: stripeDetails.cardBrand,
+        cardLast4: stripeDetails.cardLast4,
+        customerEmail,
+        customerName,
+        receiptUrl: stripeDetails.receiptUrl,
+        processingFee: stripeDetails.processingFee,
+        netAmount: stripeDetails.netAmount ?? amount,
+        paidAt,
+      });
+    } else {
+      await PersonalRequestStripePayment.insertSucceeded(connection, {
+        personalRequestOrderId: requestId,
+        orderId: request.order_id || null,
+        amount,
+        currency,
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId: stripeDetails.stripePaymentIntentId,
+        stripeChargeId: stripeDetails.stripeChargeId,
+        stripeCustomerId: stripeDetails.stripeCustomerId,
+        paymentMethodType: stripeDetails.paymentMethodType,
+        cardBrand: stripeDetails.cardBrand,
+        cardLast4: stripeDetails.cardLast4,
+        customerEmail,
+        customerName,
+        receiptUrl: stripeDetails.receiptUrl,
+        processingFee: stripeDetails.processingFee,
+        netAmount: stripeDetails.netAmount ?? amount,
+        paidAt,
+      });
+    }
+
+    // Also mirror into staff online payments list when table + DMS order exist
+    if (request.order_id) {
+      const [tableRows] = await connection.execute(
+        `SELECT COUNT(*) AS cnt
+         FROM information_schema.tables
+         WHERE table_schema = DATABASE()
+           AND table_name = 'stripe_online_payments'`
+      );
+
+      if (Number(tableRows[0]?.cnt) > 0) {
+        try {
+          const [existingOnline] = await connection.execute(
+            `SELECT id, status
+             FROM stripe_online_payments
+             WHERE stripe_checkout_session_id = :sessionId
+             LIMIT 1`,
+            { sessionId: session.id }
+          );
+
+          if (!existingOnline[0]) {
+            await connection.execute(
+              `INSERT INTO stripe_online_payments
+                 (order_id, invoice_type, invoice_number, amount, currency, status,
+                  stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
+                  stripe_customer_id, payment_method_type, card_brand, card_last4,
+                  customer_email, customer_name, receipt_url, processing_fee, net_amount,
+                  failure_message, paid_at)
+               VALUES
+                 (:orderId, 'personal_portal', :invoiceNumber, :amount, :currency, 'succeeded',
+                  :sessionId, :paymentIntentId, :chargeId, :customerId, :paymentMethodType,
+                  :cardBrand, :cardLast4, :customerEmail, :customerName, :receiptUrl,
+                  :processingFee, :netAmount, NULL, :paidAt)`,
+              {
+                orderId: request.order_id,
+                invoiceNumber: request.confirmation_reference || `PR-${requestId}`,
+                amount,
+                currency,
+                sessionId: session.id,
+                paymentIntentId: stripeDetails.stripePaymentIntentId,
+                chargeId: stripeDetails.stripeChargeId,
+                customerId: stripeDetails.stripeCustomerId,
+                paymentMethodType: stripeDetails.paymentMethodType,
+                cardBrand: stripeDetails.cardBrand,
+                cardLast4: stripeDetails.cardLast4,
+                customerEmail,
+                customerName,
+                receiptUrl: stripeDetails.receiptUrl,
+                processingFee: stripeDetails.processingFee,
+                netAmount: stripeDetails.netAmount ?? amount,
+                paidAt,
+              }
+            );
+          } else if (existingOnline[0].status !== "succeeded") {
+            await updatePaymentRecord(connection, existingOnline[0].id, {
+              status: "succeeded",
+              ...stripeDetails,
+              paidAt,
+              failureMessage: null,
+            });
+          }
+        } catch (mirrorError) {
+          logger.warn("Could not mirror personal portal payment to stripe_online_payments", {
+            sessionId: session.id,
+            message: mirrorError.message,
+          });
+        }
+      }
+    }
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    rethrowServiceError(error);
+  } finally {
+    connection.release();
+  }
+}
+
 module.exports = {
   buildPaymentUrl,
   ensurePaymentAccessToken,
@@ -1152,4 +1352,6 @@ module.exports = {
   getOnlinePayments,
   getOnlinePaymentsForOrder,
   fulfillSuccessfulCheckoutSession,
+  extractStripePaymentDetails,
+  recordPersonalPortalStripePayment,
 };

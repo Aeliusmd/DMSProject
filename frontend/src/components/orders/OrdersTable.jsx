@@ -69,6 +69,79 @@ import { getOrderRecordSlots, getOrderTypeLabel } from "@/lib/orders/recordTypeU
 
 const ORDERS_PER_PAGE = 10;
 
+const PERSONAL_PORTAL_STATUS_FLOW = [
+  "in_process",
+  "invoice",
+  "paid",
+  "released",
+];
+
+const PERSONAL_PORTAL_STATUS_LABELS = {
+  pending_payment: "Pending Payment",
+  in_process: "In Process",
+  invoice: "Invoice",
+  paid: "Paid",
+  released: "Released",
+};
+
+function buildPersonalPortalStatusStages(
+  portalStatus,
+  { hasRecords = false, hasInvoice = false, invoicesPaid = false } = {}
+) {
+  const normalized =
+    portalStatus && PERSONAL_PORTAL_STATUS_FLOW.includes(portalStatus)
+      ? portalStatus
+      : "in_process";
+
+  return PERSONAL_PORTAL_STATUS_FLOW.map((key) => {
+    let status = "pending";
+
+    if (key === "in_process") {
+      status = "complete";
+    } else if (key === "invoice") {
+      status =
+        hasInvoice ||
+        invoicesPaid ||
+        normalized === "invoice" ||
+        normalized === "paid"
+          ? "complete"
+          : "pending";
+    } else if (key === "paid") {
+      status =
+        invoicesPaid || normalized === "paid" ? "complete" : "pending";
+    } else if (key === "released") {
+      // Records uploaded → Released completed
+      status = hasRecords ? "complete" : "pending";
+    }
+
+    return {
+      key,
+      label: PERSONAL_PORTAL_STATUS_LABELS[key],
+      status,
+    };
+  });
+}
+
+function buildPersonalReviewRecordsStage(order) {
+  const hasAllRecordsUploaded = Boolean(order.hasMedicalRecords);
+  const hasAnyRecordsUploaded = Boolean(order.hasAnyRecordsUploaded);
+
+  return {
+    key: "Review Records",
+    label: "Review Records",
+    status: hasAllRecordsUploaded ? "complete" : "pending",
+    showScanRecordsLink: !hasAllRecordsUploaded,
+    showPreviewRecords: hasAnyRecordsUploaded,
+    showRemoveRecords: hasAllRecordsUploaded && hasAnyRecordsUploaded,
+  };
+}
+
+function getPersonalScanRecordsHref(order) {
+  if (!order?.dbId || order.certificateNoRecords) return null;
+  if (order.hasMedicalRecords) return null;
+  return `/orders/scan-medical-records?orderId=${encodeURIComponent(order.dbId)}`;
+}
+
 const defaultOrderFilters = {
   facility: "",
   company: "",
@@ -553,6 +626,7 @@ function toRenderOrder(order, companyPortalMode = false) {
     companyPortalCanEmailRecords: Boolean(order.companyPortalCanEmailRecords),
     status: buildWorkflowStagesForOrder(order, companyPortalMode),
     invoice: order.invoice || { createOnly: true },
+    invoiceStatus: order.invoiceStatus || order.invoice?.status || "",
     records: order.records || { title: "Records", lines: [], links: [] },
     orderRecords: order.records?.orderRecords || order.orderRecords || [],
     company: order.company || { name: "—", address: "", phone: "", email: "" },
@@ -591,7 +665,8 @@ function toRenderOrder(order, companyPortalMode = false) {
     missingRequiredFields: Array.isArray(order.missingRequiredFields)
       ? order.missingRequiredFields
       : [],
-    creationSource: order.creationSource || "manual",
+    portalStatus: order.portalStatus || null,
+    portalStatusLabel: order.portalStatusLabel || null,
   };
 }
 
@@ -605,6 +680,7 @@ export default function OrdersTable({
   onSummaryChange = null,
   creationSource = null,
   companyPortalMode = false,
+  personalMode = false,
 }) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
@@ -682,6 +758,9 @@ export default function OrdersTable({
     search: filters.search || "",
     createdFrom: filters.createdFrom || "",
     createdTo: filters.createdTo || "",
+    creationSource: personalMode
+      ? "personal_portal"
+      : creationSource || filters.creationSource || "",
   };
 
   const sortDir =
@@ -689,7 +768,7 @@ export default function OrdersTable({
       ? createdSortDir
       : "";
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}|${excludeCompleted ? "1" : "0"}|${sortDir}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}|${normalizedFilters.creationSource}|${excludeCompleted ? "1" : "0"}|${sortDir}|${companyPortalMode ? "c" : personalMode ? "p" : "o"}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
@@ -716,9 +795,9 @@ export default function OrdersTable({
           search: normalizedFilters.search,
           createdFrom: normalizedFilters.createdFrom,
           createdTo: normalizedFilters.createdTo,
+          creationSource: normalizedFilters.creationSource || undefined,
           excludeCompleted: Boolean(excludeCompleted),
           sortDir: sortDir || undefined,
-          creationSource: creationSource || undefined,
         };
 
         let data = [];
@@ -781,12 +860,14 @@ export default function OrdersTable({
       normalizedFilters.search,
       normalizedFilters.createdFrom,
       normalizedFilters.createdTo,
+      normalizedFilters.creationSource,
       excludeCompleted,
       sortDir,
       useServerPagination,
       currentPage,
       creationSource,
       companyPortalMode,
+      personalMode,
     ]
   );
 
@@ -1304,7 +1385,11 @@ export default function OrdersTable({
   };
 
   const isReportView = Boolean(showDoctorColumn && excludeCompleted);
-  const tableColumnCount = isReportView ? 12 : 11;
+  const tableColumnCount = personalMode
+    ? 9
+    : isReportView
+      ? 12
+      : 11;
 
   return (
     <>
@@ -1463,8 +1548,10 @@ export default function OrdersTable({
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th className="w-[90px] px-4 py-3">ID</th>
                 <th className="w-[110px] px-4 py-3">Notes</th>
-                <th className="w-[150px] px-4 py-3">Case</th>
-                {isReportView && (
+                <th className="w-[150px] px-4 py-3">
+                  {personalMode ? "Applicant" : "Case"}
+                </th>
+                {!personalMode && isReportView && (
                   <th className="w-[130px] px-4 py-3">Applicant</th>
                 )}
                 <th className="w-[160px] px-4 py-3">
@@ -1473,9 +1560,15 @@ export default function OrdersTable({
                 <th className="w-[125px] px-4 py-3">Status</th>
                 <th className="w-[170px] px-4 py-3">Invoice</th>
                 <th className="w-[170px] px-4 py-3">Records</th>
-                <th className="w-[280px] px-4 py-3">Company</th>
-                <th className="w-[110px] px-4 py-3">DOB/SSN/DOI</th>
-                <th className="w-[130px] px-4 py-3">Forms</th>
+                {!personalMode && (
+                  <th className="w-[280px] px-4 py-3">Company</th>
+                )}
+                <th className="w-[110px] px-4 py-3">
+                  {personalMode ? "DOB" : "DOB/SSN/DOI"}
+                </th>
+                {!personalMode && (
+                  <th className="w-[130px] px-4 py-3">Forms</th>
+                )}
                 <th className="w-[120px] px-4 py-3" />
               </tr>
             </thead>
@@ -1574,7 +1667,11 @@ export default function OrdersTable({
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      {isReportView ? (
+                      {personalMode ? (
+                        <p className="font-semibold text-[#111827]">
+                          {order.applicant || "—"}
+                        </p>
+                      ) : isReportView ? (
                         <ReportCaseCell
                           order={order}
                           onOpenSubpoena={() => setSelectedSubpoenaOrder(order)}
@@ -1614,7 +1711,7 @@ export default function OrdersTable({
                       )}
                     </td>
 
-                    {isReportView && (
+                    {!personalMode && isReportView && (
                       <td className="px-4 py-5 align-top">
                         <p className="font-semibold text-[#111827]">
                           {order.applicant || "—"}
@@ -1643,14 +1740,53 @@ export default function OrdersTable({
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <div className="mb-2 flex flex-wrap items-center gap-2">
-                        <OrderStatusBadge status={order.displayOrderStatus} />
-                        {order.rushLabel ? (
-                          <RushBadge rush={order.rushLabel} />
-                        ) : null}
-                      </div>
+                      {!personalMode ? (
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <OrderStatusBadge status={order.displayOrderStatus} />
+                          {order.rushLabel ? (
+                            <RushBadge rush={order.rushLabel} />
+                          ) : null}
+                        </div>
+                      ) : null}
 
-                      {isDeletedOrderStatus(order.orderStatus) ? (
+                      {personalMode ? (
+                        <div className="space-y-1">
+                          <WorkflowStageItem
+                            stage={buildPersonalReviewRecordsStage(order)}
+                            href={getPersonalScanRecordsHref(order)}
+                            onPreviewRecords={() =>
+                              setSelectedMedicalRecordsOrder(order)
+                            }
+                            onRemoveRecords={() => openRemoveRecordsModal(order)}
+                            removingRecords={
+                              actionLoading &&
+                              removeRecordsModal.order?.dbId === order.dbId
+                            }
+                          />
+                          {buildPersonalPortalStatusStages(order.portalStatus, {
+                            hasRecords:
+                              Boolean(order.hasMedicalRecords) ||
+                              Boolean(order.hasAnyRecordsUploaded),
+                            hasInvoice: Boolean(
+                              order.invoice &&
+                                !order.invoice.createOnly &&
+                                (order.invoice.invoiceId ||
+                                  order.invoice.invoiceDate ||
+                                  order.invoice.reviewDate)
+                            ),
+                            invoicesPaid:
+                              `${order.invoiceStatus || ""}`.toLowerCase() ===
+                                "paid" ||
+                              `${order.invoice?.status || ""}`.toLowerCase() ===
+                                "paid",
+                          }).map((stage) => (
+                            <WorkflowStageItem
+                              key={stage.key}
+                              stage={stage}
+                            />
+                          ))}
+                        </div>
+                      ) : isDeletedOrderStatus(order.orderStatus) ? (
                         <div className="space-y-2">
                           {order.statusBeforeInactive ? (
                             <p className="text-[10px] text-[#94A3B8]">
@@ -1715,7 +1851,8 @@ export default function OrdersTable({
                         </div>
                       )}
 
-                      {(order.orderStatus === "Ready to Pickup" ||
+                      {!personalMode &&
+                      (order.orderStatus === "Ready to Pickup" ||
                         order.orderStatus === "Completed") &&
                         (() => {
                         const deliveryActions = getCompletedDeliveryActions(order);
@@ -1821,96 +1958,116 @@ export default function OrdersTable({
                     </td>
 
                     <td className="px-4 py-5 align-top">
-                      <RecordsBlock
-                        records={order.records}
-                        dateRequested={order.dateRequested}
-                        dateRequestedDisplay={order.dateRequestedDisplay}
-                        isCnr={order.certificateNoRecords}
-                        cnrMemo={order.cnrMemo}
-                        cnrDelivery={order.cnrDelivery}
-                        cnrDateSent={order.cnrDateSent}
-                        onPrintedSentOutClick={() =>
-                          openCnrTextModal(
-                            setCnrTextModal,
-                            order,
-                            "Printed/Sent Out Note",
-                            [
-                              CNR_DELIVERY_LABELS[order.cnrDelivery] ||
-                                order.cnrDelivery,
-                              order.cnrDateSent
-                                ? `Date: ${formatCnrDisplayDate(order.cnrDateSent)}`
-                                : "",
-                            ]
-                              .filter(Boolean)
-                              .join("\n")
-                          )
-                        }
-                        onCnrNoteClick={
-                          !order.cnrMemo
-                            ? () =>
-                                openCnrTextModal(
-                                  setCnrTextModal,
-                                  order,
-                                  "CNR Note"
-                                )
-                            : undefined
-                        }
-                      />
-
-                      {companyPortalMode &&
-                      shouldShowCompanyPortalUploadLink(order) ? (
-                        <Link
-                          href={getCompanyPortalRecordsUploadHref(order)}
-                          className="mt-2 block text-[10px] font-semibold text-[#007F96] underline"
-                        >
-                          Upload Records
-                        </Link>
-                      ) : null}
-
-                      {companyPortalMode &&
-                      (order.hasAnyRecordsUploaded ||
-                        order.records?.anyRecordsUploaded) ? (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedMedicalRecordsOrder(order)}
-                          className="mt-2 block text-left text-[10px] font-semibold text-[#007F96] underline"
-                        >
-                          View Uploaded Records
-                        </button>
-                      ) : null}
-                    </td>
-
-                    <td className="px-4 py-5 align-top">
-                      <CompanyBlock company={order.company} />
-                    </td>
-
-                    <td className="px-4 py-5 align-top">
-                      <div className="space-y-1 text-[11px] text-[#334155]">
-                        {order.dob ? <p>{order.dob}</p> : null}
-                        {order.ssn ? <p>{order.ssn}</p> : null}
-                        {order.hasDoi ? (
-                          <p>{order.doiDisplay}</p>
-                        ) : (
+                      <div className="space-y-1">
+                        {personalMode && getPersonalScanRecordsHref(order) ? (
                           <Link
-                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                              order.dbId
-                            )}`}
-                            className="font-semibold text-red-500 hover:underline"
+                            href={getPersonalScanRecordsHref(order)}
+                            className="block text-[10px] font-semibold text-[#007F96] underline"
                           >
-                            No DOI
+                            Scan Records
                           </Link>
-                        )}
+                        ) : null}
+
+                        <RecordsBlock
+                          records={order.records}
+                          dateRequested={order.dateRequested}
+                          dateRequestedDisplay={order.dateRequestedDisplay}
+                          isCnr={order.certificateNoRecords}
+                          cnrMemo={order.cnrMemo}
+                          cnrDelivery={order.cnrDelivery}
+                          cnrDateSent={order.cnrDateSent}
+                          onPrintedSentOutClick={() =>
+                            openCnrTextModal(
+                              setCnrTextModal,
+                              order,
+                              "Printed/Sent Out Note",
+                              [
+                                CNR_DELIVERY_LABELS[order.cnrDelivery] ||
+                                  order.cnrDelivery,
+                                order.cnrDateSent
+                                  ? `Date: ${formatCnrDisplayDate(order.cnrDateSent)}`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join("\n")
+                            )
+                          }
+                          onCnrNoteClick={
+                            !order.cnrMemo
+                              ? () =>
+                                  openCnrTextModal(
+                                    setCnrTextModal,
+                                    order,
+                                    "CNR Note"
+                                  )
+                              : undefined
+                          }
+                        />
+
+                        {companyPortalMode &&
+                        shouldShowCompanyPortalUploadLink(order) ? (
+                          <Link
+                            href={getCompanyPortalRecordsUploadHref(order)}
+                            className="block text-[10px] font-semibold text-[#007F96] underline"
+                          >
+                            Upload Records
+                          </Link>
+                        ) : null}
+
+                        {companyPortalMode &&
+                        (order.hasAnyRecordsUploaded ||
+                          order.records?.anyRecordsUploaded) ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMedicalRecordsOrder(order)}
+                            className="block text-left text-[10px] font-semibold text-[#007F96] underline"
+                          >
+                            View Uploaded Records
+                          </button>
+                        ) : null}
                       </div>
                     </td>
 
+                    {!personalMode && (
+                      <td className="px-4 py-5 align-top">
+                        <CompanyBlock company={order.company} />
+                      </td>
+                    )}
+
                     <td className="px-4 py-5 align-top">
-                      <FormsList
-                        forms={order.forms}
-                        onCnrClick={() => setSelectedCnrOrder(order)}
-                        onCertificationClick={() => setSelectedCertificationOrder(order)}
-                        onCopyLetterClick={() => setSelectedCopyLetterOrder(order)}
-                      />
+                      <div className="space-y-1 text-[11px] text-[#334155]">
+                        {order.dob ? <p>{order.dob}</p> : <p>—</p>}
+                        {!personalMode && order.ssn ? <p>{order.ssn}</p> : null}
+                        {!personalMode &&
+                          (order.hasDoi ? (
+                            <p>{order.doiDisplay}</p>
+                          ) : (
+                            <Link
+                              href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                                order.dbId
+                              )}`}
+                              className="font-semibold text-red-500 hover:underline"
+                            >
+                              No DOI
+                            </Link>
+                          ))}
+                      </div>
                     </td>
+
+                    {!personalMode && (
+                      <td className="px-4 py-5 align-top">
+                        <FormsList
+                          forms={order.forms}
+                          onCnrClick={() => setSelectedCnrOrder(order)}
+                          onCertificationClick={() =>
+                            setSelectedCertificationOrder(order)
+                          }
+                          onCopyLetterClick={() =>
+                            setSelectedCopyLetterOrder(order)
+                          }
+                        />
+                      </td>
+                    )}
 
                     <td className={`align-top ${fitToWindow ? "px-1 py-3" : "px-4 py-5"}`}>
                       <div

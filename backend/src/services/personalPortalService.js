@@ -1,5 +1,7 @@
 /**
- * Personal Request Portal — email OTP, request submission, Stripe $35 fee, order creation.
+ * Personal Request Portal — $35 prepayment, then staff invoice/payment via DMS.
+ * Portal request lives in personal_request_*; a linked thin DMS order enables
+ * existing Invoice / Payments UI for additional charges.
  */
 
 const crypto = require("crypto");
@@ -10,9 +12,19 @@ const config = require("../config");
 const ApiError = require("../utils/ApiError");
 const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const { getPool } = require("../config/database");
-const PersonalPortalRequest = require("../models/PersonalPortalRequest");
+const PersonalRequestOrder = require("../models/PersonalRequestOrder");
+const PersonalRequestFacility = require("../models/PersonalRequestFacility");
+const PersonalRequestOrderRecord = require("../models/PersonalRequestOrderRecord");
+const PersonalRequestStripePayment = require("../models/PersonalRequestStripePayment");
 const Order = require("../models/Order");
 const OrderRecord = require("../models/OrderRecord");
+const {
+  areAllOrderInvoicesPaid,
+  hasStandardInvoiceFields,
+  hasXrayInvoiceFields,
+} = require("../utils/orderInvoicePayment");
+const Invoice = require("../models/Invoice");
+const InvoiceXray = require("../models/InvoiceXray");
 const twoFactorStore = require("./twoFactorStore");
 const tokenService = require("./tokenService");
 const emailService = require("./emailService");
@@ -28,6 +40,14 @@ const PORTAL_STATUS_LABELS = {
   invoice: "Invoice",
   paid: "Paid",
   released: "Released",
+};
+
+const STATUS_RANK = {
+  pending_payment: 0,
+  in_process: 1,
+  invoice: 2,
+  paid: 3,
+  released: 4,
 };
 
 function getStripe() {
@@ -71,6 +91,17 @@ function toRelativeLicensePath(file) {
   return relative || null;
 }
 
+function formatIsoToDisplay(iso) {
+  if (!iso) return "";
+  const [year, month, day] = `${iso}`.split("-");
+  if (!year || !month || !day) return iso;
+  return `${month}/${day}/${year}`;
+}
+
+function getProcessingFeeAmount() {
+  return (config.personalPortal?.processingFeeCents || 3500) / 100;
+}
+
 function mapRecordTypeFlags(recordTypes = []) {
   return {
     medicalRecords: recordTypes.includes("medical"),
@@ -82,11 +113,55 @@ function mapRecordTypeFlags(recordTypes = []) {
   };
 }
 
-function formatIsoToDisplay(iso) {
-  if (!iso) return "";
-  const [year, month, day] = `${iso}`.split("-");
-  if (!year || !month || !day) return iso;
-  return `${month}/${day}/${year}`;
+function buildOrderPayloadFromBundle(bundle, confirmationReference) {
+  const { order, primaryFacility, recordTypes } = bundle;
+  const flags = mapRecordTypeFlags(recordTypes);
+
+  return {
+    orderNumber: confirmationReference,
+    firstName: order.first_name,
+    lastName: order.last_name,
+    dob: order.dob,
+    facility: primaryFacility?.facility_id
+      ? String(primaryFacility.facility_id)
+      : undefined,
+    facilityName: primaryFacility?.facility_name || "Personal Request Facility",
+    facilityAddress: primaryFacility?.facility_address,
+    fullAddress: primaryFacility?.facility_address,
+    address: primaryFacility?.facility_address,
+    email: order.email,
+    serveCompanyName: "Personal Request Portal",
+    specificDoctor: "Records Department",
+    specificRecord: `Records ${formatIsoToDisplay(primaryFacility?.records_date_begin)} to ${formatIsoToDisplay(primaryFacility?.records_date_end)}`,
+    injuryType: "cumulative",
+    injuryDateBegin: primaryFacility?.records_date_begin,
+    injuryDateEnd: primaryFacility?.records_date_end,
+    dateRequested: new Date().toISOString().slice(0, 10),
+    creationSource: "personal_portal",
+    deliveryPreference: order.delivery_preference,
+    mailAddress: order.mail_address,
+    ...flags,
+  };
+}
+
+async function loadRequestBundle(orderId) {
+  const order = await PersonalRequestOrder.findById(orderId);
+  if (!order) return null;
+
+  const facilities = await PersonalRequestFacility.findByOrderId(orderId);
+  const recordRows = await PersonalRequestOrderRecord.findByOrderId(orderId);
+  const primaryFacility = facilities[0] || null;
+  const recordTypes = [
+    ...new Set(recordRows.map((row) => row.record_type).filter(Boolean)),
+  ];
+
+  return {
+    order,
+    facilities,
+    primaryFacility,
+    recordRows,
+    recordTypes,
+  };
 }
 
 async function sendEmailOtp(email) {
@@ -140,13 +215,22 @@ async function confirmEmailOtp(sessionToken, code, email) {
   };
 }
 
-async function createPendingRequest(parsed, driverLicenseFile) {
-  const verifiedEmail = tokenService.verifyPersonalPortalEmailToken(
-    parsed.emailVerificationToken
-  );
+async function createPendingRequest(parsed, driverLicenseFile, options = {}) {
+  const portalUserId = options.portalUserId || null;
 
-  if (verifiedEmail !== parsed.email) {
-    throw new ApiError(400, "Email verification does not match the submitted email.");
+  if (portalUserId) {
+    // Authenticated account — email comes from the signed-in user
+    if (!parsed.email) {
+      throw new ApiError(400, "Account email is required.");
+    }
+  } else {
+    const verifiedEmail = tokenService.verifyPersonalPortalEmailToken(
+      parsed.emailVerificationToken
+    );
+
+    if (verifiedEmail !== parsed.email) {
+      throw new ApiError(400, "Email verification does not match the submitted email.");
+    }
   }
 
   const licensePath = toRelativeLicensePath(driverLicenseFile);
@@ -154,37 +238,81 @@ async function createPendingRequest(parsed, driverLicenseFile) {
     throw new ApiError(400, "A valid driver's license image is required.");
   }
 
-  const requestId = await PersonalPortalRequest.create({
-    email: parsed.email,
-    driverLicenseNumber: parsed.driverLicenseNumber,
-    driverLicenseStoragePath: licensePath,
-    firstName: parsed.firstName,
-    lastName: parsed.lastName,
-    dob: parsed.dobIso,
-    treatingFacilityName: parsed.treatingFacilityName,
-    treatingFacilityAddress: parsed.treatingFacilityAddress,
-    recordsDateBegin: parsed.recordsDateBeginIso,
-    recordsDateEnd: parsed.recordsDateEndIso,
-    recordTypesJson: JSON.stringify(parsed.recordTypes),
-    deliveryPreference: parsed.deliveryPreference,
-    mailAddress: parsed.mailAddress,
-    portalStatus: "pending_payment",
-    stripeCheckoutSessionId: null,
-  });
+  const pool = getPool();
+  const connection = await pool.getConnection();
+  let requestId;
+
+  try {
+    await connection.beginTransaction();
+
+    requestId = await PersonalRequestOrder.create(
+      {
+        portalUserId,
+        email: parsed.email,
+        driverLicenseNumber: parsed.driverLicenseNumber,
+        driverLicenseStoragePath: licensePath,
+        firstName: parsed.firstName,
+        lastName: parsed.lastName,
+        dob: parsed.dobIso,
+        deliveryPreference: parsed.deliveryPreference,
+        mailAddress: parsed.mailAddress,
+        portalStatus: "pending_payment",
+        stripeCheckoutSessionId: null,
+      },
+      connection
+    );
+
+    const facilityRowId = await PersonalRequestFacility.create(
+      {
+        personalRequestOrderId: requestId,
+        facilityId: parsed.facilityId || null,
+        facilityName: parsed.treatingFacilityName,
+        facilityAddress: parsed.treatingFacilityAddress,
+        recordsDateBegin: parsed.recordsDateBeginIso,
+        recordsDateEnd: parsed.recordsDateEndIso,
+        sortOrder: 0,
+      },
+      connection
+    );
+
+    await PersonalRequestOrderRecord.createMany(
+      (parsed.recordTypes || []).map((recordType) => ({
+        personalRequestOrderId: requestId,
+        personalRequestFacilityId: facilityRowId,
+        recordType,
+      })),
+      connection
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    rethrowServiceError(error);
+  } finally {
+    connection.release();
+  }
 
   const stripe = getStripe();
   const feeCents = config.personalPortal?.processingFeeCents || 3500;
+  const feeAmount = Number((feeCents / 100).toFixed(2));
+  const currency = config.stripe.currency || "usd";
   const baseClient = (config.clientUrl || "http://localhost:3000").replace(/\/$/, "");
   const successUrl = `${baseClient}/personalrequest/result?request_id=${requestId}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${baseClient}/personalrequest?canceled=1`;
+  const cancelUrl = `${baseClient}/personalrequest/new?canceled=1`;
 
-  const session = await stripe.checkout.sessions.create({
+  const checkoutPayload = {
     mode: "payment",
     payment_method_types: ["card"],
+    // Skip Link (email OTP / Continue with Link) — card form only
+    wallet_options: {
+      link: {
+        display: "never",
+      },
+    },
     line_items: [
       {
         price_data: {
-          currency: config.stripe.currency || "usd",
+          currency,
           product_data: {
             name: "Personal Records Request — Processing Fee",
             description: "Non-refundable processing fee for personal record request",
@@ -199,84 +327,45 @@ async function createPendingRequest(parsed, driverLicenseFile) {
       payment_kind: "personal_portal",
       personal_request_id: String(requestId),
       email: parsed.email,
+      amount: String(feeAmount),
+      currency,
     },
     success_url: successUrl,
     cancel_url: cancelUrl,
-  });
+  };
 
-  const pool = getPool();
-  await pool.execute(
-    `UPDATE personal_portal_requests
-     SET stripe_checkout_session_id = :sessionId, updated_at = NOW()
-     WHERE id = :id`,
-    { id: requestId, sessionId: session.id }
-  );
+  let session;
+  try {
+    session = await stripe.checkout.sessions.create(checkoutPayload);
+  } catch (error) {
+    // Older Stripe API versions may not support wallet_options — retry without it
+    if (/wallet_options|unknown parameter/i.test(error?.message || "")) {
+      const { wallet_options: _ignored, ...fallbackPayload } = checkoutPayload;
+      session = await stripe.checkout.sessions.create(fallbackPayload);
+      logger.warn(
+        "Stripe wallet_options not supported; checkout created without Link disable"
+      );
+    } else {
+      throw error;
+    }
+  }
+
+  await PersonalRequestOrder.setStripeCheckoutSessionId(requestId, session.id);
+
+  await PersonalRequestStripePayment.createPending({
+    personalRequestOrderId: requestId,
+    amount: feeAmount,
+    currency,
+    stripeCheckoutSessionId: session.id,
+    customerEmail: parsed.email,
+    customerName: `${parsed.firstName} ${parsed.lastName}`.trim(),
+  });
 
   return {
     requestId,
     checkoutUrl: session.url,
     sessionId: session.id,
-    processingFee: (feeCents / 100).toFixed(2),
-  };
-}
-
-function parseRecordTypesJson(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => `${item || ""}`.trim().toLowerCase()).filter(Boolean);
-  }
-
-  if (value && typeof value === "object") {
-    return Object.values(value)
-      .map((item) => `${item || ""}`.trim().toLowerCase())
-      .filter(Boolean);
-  }
-
-  const raw = `${value || ""}`.trim();
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.map((item) => `${item || ""}`.trim().toLowerCase()).filter(Boolean);
-    }
-    if (typeof parsed === "string" && parsed) {
-      return [parsed.toLowerCase()];
-    }
-  } catch {
-    // Stored as a plain type name (e.g. medical) instead of JSON
-  }
-
-  if (raw.includes(",")) {
-    return raw.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
-  }
-
-  return [raw.toLowerCase()];
-}
-
-async function buildOrderPayloadFromRequest(request, confirmationReference) {
-  const recordTypes = parseRecordTypesJson(request.record_types_json);
-  const flags = mapRecordTypeFlags(recordTypes);
-
-  return {
-    orderNumber: confirmationReference,
-    firstName: request.first_name,
-    lastName: request.last_name,
-    dob: request.dob,
-    facilityName: request.treating_facility_name,
-    fullAddress: request.treating_facility_address,
-    address: request.treating_facility_address,
-    email: request.email,
-    serveCompanyName: "Personal Request Portal",
-    specificDoctor: "Records Department",
-    specificRecord: `Records ${formatIsoToDisplay(request.records_date_begin)} to ${formatIsoToDisplay(request.records_date_end)}`,
-    injuryType: "cumulative",
-    injuryDateBegin: request.records_date_begin,
-    injuryDateEnd: request.records_date_end,
-    dateRequested: new Date().toISOString().slice(0, 10),
-    creationSource: "personal_portal",
-    deliveryPreference: request.delivery_preference,
-    mailAddress: request.mail_address,
-    ...flags,
+    processingFee: feeAmount.toFixed(2),
   };
 }
 
@@ -287,30 +376,46 @@ async function fulfillPersonalPortalPayment(session) {
     return;
   }
 
-  const request = await PersonalPortalRequest.findById(requestId);
-  if (!request) {
+  const bundle = await loadRequestBundle(requestId);
+  if (!bundle?.order) {
     logger.warn("Personal portal request not found", { requestId });
     return;
   }
 
-  if (request.processing_fee_paid && request.order_id) {
+  const { order } = bundle;
+
+  // Already prepaid and linked for staff invoice/payment ops
+  if (order.processing_fee_paid && order.order_id) {
     return;
   }
 
   const confirmationReference =
-    request.confirmation_reference || generateConfirmationReference();
+    order.confirmation_reference || generateConfirmationReference();
   const lookupExpiresAt = addLookupExpiry(new Date());
+  const feeAmount = getProcessingFeeAmount();
 
-  const orderPayload = await buildOrderPayloadFromRequest(request, confirmationReference);
-  const order = await orderService.createOrder(
-    orderPayload,
-    null,
-    {},
-    {
-      allowIncomplete: true,
-      creationSource: "personal_portal",
-    }
-  );
+  let dmsOrderId = order.order_id || null;
+
+  if (!dmsOrderId) {
+    const orderPayload = buildOrderPayloadFromBundle(bundle, confirmationReference);
+    const dmsOrder = await orderService.createOrder(
+      {
+        ...orderPayload,
+        prepaymentPaid: feeAmount,
+        prepaymentDue: 0,
+        prepaymentMemo: "Personal portal processing fee",
+        prepaymentDate: new Date().toISOString().slice(0, 10),
+        prepaymentCheck: "STRIPE-PORTAL",
+      },
+      null,
+      {},
+      {
+        allowIncomplete: true,
+        creationSource: "personal_portal",
+      }
+    );
+    dmsOrderId = dmsOrder.id;
+  }
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -318,19 +423,32 @@ async function fulfillPersonalPortalPayment(session) {
   try {
     await connection.beginTransaction();
 
-    await Order.createAdditionalDocument(connection, {
-      orderId: order.id,
-      documentName: "Driver's License",
-      originalFileName: path.basename(request.driver_license_storage_path),
-      mimeType: "image/jpeg",
-      storagePath: request.driver_license_storage_path,
-      fileSizeBytes: null,
-      uploadedBy: null,
+    if (order.driver_license_storage_path) {
+      await Order.createAdditionalDocument(connection, {
+        orderId: dmsOrderId,
+        documentName: "Driver's License",
+        originalFileName: path.basename(order.driver_license_storage_path),
+        mimeType: "image/jpeg",
+        storagePath: order.driver_license_storage_path,
+        fileSizeBytes: null,
+        uploadedBy: null,
+      });
+    }
+
+    await Order.upsertPayment(connection, {
+      orderId: dmsOrderId,
+      paymentType: "prepayment",
+      checkNumber: "STRIPE-PORTAL",
+      paymentDate: new Date().toISOString().slice(0, 10),
+      amount: feeAmount,
+      dueAmount: 0,
+      isPaid: 1,
+      memo: "Personal portal processing fee ($35 prepayment)",
     });
 
-    await PersonalPortalRequest.markPaid(connection, requestId, {
+    await PersonalRequestOrder.markPaid(connection, requestId, {
       confirmationReference,
-      orderId: order.id,
+      orderId: dmsOrderId,
       portalStatus: "in_process",
       lookupExpiresAt,
     });
@@ -344,11 +462,91 @@ async function fulfillPersonalPortalPayment(session) {
   }
 
   await emailService.sendPersonalPortalConfirmation({
-    to: request.email,
-    name: `${request.first_name} ${request.last_name}`.trim(),
+    to: order.email,
+    name: `${order.first_name} ${order.last_name}`.trim(),
     confirmationReference,
     lookupExpiresAt,
   });
+
+  try {
+    const stripePaymentService = require("./stripePaymentService");
+    await stripePaymentService.recordPersonalPortalStripePayment(session);
+  } catch (error) {
+    logger.warn("Failed to record personal portal Stripe payment", {
+      requestId,
+      sessionId: session.id,
+      message: error.message,
+    });
+  }
+}
+
+/**
+ * Keep personal portal_status in sync with DMS invoice / payment / release.
+ */
+async function syncPortalStatusForDmsOrder(orderId) {
+  const normalizedId = Number(orderId);
+  if (!Number.isFinite(normalizedId)) return null;
+
+  const request = await PersonalRequestOrder.findByOrderId(normalizedId);
+  if (!request?.processing_fee_paid) return null;
+
+  const nextStatus = await computePortalStatusForLinkedOrder(normalizedId, request);
+  if (!nextStatus) return request.portal_status;
+
+  const currentRank = STATUS_RANK[request.portal_status] ?? 0;
+  const nextRank = STATUS_RANK[nextStatus] ?? 0;
+  // Allow moving back from released if records were removed
+  if (nextRank < currentRank && request.portal_status !== "released") {
+    return request.portal_status;
+  }
+
+  if (nextStatus === "released") {
+    try {
+      const link = await recordDownloadService.createDownloadLinkForOrder(normalizedId);
+      await PersonalRequestOrder.setReleasedDownloadToken(request.id, link.token);
+    } catch (error) {
+      logger.warn("Unable to create release download link for personal request", {
+        requestId: request.id,
+        orderId: normalizedId,
+        message: error.message,
+      });
+      await PersonalRequestOrder.updatePortalStatus(request.id, "released");
+    }
+  } else if (nextStatus !== request.portal_status) {
+    await PersonalRequestOrder.updatePortalStatus(request.id, nextStatus);
+  }
+
+  return nextStatus;
+}
+
+async function computePortalStatusForLinkedOrder(orderId, requestOrder) {
+  const dmsOrder = await Order.findById(orderId);
+  if (!dmsOrder) {
+    return requestOrder?.portal_status || "in_process";
+  }
+
+  const [invoice, xray, records] = await Promise.all([
+    Invoice.findByOrderId(orderId),
+    InvoiceXray.findByOrderId(orderId),
+    OrderRecord.findByOrderId(orderId),
+  ]);
+
+  const hasInvoice =
+    hasStandardInvoiceFields(invoice) || hasXrayInvoiceFields(xray);
+  const allPaid = hasInvoice ? await areAllOrderInvoicesPaid(orderId) : false;
+  const hasRecordFiles = (records || []).some((record) => record.storage_path);
+
+  // Records uploaded = Released (records are ready for the patient)
+  if (hasRecordFiles) {
+    return "released";
+  }
+  if (hasInvoice && allPaid) {
+    return "paid";
+  }
+  if (hasInvoice) {
+    return "invoice";
+  }
+  return "in_process";
 }
 
 async function getCheckoutResult(requestId, sessionId) {
@@ -357,8 +555,8 @@ async function getCheckoutResult(requestId, sessionId) {
     throw new ApiError(400, "Invalid request id");
   }
 
-  const request = await PersonalPortalRequest.findById(normalizedId);
-  if (!request) {
+  const bundle = await loadRequestBundle(normalizedId);
+  if (!bundle?.order) {
     throw new ApiError(404, "Request not found");
   }
 
@@ -366,7 +564,7 @@ async function getCheckoutResult(requestId, sessionId) {
     throw new ApiError(400, "session_id is required");
   }
 
-  if (request.stripe_checkout_session_id !== sessionId) {
+  if (bundle.order.stripe_checkout_session_id !== sessionId) {
     throw new ApiError(400, "Payment session does not match this request");
   }
 
@@ -377,35 +575,16 @@ async function getCheckoutResult(requestId, sessionId) {
     await fulfillPersonalPortalPayment(session);
   }
 
-  const updated = await PersonalPortalRequest.findById(normalizedId);
-
+  const updated = await loadRequestBundle(normalizedId);
   return mapPublicRequestStatus(updated);
 }
 
-async function derivePortalStatus(request, order) {
-  if (!request || !order) {
-    return request?.portal_status || "pending_payment";
-  }
-
-  const records = await OrderRecord.findByOrderId(order.id);
-  const hasRecordFiles = records.some((record) => record.storage_path);
-
-  if (
-    hasRecordFiles &&
-    ["Ready", "Completed", "Ready to Pickup"].includes(order.status)
-  ) {
-    return "released";
-  }
-
-  return request.portal_status || "in_process";
-}
-
-function assertLookupNotExpired(request) {
-  if (!request?.lookup_expires_at) {
+function assertLookupNotExpired(requestOrder) {
+  if (!requestOrder?.lookup_expires_at) {
     throw new ApiError(410, "Status lookup is no longer available for this request.");
   }
 
-  if (new Date(request.lookup_expires_at) < new Date()) {
+  if (new Date(requestOrder.lookup_expires_at) < new Date()) {
     throw new ApiError(
       410,
       "Status lookup has expired. Please contact support if you need assistance."
@@ -414,70 +593,217 @@ function assertLookupNotExpired(request) {
 }
 
 async function lookupRequestStatus({ confirmationReference, driverLicenseNumber }) {
-  let request = null;
+  let requestOrder = null;
 
   if (confirmationReference) {
-    request = await PersonalPortalRequest.findByConfirmationReference(
+    requestOrder = await PersonalRequestOrder.findByConfirmationReference(
       confirmationReference
     );
   } else if (driverLicenseNumber) {
-    request = await PersonalPortalRequest.findByDriverLicenseNumber(driverLicenseNumber);
+    requestOrder = await PersonalRequestOrder.findByDriverLicenseNumber(
+      driverLicenseNumber
+    );
   }
 
-  if (!request) {
+  if (!requestOrder) {
     throw new ApiError(404, "No request found with the information provided.");
   }
 
-  if (!request.processing_fee_paid) {
+  if (!requestOrder.processing_fee_paid) {
     throw new ApiError(400, "This request has not been submitted and paid yet.");
   }
 
-  assertLookupNotExpired(request);
+  assertLookupNotExpired(requestOrder);
 
-  return mapPublicRequestStatus(request);
+  const bundle = await loadRequestBundle(requestOrder.id);
+  return mapPublicRequestStatus(bundle);
 }
 
-async function mapPublicRequestStatus(request) {
-  let order = null;
-  if (request.order_id) {
-    order = await Order.findById(request.order_id);
+async function mapPublicRequestStatus(bundle) {
+  const order = bundle?.order;
+  if (!order) {
+    throw new ApiError(404, "Request not found");
   }
 
-  const portalStatus = await derivePortalStatus(request, order);
+  const primaryFacility = bundle.primaryFacility;
+  const recordTypes = bundle.recordTypes || [];
+
+  let portalStatus = order.portal_status || "pending_payment";
+  if (order.order_id && order.processing_fee_paid) {
+    portalStatus =
+      (await syncPortalStatusForDmsOrder(order.order_id)) || portalStatus;
+  }
+
+  const refreshed = order.order_id
+    ? (await PersonalRequestOrder.findById(order.id)) || order
+    : order;
+  portalStatus = refreshed.portal_status || portalStatus;
   const statusLabel = PORTAL_STATUS_LABELS[portalStatus] || portalStatus;
 
   let downloadUrl = null;
-  if (portalStatus === "released" && request.order_id) {
+  if (portalStatus === "released" && order.order_id) {
     try {
-      const link = await recordDownloadService.createDownloadLinkForOrder(
-        request.order_id
-      );
-      downloadUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/download/records/${link.token}`;
+      if (refreshed.released_download_token) {
+        downloadUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/download/records/${refreshed.released_download_token}`;
+      } else {
+        const link = await recordDownloadService.createDownloadLinkForOrder(
+          order.order_id
+        );
+        downloadUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/download/records/${link.token}`;
+      }
     } catch (error) {
       logger.warn("Unable to create download link for personal portal request", {
-        requestId: request.id,
+        requestId: order.id,
         message: error.message,
       });
     }
   }
 
+  const stripePayments = await PersonalRequestStripePayment.findByPersonalRequestOrderId(
+    order.id
+  );
+  const latestPayment = stripePayments[0] || null;
+
   return {
-    confirmationReference: request.confirmation_reference,
+    id: order.id,
+    confirmationReference: order.confirmation_reference,
     status: portalStatus,
     statusLabel,
-    firstName: request.first_name,
-    lastName: request.last_name,
-    email: tokenService.maskEmail(request.email),
-    treatingFacilityName: request.treating_facility_name,
-    recordsDateBegin: formatIsoToDisplay(request.records_date_begin),
-    recordsDateEnd: formatIsoToDisplay(request.records_date_end),
-    recordTypes: parseRecordTypesJson(request.record_types_json),
-    deliveryPreference: request.delivery_preference,
-    lookupExpiresAt: request.lookup_expires_at,
+    firstName: order.first_name,
+    lastName: order.last_name,
+    email: tokenService.maskEmail(order.email),
+    treatingFacilityName:
+      primaryFacility?.facility_name || order.treating_facility_name || null,
+    recordsDateBegin: formatIsoToDisplay(primaryFacility?.records_date_begin),
+    recordsDateEnd: formatIsoToDisplay(primaryFacility?.records_date_end),
+    recordTypes,
+    deliveryPreference: order.delivery_preference,
+    lookupExpiresAt: order.lookup_expires_at,
     canDownload: portalStatus === "released" && Boolean(downloadUrl),
     downloadUrl,
-    orderId: request.order_id,
+    orderId: order.order_id || null,
+    createdAt: order.created_at,
+    payment: latestPayment
+      ? {
+          status: latestPayment.status,
+          amount: Number(latestPayment.amount),
+          currency: latestPayment.currency,
+          paidAt: latestPayment.paid_at,
+          cardBrand: latestPayment.card_brand,
+          cardLast4: latestPayment.card_last4,
+          receiptUrl: latestPayment.receipt_url,
+          stripePaymentIntentId: latestPayment.stripe_payment_intent_id,
+        }
+      : null,
   };
+}
+
+async function getDashboardForUser(portalUserId) {
+  const counts = await PersonalRequestOrder.countByPortalUserId(portalUserId);
+  const rows = await PersonalRequestOrder.findByPortalUserId(portalUserId, {
+    limit: 20,
+  });
+
+  const recentRequests = [];
+  for (const row of rows) {
+    if (!row.processing_fee_paid) continue;
+    const bundle = await loadRequestBundle(row.id);
+    recentRequests.push(await mapPublicRequestStatus(bundle));
+  }
+
+  return {
+    stats: {
+      totalOrders: Number(counts.total || 0),
+      inProcess: Number(counts.in_process || 0),
+      invoice: Number(counts.invoice || 0),
+      paid: Number(counts.paid || 0),
+      released: Number(counts.released || 0),
+    },
+    recentRequests,
+  };
+}
+
+async function backfillMissingDmsOrderLinks() {
+  const rows = await PersonalRequestOrder.findPaidWithoutOrderId({ limit: 25 });
+  for (const row of rows) {
+    const bundle = await loadRequestBundle(row.id);
+    if (!bundle?.order || bundle.order.order_id) continue;
+
+    const confirmationReference =
+      bundle.order.confirmation_reference || generateConfirmationReference();
+    const lookupExpiresAt =
+      bundle.order.lookup_expires_at || addLookupExpiry(new Date());
+    const feeAmount = getProcessingFeeAmount();
+
+    try {
+      const orderPayload = buildOrderPayloadFromBundle(
+        bundle,
+        confirmationReference
+      );
+      const dmsOrder = await orderService.createOrder(
+        {
+          ...orderPayload,
+          prepaymentPaid: feeAmount,
+          prepaymentDue: 0,
+          prepaymentMemo: "Personal portal processing fee",
+          prepaymentDate: new Date().toISOString().slice(0, 10),
+          prepaymentCheck: "STRIPE-PORTAL",
+        },
+        null,
+        {},
+        {
+          allowIncomplete: true,
+          creationSource: "personal_portal",
+        }
+      );
+
+      const pool = getPool();
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        if (bundle.order.driver_license_storage_path) {
+          await Order.createAdditionalDocument(connection, {
+            orderId: dmsOrder.id,
+            documentName: "Driver's License",
+            originalFileName: path.basename(
+              bundle.order.driver_license_storage_path
+            ),
+            mimeType: "image/jpeg",
+            storagePath: bundle.order.driver_license_storage_path,
+            fileSizeBytes: null,
+            uploadedBy: null,
+          });
+        }
+        await Order.upsertPayment(connection, {
+          orderId: dmsOrder.id,
+          paymentType: "prepayment",
+          checkNumber: "STRIPE-PORTAL",
+          paymentDate: new Date().toISOString().slice(0, 10),
+          amount: feeAmount,
+          dueAmount: 0,
+          isPaid: 1,
+          memo: "Personal portal processing fee ($35 prepayment)",
+        });
+        await PersonalRequestOrder.markPaid(connection, row.id, {
+          confirmationReference,
+          orderId: dmsOrder.id,
+          portalStatus: bundle.order.portal_status || "in_process",
+          lookupExpiresAt,
+        });
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+    } catch (error) {
+      logger.warn("Failed to backfill DMS order for personal request", {
+        requestId: row.id,
+        message: error.message,
+      });
+    }
+  }
 }
 
 module.exports = {
@@ -487,5 +813,8 @@ module.exports = {
   fulfillPersonalPortalPayment,
   getCheckoutResult,
   lookupRequestStatus,
+  getDashboardForUser,
+  syncPortalStatusForDmsOrder,
+  backfillMissingDmsOrderLinks,
   PORTAL_STATUS_LABELS,
 };

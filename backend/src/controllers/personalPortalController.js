@@ -61,6 +61,53 @@ exports.submitRequest = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, data, "Proceed to payment to submit your request");
 });
 
+exports.submitAuthenticatedRequest = asyncHandler(async (req, res) => {
+  const accountEmail = `${req.personalUser.email || ""}`.trim().toLowerCase();
+
+  const validation = validatePersonalRequestSubmit(
+    {
+      ...req.body,
+      email: accountEmail,
+    },
+    { authenticated: true }
+  );
+
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
+  if (!req.file) {
+    throw new ApiError(400, "Validation failed", [
+      { field: "driverLicenseFile", message: "Driver's license image is required" },
+    ]);
+  }
+
+  const data = await personalPortalService.createPendingRequest(
+    {
+      ...validation.parsed,
+      email: accountEmail,
+    },
+    req.file,
+    { portalUserId: req.personalUser.id }
+  );
+
+  return ApiResponse.success(res, data, "Proceed to payment to submit your request");
+});
+
+exports.getDashboard = asyncHandler(async (req, res) => {
+  const data = await personalPortalService.getDashboardForUser(req.personalUser.id);
+  return ApiResponse.success(res, data, "Dashboard loaded");
+});
+
+exports.listRequests = asyncHandler(async (req, res) => {
+  const data = await personalPortalService.getDashboardForUser(req.personalUser.id);
+  return ApiResponse.success(
+    res,
+    { requests: data.recentRequests, stats: data.stats },
+    "Requests loaded"
+  );
+});
+
 exports.getCheckoutResult = asyncHandler(async (req, res) => {
   const requestId = req.query.request_id;
   const sessionId = req.query.session_id;

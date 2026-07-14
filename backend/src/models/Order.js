@@ -306,6 +306,24 @@ function buildFindAllWhere(filters = {}) {
   const conditions = [];
   const params = {};
 
+  // Personal Orders nav lists only personal_portal; normal Orders excludes them
+  if (filters.creationSource === "personal_portal") {
+    conditions.push("o.creation_source = 'personal_portal'");
+  } else {
+    conditions.push(
+      "(o.creation_source IS NULL OR o.creation_source <> 'personal_portal')"
+    );
+  }
+
+  if (filters.portalStatus) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM personal_request_orders pro
+      WHERE pro.order_id = o.id
+        AND pro.portal_status = :portalStatus
+    )`);
+    params.portalStatus = filters.portalStatus;
+  }
+
   if (filters.readyFilter) {
     conditions.push(`(
       o.status IN ('Ready', 'Ready to Pickup')
@@ -931,6 +949,15 @@ class Order {
        WHERE id = :orderId`,
       { orderId }
     );
+
+    setImmediate(() => {
+      try {
+        const personalPortalService = require("../services/personalPortalService");
+        personalPortalService.syncPortalStatusForDmsOrder(orderId).catch(() => {});
+      } catch (_error) {
+        // ignore — personal portal sync is optional
+      }
+    });
 
     return true;
   }

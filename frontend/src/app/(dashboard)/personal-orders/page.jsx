@@ -1,0 +1,41 @@
+"use client";
+
+import { useState } from "react";
+import DashboardShell from "@/components/layout/DashboardShell";
+import PersonalOrderStatsGrid from "@/components/personal-orders/PersonalOrderStatsGrid";
+import PersonalOrderFilterBar, {
+  defaultPersonalOrderFilters,
+} from "@/components/personal-orders/PersonalOrderFilterBar";
+import OrdersTable from "@/components/orders/OrdersTable";
+
+export default function PersonalOrdersPage() {
+  const [filters, setFilters] = useState(defaultPersonalOrderFilters);
+
+  return (
+    <DashboardShell>
+      <div className="flex min-h-[calc(100vh-92px)] flex-col gap-4">
+        <div>
+          <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
+            Personal Orders
+          </h1>
+          <p className="mt-[4px] text-[13px] text-[#64748B]">
+            Personal request portal orders ($35 prepayment). Invoice and records use the same
+            staff tools as Orders. Status meanings: In Process (received) → Invoice (extra
+            charges) → Paid (preparing records) → Released (ready).
+          </p>
+        </div>
+
+        <PersonalOrderStatsGrid />
+
+        <PersonalOrderFilterBar filters={filters} onFiltersChange={setFilters} />
+
+        <OrdersTable
+          filters={filters}
+          fitToWindow
+          useServerPagination
+          personalMode
+        />
+      </div>
+    </DashboardShell>
+  );
+}

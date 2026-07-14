@@ -8,6 +8,7 @@ const EMPLOYEE_ALLOWED_PATH_PREFIXES = [
   "/dashboard",
   "/orders",
   "/company-orders",
+  "/personal-orders",
   "/activity-log",
   "/notifications",
 ];

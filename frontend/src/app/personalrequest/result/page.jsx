@@ -116,16 +116,27 @@ export default function PersonalRequestResultPage() {
               <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[12px] text-[#92400E]">
                 <li>We verify your identity and request details</li>
                 <li>Records are retrieved from the treating facility</li>
-                <li>You&apos;ll be notified when records are ready for download</li>
+                <li>
+                  Come back anytime with your order number to check status (available for about 7
+                  days)
+                </li>
               </ul>
             </div>
 
-            <Link
-              href="/personalrequest"
-              className="inline-flex h-[46px] w-full items-center justify-center rounded-[8px] bg-[#0097B2] text-[14px] font-semibold text-white hover:bg-[#0086A0]"
-            >
-              Submit Another Request
-            </Link>
+            <div className="flex flex-col gap-3">
+              <Link
+                href="/personalrequest/dashboard"
+                className="inline-flex h-[46px] w-full items-center justify-center rounded-[8px] bg-[#0097B2] text-[14px] font-semibold text-white hover:bg-[#0086A0]"
+              >
+                Go to My Dashboard
+              </Link>
+              <Link
+                href={`/personalrequest/status?ref=${encodeURIComponent(result.confirmationReference || "")}`}
+                className="inline-flex h-[46px] w-full items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white text-[14px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+              >
+                Check Request Status
+              </Link>
+            </div>
           </div>
         ) : null}
       </section>
