@@ -300,11 +300,30 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
+  // Update the company portal stage
+  try {
+    const {
+      maybeAdvanceCompanyPortalAfterInvoicesPaid,
+    } = require("./companyPortalStageHooks");
+
+    await maybeAdvanceCompanyPortalAfterInvoicesPaid(orderId);
+  } catch (error) {
+    console.warn(
+      "[company-portal] Paid-stage advance after manual payment skipped:",
+      error.message || error
+    );
+  }
+
+  // Update the personal portal status
   try {
     const personalPortalService = require("./personalPortalService");
+
     await personalPortalService.syncPortalStatusForDmsOrder(orderId);
-  } catch (_syncError) {
-    // Non-blocking
+  } catch (error) {
+    console.warn(
+      "[personal-portal] Status sync after manual payment skipped:",
+      error.message || error
+    );
   }
 
   return searchOrderInvoices(order.order_number);

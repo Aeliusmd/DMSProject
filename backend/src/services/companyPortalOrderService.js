@@ -423,9 +423,29 @@ async function trackOrderByNumber(orderNumber, companyUserId) {
   }
 
   const formatted = formatOrder(order);
+  let paymentLinks = [];
+
+  if (order.internal_order_id) {
+    try {
+      const {
+        buildCompanyPortalInvoicePaymentLinks,
+      } = require("./companyPortalStageHooks");
+      paymentLinks = await buildCompanyPortalInvoicePaymentLinks(
+        order.internal_order_id
+      );
+    } catch (error) {
+      console.warn(
+        "[company-portal] Unable to build track payment links:",
+        error.message || error
+      );
+    }
+  }
+
   return {
     ...formatted,
     canDownloadDocuments: order.status === "Released",
+    paymentLinks,
+    hasUnpaidInvoices: paymentLinks.length > 0,
   };
 }
 
@@ -537,6 +557,28 @@ async function createCheckout(companyUserId, { uploadToken, details }) {
   };
 }
 
+async function formatPaidPortalOrder(orderRow) {
+  if (!orderRow) return null;
+
+  if (orderRow.payment_status === "paid" && !orderRow.internal_order_id) {
+    try {
+      const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+      await companyPortalInternalSyncService.ensureInternalOrderForPortalOrder(
+        orderRow
+      );
+      const refreshed = await CompanyPortalOrder.findById(orderRow.id);
+      return formatOrder(refreshed || orderRow);
+    } catch (error) {
+      console.warn(
+        "[company-portal] Lazy internal sync failed:",
+        error.message || error
+      );
+    }
+  }
+
+  return formatOrder(orderRow);
+}
+
 async function createOrderFromPending(pending, session, stripeDetails) {
   const payload = parsePendingPayload(pending);
   const recordFlags = normalizeRecordTypeFlags(payload);
@@ -593,7 +635,21 @@ async function createOrderFromPending(pending, session, stripeDetails) {
   });
 
   await CompanyPortalPendingCheckout.deleteById(pending.id);
-  return formatOrder(order);
+
+  try {
+    const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+    await companyPortalInternalSyncService.ensureInternalOrderForPortalOrder(
+      order
+    );
+  } catch (error) {
+    console.warn(
+      "[company-portal] Failed to sync internal order:",
+      error.message || error
+    );
+  }
+
+  const refreshed = await CompanyPortalOrder.findById(order.id);
+  return formatOrder(refreshed || order);
 }
 
 async function fulfillCompanyPortalCheckoutSession(session) {
@@ -620,9 +676,9 @@ async function fulfillCompanyPortalCheckoutSession(session) {
         existingBySession.id,
         stripeDetails.receiptUrl
       );
-      return formatOrder(refreshed);
+      return formatPaidPortalOrder(refreshed);
     }
-    return formatOrder(existingBySession);
+    return formatPaidPortalOrder(existingBySession);
   }
 
   // Legacy path: older checkouts that created draft rows before payment
@@ -762,7 +818,31 @@ async function getReleasedDocuments(orderId, companyUserId) {
     );
   }
 
-  return getSubpoenaFile(orderId, companyUserId);
+  // Prefer scanned medical/other records from the linked internal order.
+  if (order.internal_order_id) {
+    const Order = require("../models/Order");
+    const {
+      resolveOrderRecordFiles,
+    } = require("./recordDownloadService");
+    const internalOrder = await Order.findById(order.internal_order_id);
+    if (internalOrder) {
+      const { files } = await resolveOrderRecordFiles(internalOrder);
+      if (files.length) {
+        return {
+          kind: "records",
+          files,
+          orderNumber: order.order_number || String(order.id),
+        };
+      }
+    }
+  }
+
+  const subpoena = await getSubpoenaFile(orderId, companyUserId);
+  return {
+    kind: "subpoena",
+    absolutePath: subpoena.absolutePath,
+    fileName: subpoena.fileName,
+  };
 }
 
 async function generatePaymentReceiptPdf(orderId, companyUserId) {

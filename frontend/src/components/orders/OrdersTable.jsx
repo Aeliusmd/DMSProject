@@ -39,6 +39,8 @@ import {
   recordOrderPickup,
   recordOrderFax,
   removeMedicalRecords,
+  updateCompanyOrderStage,
+  emailCompanyOrderRecords,
 } from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
@@ -63,7 +65,7 @@ import {
   RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
-import { getOrderTypeLabel } from "@/lib/orders/recordTypeUtils";
+import { getOrderRecordSlots, getOrderTypeLabel } from "@/lib/orders/recordTypeUtils";
 
 const ORDERS_PER_PAGE = 10;
 
@@ -216,6 +218,73 @@ const WORKFLOW_STAGES = [
   "SENT",
 ];
 
+const COMPANY_PORTAL_STAGES = [
+  "In Process",
+  "Invoice",
+  "Paid",
+  "Released",
+];
+
+function resolveEffectiveCompanyPortalStatus(order = {}) {
+  const status = order.companyPortalStatus || "In Process";
+
+  if (
+    status === "Invoice" &&
+    order.companyPortalInvoiceSent &&
+    order.companyPortalAllInvoicesPaid
+  ) {
+    return "Paid";
+  }
+
+  return status;
+}
+
+function canCompanyPortalUploadRecords(order = {}) {
+  return resolveEffectiveCompanyPortalStatus(order) === "Paid";
+}
+
+function hasReachedCompanyPortalPaidStage(order = {}) {
+  const status = resolveEffectiveCompanyPortalStatus(order);
+  if (status === "Paid" || status === "Released") return true;
+
+  if (
+    Boolean(order.companyPortalInvoiceSent) &&
+    Boolean(order.companyPortalAllInvoicesPaid)
+  ) {
+    return true;
+  }
+
+  const invoice = order.invoice || {};
+  const invoiceSent = Boolean(
+    order.companyPortalInvoiceSent ||
+      invoice.sentDate ||
+      invoice.xraySentDate
+  );
+  const amountDue = parsePaymentAmount(invoice.due);
+  const invoicePaid =
+    Boolean(order.companyPortalAllInvoicesPaid) ||
+    invoice.status === "Paid" ||
+    (invoiceSent && amountDue <= 0);
+
+  return invoiceSent && invoicePaid;
+}
+
+function shouldShowCompanyPortalUploadLink(order = {}) {
+  if (order.certificateNoRecords) return false;
+  if (!hasReachedCompanyPortalPaidStage(order)) return false;
+  if (Boolean(order.records?.allRecordsUploaded)) return false;
+  return true;
+}
+
+function getCompanyPortalRecordsUploadHref(order) {
+  const returnTo =
+    order.creationSource === "company_portal" ? "company-orders" : "orders";
+
+  return `/orders/scan-medical-records?orderId=${encodeURIComponent(
+    order.dbId
+  )}&returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 const WORKFLOW_STATUS_STYLES = {
   complete: { text: "text-[#059669]", dot: "bg-[#10B981]" },
   failed: { text: "text-red-500", dot: "bg-red-500" },
@@ -243,7 +312,65 @@ function mapWorkflowStages(stages = []) {
   });
 }
 
-function buildWorkflowStagesForOrder(order) {
+function buildCompanyPortalStages(order) {
+  const status = resolveEffectiveCompanyPortalStatus(order);
+  const invoiceComplete =
+    Boolean(order.companyPortalInvoiceSent) ||
+    ["Invoice", "Paid", "Released"].includes(status);
+  const paidComplete =
+    Boolean(order.companyPortalAllInvoicesPaid) ||
+    ["Paid", "Released"].includes(status);
+  const releasedComplete = status === "Released";
+  const inProcessComplete =
+    invoiceComplete || paidComplete || releasedComplete || status !== "In Process";
+
+  const canScan = shouldShowCompanyPortalUploadLink(order);
+  const canEmail =
+    Boolean(order.companyPortalCanEmailRecords) ||
+    (hasReachedCompanyPortalPaidStage(order) &&
+      Boolean(order.hasAnyRecordsUploaded || order.records?.anyRecordsUploaded));
+
+  return COMPANY_PORTAL_STAGES.map((stageName) => {
+    let stageStatus = "pending";
+    if (stageName === "In Process" && inProcessComplete) stageStatus = "complete";
+    if (stageName === "Invoice" && invoiceComplete) stageStatus = "complete";
+    if (stageName === "Paid" && paidComplete) stageStatus = "complete";
+    if (stageName === "Released" && releasedComplete) stageStatus = "complete";
+
+    // Highlight the first incomplete stage as current.
+    if (
+      stageStatus === "pending" &&
+      ((stageName === "Invoice" && inProcessComplete && !invoiceComplete) ||
+        (stageName === "Paid" && invoiceComplete && !paidComplete) ||
+        (stageName === "Released" && paidComplete && !releasedComplete))
+    ) {
+      stageStatus = "sent";
+    }
+
+    return {
+      key: stageName,
+      label: stageName,
+      status: stageStatus,
+      isCompanyPortalStage: true,
+      canAdvance: false,
+      showScanRecordsLink: stageName === "Paid" && canScan,
+      showEmailRecords:
+        stageName === "Released" &&
+        canEmail &&
+        !releasedComplete &&
+        Boolean(order.hasAnyRecordsUploaded || order.records?.anyRecordsUploaded),
+      showPreviewRecords:
+        stageName === "Paid" &&
+        Boolean(order.hasAnyRecordsUploaded || order.records?.anyRecordsUploaded),
+    };
+  });
+}
+
+function buildWorkflowStagesForOrder(order, companyPortalMode = false) {
+  if (companyPortalMode || order.creationSource === "company_portal") {
+    return buildCompanyPortalStages(order);
+  }
+
   const prepaymentPaid = parsePaymentAmount(order.invoice?.prepaymentPaid);
   const custodianPaid = parsePaymentAmount(order.invoice?.custodianPaid);
   const hasAllRecordsUploaded = Boolean(order.records?.allRecordsUploaded);
@@ -455,7 +582,7 @@ function filterOrdersByPeriod(orders, period) {
   });
 }
 
-function toRenderOrder(order) {
+function toRenderOrder(order, companyPortalMode = false) {
   return {
     id: order.id,
     dbId: order.dbId,
@@ -490,10 +617,18 @@ function toRenderOrder(order) {
     orderRef: order.orderRef || "",
     providerName: order.providerName || "",
     providerEmail: order.providerEmail || order.invoice?.providerEmail || "",
-    status: buildWorkflowStagesForOrder(order),
+    creationSource: order.creationSource || "manual",
+    companyPortalStatus: order.companyPortalStatus || null,
+    companyPortalOrderId: order.companyPortalOrderId || null,
+    companyPortalInvoiceSent: Boolean(order.companyPortalInvoiceSent),
+    companyPortalAllInvoicesPaid: Boolean(order.companyPortalAllInvoicesPaid),
+    companyPortalCanScanRecords: Boolean(order.companyPortalCanScanRecords),
+    companyPortalCanEmailRecords: Boolean(order.companyPortalCanEmailRecords),
+    status: buildWorkflowStagesForOrder(order, companyPortalMode),
     invoice: order.invoice || { createOnly: true },
     invoiceStatus: order.invoiceStatus || order.invoice?.status || "",
     records: order.records || { title: "Records", lines: [], links: [] },
+    orderRecords: order.records?.orderRecords || order.orderRecords || [],
     company: order.company || { name: "—", address: "", phone: "", email: "" },
     facilityInfo: order.facilityInfo || {
       name: order.facilityName || "",
@@ -530,7 +665,6 @@ function toRenderOrder(order) {
     missingRequiredFields: Array.isArray(order.missingRequiredFields)
       ? order.missingRequiredFields
       : [],
-    creationSource: order.creationSource || "manual",
     portalStatus: order.portalStatus || null,
     portalStatusLabel: order.portalStatusLabel || null,
   };
@@ -544,6 +678,8 @@ export default function OrdersTable({
   showDoctorColumn = false,
   useServerPagination = false,
   onSummaryChange = null,
+  creationSource = null,
+  companyPortalMode = false,
   personalMode = false,
 }) {
   const router = useRouter();
@@ -624,7 +760,7 @@ export default function OrdersTable({
     createdTo: filters.createdTo || "",
     creationSource: personalMode
       ? "personal_portal"
-      : filters.creationSource || "",
+      : creationSource || filters.creationSource || "",
   };
 
   const sortDir =
@@ -632,7 +768,7 @@ export default function OrdersTable({
       ? createdSortDir
       : "";
 
-  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}|${normalizedFilters.creationSource}|${excludeCompleted ? "1" : "0"}|${sortDir}|${personalMode ? "p" : "o"}`;
+  const filterKey = `${normalizedFilters.facility}|${normalizedFilters.company}|${normalizedFilters.year}|${normalizedFilters.period}|${normalizedFilters.status}|${normalizedFilters.rushLevel}|${normalizedFilters.search}|${normalizedFilters.createdFrom}|${normalizedFilters.createdTo}|${normalizedFilters.creationSource}|${excludeCompleted ? "1" : "0"}|${sortDir}|${companyPortalMode ? "c" : personalMode ? "p" : "o"}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
@@ -700,7 +836,7 @@ export default function OrdersTable({
             return next;
           });
         }
-        setOrders(data.map(toRenderOrder));
+        setOrders(data.map((row) => toRenderOrder(row, companyPortalMode)));
         setLastUpdatedAt(new Date());
         setError("");
       } catch (err) {
@@ -729,6 +865,8 @@ export default function OrdersTable({
       sortDir,
       useServerPagination,
       currentPage,
+      creationSource,
+      companyPortalMode,
       personalMode,
     ]
   );
@@ -787,6 +925,31 @@ export default function OrdersTable({
   function closeRemoveRecordsModal() {
     if (actionLoading) return;
     setRemoveRecordsModal({ open: false, order: null });
+  }
+
+  async function handleAdvanceCompanyPortalStage(order, stageName) {
+    if (!order?.dbId || !stageName || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError("");
+
+    try {
+      await updateCompanyOrderStage(order.dbId, stageName);
+      await fetchOrders({ silent: true, force: true });
+    } catch (err) {
+      setActionError(
+        getApiErrorMessage(err, "Failed to update company order stage")
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  function handleEmailCompanyPortalRecords(order) {
+    if (!order?.dbId) return;
+    openSendInvoiceEmailModal(order, "send", {
+      invoiceKind: "companyPortalRecords",
+    });
   }
 
   async function handleConfirmRemoveRecords() {
@@ -906,6 +1069,17 @@ export default function OrdersTable({
       }
 
       setEmailError("");
+
+      if (invoiceKind === "companyPortalRecords") {
+        setEmailingRecordsOrderId(order.dbId);
+        try {
+          await emailCompanyOrderRecords(order.dbId, { emails });
+          await fetchOrders({ silent: true, force: true });
+        } finally {
+          setEmailingRecordsOrderId(null);
+        }
+        return;
+      }
 
       if (invoiceKind === "records") {
         setEmailingRecordsOrderId(order.dbId);
@@ -1064,9 +1238,13 @@ export default function OrdersTable({
       }
 
       setDeliveryError("");
-      openSendInvoiceEmailModal(order, "send", { invoiceKind: "records" });
+      const isCompanyPortalOrder =
+        companyPortalMode || order.creationSource === "company_portal";
+      openSendInvoiceEmailModal(order, "send", {
+        invoiceKind: isCompanyPortalOrder ? "companyPortalRecords" : "records",
+      });
     },
-    [openSendInvoiceEmailModal]
+    [companyPortalMode, openSendInvoiceEmailModal]
   );
 
 
@@ -1623,6 +1801,20 @@ export default function OrdersTable({
                               key={stage.key || stage.label}
                               stage={stage}
                               href={getWorkflowStageHref(stage, order)}
+                              onAdvance={
+                                stage.canAdvance
+                                  ? () =>
+                                      handleAdvanceCompanyPortalStage(
+                                        order,
+                                        stage.key
+                                      )
+                                  : undefined
+                              }
+                              onEmailRecords={
+                                stage.showEmailRecords
+                                  ? () => handleEmailCompanyPortalRecords(order)
+                                  : undefined
+                              }
                               onResend={
                                 stage.showResend
                                   ? () =>
@@ -1775,6 +1967,7 @@ export default function OrdersTable({
                             Scan Records
                           </Link>
                         ) : null}
+
                         <RecordsBlock
                           records={order.records}
                           dateRequested={order.dateRequested}
@@ -1810,6 +2003,28 @@ export default function OrdersTable({
                               : undefined
                           }
                         />
+
+                        {companyPortalMode &&
+                        shouldShowCompanyPortalUploadLink(order) ? (
+                          <Link
+                            href={getCompanyPortalRecordsUploadHref(order)}
+                            className="block text-[10px] font-semibold text-[#007F96] underline"
+                          >
+                            Upload Records
+                          </Link>
+                        ) : null}
+
+                        {companyPortalMode &&
+                        (order.hasAnyRecordsUploaded ||
+                          order.records?.anyRecordsUploaded) ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMedicalRecordsOrder(order)}
+                            className="block text-left text-[10px] font-semibold text-[#007F96] underline"
+                          >
+                            View Uploaded Records
+                          </button>
+                        ) : null}
                       </div>
                     </td>
 
@@ -1847,7 +2062,9 @@ export default function OrdersTable({
                           onCertificationClick={() =>
                             setSelectedCertificationOrder(order)
                           }
-                          onCopyLetterClick={() => setSelectedCopyLetterOrder(order)}
+                          onCopyLetterClick={() =>
+                            setSelectedCopyLetterOrder(order)
+                          }
                         />
                       </td>
                     )}
@@ -2300,7 +2517,7 @@ function OrderPdfPreviewModal({
 }
 
 function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
-  const uploadedRecords = (order?.records?.orderRecords || []).filter(
+  const uploadedRecords = getOrderRecordSlots(order || {}).filter(
     (record) => record.hasFile
   );
   const [activeType, setActiveType] = useState("");
@@ -2359,6 +2576,13 @@ function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
 }
 
 function getWorkflowStageHref(stage, order) {
+  if (stage?.isCompanyPortalStage) {
+    if (stage.showScanRecordsLink) {
+      return getCompanyPortalRecordsUploadHref(order);
+    }
+    return null;
+  }
+
   if (stage.key === "Review Records") {
     if (order.certificateNoRecords) {
       return null;
@@ -2399,12 +2623,87 @@ function getWorkflowStageHref(stage, order) {
 function WorkflowStageItem({
   stage,
   href,
+  onAdvance,
+  onEmailRecords,
   onPreviewRecords,
   onResend,
   onRemoveRecords,
   resending = false,
   removingRecords = false,
 }) {
+  if (stage.isCompanyPortalStage) {
+    const style =
+      WORKFLOW_STATUS_STYLES[stage.status] || WORKFLOW_STATUS_STYLES.pending;
+
+    if (stage.showScanRecordsLink && href) {
+      return (
+        <div className="space-y-1">
+          <Link
+            href={href}
+            className="block text-[10px] font-semibold text-[#007F96] underline"
+          >
+            Upload Records
+          </Link>
+          {stage.showPreviewRecords && onPreviewRecords ? (
+            <button
+              type="button"
+              onClick={onPreviewRecords}
+              className="block text-[10px] font-semibold text-[#007F96] underline"
+            >
+              View Uploaded Records
+            </button>
+          ) : null}
+          <div
+            className={`flex w-full items-center gap-1.5 text-[10px] font-semibold ${style.text}`}
+          >
+            <WorkflowStageIcon status={stage.status} />
+            <span>{stage.label}</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (stage.showEmailRecords && onEmailRecords) {
+      return (
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={onEmailRecords}
+            className="block text-[10px] font-semibold text-[#007F96] underline"
+          >
+            Email Records Link
+          </button>
+          <div
+            className={`flex w-full items-center gap-1.5 text-[10px] font-semibold ${style.text}`}
+          >
+            <WorkflowStageIcon status={stage.status} />
+            <span>{stage.label}</span>
+          </div>
+        </div>
+      );
+    }
+
+    const className = `flex w-full items-center gap-1.5 text-left text-[10px] font-semibold ${style.text} ${
+      onAdvance ? "hover:underline" : ""
+    }`;
+
+    if (onAdvance) {
+      return (
+        <button type="button" onClick={onAdvance} className={className}>
+          <WorkflowStageIcon status={stage.status} />
+          <span>{stage.label}</span>
+        </button>
+      );
+    }
+
+    return (
+      <div className={className}>
+        <WorkflowStageIcon status={stage.status} />
+        <span>{stage.label}</span>
+      </div>
+    );
+  }
+
   if (stage.showScanRecordsLink && href) {
     const pendingStyle = WORKFLOW_STATUS_STYLES.pending;
 

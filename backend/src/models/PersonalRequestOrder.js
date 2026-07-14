@@ -220,16 +220,24 @@ class PersonalRequestOrder {
     orderIds.forEach((id, index) => {
       params[`id${index}`] = id;
     });
-    const [rows] = await pool.execute(
-      `SELECT order_id, portal_status
-       FROM personal_request_orders
-       WHERE order_id IN (${placeholders})`,
-      params
-    );
-    return rows.reduce((acc, row) => {
-      if (row.order_id) acc[row.order_id] = row;
-      return acc;
-    }, {});
+    try {
+      const [rows] = await pool.execute(
+        `SELECT order_id, portal_status
+         FROM personal_request_orders
+         WHERE order_id IN (${placeholders})`,
+        params
+      );
+      return rows.reduce((acc, row) => {
+        if (row.order_id) acc[row.order_id] = row;
+        return acc;
+      }, {});
+    } catch (error) {
+      // Personal portal tables may not be migrated yet on older DBs.
+      if (error?.code === "ER_NO_SUCH_TABLE") {
+        return {};
+      }
+      throw error;
+    }
   }
 
   static async countPaidStats() {

@@ -1,7 +1,7 @@
 const { getPool } = require("../config/database");
 
 const SELECT_COLUMNS = `
-  id, company_user_id, order_number, status,
+  id, company_user_id, internal_order_id, order_number, status,
   facility_name, facility_address, facility_city, facility_state, facility_zip, treating_doctor,
   applicant_name, case_name, case_number, rec_number, ssn,
   date_of_birth, date_of_injury, date_of_injury_text,
@@ -248,6 +248,118 @@ class CompanyPortalOrder {
       { companyUserId }
     );
 
+    const row = rows[0] || {};
+    return {
+      totalOrders: Number(row.total_orders) || 0,
+      inProcess: Number(row.in_process) || 0,
+      invoice: Number(row.invoice) || 0,
+      paid: Number(row.paid) || 0,
+      released: Number(row.released) || 0,
+    };
+  }
+
+  static async setInternalOrderId(id, internalOrderId, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE company_portal_orders
+       SET internal_order_id = :internalOrderId,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id, internalOrderId }
+    );
+    return this.findById(id, connection);
+  }
+
+  static async findByInternalOrderId(internalOrderId, connection = null) {
+    const db = connection || getPool();
+    const [rows] = await db.execute(
+      `SELECT ${SELECT_COLUMNS}
+       FROM company_portal_orders
+       WHERE internal_order_id = :internalOrderId
+       LIMIT 1`,
+      { internalOrderId }
+    );
+    return rows[0] || null;
+  }
+
+  static async findByInternalOrderIds(internalOrderIds = [], connection = null) {
+    const ids = [...new Set(internalOrderIds.map(Number).filter((id) => id > 0))];
+    if (!ids.length) return [];
+
+    const db = connection || getPool();
+    const placeholders = ids.map((_, index) => `:id${index}`).join(", ");
+    const params = {};
+    ids.forEach((id, index) => {
+      params[`id${index}`] = id;
+    });
+
+    const [rows] = await db.execute(
+      `SELECT ${SELECT_COLUMNS}
+       FROM company_portal_orders
+       WHERE internal_order_id IN (${placeholders})`,
+      params
+    );
+    return rows;
+  }
+
+  static async listPaidUnlinked({ limit = 100 } = {}, connection = null) {
+    const db = connection || getPool();
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const [rows] = await db.execute(
+      `SELECT ${SELECT_COLUMNS}
+       FROM company_portal_orders
+       WHERE payment_status = 'paid'
+         AND order_number IS NOT NULL
+         AND internal_order_id IS NULL
+         AND status <> 'Draft'
+       ORDER BY id ASC
+       LIMIT ${safeLimit}`
+    );
+    return rows;
+  }
+
+  static async listPaidLinked({ limit = 200 } = {}, connection = null) {
+    const db = connection || getPool();
+    const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+    const [rows] = await db.execute(
+      `SELECT ${SELECT_COLUMNS}
+       FROM company_portal_orders
+       WHERE payment_status = 'paid'
+         AND order_number IS NOT NULL
+         AND internal_order_id IS NOT NULL
+         AND status <> 'Draft'
+       ORDER BY id DESC
+       LIMIT ${safeLimit}`
+    );
+    return rows;
+  }
+
+  static async updateStatus(id, status, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE company_portal_orders
+       SET status = :status,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id, status }
+    );
+    return this.findById(id, connection);
+  }
+
+  static async getGlobalStageStats(connection = null) {
+    const db = connection || getPool();
+    const [rows] = await db.execute(
+      `SELECT
+         COUNT(*) AS total_orders,
+         SUM(CASE WHEN status = 'In Process' THEN 1 ELSE 0 END) AS in_process,
+         SUM(CASE WHEN status = 'Invoice' THEN 1 ELSE 0 END) AS invoice,
+         SUM(CASE WHEN status = 'Paid' THEN 1 ELSE 0 END) AS paid,
+         SUM(CASE WHEN status = 'Released' THEN 1 ELSE 0 END) AS released
+       FROM company_portal_orders
+       WHERE payment_status = 'paid'
+         AND order_number IS NOT NULL
+         AND status <> 'Draft'`
+    );
     const row = rows[0] || {};
     return {
       totalOrders: Number(row.total_orders) || 0,

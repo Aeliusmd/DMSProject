@@ -5,14 +5,22 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { logout } from "@/lib/auth/authApi";
-
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessNavItem } from "@/lib/auth/roles";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
   { label: "Orders", href: "/orders", icon: <OrdersIcon /> },
-  { label: "Personal Orders", href: "/personal-orders", icon: <PersonalOrdersIcon /> },
+  {
+    label: "Company Orders",
+    href: "/company-orders",
+    icon: <CompanyOrdersIcon />,
+  },
+  {
+    label: "Personal Orders",
+    href: "/personal-orders",
+    icon: <PersonalOrdersIcon />,
+  },
   { label: "Invoices", href: "/invoices", icon: <InvoicesIcon /> },
   { label: "Payments", href: "/payments", icon: <PaymentsIcon /> },
   { label: "Employees", href: "/employees", icon: <EmployeesIcon /> },
@@ -28,6 +36,7 @@ export default function Sidebar({ isCollapsed }) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const user = getStoredUser();
+
   const visibleNavItems = navItems.filter((item) =>
     canAccessNavItem(user, item.href)
   );
@@ -70,7 +79,9 @@ export default function Sidebar({ isCollapsed }) {
           {visibleNavItems.map((item) => {
             const isActive =
               pathname === item.href ||
-              (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
+              (item.href !== "/dashboard" &&
+                item.href !== "/" &&
+                pathname.startsWith(`${item.href}/`));
 
             return (
               <Link
@@ -113,6 +124,7 @@ export default function Sidebar({ isCollapsed }) {
           }`}
         >
           <LogoutIcon />
+
           {!isCollapsed && (
             <span className="max-md:hidden">
               {isLoggingOut ? "Logging out..." : "Log out"}
@@ -127,8 +139,18 @@ export default function Sidebar({ isCollapsed }) {
 function DashboardIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.7" />
-      <path d="m12 8 3 3-3 3-3-3 3-3Z" stroke="currentColor" strokeWidth="1.5" />
+      <circle
+        cx="12"
+        cy="12"
+        r="7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="m12 8 3 3-3 3-3-3 3-3Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
     </svg>
   );
 }
@@ -136,8 +158,33 @@ function DashboardIcon() {
 function OrdersIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M6 4h12v16H6V4Z" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M9 9h6M9 13h6M9 17h4" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M6 4h12v16H6V4Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M9 9h6M9 13h6M9 17h4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
+
+function CompanyOrdersIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 20V9l8-5 8 5v11"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M9 20v-6h6v6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
     </svg>
   );
 }
@@ -145,7 +192,13 @@ function OrdersIcon() {
 function PersonalOrdersIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+      <circle
+        cx="12"
+        cy="8"
+        r="3.2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
       <path
         d="M5 19c1.6-3.2 4-4.8 7-4.8s5.4 1.6 7 4.8"
         stroke="currentColor"
@@ -159,8 +212,16 @@ function PersonalOrdersIcon() {
 function InvoicesIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M6 3h12v18H6V3Z" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M6 3h12v18H6V3Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M9 8h6M9 12h6M9 16h3"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
     </svg>
   );
 }
@@ -178,7 +239,12 @@ function PaymentsIcon() {
         strokeWidth="1.7"
       />
       <path d="M3 10h18" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M7 15h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M7 15h4"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }
@@ -186,10 +252,26 @@ function PaymentsIcon() {
 function EmployeesIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M8 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M2 20a6 6 0 0 1 12 0" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M17 11a2.5 2.5 0 1 0 0-5" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M15 20a5 5 0 0 1 7 0" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M8 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M2 20a6 6 0 0 1 12 0"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M17 11a2.5 2.5 0 1 0 0-5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M15 20a5 5 0 0 1 7 0"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
     </svg>
   );
 }
@@ -197,8 +279,16 @@ function EmployeesIcon() {
 function FacilitiesIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M9 22V12h6v10" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M9 22V12h6v10"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
     </svg>
   );
 }
@@ -206,9 +296,21 @@ function FacilitiesIcon() {
 function ActivityIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M4 12a8 8 0 1 0 2.34-5.66" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M4 4v6h6" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M12 8v5l3 2" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M4 12a8 8 0 1 0 2.34-5.66"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M4 4v6h6"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M12 8v5l3 2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
     </svg>
   );
 }
@@ -216,7 +318,11 @@ function ActivityIcon() {
 function ReportsIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M5 20V10M12 20V4M19 20v-7" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M5 20V10M12 20V4M19 20v-7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
     </svg>
   );
 }
@@ -224,7 +330,13 @@ function ReportsIcon() {
 function SettingsIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <circle
+        cx="12"
+        cy="12"
+        r="3"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
       <path
         d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.7a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.7a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"
         stroke="currentColor"
@@ -237,9 +349,21 @@ function SettingsIcon() {
 function LogoutIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-      <path d="M10 17l5-5-5-5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M15 12H3" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M21 3v18h-7" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M10 17l5-5-5-5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M15 12H3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M21 3v18h-7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
     </svg>
   );
 }
