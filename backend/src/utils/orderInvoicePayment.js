@@ -130,6 +130,10 @@ async function areAllOrderInvoicesPaid(orderId, connection = null) {
     InvoiceXray.findByOrderId(orderId, connection),
   ]);
 
+  return areAllOrderInvoicesPaidFromRows(invoice, xrayRow);
+}
+
+function areAllOrderInvoicesPaidFromRows(invoice, xrayRow) {
   const hasStandard = hasStandardInvoiceFields(invoice);
   const hasXray = hasXrayInvoiceFields(xrayRow);
 
@@ -165,6 +169,7 @@ module.exports = {
   isStandardInvoiceFullyWrittenOff,
   isXrayInvoiceFullyWrittenOff,
   areAllOrderInvoicesWrittenOffFromRows,
+  areAllOrderInvoicesPaidFromRows,
   areAllOrderInvoicesPaid,
   areAllOrderInvoicesWrittenOff,
 };

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
+import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
 import { lookupPersonalRequestStatus } from "@/lib/personal-request/personalRequestApi";
 import { validateStatusLookupForm } from "@/lib/validations/personalRequestValidation";
 import {
@@ -207,13 +208,23 @@ export default function PersonalRequestStatusPage() {
               </div>
             </dl>
 
-            {result.canDownload && result.downloadUrl ? (
-              <a
-                href={result.downloadUrl}
-                className="flex h-[46px] w-full items-center justify-center rounded-[8px] bg-[#16A34A] text-[14px] font-semibold text-white hover:bg-[#15803D]"
-              >
-                Download Records
-              </a>
+            {result.canDownload &&
+            (result.downloadToken || result.downloadUrl) ? (
+              <div className="space-y-2">
+                <PersonalRecordsDownloadButton
+                  downloadToken={result.downloadToken}
+                  downloadUrl={result.downloadUrl}
+                  label="Download Records"
+                  className="flex h-[46px] w-full items-center justify-center rounded-[8px] bg-[#16A34A] text-[14px] font-semibold text-white hover:bg-[#15803D]"
+                />
+                <p className="text-center text-[11px] text-[#64748B]">
+                  This download link expires in 7 days
+                  {result.downloadExpiresAt
+                    ? ` (${new Date(result.downloadExpiresAt).toLocaleString()})`
+                    : ""}
+                  .
+                </p>
+              </div>
             ) : (
               <p className="rounded-[8px] border border-[#E2E8F0] bg-white px-3 py-2.5 text-[12px] text-[#64748B]">
                 {result.status === "released"

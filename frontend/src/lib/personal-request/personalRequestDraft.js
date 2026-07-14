@@ -20,6 +20,17 @@ export function savePersonalRequestDraft(payload) {
   }
 }
 
+let draftSaveTimer = null;
+
+export function savePersonalRequestDraftDebounced(payload, delayMs = 400) {
+  if (typeof window === "undefined") return;
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    draftSaveTimer = null;
+    savePersonalRequestDraft(payload);
+  }, delayMs);
+}
+
 export function clearPersonalRequestDraft() {
   if (typeof window === "undefined") return;
   try {

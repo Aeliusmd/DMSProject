@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import PersonalPortalSidebar from "@/components/personal-request/PersonalPortalSidebar";
+import useIsClient from "@/hooks/useIsClient";
 import { getStoredPersonalUser } from "@/lib/personal-request/personalPortalAuthStorage";
 
 /** Same layout structure as CompanyPortalDashboardShell */
 export default function PersonalPortalDashboardShell({ children, title }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const user = getStoredPersonalUser();
+  const isClient = useIsClient();
+  const user = isClient ? getStoredPersonalUser() : null;
   const displayName =
     user?.displayName ||
     `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||

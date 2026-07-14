@@ -32,6 +32,26 @@ class PersonalRequestFacility {
     return rows;
   }
 
+  static async findByOrderIds(orderIds = [], connection = null) {
+    const ids = [...new Set(orderIds.map(Number).filter((id) => id > 0))];
+    if (!ids.length) return [];
+
+    const executor = connection || getPool();
+    const placeholders = ids.map((_, index) => `:id${index}`).join(", ");
+    const params = {};
+    ids.forEach((id, index) => {
+      params[`id${index}`] = id;
+    });
+
+    const [rows] = await executor.execute(
+      `SELECT * FROM personal_request_facilities
+       WHERE personal_request_order_id IN (${placeholders})
+       ORDER BY personal_request_order_id ASC, sort_order ASC, id ASC`,
+      params
+    );
+    return rows;
+  }
+
   static async findPrimaryByOrderId(personalRequestOrderId, connection = null) {
     const rows = await PersonalRequestFacility.findByOrderId(
       personalRequestOrderId,
