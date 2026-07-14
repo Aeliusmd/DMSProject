@@ -299,6 +299,13 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+  } catch (_syncError) {
+    // Non-blocking
+  }
+
   return searchOrderInvoices(order.order_number);
 }
 

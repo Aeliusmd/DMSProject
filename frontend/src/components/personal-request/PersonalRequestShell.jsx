@@ -1,11 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
 
-export default function PersonalRequestShell({ children, activeNav = "personal" }) {
+export default function PersonalRequestShell({ children }) {
   return (
     <div className="flex min-h-screen flex-col bg-[#F5F7FA]">
       <header className="border-b border-[#E5E7EB] bg-white">
-        <div className="mx-auto flex h-[64px] w-full max-w-[1100px] items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex h-[64px] w-full max-w-[1100px] items-center px-4 sm:px-6">
           <Link href="/landingpage" className="flex items-center gap-2.5">
             <Image
               src="/images/logo.png"
@@ -19,29 +19,6 @@ export default function PersonalRequestShell({ children, activeNav = "personal" 
               DMS Records
             </span>
           </Link>
-
-          <nav className="flex items-center gap-6 text-[13px] font-medium">
-            <Link
-              href="/Subpoenaupload"
-              className={
-                activeNav === "subpoena"
-                  ? "text-[#0097B2] underline decoration-2 underline-offset-8"
-                  : "text-[#64748B] hover:text-[#334155]"
-              }
-            >
-              Subpoena Upload
-            </Link>
-            <Link
-              href="/personalrequest"
-              className={
-                activeNav === "personal"
-                  ? "text-[#0097B2] underline decoration-2 underline-offset-8"
-                  : "text-[#64748B] hover:text-[#334155]"
-              }
-            >
-              Personal Records
-            </Link>
-          </nav>
         </div>
       </header>
 

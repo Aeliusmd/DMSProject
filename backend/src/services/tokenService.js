@@ -61,6 +61,34 @@ function generateCompanyRefreshToken(payload) {
   );
 }
 
+function generatePersonalAccessToken(payload) {
+  return jwt.sign(
+    {
+      sub: payload.personalUserId,
+      role: "Personal",
+      sessionId: payload.sessionId,
+      type: "personal_access",
+      portal: "personal",
+    },
+    config.jwt.accessSecret,
+    { expiresIn: config.jwt.accessExpiresIn }
+  );
+}
+
+function generatePersonalRefreshToken(payload) {
+  return jwt.sign(
+    {
+      sub: payload.personalUserId,
+      sessionId: payload.sessionId,
+      sessionToken: payload.sessionToken,
+      type: "personal_refresh",
+      portal: "personal",
+    },
+    config.jwt.refreshSecret,
+    { expiresIn: config.jwt.refreshExpiresIn }
+  );
+}
+
 function verifyAccessToken(token) {
   const decoded = jwt.verify(token, config.jwt.accessSecret);
 
@@ -95,6 +123,26 @@ function verifyCompanyRefreshToken(token) {
   const decoded = jwt.verify(token, config.jwt.refreshSecret);
 
   if (decoded.type !== "company_refresh" || decoded.portal !== "company") {
+    throw new ApiError(401, "Invalid or expired session. Please sign in again.");
+  }
+
+  return decoded;
+}
+
+function verifyPersonalAccessToken(token) {
+  const decoded = jwt.verify(token, config.jwt.accessSecret);
+
+  if (decoded.type !== "personal_access" || decoded.portal !== "personal") {
+    throw new ApiError(401, "Invalid or expired session. Please sign in again.");
+  }
+
+  return decoded;
+}
+
+function verifyPersonalRefreshToken(token) {
+  const decoded = jwt.verify(token, config.jwt.refreshSecret);
+
+  if (decoded.type !== "personal_refresh" || decoded.portal !== "personal") {
     throw new ApiError(401, "Invalid or expired session. Please sign in again.");
   }
 
@@ -189,10 +237,14 @@ module.exports = {
   generateRefreshToken,
   generateCompanyAccessToken,
   generateCompanyRefreshToken,
+  generatePersonalAccessToken,
+  generatePersonalRefreshToken,
   verifyAccessToken,
   verifyRefreshToken,
   verifyCompanyAccessToken,
   verifyCompanyRefreshToken,
+  verifyPersonalAccessToken,
+  verifyPersonalRefreshToken,
   getAccessTokenExpiresInSeconds,
   getSessionExpiryDate,
   generateOtpCode,

@@ -3,6 +3,8 @@ const express = require("express");
 const authRoutes = require("./authRoutes");
 const companyPortalAuthRoutes = require("./companyPortalAuthRoutes");
 const companyPortalOrderRoutes = require("./companyPortalOrderRoutes");
+const personalPortalAuthRoutes = require("./personalPortalAuthRoutes");
+const personalPortalRequestRoutes = require("./personalPortalRequestRoutes");
 const orderRoutes = require("./orderRoutes");
 const providerRoutes = require("./providerRoutes");
 const facilityRoutes = require("./facilityRoutes");
@@ -15,13 +17,17 @@ const settingsRoutes = require("./settingsRoutes");
 const dashboardRoutes = require("./dashboardRoutes");
 const paymentRoutes = require("./paymentRoutes");
 const publicRoutes = require("./publicRoutes");
+const staffPersonalOrderRoutes = require("./staffPersonalOrderRoutes");
 
 const router = express.Router();
 
 router.use("/auth", authRoutes);
 router.use("/company-portal/auth", companyPortalAuthRoutes);
 router.use("/company-portal", companyPortalOrderRoutes);
+router.use("/personal-portal/auth", personalPortalAuthRoutes);
+router.use("/personal-portal", personalPortalRequestRoutes);
 router.use("/orders", orderRoutes);
+router.use("/personal-orders", staffPersonalOrderRoutes);
 router.use("/providers", providerRoutes);
 router.use("/facilities", facilityRoutes);
 router.use("/employees", employeeRoutes);

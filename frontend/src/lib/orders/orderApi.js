@@ -8,7 +8,8 @@ function buildOrdersQuery(filters = {}) {
   if (filters.year) params.set("year", filters.year);
   if (filters.period) params.set("period", filters.period);
   if (filters.status) params.set("status", filters.status);
-  if (filters.rushLevel) params.set("rushLevel", filters.rushLevel);
+  if (filters.creationSource) params.set("creationSource", filters.creationSource);
+  if (filters.portalStatus) params.set("portalStatus", filters.portalStatus);
   if (filters.excludeCompleted) params.set("excludeCompleted", "1");
   if (filters.sortDir) params.set("sortDir", filters.sortDir);
   if (filters.search?.trim()) params.set("search", filters.search.trim());

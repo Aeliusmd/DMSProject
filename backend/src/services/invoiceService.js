@@ -2471,6 +2471,13 @@ async function createOrUpdateXrayInvoice(body, userId) {
 
     await connection.commit();
 
+    try {
+      const personalPortalService = require("./personalPortalService");
+      await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+    } catch (syncError) {
+      // Non-blocking: personal portal status sync must not fail invoice create
+    }
+
     return getXrayInvoiceByOrderId(orderId);
   } catch (error) {
     await connection.rollback();
@@ -2601,6 +2608,13 @@ async function createInvoice(body, userId) {
 
     await connection.commit();
 
+    try {
+      const personalPortalService = require("./personalPortalService");
+      await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+    } catch (_syncError) {
+      // Non-blocking
+    }
+
     return getInvoiceById(invoiceId);
   } catch (error) {
     await connection.rollback();
@@ -2673,6 +2687,13 @@ async function updateInvoice(id, body) {
     );
 
     await connection.commit();
+
+    try {
+      const personalPortalService = require("./personalPortalService");
+      await personalPortalService.syncPortalStatusForDmsOrder(existing.order_id);
+    } catch (_syncError) {
+      // Non-blocking
+    }
 
     return getInvoiceById(id);
   } catch (error) {

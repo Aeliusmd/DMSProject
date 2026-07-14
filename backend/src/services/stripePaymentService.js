@@ -759,6 +759,13 @@ async function fulfillSuccessfulCheckoutSession(session) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+  } catch (_syncError) {
+    // Non-blocking
+  }
+
   const [updatedRows] = await pool.execute(
     `SELECT s.*, o.order_number,
             COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name

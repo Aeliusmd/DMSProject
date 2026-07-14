@@ -62,8 +62,9 @@ function validateEmailOtpConfirm(body = {}) {
   return { valid: errors.length === 0, errors, sessionToken, code };
 }
 
-function validatePersonalRequestSubmit(body = {}) {
+function validatePersonalRequestSubmit(body = {}, options = {}) {
   const errors = [];
+  const email = trimToString(body.email).toLowerCase();
 
   if (isBlank(body.firstName)) {
     errors.push({ field: "firstName", message: "First name is required" });
@@ -190,12 +191,12 @@ function validatePersonalRequestSubmit(body = {}) {
     });
   }
 
-  const email = trimToString(body.email).toLowerCase();
-  if (isBlank(email) || !isValidEmail(email)) {
+  if (isBlank(body.email) || !isValidEmail(email)) {
     errors.push({ field: "email", message: "A verified email is required" });
   }
 
-  if (isBlank(body.emailVerificationToken)) {
+  const skipEmailToken = Boolean(options.authenticated);
+  if (!skipEmailToken && isBlank(body.emailVerificationToken)) {
     errors.push({
       field: "emailVerificationToken",
       message: "Email verification is required before submitting",
