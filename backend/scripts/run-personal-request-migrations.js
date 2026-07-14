@@ -20,12 +20,28 @@ const OPTIONAL_IF_STRIPE_TABLE_EXISTS = [
   "alter_stripe_online_payments_personal_portal.sql",
 ];
 
-async function runFile(connection, fileName) {
+async function runFile(connection, fileName, { skipBackfill = false } = {}) {
   const fullPath = path.join(MIGRATIONS_DIR, fileName);
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Migration not found: ${fileName}`);
   }
-  const sql = fs.readFileSync(fullPath, "utf8");
+  let sql = fs.readFileSync(fullPath, "utf8");
+
+  if (
+    skipBackfill &&
+    fileName === "add_personal_request_orders_tables.sql"
+  ) {
+    const marker =
+      "-- 4) Backfill from legacy personal_portal_requests";
+    const idx = sql.indexOf(marker);
+    if (idx >= 0) {
+      sql = sql.slice(0, idx);
+      console.log(
+        "note skipped legacy personal_portal_requests backfill (table missing)"
+      );
+    }
+  }
+
   await connection.query(sql);
   console.log(`OK  ${fileName}`);
 }
@@ -41,8 +57,16 @@ async function main() {
   });
 
   try {
+    const [legacy] = await connection.query(
+      "SHOW TABLES LIKE 'personal_portal_requests'"
+    );
+    const skipBackfill = !legacy.length;
+
     for (const file of REQUIRED) {
-      await runFile(connection, file);
+      await runFile(connection, file, {
+        skipBackfill:
+          skipBackfill && file === "add_personal_request_orders_tables.sql",
+      });
     }
 
     const [tables] = await connection.query(
