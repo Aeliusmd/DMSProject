@@ -869,24 +869,49 @@ async function fulfillSuccessfulCheckoutSession(session) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
-  try {
-    const personalPortalService = require("./personalPortalService");
-    await personalPortalService.syncPortalStatusForDmsOrder(orderId);
-  } catch (_syncError) {
-    // Non-blocking
-  }
+ await Order.syncOrderStatusFromWorkflow(orderId);
 
-  const [updatedRows] = await pool.execute(
-    `SELECT s.*, o.order_number,
-            COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
-     FROM stripe_online_payments s
-     INNER JOIN orders o ON o.id = s.order_id
-     LEFT JOIN facilities f ON f.id = o.facility_id
-     LEFT JOIN providers p ON p.id = o.provider_id
-     WHERE s.id = :id`,
-    { id: paymentRecordId }
+// Advance the company portal workflow after invoices are paid.
+try {
+  const {
+    maybeAdvanceCompanyPortalAfterInvoicesPaid,
+  } = require("./companyPortalStageHooks");
+
+  await maybeAdvanceCompanyPortalAfterInvoicesPaid(orderId);
+} catch (error) {
+  console.warn(
+    "[company-portal] Paid-stage advance skipped:",
+    error.message || error
   );
+}
 
+// Synchronize the personal portal order status.
+try {
+  const personalPortalService = require("./personalPortalService");
+
+  await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+} catch (error) {
+  console.warn(
+    "[personal-portal] Status sync after online payment skipped:",
+    error.message || error
+  );
+}
+
+const [updatedRows] = await pool.execute(
+  `SELECT s.*, o.order_number,
+          COALESCE(
+            p.company_name,
+            o.serve_company_name,
+            f.facility_name,
+            '—'
+          ) AS company_name
+   FROM stripe_online_payments s
+   INNER JOIN orders o ON o.id = s.order_id
+   LEFT JOIN facilities f ON f.id = o.facility_id
+   LEFT JOIN providers p ON p.id = o.provider_id
+   WHERE s.id = :id`,
+  { id: paymentRecordId }
+);
   if (updatedRows[0]?.customer_email) {
     await sendPaymentNotificationEmail(updatedRows[0], "success");
   }

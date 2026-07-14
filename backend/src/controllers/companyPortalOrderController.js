@@ -104,18 +104,59 @@ exports.getSubpoenaFile = asyncHandler(async (req, res) => {
 });
 
 exports.downloadReleasedDocuments = asyncHandler(async (req, res) => {
-  const file = await companyPortalOrderService.getReleasedDocuments(
+  const payload = await companyPortalOrderService.getReleasedDocuments(
     Number(req.params.orderId),
     req.companyUser.id
   );
 
+  if (payload.kind === "records") {
+    const {
+      sendFileResponse,
+      streamArchiveToResponse,
+    } = require("../utils/responseUtils");
+    const { createZipArchive } = require("../utils/zipArchive");
+    const files = payload.files || [];
+
+    if (!files.length) {
+      throw new ApiError(404, "Released documents not found");
+    }
+
+    if (files.length === 1) {
+      const file = files[0];
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${encodeURIComponent(file.filename)}"`
+      );
+      await sendFileResponse(res, file.path);
+      return;
+    }
+
+    const safeOrderNumber = `${payload.orderNumber || req.params.orderId}`.replace(
+      /[^\w.-]+/g,
+      "_"
+    );
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${safeOrderNumber}-records.zip"`
+    );
+
+    const archive = createZipArchive();
+    files.forEach((file) => {
+      archive.file(file.path, { name: file.filename });
+    });
+    await streamArchiveToResponse(archive, res);
+    return;
+  }
+
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="${encodeURIComponent(file.fileName)}"`
+    `attachment; filename="${encodeURIComponent(payload.fileName)}"`
   );
 
-  const stream = fs.createReadStream(file.absolutePath);
+  const stream = fs.createReadStream(payload.absolutePath);
   stream.pipe(res);
 });
 

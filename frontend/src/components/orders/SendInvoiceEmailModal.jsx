@@ -43,7 +43,8 @@ export default function SendInvoiceEmailModal({
   const [submitting, setSubmitting] = useState(false);
 
   const isXray = invoiceKind === "xray";
-  const isRecords = invoiceKind === "records";
+  const isRecords =
+    invoiceKind === "records" || invoiceKind === "companyPortalRecords";
   const isCnr = invoiceKind === "cnr";
   const isCertification = invoiceKind === "certification";
   const isResend = mode === "resend";

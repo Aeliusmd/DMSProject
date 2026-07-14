@@ -61,7 +61,7 @@ export default function CompanyPortalTrackResultPage() {
       const blob = await fetchCompanyPortalReleasedDocumentsBlob(order.id);
       downloadBlobAsFile(
         blob,
-        order.subpoenaFileName || `${order.orderNumber}-documents.pdf`
+        `${order.orderNumber || "order"}-released-documents`
       );
     } catch (err) {
       setDownloadError(
@@ -118,6 +118,44 @@ export default function CompanyPortalTrackResultPage() {
               . Documents become available when status is Released.
             </p>
 
+            {Array.isArray(order.paymentLinks) && order.paymentLinks.length > 0 ? (
+              <div className="mt-5 rounded-[8px] border border-[#BAE6FD] bg-[#F0F9FF] px-4 py-3">
+                <p className="text-[12px] font-semibold text-[#0369A1]">
+                  Outstanding invoice payments
+                </p>
+                <p className="mt-1 text-[12px] text-[#0C4A6E]">
+                  Use the secure payment link below to pay remaining invoice
+                  balances for this order.
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {order.paymentLinks.map((link) => (
+                    <li
+                      key={`${link.type}-${link.invoiceNumber || link.label}`}
+                      className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-[12px] font-semibold text-[#0F172A]">
+                          {link.label}
+                          {link.invoiceNumber ? ` (${link.invoiceNumber})` : ""}
+                        </p>
+                        <p className="text-[11px] text-[#64748B]">
+                          Due: {link.dueDisplay || "—"}
+                        </p>
+                      </div>
+                      <a
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex h-9 items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+                      >
+                        Pay now
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             <div className="mt-5">
               <button
                 type="button"
@@ -141,7 +179,12 @@ export default function CompanyPortalTrackResultPage() {
                   Download is disabled until this order reaches{" "}
                   <span className="font-semibold">Released</span> status.
                 </p>
-              ) : null}
+              ) : (
+                <p className="mt-2 text-[12px] text-[#64748B]">
+                  Download includes the released medical/other records for this
+                  order.
+                </p>
+              )}
               {downloadError ? (
                 <p className="mt-2 text-[12px] text-red-600">{downloadError}</p>
               ) : null}

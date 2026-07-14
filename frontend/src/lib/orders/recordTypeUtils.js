@@ -62,25 +62,62 @@ export function getSavedOrderRecordTypeLabel(order = {}) {
 }
 
 export function getOrderRecordSlots(order = {}) {
-  if (Array.isArray(order.orderRecords) && order.orderRecords.length) {
-    return order.orderRecords.map((record) => ({
-      recordType: record.recordType,
-      label: getOrderTypeLabel(record.recordType),
-      hasFile: Boolean(record.hasFile),
-      storagePath: record.storagePath || null,
-      storageUrl: record.storageUrl || null,
-    }));
+  const recordsByType = new Map();
+  const recordRows = [
+    ...(Array.isArray(order.orderRecords) ? order.orderRecords : []),
+    ...(Array.isArray(order.records?.orderRecords) ? order.records.orderRecords : []),
+  ];
+
+  for (const record of recordRows) {
+    if (!record?.recordType) continue;
+
+    const existing = recordsByType.get(record.recordType);
+    const hasFile = Boolean(record.hasFile || record.storagePath);
+
+    if (!existing || hasFile) {
+      recordsByType.set(record.recordType, {
+        recordType: record.recordType,
+        label: getOrderTypeLabel(record.recordType),
+        hasFile: existing?.hasFile || hasFile,
+        storagePath: record.storagePath || existing?.storagePath || null,
+        storageUrl: record.storageUrl || existing?.storageUrl || null,
+      });
+    }
   }
 
-  return ORDER_RECORD_TYPES.filter((recordType) => Boolean(order[recordType.key])).map(
-    (recordType) => ({
-      recordType: recordType.orderType,
-      label: recordType.label,
-      hasFile: false,
-      storagePath: null,
-      storageUrl: null,
-    })
+  const flagSlots = ORDER_RECORD_TYPES.filter((recordType) =>
+    Boolean(order[recordType.key])
+  ).map((recordType) => ({
+    recordType: recordType.orderType,
+    label: recordType.label,
+    hasFile: false,
+    storagePath: null,
+    storageUrl: null,
+  }));
+
+  const orderIndex = Object.fromEntries(
+    ORDER_RECORD_TYPES.map((recordType, index) => [recordType.orderType, index])
   );
+
+  const sortSlots = (slots) =>
+    [...slots].sort(
+      (left, right) =>
+        (orderIndex[left.recordType] ?? 99) - (orderIndex[right.recordType] ?? 99)
+    );
+
+  if (recordsByType.size > 0) {
+    const merged = sortSlots(Array.from(recordsByType.values()));
+
+    for (const slot of flagSlots) {
+      if (!recordsByType.has(slot.recordType)) {
+        merged.push(slot);
+      }
+    }
+
+    return sortSlots(merged);
+  }
+
+  return flagSlots;
 }
 
 export function allOrderRecordSlotsUploaded(order = {}) {
