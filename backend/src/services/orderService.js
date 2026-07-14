@@ -23,6 +23,7 @@ const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
 const invoiceService = require("./invoiceService");
 const Invoice = require("../models/Invoice");
 const InvoiceXray = require("../models/InvoiceXray");
+const PersonalRequestOrder = require("../models/PersonalRequestOrder");
 const {
   areAllOrderInvoicesWrittenOffFromRows,
 } = require("../utils/orderInvoicePayment");
@@ -1019,6 +1020,9 @@ function mapOrderListRow(
     cnrDateSent: toInputDate(row.cnr_date_sent),
     recentNotes: extras.recentNotes || [],
     hasActiveReminder: Boolean(extras.hasActiveReminder),
+    creationSource: row.creation_source || "manual",
+    portalStatus: extras.portalStatus || null,
+    portalStatusLabel: extras.portalStatusLabel || null,
   };
 
   return appendOrderCompletenessFields(mapped, row, orderRecords);
@@ -1307,6 +1311,10 @@ function parseExcludeCompleted(value) {
 async function getAllOrders(query = {}) {
   const filters = {};
 
+  if (`${query.creationSource || ""}`.trim() === "personal_portal") {
+    filters.creationSource = "personal_portal";
+  }
+
   if (query.facility) {
     filters.facilityId = assertPositiveInt(query.facility, "facility");
   }
@@ -1315,7 +1323,20 @@ async function getAllOrders(query = {}) {
     filters.company = sanitizeSearchText(query.company, { maxLength: 255 });
   }
 
-  if (query.status === "ready") {
+  const PERSONAL_PORTAL_STATUSES = new Set([
+    "in_process",
+    "invoice",
+    "paid",
+    "released",
+    "pending_payment",
+  ]);
+  const statusRaw = `${query.portalStatus || query.status || ""}`.trim();
+
+  if (filters.creationSource === "personal_portal") {
+    if (PERSONAL_PORTAL_STATUSES.has(statusRaw)) {
+      filters.portalStatus = statusRaw;
+    }
+  } else if (query.status === "ready") {
     filters.readyFilter = true;
   } else if (query.status && STATUS_FILTER_MAP[query.status]) {
     filters.status = STATUS_FILTER_MAP[query.status];
@@ -1412,6 +1433,7 @@ async function getAllOrders(query = {}) {
     orderRecordRows,
     recentNotesByOrderId,
     activeReminderByOrderId,
+    portalByOrderId,
   ] = await Promise.all([
     Order.findWorkflowStagesByOrderIds(orderIds),
     invoiceService.getStandardInvoicesByOrderIds(orderIds),
@@ -1420,7 +1442,16 @@ async function getAllOrders(query = {}) {
     OrderRecord.findByOrderIds(orderIds),
     Order.findRecentNotesByOrderIds(orderIds, 2),
     Order.findActiveReminderFlagsByOrderIds(orderIds),
+    PersonalRequestOrder.findPortalStatusesByOrderIds(orderIds),
   ]);
+
+  const PORTAL_STATUS_LABELS = {
+    pending_payment: "Pending Payment",
+    in_process: "In Process",
+    invoice: "Invoice",
+    paid: "Paid",
+    released: "Released",
+  };
 
   const stagesByOrderId = stages.reduce((acc, stage) => {
     if (!acc[stage.order_id]) acc[stage.order_id] = [];
@@ -1443,6 +1474,13 @@ async function getAllOrders(query = {}) {
   const mappedOrders = rows.map((row) => {
     const invoiceRow = invoicesByOrderId[row.id] || null;
     const xrayRow = xrayByOrderId[row.id] || null;
+    const portal = portalByOrderId[row.id] || null;
+    const portalStatus =
+      portal?.portal_status ||
+      (row.creation_source === "personal_portal" ? "in_process" : null);
+    const portalStatusLabel = portalStatus
+      ? PORTAL_STATUS_LABELS[portalStatus] || portalStatus
+      : null;
 
     return mapOrderListRow(
       row,
@@ -1454,6 +1492,8 @@ async function getAllOrders(query = {}) {
       {
         recentNotes: (recentNotesByOrderId[row.id] || []).map(mapNote),
         hasActiveReminder: Boolean(activeReminderByOrderId[row.id]),
+        portalStatus,
+        portalStatusLabel,
       }
     );
   });
@@ -2698,6 +2738,13 @@ async function scanMedicalRecords(
     connection.release();
   }
 
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+  } catch (_syncError) {
+    // Non-blocking for personal portal status
+  }
+
   return getOrderById(orderId);
 }
 
@@ -2754,6 +2801,13 @@ async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {
     rethrowServiceError(error);
   } finally {
     connection.release();
+  }
+
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.syncPortalStatusForDmsOrder(orderId);
+  } catch (_syncError) {
+    // Non-blocking
   }
 
   return getOrderById(orderId);

@@ -7,6 +7,7 @@ export const ROLES = {
 const EMPLOYEE_ALLOWED_PATH_PREFIXES = [
   "/dashboard",
   "/orders",
+  "/personal-orders",
   "/activity-log",
   "/notifications",
 ];
