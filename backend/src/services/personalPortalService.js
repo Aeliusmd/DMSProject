@@ -597,8 +597,9 @@ async function computePortalStatusForLinkedOrder(orderId, requestOrder) {
     : false;
   const hasRecordFiles = (records || []).some((record) => record.storage_path);
 
-  // Records uploaded = Released (records are ready for the patient)
-  if (hasRecordFiles) {
+  // Released only when records are ready AND any created invoice is fully paid.
+  // Unpaid invoice must stay on Invoice (or Paid when paid) — never Released.
+  if (hasRecordFiles && (!hasInvoice || allPaid)) {
     return "released";
   }
   if (hasInvoice && allPaid) {

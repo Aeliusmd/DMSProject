@@ -76,37 +76,42 @@ export default function PersonalPortalDashboardPage() {
       {
         label: "Total requests",
         value: stats.totalOrders,
-        hint: "Paid personal requests",
+        hint: "Paid and placed requests",
+        icon: <OrdersIcon />,
         iconBg: "#E6F7FA",
         iconColor: "#0097B2",
       },
       {
         label: "In Process",
         value: stats.inProcess,
-        hint: "Received; being worked on",
+        hint: "Being verified and processed",
+        icon: <PendingIcon />,
         iconBg: "#FFF7ED",
         iconColor: "#EA580C",
       },
       {
         label: "Invoice",
         value: stats.invoice,
-        hint: "Additional charges beyond $35",
+        hint: "Invoice stage",
+        icon: <InvoiceIcon />,
         iconBg: "#FEF3C7",
-        iconColor: "#B45309",
+        iconColor: "#D97706",
       },
       {
         label: "Paid",
         value: stats.paid,
-        hint: "Invoice paid; preparing records",
-        iconBg: "#DBEAFE",
-        iconColor: "#1D4ED8",
+        hint: "Facility payment completed",
+        icon: <PaidIcon />,
+        iconBg: "#EFF6FF",
+        iconColor: "#2563EB",
       },
       {
         label: "Released",
         value: stats.released,
-        hint: "Records ready",
-        iconBg: "#DCFCE7",
-        iconColor: "#15803D",
+        hint: "Documents ready to download",
+        icon: <ReleasedIcon />,
+        iconBg: "#ECFDF5",
+        iconColor: "#059669",
       },
     ],
     [stats]
@@ -125,7 +130,7 @@ export default function PersonalPortalDashboardPage() {
         </p>
       ) : null}
 
-      <div className="mb-5">
+      <div className="mb-6">
         <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#111827]">
           Welcome, {displayName}
         </h1>
@@ -135,20 +140,21 @@ export default function PersonalPortalDashboardPage() {
         </p>
       </div>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((card) => (
           <CompanyPortalStatCard
             key={card.label}
             label={card.label}
             value={loading ? "…" : card.value}
             hint={card.hint}
+            icon={card.icon}
             iconBg={card.iconBg}
             iconColor={card.iconColor}
           />
         ))}
       </div>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Link
           href="/personalrequest/new"
           className="rounded-[10px] border border-[#D0E8ED] bg-[#E6F7FA] px-5 py-4 text-[13px] font-semibold text-[#0B7C8E] hover:bg-[#D7F2F7]"
@@ -169,7 +175,7 @@ export default function PersonalPortalDashboardPage() {
         </Link>
       </div>
 
-      <section className="rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
+      <section className="mt-5 rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="flex items-center justify-between gap-3 border-b border-[#F1F5F9] px-5 py-4">
           <div>
             <h2 className="text-[15px] font-semibold text-[#111827]">Recent requests</h2>
@@ -254,5 +260,93 @@ export default function PersonalPortalDashboardPage() {
         </div>
       </section>
     </PersonalPortalDashboardShell>
+  );
+}
+
+function OrdersIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M8 7h8M8 12h8M8 17h5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <rect
+        x="4"
+        y="4"
+        width="16"
+        height="16"
+        rx="3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function PendingIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M12 8v4l2.5 2.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function InvoiceIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M7 3h10v18l-2-1.2L13 21l-2-1.2L9 21l-2-1.2V3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9 8h6M9 12h6M9 16h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function PaidIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect
+        x="3"
+        y="6"
+        width="18"
+        height="12"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M3 10h18" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ReleasedIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M8.5 12.5 11 15l4.5-5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
