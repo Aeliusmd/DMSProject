@@ -198,7 +198,7 @@ export async function authFetch(path, options = {}, _isRetry = false) {
 
 export async function request(
   path,
-  { method = "GET", body, auth = false, cache, _isRetry = false } = {}
+  { method = "GET", body, auth = false, cache, signal, _isRetry = false } = {}
 ) {
   const isFormData =
     typeof FormData !== "undefined" && body instanceof FormData;
@@ -228,6 +228,7 @@ export async function request(
     headers,
     body: requestBody,
     ...(cache ? { cache } : {}),
+    ...(signal ? { signal } : {}),
   });
 
   // Access token likely expired — try to refresh once, then retry.
@@ -244,7 +245,7 @@ export async function request(
       throw new ApiRequestError("Session expired. Please sign in again.", 401);
     }
 
-    return request(path, { method, body, auth, _isRetry: true });
+    return request(path, { method, body, auth, cache, signal, _isRetry: true });
   }
 
   const data = await parseResponse(response);

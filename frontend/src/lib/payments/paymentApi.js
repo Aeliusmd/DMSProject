@@ -186,51 +186,60 @@ function buildOnlineSummary(rows) {
 }
 
 /**
- * List payment rows for manual or online tab.
+ * List payment rows for manual or online tab (keyset, 10/page).
  */
 export async function getPayments({
   type = "manual",
   dateFrom,
   dateTo,
+  orderSearch,
+  invoiceSearch,
+  cursor = null,
+  pageSize = 10,
+  pagination = "keyset",
+  includeSummary = true,
+  signal,
 } = {}) {
   const channel = type === "online" ? "online" : "manual";
-
-  if (channel === "manual") {
-    const params = new URLSearchParams();
-    if (dateFrom) params.set("dateFrom", dateFrom);
-    if (dateTo) params.set("dateTo", dateTo);
-
-    const query = params.toString();
-    const data = await request(`/payments/manual${query ? `?${query}` : ""}`, {
-      auth: true,
-      cache: "no-store",
-    });
-
-    const rows = data?.data?.payments || [];
-
-    return {
-      payments: rows,
-      summary: buildManualSummary(rows),
-      count: rows.length,
-    };
-  }
-
   const params = new URLSearchParams();
+
+  params.set("pagination", pagination || "keyset");
+  params.set("pageSize", String(pageSize || 10));
+  params.set("includeSummary", includeSummary ? "1" : "0");
+  if (cursor) params.set("cursor", String(cursor));
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
+  if (orderSearch?.trim()) params.set("orderSearch", orderSearch.trim());
+  if (invoiceSearch?.trim()) params.set("invoiceSearch", invoiceSearch.trim());
 
-  const query = params.toString();
-  const data = await request(`/payments/online${query ? `?${query}` : ""}`, {
+  const path =
+    channel === "manual"
+      ? `/payments/manual?${params.toString()}`
+      : `/payments/online?${params.toString()}`;
+
+  const data = await request(path, {
     auth: true,
     cache: "no-store",
+    signal,
   });
 
   const rows = data?.data?.payments || [];
+  const paginationMeta = data?.data?.pagination || {
+    type: "keyset",
+    pageSize: pageSize || 10,
+    hasMore: false,
+    nextCursor: null,
+  };
+  const summary = data?.data?.summary ?? null;
 
   return {
     payments: rows,
-    summary: buildOnlineSummary(rows),
-    count: rows.length,
+    summary,
+    pagination: paginationMeta,
+    count:
+      summary != null
+        ? Number(summary.totalPayments ?? summary.totalTransactions ?? rows.length) || 0
+        : null,
   };
 }
 

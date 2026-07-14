@@ -1,18 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import PaymentsTable from "@/components/payments/PaymentsTable";
 import ManualPaymentModal from "@/components/payments/ManualPaymentModal";
 import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
-import {
-  buildManualSummary,
-  buildOnlineSummary,
-  filterPaymentsByInvoiceId,
-  filterPaymentsByOrderId,
-  getPayments,
-} from "@/lib/payments/paymentApi";
+import { getPayments } from "@/lib/payments/paymentApi";
+
+const PAYMENTS_PER_PAGE = 10;
 
 const EMPTY_MANUAL_SUMMARY = {
   totalPayments: 0,
@@ -30,6 +26,25 @@ const EMPTY_ONLINE_SUMMARY = {
   failedCount: 0,
 };
 
+const EMPTY_PAGINATION = {
+  type: "keyset",
+  pageSize: PAYMENTS_PER_PAGE,
+  hasMore: false,
+  nextCursor: null,
+};
+
+function createTabState(emptySummary) {
+  return {
+    payments: [],
+    summary: emptySummary,
+    pagination: { ...EMPTY_PAGINATION },
+    count: 0,
+    currentPage: 1,
+    cursorHistory: [null],
+    loaded: false,
+  };
+}
+
 export default function PaymentsPage() {
   const searchParams = useSearchParams();
   const initialChannel =
@@ -38,64 +53,177 @@ export default function PaymentsPage() {
   const [filters, setFilters] = useState({
     from: "",
     through: "",
-    orderId: "",
   });
   const [appliedFilters, setAppliedFilters] = useState({
     from: "",
     through: "",
-    orderId: "",
   });
+  const [orderSearch, setOrderSearch] = useState("");
+  const [appliedOrderSearch, setAppliedOrderSearch] = useState("");
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [appliedInvoiceSearch, setAppliedInvoiceSearch] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [manualPaymentModalOpen, setManualPaymentModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [manualData, setManualData] = useState({
-    payments: [],
-    summary: EMPTY_MANUAL_SUMMARY,
-    count: 0,
-  });
-  const [onlineData, setOnlineData] = useState({
-    payments: [],
-    summary: EMPTY_ONLINE_SUMMARY,
-    count: 0,
-  });
 
-  const loadPayments = useCallback(async () => {
-    setLoading(true);
+  const [manualState, setManualState] = useState(() =>
+    createTabState(EMPTY_MANUAL_SUMMARY)
+  );
+  const [onlineState, setOnlineState] = useState(() =>
+    createTabState(EMPTY_ONLINE_SUMMARY)
+  );
 
-    const dateFilters = {
-      dateFrom: appliedFilters.from || undefined,
-      dateTo: appliedFilters.through || undefined,
-    };
-
-    try {
-      const [manualResult, onlineResult] = await Promise.all([
-        getPayments({ ...dateFilters, type: "manual" }),
-        getPayments({ ...dateFilters, type: "online" }),
-      ]);
-
-      setManualData(manualResult);
-      setOnlineData(onlineResult);
-    } catch {
-      setManualData({
-        payments: [],
-        summary: EMPTY_MANUAL_SUMMARY,
-        count: 0,
-      });
-      setOnlineData({
-        payments: [],
-        summary: EMPTY_ONLINE_SUMMARY,
-        count: 0,
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [appliedFilters.from, appliedFilters.through]);
+  const manualCursorHistoryRef = useRef([null]);
+  const onlineCursorHistoryRef = useRef([null]);
+  const loadAbortRef = useRef(null);
 
   useEffect(() => {
-    loadPayments();
-  }, [loadPayments, refreshKey]);
+    manualCursorHistoryRef.current = manualState.cursorHistory;
+  }, [manualState.cursorHistory]);
+
+  useEffect(() => {
+    onlineCursorHistoryRef.current = onlineState.cursorHistory;
+  }, [onlineState.cursorHistory]);
+
+  const isManual = paymentType === "manual";
+  const activeState = isManual ? manualState : onlineState;
+  const setActiveState = isManual ? setManualState : setOnlineState;
+  const activeCursorHistoryRef = isManual
+    ? manualCursorHistoryRef
+    : onlineCursorHistoryRef;
+  const activePage = activeState.currentPage;
+
+  const loadActiveTab = useCallback(async () => {
+    if (loadAbortRef.current) {
+      loadAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+
+    setLoading(true);
+
+    const cursor = activeCursorHistoryRef.current[activePage - 1] ?? null;
+    const includeSummary = activePage === 1;
+
+    try {
+      const result = await getPayments({
+        type: paymentType,
+        dateFrom: appliedFilters.from || undefined,
+        dateTo: appliedFilters.through || undefined,
+        orderSearch: appliedOrderSearch || undefined,
+        invoiceSearch: appliedInvoiceSearch || undefined,
+        cursor,
+        pageSize: PAYMENTS_PER_PAGE,
+        pagination: "keyset",
+        includeSummary,
+        signal: controller.signal,
+      });
+
+      if (controller.signal.aborted) return;
+
+      const hasMore = Boolean(result.pagination?.hasMore);
+      const nextCursor = result.pagination?.nextCursor ?? null;
+
+      setActiveState((prev) => {
+        const nextHistory = prev.cursorHistory.slice(0, activePage);
+        if (hasMore && nextCursor != null) {
+          nextHistory[activePage] = nextCursor;
+        }
+        activeCursorHistoryRef.current = nextHistory;
+
+        const nextSummary =
+          result.summary != null
+            ? result.summary
+            : prev.summary ||
+              (paymentType === "manual"
+                ? EMPTY_MANUAL_SUMMARY
+                : EMPTY_ONLINE_SUMMARY);
+
+        const nextCount =
+          result.count != null
+            ? result.count
+            : result.summary != null
+              ? Number(
+                  result.summary.totalPayments ??
+                    result.summary.totalTransactions ??
+                    0
+                ) || prev.count
+              : prev.count;
+
+        return {
+          ...prev,
+          payments: result.payments || [],
+          summary: nextSummary,
+          pagination: {
+            type: "keyset",
+            pageSize:
+              Number(result.pagination?.pageSize) || PAYMENTS_PER_PAGE,
+            hasMore,
+            nextCursor,
+          },
+          count: nextCount,
+          currentPage: activePage,
+          cursorHistory: nextHistory.length ? nextHistory : [null],
+          loaded: true,
+        };
+      });
+    } catch (error) {
+      if (
+        controller.signal.aborted ||
+        error?.name === "AbortError" ||
+        error?.code === 20
+      ) {
+        return;
+      }
+
+      setActiveState((prev) => ({
+        ...prev,
+        payments: [],
+        summary:
+          paymentType === "manual"
+            ? EMPTY_MANUAL_SUMMARY
+            : EMPTY_ONLINE_SUMMARY,
+        pagination: { ...EMPTY_PAGINATION },
+        count: 0,
+        loaded: true,
+      }));
+    } finally {
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }, [
+    activeCursorHistoryRef,
+    activePage,
+    appliedFilters.from,
+    appliedFilters.through,
+    appliedInvoiceSearch,
+    appliedOrderSearch,
+    paymentType,
+    setActiveState,
+  ]);
+
+  useEffect(() => {
+    loadActiveTab();
+    return () => {
+      if (loadAbortRef.current) {
+        loadAbortRef.current.abort();
+      }
+    };
+  }, [loadActiveTab, refreshKey]);
+
+  const resetTabPagination = useCallback((setter, historyRef) => {
+    setter((prev) => {
+      const next = {
+        ...prev,
+        currentPage: 1,
+        cursorHistory: [null],
+        loaded: false,
+      };
+      if (historyRef) historyRef.current = [null];
+      return next;
+    });
+  }, []);
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -110,8 +238,9 @@ export default function PaymentsPage() {
     setAppliedFilters({
       from: filters.from,
       through: filters.through,
-      orderId: filters.orderId.trim(),
     });
+    resetTabPagination(setManualState, manualCursorHistoryRef);
+    resetTabPagination(setOnlineState, onlineCursorHistoryRef);
     setRefreshKey((value) => value + 1);
   };
 
@@ -119,59 +248,90 @@ export default function PaymentsPage() {
     const emptyFilters = {
       from: "",
       through: "",
-      orderId: "",
     };
 
     setFilters(emptyFilters);
     setAppliedFilters(emptyFilters);
+    setOrderSearch("");
+    setAppliedOrderSearch("");
     setInvoiceSearch("");
     setAppliedInvoiceSearch("");
+    resetTabPagination(setManualState, manualCursorHistoryRef);
+    resetTabPagination(setOnlineState, onlineCursorHistoryRef);
     setRefreshKey((value) => value + 1);
   };
 
-  const filterByOrderId = useCallback(
-    (rows) => filterPaymentsByOrderId(rows, appliedFilters.orderId),
-    [appliedFilters.orderId]
-  );
+  const handleIdSearch = () => {
+    setAppliedOrderSearch(orderSearch.trim());
+    setAppliedInvoiceSearch(invoiceSearch.trim());
+    resetTabPagination(setManualState, manualCursorHistoryRef);
+    resetTabPagination(setOnlineState, onlineCursorHistoryRef);
+    setRefreshKey((value) => value + 1);
+  };
 
-  const filterByInvoiceId = useCallback(
-    (rows) => filterPaymentsByInvoiceId(rows, appliedInvoiceSearch),
-    [appliedInvoiceSearch]
-  );
+  const handleClearIdSearch = () => {
+    setOrderSearch("");
+    setAppliedOrderSearch("");
+    setInvoiceSearch("");
+    setAppliedInvoiceSearch("");
+    resetTabPagination(setManualState, manualCursorHistoryRef);
+    resetTabPagination(setOnlineState, onlineCursorHistoryRef);
+    setRefreshKey((value) => value + 1);
+  };
 
-  const filteredManualPayments = useMemo(
-    () => filterByInvoiceId(filterByOrderId(manualData.payments)),
-    [manualData.payments, filterByOrderId, filterByInvoiceId]
-  );
-  const filteredOnlinePayments = useMemo(
-    () => filterByInvoiceId(filterByOrderId(onlineData.payments)),
-    [onlineData.payments, filterByOrderId, filterByInvoiceId]
-  );
+  const handleTabChange = (nextType) => {
+    if (nextType === paymentType) return;
+    setPaymentType(nextType);
+  };
 
-  const isManual = paymentType === "manual";
-  const currentPayments = isManual
-    ? filteredManualPayments
-    : filteredOnlinePayments;
+  const goToPreviousPage = () => {
+    setActiveState((prev) => ({
+      ...prev,
+      currentPage: Math.max(prev.currentPage - 1, 1),
+    }));
+  };
 
-  const currentSummary = useMemo(() => {
-    if (loading) {
-      return isManual ? manualData.summary : onlineData.summary;
+  const goToNextPage = () => {
+    setActiveState((prev) => {
+      if (!prev.pagination.hasMore) return prev;
+
+      const nextHistory = prev.cursorHistory.slice(0, prev.currentPage);
+      if (prev.pagination.nextCursor != null) {
+        nextHistory[prev.currentPage] = prev.pagination.nextCursor;
+      }
+      activeCursorHistoryRef.current = nextHistory;
+
+      return {
+        ...prev,
+        cursorHistory: nextHistory,
+        currentPage: prev.currentPage + 1,
+      };
+    });
+  };
+
+  const currentPayments = activeState.payments;
+  const currentSummary = activeState.summary;
+  const startRecord = currentPayments.length
+    ? (activeState.currentPage - 1) * PAYMENTS_PER_PAGE + 1
+    : 0;
+  const endRecord =
+    startRecord + currentPayments.length - (currentPayments.length ? 1 : 0);
+
+  const rangeLabel = useMemo(() => {
+    if (loading) return "Loading...";
+    if (!currentPayments.length) return "0 payments";
+    if (activeState.pagination.hasMore) {
+      return `Showing ${startRecord}-${endRecord} of ${endRecord}+ payments`;
     }
-
-    return isManual
-      ? buildManualSummary(filteredManualPayments)
-      : buildOnlineSummary(filteredOnlinePayments);
+    return `Showing ${startRecord}-${endRecord} of ${activeState.count || endRecord} payments`;
   }, [
-    filteredManualPayments,
-    filteredOnlinePayments,
-    isManual,
+    activeState.count,
+    activeState.pagination.hasMore,
+    currentPayments.length,
+    endRecord,
     loading,
-    manualData.summary,
-    onlineData.summary,
+    startRecord,
   ]);
-
-  const manualTabCount = filteredManualPayments.length;
-  const onlineTabCount = filteredOnlinePayments.length;
 
   return (
     <DashboardShell>
@@ -193,22 +353,25 @@ export default function PaymentsPage() {
           />
         </div>
 
-        <GlobalInvoiceSearch
-          value={invoiceSearch}
-          onChange={setInvoiceSearch}
-          onSearch={() => setAppliedInvoiceSearch(invoiceSearch.trim())}
-          onClear={() => {
-            setInvoiceSearch("");
-            setAppliedInvoiceSearch("");
-          }}
+        <GlobalIdSearch
+          orderValue={orderSearch}
+          invoiceValue={invoiceSearch}
+          onOrderChange={setOrderSearch}
+          onInvoiceChange={setInvoiceSearch}
+          onSearch={handleIdSearch}
+          onClear={handleClearIdSearch}
         />
 
         <div className="flex flex-col gap-3 border-b border-[#E2E8F0] pb-0">
           <PaymentTypeTabs
             activeType={paymentType}
-            onChange={setPaymentType}
-            manualCount={manualTabCount}
-            onlineCount={onlineTabCount}
+            onChange={handleTabChange}
+            manualCount={
+              manualState.loaded ? manualState.count : null
+            }
+            onlineCount={
+              onlineState.loaded ? onlineState.count : null
+            }
           />
         </div>
 
@@ -223,7 +386,7 @@ export default function PaymentsPage() {
           <PaymentSummary
             paymentType={paymentType}
             summary={currentSummary}
-            loading={loading}
+            loading={loading && activePage === 1}
           />
         </div>
 
@@ -238,7 +401,11 @@ export default function PaymentsPage() {
         <ManualPaymentModal
           isOpen={manualPaymentModalOpen}
           onClose={() => setManualPaymentModalOpen(false)}
-          onSaved={() => setRefreshKey((value) => value + 1)}
+          onSaved={() => {
+            resetTabPagination(setManualState, manualCursorHistoryRef);
+            resetTabPagination(setOnlineState, onlineCursorHistoryRef);
+            setRefreshKey((value) => value + 1);
+          }}
         />
 
         <PaymentsTable
@@ -246,12 +413,47 @@ export default function PaymentsPage() {
           loading={loading}
           paymentType={paymentType}
         />
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[11px] text-[#64748B]">{rangeLabel}</p>
+
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              onClick={goToPreviousPage}
+              disabled={loading || activeState.currentPage === 1}
+              className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ‹
+            </button>
+
+            <span className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] bg-[#111827] px-2 text-[12px] font-semibold text-white">
+              {activeState.currentPage}
+            </span>
+
+            <button
+              type="button"
+              onClick={goToNextPage}
+              disabled={loading || !activeState.pagination.hasMore}
+              className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              ›
+            </button>
+          </div>
+        </div>
       </div>
     </DashboardShell>
   );
 }
 
-function GlobalInvoiceSearch({ value, onChange, onSearch, onClear }) {
+function GlobalIdSearch({
+  orderValue,
+  invoiceValue,
+  onOrderChange,
+  onInvoiceChange,
+  onSearch,
+  onClear,
+}) {
   const handleKeyDown = (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -259,46 +461,73 @@ function GlobalInvoiceSearch({ value, onChange, onSearch, onClear }) {
     }
   };
 
+  const hasValue = Boolean(orderValue || invoiceValue);
+
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <label
-          htmlFor="global-invoice-search"
-          className="shrink-0 text-[12px] font-semibold text-[#334155]"
-        >
-          Search by Invoice ID
-        </label>
+      <div className="flex flex-col gap-3">
+        <p className="text-[12px] font-semibold text-[#334155]">
+          Search by Order ID or Invoice ID
+        </p>
 
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3">
             <SearchIcon />
+            <label
+              htmlFor="global-order-search"
+              className="shrink-0 text-[11px] font-medium text-[#64748B]"
+            >
+              Order ID
+            </label>
+            <input
+              id="global-order-search"
+              type="text"
+              value={orderValue}
+              onChange={(e) => onOrderChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Order number or ID (e.g. 70656-1)"
+              className="h-[38px] min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
+            />
+          </div>
+
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3">
+            <SearchIcon />
+            <label
+              htmlFor="global-invoice-search"
+              className="shrink-0 text-[11px] font-medium text-[#64748B]"
+            >
+              Invoice ID
+            </label>
             <input
               id="global-invoice-search"
               type="text"
-              value={value}
-              onChange={(e) => onChange(e.target.value)}
+              value={invoiceValue}
+              onChange={(e) => onInvoiceChange(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Enter invoice number or ID (e.g. INV-24018)"
+              placeholder="Invoice number (e.g. INV-24018)"
               className="h-[38px] min-w-0 flex-1 bg-transparent text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8]"
             />
-            {value ? (
+          </div>
+
+          <div className="flex items-center gap-2">
+            {hasValue ? (
               <button
                 type="button"
                 onClick={onClear}
-                className="shrink-0 text-[11px] font-semibold text-[#64748B] hover:text-[#334155]"
+                className="h-[38px] shrink-0 rounded-[6px] bg-[#F1F5F9] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
               >
                 Clear
               </button>
             ) : null}
-          </div>
 
-          <button
-            type="button"
-            onClick={onSearch}
-            className="h-[38px] shrink-0 rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
-          >
-            Search
-          </button>
+            <button
+              type="button"
+              onClick={onSearch}
+              className="h-[38px] shrink-0 rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+            >
+              Search
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -332,7 +561,8 @@ function PaymentTypeTabs({ activeType, onChange, manualCount, onlineCount }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Manual Payments ({manualCount})
+        Manual Payments
+        {manualCount != null ? ` (${manualCount})` : ""}
       </button>
 
       <button
@@ -344,7 +574,8 @@ function PaymentTypeTabs({ activeType, onChange, manualCount, onlineCount }) {
             : "border-transparent text-[#64748B] hover:bg-[#F8FAFC]"
         }`}
       >
-        Online Payments ({onlineCount})
+        Online Payments
+        {onlineCount != null ? ` (${onlineCount})` : ""}
       </button>
     </div>
   );
@@ -358,14 +589,6 @@ function PaymentFilters({ filters, onChange, onFilter, onReset }) {
       </h2>
 
       <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
-        <TextField
-          label="Order ID"
-          name="orderId"
-          value={filters.orderId}
-          onChange={onChange}
-          placeholder="Enter order number"
-        />
-
         <DateField
           label="From"
           name="from"
@@ -397,25 +620,6 @@ function PaymentFilters({ filters, onChange, onFilter, onReset }) {
         </button>
       </div>
     </section>
-  );
-}
-
-function TextField({ label, name, value, onChange, placeholder = "" }) {
-  return (
-    <div className="min-w-0 flex-1 lg:max-w-[180px]">
-      <label className="mb-2 block text-[11px] font-medium text-[#64748B]">
-        {label}
-      </label>
-
-      <input
-        type="text"
-        name={name}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-      />
-    </div>
   );
 }
 
