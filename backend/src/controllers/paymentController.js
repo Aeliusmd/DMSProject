@@ -58,14 +58,32 @@ exports.recordManualPayment = asyncHandler(async (req, res) => {
 
 exports.getManualPayments = asyncHandler(async (req, res) => {
   throwIfInvalid(validatePaymentListQuery(req.query));
-  const payments = await paymentService.getManualPayments(req.query);
-  return ApiResponse.success(res, { payments });
+  const result = await paymentService.getManualPayments(req.query);
+
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { payments: result });
+  }
+
+  return ApiResponse.success(res, {
+    payments: result.payments || [],
+    summary: result.summary || null,
+    pagination: result.pagination || null,
+  });
 });
 
 exports.getOnlinePayments = asyncHandler(async (req, res) => {
   throwIfInvalid(validatePaymentListQuery(req.query));
-  const payments = await paymentService.getOnlinePayments(req.query);
-  return ApiResponse.success(res, { payments });
+  const result = await paymentService.getOnlinePayments(req.query);
+
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { payments: result });
+  }
+
+  return ApiResponse.success(res, {
+    payments: result.payments || [],
+    summary: result.summary || null,
+    pagination: result.pagination || null,
+  });
 });
 
 exports.getOrderPaymentDetail = asyncHandler(async (req, res) => {

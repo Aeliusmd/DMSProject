@@ -128,9 +128,35 @@ function validatePaymentSearchQuery(query = {}) {
 
 function validatePaymentListQuery(query = {}) {
   const errors = [];
+  const orderSearch = trimToString(
+    query.orderSearch ||
+      (!isValidPositiveIntId(query.orderId) ? query.orderId : "") ||
+      ""
+  );
+  const invoiceSearch = trimToString(query.invoiceSearch || "");
 
-  if (!isBlank(query.orderId) && !isValidPositiveIntId(query.orderId)) {
-    errors.push({ field: "orderId", message: "Invalid order id" });
+  if (
+    !isBlank(query.orderId) &&
+    !isValidPositiveIntId(query.orderId) &&
+    isBlank(query.orderSearch)
+  ) {
+    // Non-numeric orderId is treated as orderSearch text; accept printable refs.
+    if (!orderSearch) {
+      errors.push({ field: "orderId", message: "Invalid order id" });
+    }
+  }
+
+  addMaxLengthError(errors, "orderSearch", orderSearch, MAX_SEARCH_LENGTH);
+  addMaxLengthError(errors, "invoiceSearch", invoiceSearch, MAX_SEARCH_LENGTH);
+
+  if (orderSearch && hasHtmlMarkup(orderSearch)) {
+    errors.push({ field: "orderSearch", message: htmlMarkupMessage("orderSearch") });
+  }
+  if (invoiceSearch && hasHtmlMarkup(invoiceSearch)) {
+    errors.push({
+      field: "invoiceSearch",
+      message: htmlMarkupMessage("invoiceSearch"),
+    });
   }
 
   addOptionalIsoDateError(errors, "dateFrom", query.dateFrom);
@@ -150,6 +176,26 @@ function validatePaymentListQuery(query = {}) {
         message: `limit must be between 1 and ${MAX_PAYMENT_LIST_LIMIT}`,
       });
     }
+  }
+
+  if (!isBlank(query.pageSize)) {
+    const pageSize = Number(query.pageSize);
+
+    if (
+      !Number.isFinite(pageSize) ||
+      !Number.isInteger(pageSize) ||
+      pageSize < 1 ||
+      pageSize > MAX_PAGE_SIZE
+    ) {
+      errors.push({
+        field: "pageSize",
+        message: `pageSize must be between 1 and ${MAX_PAGE_SIZE}`,
+      });
+    }
+  }
+
+  if (!isBlank(query.cursor) && String(query.cursor).length > 500) {
+    errors.push({ field: "cursor", message: "Invalid cursor" });
   }
 
   return { valid: errors.length === 0, errors };
@@ -184,6 +230,27 @@ function parsePaymentListLimit(query = {}) {
   return Math.min(limit, MAX_PAYMENT_LIST_LIMIT);
 }
 
+function parsePaymentPageSize(query = {}) {
+  const pageSize = Number(query.pageSize);
+  if (
+    !Number.isFinite(pageSize) ||
+    !Number.isInteger(pageSize) ||
+    pageSize < 1
+  ) {
+    return 10;
+  }
+
+  return Math.min(pageSize, MAX_PAGE_SIZE);
+}
+
+function wantsPaymentKeyset(query = {}) {
+  return (
+    String(query.pagination || "").toLowerCase() === "keyset" ||
+    !isBlank(query.pageSize) ||
+    !isBlank(query.cursor)
+  );
+}
+
 module.exports = {
   validateNotificationQuery,
   validateOrderNotesQuery,
@@ -194,6 +261,8 @@ module.exports = {
   validatePaymentListQuery,
   validatePositiveIntRouteParam,
   parsePaymentListLimit,
+  parsePaymentPageSize,
+  wantsPaymentKeyset,
   MAX_PAYMENT_LIST_LIMIT,
   DEFAULT_PAYMENT_LIST_LIMIT,
 };

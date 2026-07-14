@@ -72,7 +72,7 @@ export default function PaymentsTable({
   const router = useRouter();
   const channel = paymentType === "online" ? "online" : "manual";
 
-  if (loading) {
+  if (loading && !payments.length) {
     return (
       <section className="flex min-h-[280px] items-center justify-center rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <p className="text-[13px] text-[#94A3B8]">Loading payments...</p>
@@ -80,7 +80,7 @@ export default function PaymentsTable({
     );
   }
 
-  if (!payments.length) {
+  if (!loading && !payments.length) {
     return (
       <section className="flex min-h-[280px] items-center justify-center rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <p className="text-[13px] text-[#94A3B8]">
@@ -95,8 +95,15 @@ export default function PaymentsTable({
   };
 
   return (
-    <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-      <div className="h-full overflow-auto">
+    <section className="relative min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
+      {loading ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center bg-white/80 py-2">
+          <p className="text-[11px] font-medium text-[#64748B]">
+            Updating results…
+          </p>
+        </div>
+      ) : null}
+      <div className={`h-full overflow-auto ${loading ? "opacity-60" : ""}`}>
         <table className="w-full min-w-[900px] border-collapse">
           <thead className="sticky top-0 z-10 bg-white">
             <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
