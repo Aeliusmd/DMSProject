@@ -14,6 +14,7 @@ const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const {
   parseOptionalIsoDate,
   assertPositiveInt,
+  likePrefix,
 } = require("../utils/sqlSafety");
 const { parsePaymentListLimit } = require("../validators/queryValidators");
 
@@ -340,30 +341,371 @@ function mapManualPaymentRow(row) {
   };
 }
 
+function resolveManualListFilters(query = {}) {
+  const filters = {
+    orderId: null,
+    orderSearch: null,
+    invoiceSearch: null,
+    dateFrom: parseOptionalIsoDate(query.dateFrom, "dateFrom"),
+    dateTo: parseOptionalIsoDate(query.dateTo, "dateTo"),
+  };
+
+  if (query.orderId && Number.isFinite(Number(query.orderId)) && Number(query.orderId) > 0) {
+    filters.orderId = assertPositiveInt(query.orderId, "orderId");
+  }
+
+  const orderSearch = String(query.orderSearch || "").trim();
+  if (orderSearch) {
+    if (/^\d+$/.test(orderSearch)) {
+      // Pure digits: match PK id or order_number prefix (e.g. 70656 → 70656-1).
+      if (!filters.orderId) {
+        filters.orderId = assertPositiveInt(orderSearch, "orderSearch");
+      }
+      filters.orderSearch = orderSearch;
+    } else {
+      filters.orderSearch = orderSearch;
+    }
+  } else if (query.orderId && !filters.orderId && String(query.orderId).trim()) {
+    const raw = String(query.orderId).trim();
+    if (/^\d+$/.test(raw)) {
+      filters.orderId = assertPositiveInt(raw, "orderId");
+      filters.orderSearch = raw;
+    } else {
+      filters.orderSearch = raw;
+    }
+  }
+
+  const invoiceSearch = String(query.invoiceSearch || "").trim();
+  if (invoiceSearch) {
+    filters.invoiceSearch = invoiceSearch;
+  }
+
+  return filters;
+}
+
+function wantsPaymentSummary(query = {}) {
+  const raw = String(query.includeSummary ?? "1").trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no");
+}
+
+function appendManualFilterConditions(conditions, params, alias, filters, invoiceColumn) {
+  if (filters.orderId && filters.orderSearch) {
+    // Index-friendly: PK equality OR left-prefix on unique order_number.
+    conditions.push(
+      "(o.id = :orderId OR o.order_number LIKE :orderSearch)"
+    );
+    params.orderId = filters.orderId;
+    params.orderSearch = likePrefix(filters.orderSearch);
+  } else if (filters.orderId) {
+    conditions.push("o.id = :orderId");
+    params.orderId = filters.orderId;
+  } else if (filters.orderSearch) {
+    conditions.push("o.order_number LIKE :orderSearch");
+    params.orderSearch = likePrefix(filters.orderSearch);
+  }
+
+  if (filters.invoiceSearch) {
+    conditions.push(`${invoiceColumn} LIKE :invoiceSearch`);
+    params.invoiceSearch = likePrefix(filters.invoiceSearch);
+  }
+
+  if (filters.dateFrom) {
+    conditions.push(`${alias}.payment_date >= :dateFrom`);
+    params.dateFrom = filters.dateFrom;
+  }
+
+  if (filters.dateTo) {
+    conditions.push(`${alias}.payment_date <= :dateTo`);
+    params.dateTo = filters.dateTo;
+  }
+}
+
+function appendManualArmKeyset(conditions, params, alias, sourceType, cursor) {
+  if (!cursor) return;
+
+  params.cursorSortDate = cursor.sortDate;
+  params.cursorSourceId = cursor.sourceId;
+
+  if (sourceType === "regular") {
+    if (cursor.sourceType === "xray") {
+      // All regular rows on/after the cursor date were already consumed.
+      conditions.push(`${alias}.payment_date < :cursorSortDate`);
+      return;
+    }
+
+    conditions.push(`(
+      ${alias}.payment_date < :cursorSortDate
+      OR (
+        ${alias}.payment_date = :cursorSortDate
+        AND ${alias}.id < :cursorSourceId
+      )
+    )`);
+    return;
+  }
+
+  // xray arm
+  if (cursor.sourceType === "regular") {
+    conditions.push(`${alias}.payment_date <= :cursorSortDate`);
+    return;
+  }
+
+  conditions.push(`(
+    ${alias}.payment_date < :cursorSortDate
+    OR (
+      ${alias}.payment_date = :cursorSortDate
+      AND ${alias}.id < :cursorSourceId
+    )
+  )`);
+}
+
+function toDateKey(value) {
+  if (!value) return null;
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const text = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(0, 10);
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return toDateKey(parsed);
+  }
+
+  return null;
+}
+
+function parseManualPaymentCursor(cursor) {
+  if (!cursor) return null;
+
+  try {
+    const decoded = Buffer.from(String(cursor), "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded);
+    const sortDate = toDateKey(parsed?.sortDate);
+    const sourceType = parsed?.sourceType === "xray" ? "xray" : "regular";
+    const sourceId = Number(parsed?.sourceId);
+
+    if (!sortDate || !Number.isFinite(sourceId) || sourceId <= 0) {
+      return null;
+    }
+
+    return { sortDate, sourceType, sourceId };
+  } catch {
+    return null;
+  }
+}
+
+function encodeManualPaymentCursor(row) {
+  const sortDate = toDateKey(row?.payment_date);
+  if (!sortDate || !row?.source_id) return null;
+
+  return Buffer.from(
+    JSON.stringify({
+      sortDate,
+      sourceType: row.payment_type === "xray" ? "xray" : "regular",
+      sourceId: Number(row.source_id),
+    })
+  ).toString("base64url");
+}
+
+function compareManualPaymentRows(a, b) {
+  const dateA = toDateKey(a.payment_date) || "";
+  const dateB = toDateKey(b.payment_date) || "";
+  if (dateA !== dateB) return dateB.localeCompare(dateA);
+
+  const typeA = a.payment_type === "xray" ? "xray" : "regular";
+  const typeB = b.payment_type === "xray" ? "xray" : "regular";
+  if (typeA !== typeB) return typeA.localeCompare(typeB);
+
+  return Number(b.source_id) - Number(a.source_id);
+}
+
+async function getManualPaymentsSummary(filters) {
+  const pool = getPool();
+  const standardConditions = ["i.payment_method = 'manual'", "i.payment_date IS NOT NULL"];
+  const standardParams = {};
+  appendManualFilterConditions(
+    standardConditions,
+    standardParams,
+    "i",
+    filters,
+    "i.invoice_number"
+  );
+
+  const xrayConditions = ["x.payment_method = 'manual'", "x.payment_date IS NOT NULL"];
+  const xrayParams = {};
+  appendManualFilterConditions(
+    xrayConditions,
+    xrayParams,
+    "x",
+    filters,
+    "x.invoice_number"
+  );
+
+  const [[standardAgg], [xrayAgg]] = await Promise.all([
+    pool.execute(
+      `SELECT COUNT(*) AS cnt, COALESCE(SUM(i.amount_paid), 0) AS total
+       FROM invoices i
+       INNER JOIN orders o ON o.id = i.order_id
+       WHERE ${standardConditions.join(" AND ")}`,
+      standardParams
+    ),
+    pool.execute(
+      `SELECT COUNT(*) AS cnt, COALESCE(SUM(x.amount_paid), 0) AS total
+       FROM invoice_xray_details x
+       INNER JOIN orders o ON o.id = x.order_id
+       WHERE ${xrayConditions.join(" AND ")}`,
+      xrayParams
+    ),
+  ]);
+
+  const totalPayments =
+    Number(standardAgg[0]?.cnt || 0) + Number(xrayAgg[0]?.cnt || 0);
+  const totalAmount =
+    toNumber(standardAgg[0]?.total) + toNumber(xrayAgg[0]?.total);
+
+  return {
+    totalPayments,
+    totalAmount: formatMoney(totalAmount),
+    checkCount: totalPayments,
+    wireCount: 0,
+    pendingCount: 0,
+  };
+}
+
+async function fetchManualPaymentArm({
+  sourceType,
+  filters,
+  cursor,
+  limit,
+}) {
+  const pool = getPool();
+  const isXray = sourceType === "xray";
+  const alias = isXray ? "x" : "i";
+  const table = isXray ? "invoice_xray_details x" : "invoices i";
+  const recordedBy = isXray ? "x.payment_recorded_by" : "i.payment_recorded_by";
+  const invoiceNumber = isXray ? "x.invoice_number" : "i.invoice_number";
+  const invoiceRef = isXray ? "CAST(o.id AS CHAR)" : "CAST(i.id AS CHAR)";
+  const amountCol = isXray ? "x.amount_paid" : "i.amount_paid";
+
+  const conditions = [
+    `${alias}.payment_method = 'manual'`,
+    `${alias}.payment_date IS NOT NULL`,
+  ];
+  const params = {};
+  appendManualFilterConditions(
+    conditions,
+    params,
+    alias,
+    filters,
+    invoiceNumber
+  );
+  appendManualArmKeyset(conditions, params, alias, sourceType, cursor);
+
+  const [rows] = await pool.execute(
+    `SELECT
+       CONCAT('manual-${isXray ? "xray" : "inv"}-', ${alias}.id) AS id,
+       ${alias}.id AS source_id,
+       o.id AS order_id,
+       o.order_number,
+       o.case_number,
+       COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name,
+       TRIM(CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name)) AS applicant_name,
+       ${invoiceNumber} AS invoice_number,
+       ${invoiceRef} AS invoice_ref,
+       '${sourceType}' AS payment_type,
+       ${amountCol} AS amount,
+       ${alias}.payment_date,
+       ${alias}.payment_check_number,
+       ${alias}.payment_recorded_at,
+       ${alias}.notes,
+       e.name AS recorded_by_name
+     FROM ${table}
+     INNER JOIN orders o ON o.id = ${alias}.order_id
+     LEFT JOIN facilities f ON f.id = o.facility_id
+     LEFT JOIN providers p ON p.id = o.provider_id
+     LEFT JOIN matrix_employees e ON e.id = ${recordedBy}
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY ${alias}.payment_date DESC, ${alias}.id DESC
+     LIMIT ${Math.max(1, Number(limit) || 11)}`,
+    params
+  );
+
+  return rows;
+}
+
+async function getManualPaymentsKeyset(query = {}) {
+  const { parsePaymentPageSize } = require("../validators/queryValidators");
+  const pageSize = parsePaymentPageSize(query);
+  const filters = resolveManualListFilters(query);
+  const cursor = parseManualPaymentCursor(query.cursor);
+  const includeSummary = wantsPaymentSummary(query);
+  const armLimit = pageSize + 1;
+
+  const [standardRows, xrayRows, summary] = await Promise.all([
+    fetchManualPaymentArm({
+      sourceType: "regular",
+      filters,
+      cursor,
+      limit: armLimit,
+    }),
+    fetchManualPaymentArm({
+      sourceType: "xray",
+      filters,
+      cursor,
+      limit: armLimit,
+    }),
+    includeSummary ? getManualPaymentsSummary(filters) : Promise.resolve(null),
+  ]);
+
+  const merged = [...standardRows, ...xrayRows]
+    .sort(compareManualPaymentRows)
+    .slice(0, armLimit);
+
+  const hasMore = merged.length > pageSize;
+  const pageRows = hasMore ? merged.slice(0, pageSize) : merged;
+  const payments = pageRows.map(mapManualPaymentRow);
+
+  return {
+    payments,
+    summary,
+    pagination: {
+      type: "keyset",
+      pageSize,
+      hasMore,
+      nextCursor: hasMore
+        ? encodeManualPaymentCursor(pageRows[pageRows.length - 1])
+        : null,
+    },
+  };
+}
+
 async function getManualPayments(query = {}) {
+  const { wantsPaymentKeyset } = require("../validators/queryValidators");
+
+  if (wantsPaymentKeyset(query)) {
+    return getManualPaymentsKeyset(query);
+  }
+
   const pool = getPool();
   const limit = parsePaymentListLimit(query);
+  const filters = resolveManualListFilters(query);
+
   const conditions = ["i.payment_method = 'manual'"];
   const params = {};
-
-  if (query.orderId) {
-    conditions.push("o.id = :orderId");
-    params.orderId = assertPositiveInt(query.orderId, "orderId");
-  }
-
-  const dateFrom = parseOptionalIsoDate(query.dateFrom, "dateFrom");
-  if (dateFrom) {
-    conditions.push("i.payment_date >= :dateFrom");
-    params.dateFrom = dateFrom;
-  }
-
-  const dateTo = parseOptionalIsoDate(query.dateTo, "dateTo");
-  if (dateTo) {
-    conditions.push("i.payment_date <= :dateTo");
-    params.dateTo = dateTo;
-  }
-
-  const whereClause = `WHERE ${conditions.join(" AND ")}`;
+  appendManualFilterConditions(
+    conditions,
+    params,
+    "i",
+    filters,
+    "i.invoice_number"
+  );
 
   const [standardRows] = await pool.execute(
     `SELECT
@@ -387,29 +729,19 @@ async function getManualPayments(query = {}) {
      LEFT JOIN facilities f ON f.id = o.facility_id
      LEFT JOIN providers p ON p.id = o.provider_id
      LEFT JOIN matrix_employees e ON e.id = i.payment_recorded_by
-     ${whereClause}`,
+     WHERE ${conditions.join(" AND ")}`,
     params
   );
 
   const xrayConditions = ["x.payment_method = 'manual'"];
   const xrayParams = {};
-
-  if (query.orderId) {
-    xrayConditions.push("o.id = :orderId");
-    xrayParams.orderId = assertPositiveInt(query.orderId, "orderId");
-  }
-
-  if (dateFrom) {
-    xrayConditions.push("x.payment_date >= :dateFrom");
-    xrayParams.dateFrom = dateFrom;
-  }
-
-  if (dateTo) {
-    xrayConditions.push("x.payment_date <= :dateTo");
-    xrayParams.dateTo = dateTo;
-  }
-
-  const xrayWhereClause = `WHERE ${xrayConditions.join(" AND ")}`;
+  appendManualFilterConditions(
+    xrayConditions,
+    xrayParams,
+    "x",
+    filters,
+    "x.invoice_number"
+  );
 
   const [xrayRows] = await pool.execute(
     `SELECT
@@ -433,18 +765,16 @@ async function getManualPayments(query = {}) {
      LEFT JOIN facilities f ON f.id = o.facility_id
      LEFT JOIN providers p ON p.id = o.provider_id
      LEFT JOIN matrix_employees e ON e.id = x.payment_recorded_by
-     ${xrayWhereClause}`,
+     WHERE ${xrayConditions.join(" AND ")}`,
     xrayParams
   );
 
-  const payments = [...standardRows, ...xrayRows]
+  return [...standardRows, ...xrayRows]
     .map(mapManualPaymentRow)
     .sort((a, b) =>
       String(b.paymentDate || "").localeCompare(String(a.paymentDate || ""))
     )
     .slice(0, limit);
-
-  return payments;
 }
 
 function mapDetailInvoice(type, row, order) {

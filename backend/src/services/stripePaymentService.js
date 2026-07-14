@@ -16,8 +16,8 @@ const logger = require("../utils/logger");
 const {
   parseOptionalIsoDate,
   assertPositiveInt,
+  likePrefix,
 } = require("../utils/sqlSafety");
-const { parsePaymentListLimit } = require("../validators/queryValidators");
 
 let stripeClient = null;
 
@@ -448,27 +448,91 @@ function mapOnlinePaymentRow(row) {
   };
 }
 
+function wantsPaymentSummary(query = {}) {
+  const raw = String(query.includeSummary ?? "1").trim().toLowerCase();
+  return !(raw === "0" || raw === "false" || raw === "no");
+}
+
 async function getOnlinePayments(query = {}) {
   const pool = getPool();
-  const limit = parsePaymentListLimit(query);
+  const {
+    parsePaymentListLimit,
+    parsePaymentPageSize,
+    wantsPaymentKeyset,
+  } = require("../validators/queryValidators");
+
+  const useKeyset = wantsPaymentKeyset(query);
+  const pageSize = useKeyset ? parsePaymentPageSize(query) : null;
+  const limit = useKeyset ? pageSize + 1 : parsePaymentListLimit(query);
+  const includeSummary = useKeyset ? wantsPaymentSummary(query) : false;
+
   const conditions = ["s.status = 'succeeded'"];
   const params = {};
 
-  if (query.orderId) {
+  let orderIdFilter = null;
+  if (query.orderId && Number.isFinite(Number(query.orderId)) && Number(query.orderId) > 0) {
+    orderIdFilter = assertPositiveInt(query.orderId, "orderId");
+  }
+
+  const orderSearch =
+    String(query.orderSearch || "").trim() ||
+    (query.orderId && !orderIdFilter ? String(query.orderId).trim() : "");
+
+  if (orderSearch) {
+    if (/^\d+$/.test(orderSearch)) {
+      if (!orderIdFilter) {
+        orderIdFilter = assertPositiveInt(orderSearch, "orderSearch");
+      }
+      conditions.push("(o.id = :orderId OR o.order_number LIKE :orderSearch)");
+      params.orderId = orderIdFilter;
+      params.orderSearch = likePrefix(orderSearch);
+    } else {
+      conditions.push("o.order_number LIKE :orderSearch");
+      params.orderSearch = likePrefix(orderSearch);
+      if (orderIdFilter) {
+        // Explicit numeric orderId param plus textual orderSearch → AND both.
+        conditions.push("o.id = :orderId");
+        params.orderId = orderIdFilter;
+      }
+    }
+  } else if (orderIdFilter) {
     conditions.push("o.id = :orderId");
-    params.orderId = assertPositiveInt(query.orderId, "orderId");
+    params.orderId = orderIdFilter;
+  }
+
+  const invoiceSearch = String(query.invoiceSearch || "").trim();
+  if (invoiceSearch) {
+    if (/^\d+$/.test(invoiceSearch)) {
+      conditions.push(
+        `(s.id = :invoiceSearchId OR s.invoice_number LIKE :invoiceSearch)`
+      );
+      params.invoiceSearchId = assertPositiveInt(invoiceSearch, "invoiceSearch");
+      params.invoiceSearch = likePrefix(invoiceSearch);
+    } else {
+      conditions.push("s.invoice_number LIKE :invoiceSearch");
+      params.invoiceSearch = likePrefix(invoiceSearch);
+    }
   }
 
   const dateFrom = parseOptionalIsoDate(query.dateFrom, "dateFrom");
   if (dateFrom) {
-    conditions.push("DATE(COALESCE(s.paid_at, s.created_at)) >= :dateFrom");
+    conditions.push("s.paid_at >= :dateFrom");
     params.dateFrom = dateFrom;
   }
 
   const dateTo = parseOptionalIsoDate(query.dateTo, "dateTo");
   if (dateTo) {
-    conditions.push("DATE(COALESCE(s.paid_at, s.created_at)) <= :dateTo");
+    // Inclusive calendar day without DATE() on the column (keeps index usable).
+    conditions.push("s.paid_at < DATE_ADD(:dateTo, INTERVAL 1 DAY)");
     params.dateTo = dateTo;
+  }
+
+  if (useKeyset && query.cursor) {
+    const cursorId = Number(query.cursor);
+    if (Number.isFinite(cursorId) && cursorId > 0) {
+      conditions.push("s.id < :cursorId");
+      params.cursorId = cursorId;
+    }
   }
 
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
@@ -486,16 +550,62 @@ async function getOnlinePayments(query = {}) {
      LEFT JOIN facilities f ON f.id = o.facility_id
      LEFT JOIN providers p ON p.id = o.provider_id
      ${whereClause}
-     ORDER BY COALESCE(s.paid_at, s.created_at) DESC
+     ORDER BY s.id DESC
      LIMIT ${limit}`,
     params
   );
 
-  return rows.map(mapOnlinePaymentRow);
+  if (!useKeyset) {
+    return rows.map(mapOnlinePaymentRow);
+  }
+
+  const hasMore = rows.length > pageSize;
+  const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+  const payments = pageRows.map(mapOnlinePaymentRow);
+  const last = pageRows[pageRows.length - 1];
+
+  let summary = null;
+  if (includeSummary) {
+    const summaryConditions = conditions.filter((c) => !c.includes(":cursorId"));
+    const summaryParams = Object.fromEntries(
+      Object.entries(params).filter(([key]) => key !== "cursorId")
+    );
+
+    const [aggRows] = await pool.execute(
+      `SELECT
+         COUNT(*) AS cnt,
+         COALESCE(SUM(s.amount), 0) AS total
+       FROM stripe_online_payments s
+       INNER JOIN orders o ON o.id = s.order_id
+       WHERE ${summaryConditions.join(" AND ")}`,
+      summaryParams
+    );
+
+    const totalTransactions = Number(aggRows[0]?.cnt || 0);
+    const totalCollected = toNumber(aggRows[0]?.total);
+    summary = {
+      totalTransactions,
+      totalCollected: formatMoney(totalCollected),
+      succeededCount: totalTransactions,
+      pendingCount: 0,
+      failedCount: 0,
+    };
+  }
+
+  return {
+    payments,
+    summary,
+    pagination: {
+      type: "keyset",
+      pageSize,
+      hasMore,
+      nextCursor: hasMore && last ? String(last.id) : null,
+    },
+  };
 }
 
 async function getOnlinePaymentsForOrder(orderId) {
-  return getOnlinePayments({ orderId });
+  return getOnlinePayments({ orderId, limit: 500 });
 }
 
 async function extractStripePaymentDetails(session) {
