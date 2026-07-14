@@ -300,6 +300,18 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
+  try {
+    const {
+      maybeAdvanceCompanyPortalAfterInvoicesPaid,
+    } = require("./companyPortalStageHooks");
+    await maybeAdvanceCompanyPortalAfterInvoicesPaid(orderId);
+  } catch (error) {
+    console.warn(
+      "[company-portal] Paid-stage advance after manual payment skipped:",
+      error.message || error
+    );
+  }
+
   return searchOrderInvoices(order.order_number);
 }
 

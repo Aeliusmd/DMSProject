@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { randomBytes } = require("crypto");
-const archiver = require("archiver");
+const { createZipArchive } = require("../utils/zipArchive");
 const ApiError = require("../utils/ApiError");
 const {
   sendFileResponse,
@@ -180,7 +180,7 @@ async function streamDownloadByToken(token, res) {
     `attachment; filename="${zipName.replace(/"/g, "")}"`
   );
 
-  const archive = archiver("zip", { zlib: { level: 9 } });
+  const archive = createZipArchive();
 
   files.forEach((file) => {
     archive.file(file.path, { name: file.filename });

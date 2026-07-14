@@ -179,11 +179,13 @@ async function getDashboardStats() {
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
       FROM orders
       WHERE status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
+        AND (creation_source IS NULL OR creation_source <> 'company_portal')
     `),
     pool.execute(
       `SELECT COUNT(*) AS rush_orders
        FROM orders
        WHERE status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
+         AND (creation_source IS NULL OR creation_source <> 'company_portal')
          AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL}) > :minDays`,
       { minDays: RUSH_ESCALATED_MIN_DAYS }
     ),
@@ -276,6 +278,7 @@ async function getTopProviders(limit = 5) {
     LEFT JOIN invoices i ON i.order_id = o.id
     LEFT JOIN invoice_xray_details x ON x.order_id = o.id
     WHERE o.status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
+      AND (o.creation_source IS NULL OR o.creation_source <> 'company_portal')
     GROUP BY provider_name
     ORDER BY case_count DESC, invoiced_total DESC, provider_name ASC
     LIMIT ${safeLimit}

@@ -450,7 +450,9 @@ function buildOrderDbPayload(data) {
         ? "auto"
         : data.creationSource === "personal_portal"
           ? "personal_portal"
-          : "manual",
+          : data.creationSource === "company_portal"
+            ? "company_portal"
+            : "manual",
   };
 }
 
@@ -1019,6 +1021,9 @@ function mapOrderListRow(
     cnrDateSent: toInputDate(row.cnr_date_sent),
     recentNotes: extras.recentNotes || [],
     hasActiveReminder: Boolean(extras.hasActiveReminder),
+    creationSource: row.creation_source || "manual",
+    companyPortalStatus: extras.companyPortalStatus || null,
+    companyPortalOrderId: extras.companyPortalOrderId || null,
   };
 
   return appendOrderCompletenessFields(mapped, row, orderRecords);
@@ -1306,6 +1311,32 @@ function parseExcludeCompleted(value) {
 
 async function getAllOrders(query = {}) {
   const filters = {};
+  const creationSource = String(query.creationSource || "")
+    .trim()
+    .toLowerCase();
+
+  if (creationSource === "company_portal") {
+    filters.creationSource = "company_portal";
+    // Best-effort: ensure paid portal orders have internal rows for tooling.
+    try {
+      const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+      await companyPortalInternalSyncService.backfillUnlinkedPaidPortalOrders({
+        limit: 50,
+      });
+      await companyPortalInternalSyncService.backfillMissingPortalPrepayments({
+        limit: 200,
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[company-portal] backfill skipped:",
+        error.message || error
+      );
+    }
+  } else {
+    // Keep internal Orders page free of external company portal work.
+    filters.excludeCreationSource = "company_portal";
+  }
 
   if (query.facility) {
     filters.facilityId = assertPositiveInt(query.facility, "facility");
@@ -1457,6 +1488,89 @@ async function getAllOrders(query = {}) {
       }
     );
   });
+
+  if (filters.creationSource === "company_portal") {
+    const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+    const {
+      enrichCompanyPortalOrderStageMeta,
+      maybeAdvanceCompanyPortalAfterInvoicesPaid,
+      resolveEffectiveCompanyPortalStatus,
+      canCompanyPortalScanRecords,
+      canCompanyPortalEmailRecords,
+    } = require("./companyPortalStageHooks");
+    const [statusMap, stageMetaMap] = await Promise.all([
+      companyPortalInternalSyncService.getCompanyPortalStatusMap(orderIds),
+      enrichCompanyPortalOrderStageMeta(orderIds),
+    ]);
+
+    for (const order of mappedOrders) {
+      const orderId = Number(order.dbId);
+      let meta = statusMap.get(orderId);
+      const stageMeta = stageMetaMap.get(orderId) || {};
+      let portalStatus = meta?.companyPortalStatus || null;
+
+      if (!meta) {
+        try {
+          const resolved =
+            await companyPortalInternalSyncService.resolveCompanyPortalOrderForInternalOrder(
+              orderId
+            );
+          if (resolved.portalOrder) {
+            meta = {
+              companyPortalOrderId: resolved.portalOrder.id,
+              companyPortalStatus: resolved.portalOrder.status,
+              companyPortalPaymentStatus: resolved.portalOrder.payment_status,
+            };
+            statusMap.set(orderId, meta);
+            portalStatus = resolved.portalOrder.status;
+          }
+        } catch {
+          // Keep row usable even if auto-link fails.
+        }
+      }
+
+      if (meta && stageMeta.allInvoicesPaid && portalStatus === "Invoice") {
+        try {
+          const advanced = await maybeAdvanceCompanyPortalAfterInvoicesPaid(
+            orderId
+          );
+          portalStatus = advanced?.status || portalStatus;
+        } catch {
+          // Keep stored status; effective status still resolves for UI.
+        }
+      }
+
+      const effectiveStatus = resolveEffectiveCompanyPortalStatus(
+        portalStatus,
+        stageMeta
+      );
+      const hasUploadedRecords = Boolean(
+        order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
+      );
+      const hasAllRecordsUploaded = Boolean(order.records?.allRecordsUploaded);
+
+      if (meta) {
+        order.companyPortalOrderId = meta.companyPortalOrderId;
+        order.companyPortalStatus = effectiveStatus || portalStatus;
+        order.companyPortalPaymentStatus = meta.companyPortalPaymentStatus;
+      } else if (effectiveStatus) {
+        order.companyPortalStatus = effectiveStatus;
+      }
+
+      order.companyPortalInvoiceSent = Boolean(stageMeta.invoiceSent);
+      order.companyPortalAllInvoicesPaid = Boolean(stageMeta.allInvoicesPaid);
+      order.companyPortalCanScanRecords = canCompanyPortalScanRecords(
+        portalStatus,
+        stageMeta,
+        hasAllRecordsUploaded
+      );
+      order.companyPortalCanEmailRecords = canCompanyPortalEmailRecords(
+        portalStatus,
+        stageMeta,
+        hasUploadedRecords
+      );
+    }
+  }
 
   if (!useKeysetPagination) {
     return mappedOrders;

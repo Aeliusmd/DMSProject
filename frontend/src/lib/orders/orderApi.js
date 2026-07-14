@@ -19,6 +19,9 @@ function buildOrdersQuery(filters = {}) {
   if (filters.pageSize) params.set("pageSize", String(filters.pageSize));
   if (filters.cursor) params.set("cursor", String(filters.cursor));
   if (filters.pagination) params.set("pagination", String(filters.pagination));
+  if (filters.creationSource) {
+    params.set("creationSource", String(filters.creationSource));
+  }
 
   const queryString = params.toString();
   return queryString ? `?${queryString}` : "";
@@ -584,5 +587,39 @@ export async function recordOrderFax(orderId, payload = {}) {
     body: payload,
   });
 
+  return data?.data || {};
+}
+
+export async function getCompanyOrderStats() {
+  const data = await request("/company-orders/stats", {
+    auth: true,
+    cache: "no-store",
+  });
+  return (
+    data?.data || {
+      totalOrders: 0,
+      inProcess: 0,
+      invoice: 0,
+      paid: 0,
+      released: 0,
+    }
+  );
+}
+
+export async function updateCompanyOrderStage(orderId, status) {
+  const data = await request(`/company-orders/${orderId}/stage`, {
+    method: "PATCH",
+    auth: true,
+    body: { status },
+  });
+  return data?.data || {};
+}
+
+export async function emailCompanyOrderRecords(orderId, payload = {}) {
+  const data = await request(`/company-orders/${orderId}/email-records`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
   return data?.data || {};
 }

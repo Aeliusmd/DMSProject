@@ -3412,6 +3412,19 @@ async function sendInvoices(invoiceIds = [], options = {}) {
         "sent",
         new Date()
       );
+
+      try {
+        const {
+          maybeAdvanceCompanyPortalAfterInvoiceSent,
+        } = require("./companyPortalStageHooks");
+        await maybeAdvanceCompanyPortalAfterInvoiceSent(invoice.order_id);
+      } catch (error) {
+        // Company-portal stage advances must not block invoice send.
+        console.warn(
+          "[company-portal] Invoice-sent stage advance skipped:",
+          error.message || error
+        );
+      }
     }
 
     sent.push({ invoiceId, recipient: deliveredTo });
@@ -3632,6 +3645,18 @@ async function sendXrayInvoices(orderIds = [], options = {}) {
     );
 
     await Order.upsertWorkflowStage(orderId, "SENT", "sent", new Date());
+
+    try {
+      const {
+        maybeAdvanceCompanyPortalAfterInvoiceSent,
+      } = require("./companyPortalStageHooks");
+      await maybeAdvanceCompanyPortalAfterInvoiceSent(orderId);
+    } catch (error) {
+      console.warn(
+        "[company-portal] X-Ray invoice-sent stage advance skipped:",
+        error.message || error
+      );
+    }
 
     sent.push({ orderId, recipient: deliveredTo });
   }

@@ -12,6 +12,11 @@ import { canAccessNavItem } from "@/lib/auth/roles";
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
   { label: "Orders", href: "/orders", icon: <OrdersIcon /> },
+  {
+    label: "Company Orders",
+    href: "/company-orders",
+    icon: <CompanyOrdersIcon />,
+  },
   { label: "Invoices", href: "/invoices", icon: <InvoicesIcon /> },
   { label: "Payments", href: "/payments", icon: <PaymentsIcon /> },
   { label: "Employees", href: "/employees", icon: <EmployeesIcon /> },
@@ -67,7 +72,11 @@ export default function Sidebar({ isCollapsed }) {
       <nav className="flex-1 px-[10px] py-[16px]">
         <div className="space-y-[7px]">
           {visibleNavItems.map((item) => {
-            const isActive = pathname === item.href;
+            const isActive =
+              pathname === item.href ||
+              (item.href !== "/dashboard" &&
+                item.href !== "/" &&
+                pathname.startsWith(`${item.href}/`));
 
             return (
               <Link
@@ -135,6 +144,19 @@ function OrdersIcon() {
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
       <path d="M6 4h12v16H6V4Z" stroke="currentColor" strokeWidth="1.7" />
       <path d="M9 9h6M9 13h6M9 17h4" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
+
+function CompanyOrdersIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 20V9l8-5 8 5v11"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path d="M9 20v-6h6v6" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

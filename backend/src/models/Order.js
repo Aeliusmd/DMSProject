@@ -377,6 +377,16 @@ function buildFindAllWhere(filters = {}) {
     appendOrderSearchFilter(conditions, params, filters.search);
   }
 
+  if (filters.creationSource) {
+    conditions.push("o.creation_source = :creationSource");
+    params.creationSource = filters.creationSource;
+  } else if (filters.excludeCreationSource) {
+    conditions.push(
+      "(o.creation_source IS NULL OR o.creation_source <> :excludeCreationSource)"
+    );
+    params.excludeCreationSource = filters.excludeCreationSource;
+  }
+
   return {
     whereClause: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
     params,
@@ -657,6 +667,7 @@ class Order {
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed
       FROM orders
       WHERE ${ACTIVE_ORDER}
+        AND (creation_source IS NULL OR creation_source <> 'company_portal')
     `);
 
     return rows[0] || {};

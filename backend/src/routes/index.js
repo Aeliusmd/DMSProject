@@ -15,12 +15,14 @@ const settingsRoutes = require("./settingsRoutes");
 const dashboardRoutes = require("./dashboardRoutes");
 const paymentRoutes = require("./paymentRoutes");
 const publicRoutes = require("./publicRoutes");
+const companyOrdersRoutes = require("./companyOrdersRoutes");
 
 const router = express.Router();
 
 router.use("/auth", authRoutes);
 router.use("/company-portal/auth", companyPortalAuthRoutes);
 router.use("/company-portal", companyPortalOrderRoutes);
+router.use("/company-orders", companyOrdersRoutes);
 router.use("/orders", orderRoutes);
 router.use("/providers", providerRoutes);
 router.use("/facilities", facilityRoutes);

@@ -16,11 +16,18 @@ import {
   getSavedOrderRecordTypeLabel,
 } from "@/lib/orders/recordTypeUtils";
 
+function resolveReturnPath(returnTo) {
+  const normalized = `${returnTo || ""}`.trim().replace(/^\/+/, "");
+  if (normalized === "company-orders") return "/company-orders";
+  return "/orders";
+}
+
 export default function ScanMedicalRecordsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const orderId = searchParams.get("orderId");
   const isEditMode = searchParams.get("mode") === "edit";
+  const returnPath = resolveReturnPath(searchParams.get("returnTo"));
 
   const fileInputRefs = useRef({});
   const [order, setOrder] = useState(null);
@@ -39,6 +46,8 @@ export default function ScanMedicalRecordsPage() {
   const allUploaded = order ? allOrderRecordSlotsUploaded(order) : false;
   const savedRecordTypeLabel = order ? getSavedOrderRecordTypeLabel(order) : "";
   const canUpload = recordSlots.length > 0;
+  const backLabel =
+    returnPath === "/company-orders" ? "Back to Company Orders" : "Back to Orders";
 
   useEffect(() => {
     let cancelled = false;
@@ -75,12 +84,6 @@ export default function ScanMedicalRecordsPage() {
       cancelled = true;
     };
   }, [orderId]);
-
-  useEffect(() => {
-    if (!loadingOrder && allUploaded && !isEditMode) {
-      router.replace("/orders");
-    }
-  }, [allUploaded, isEditMode, loadingOrder, router]);
 
   const isCnrOrder = Boolean(order?.certificateNoRecords);
 
@@ -162,7 +165,11 @@ export default function ScanMedicalRecordsPage() {
           recordType: slot.recordType,
         });
 
-        if (latest) setOrder(latest);
+        if (latest) {
+          setOrder(latest);
+        } else {
+          latest = await refreshOrder();
+        }
 
         setSelectedFiles((prev) => {
           const next = { ...prev };
@@ -178,15 +185,21 @@ export default function ScanMedicalRecordsPage() {
       setConfirmAction(null);
 
       const uploadedLabels = queue.map((slot) => slot.label).join(", ");
-      setSuccessMessage(
-        queue.length > 1
-          ? `${uploadedLabels} uploaded.`
-          : `${queue[0].label} uploaded.`
-      );
-
       latest = latest || (await refreshOrder());
+
       if (allOrderRecordSlotsUploaded(latest) && !isEditMode) {
-        setTimeout(() => router.push("/orders"), 1200);
+        setSuccessMessage(
+          queue.length > 1
+            ? `${uploadedLabels} uploaded. All record types are complete.`
+            : `${queue[0].label} uploaded. All record types are complete.`
+        );
+        setTimeout(() => router.push(returnPath), 1500);
+      } else {
+        setSuccessMessage(
+          queue.length > 1
+            ? `${uploadedLabels} uploaded.`
+            : `${queue[0].label} uploaded.`
+        );
       }
     } catch (err) {
       setError(err.message || "Records upload failed.");
@@ -205,6 +218,7 @@ export default function ScanMedicalRecordsPage() {
     try {
       const updated = await removeMedicalRecords(orderId, { recordType });
       if (updated) setOrder(updated);
+      else await refreshOrder();
       setSuccessMessage("Scanned records removed.");
       setConfirmAction(null);
     } catch (err) {
@@ -220,7 +234,7 @@ export default function ScanMedicalRecordsPage() {
         .join(" ")
     : "";
 
-  if (loadingOrder || (!isEditMode && allUploaded)) {
+  if (loadingOrder) {
     return (
       <DashboardShell>
         <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
@@ -242,10 +256,10 @@ export default function ScanMedicalRecordsPage() {
             Record from the orders table to email the CNR letter instead.
           </p>
           <Link
-            href="/orders"
+            href={returnPath}
             className="text-[12px] font-semibold text-[#007F96] hover:underline"
           >
-            Back to Orders
+            {backLabel}
           </Link>
         </div>
       </DashboardShell>
@@ -260,7 +274,11 @@ export default function ScanMedicalRecordsPage() {
             No scanned records are uploaded for this order.
           </p>
           <Link
-            href={`/orders/scan-medical-records?orderId=${encodeURIComponent(orderId)}`}
+            href={`/orders/scan-medical-records?orderId=${encodeURIComponent(
+              orderId
+            )}&returnTo=${encodeURIComponent(
+              searchParams.get("returnTo") || "orders"
+            )}`}
             className="text-[12px] font-semibold text-[#007F96] hover:underline"
           >
             Upload scanned records
@@ -275,16 +293,17 @@ export default function ScanMedicalRecordsPage() {
     : null;
 
   const uploadQueue = confirmAction?.type === "upload" ? getUploadQueue() : [];
+  const uploadedSlots = recordSlots.filter((slot) => slot.hasFile);
 
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] flex-col">
         <div className="shrink-0">
           <Link
-            href="/orders"
+            href={returnPath}
             className="text-[11px] font-medium text-[#007F96] hover:underline"
           >
-            Back to Orders
+            {backLabel}
           </Link>
           <h1 className="mt-2 text-[15px] font-semibold text-[#111827]">
             {isEditMode ? "Edit Scanned Records" : "Scan Records"}
@@ -360,6 +379,27 @@ export default function ScanMedicalRecordsPage() {
                   </div>
                 )}
 
+                {uploadedSlots.length > 0 && (
+                  <div className="mt-3 space-y-1.5 border-t border-[#E2E8F0] pt-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-[#64748B]">
+                      Uploaded documents
+                    </p>
+                    <ul className="space-y-1">
+                      {uploadedSlots.map((slot) => (
+                        <li
+                          key={slot.recordType}
+                          className="flex items-center justify-between gap-2 rounded-[4px] bg-white px-2 py-1.5 text-[10px]"
+                        >
+                          <span className="font-medium text-[#166534]">
+                            {slot.label}
+                          </span>
+                          <span className="text-[#64748B]">PDF uploaded</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
                 {canUpload && !isMultiType ? (
                   <p className="mt-3 border-t border-[#E2E8F0] pt-3">
                     <span className="text-[10px] font-semibold uppercase tracking-wide text-[#64748B]">
@@ -377,6 +417,23 @@ export default function ScanMedicalRecordsPage() {
                     create or edit order first.
                   </p>
                 )}
+              </div>
+            ) : null}
+
+            {allUploaded && !isEditMode ? (
+              <div className="mt-6 rounded-[8px] border border-[#BBF7D0] bg-[#F0FDF4] px-4 py-3 text-left">
+                <p className="text-[12px] font-semibold text-[#166534]">
+                  All required records are uploaded
+                </p>
+                <p className="mt-1 text-[11px] text-[#15803D]">
+                  Return to the orders table to email the records link when ready.
+                </p>
+                <Link
+                  href={returnPath}
+                  className="mt-3 inline-flex text-[11px] font-semibold text-[#007F96] underline"
+                >
+                  {backLabel}
+                </Link>
               </div>
             ) : null}
 
@@ -502,9 +559,14 @@ export default function ScanMedicalRecordsPage() {
                             slot.hasFile ? "text-[#059669]" : "text-[#94A3B8]"
                           }`}
                         >
-                          {slot.hasFile ? "Done" : "Pending"}
+                          {slot.hasFile ? "Complete" : "Pending"}
                         </p>
                       </div>
+                      {slot.hasFile && !isEditMode ? (
+                        <span className="shrink-0 rounded-[4px] bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
+                          Uploaded
+                        </span>
+                      ) : null}
                       {isEditMode && slot.hasFile && (
                         <button
                           type="button"
@@ -522,13 +584,19 @@ export default function ScanMedicalRecordsPage() {
                       )}
                     </div>
 
+                    {slot.hasFile && !isEditMode ? (
+                      <p className="mt-2 text-[10px] font-medium text-[#64748B]">
+                        PDF uploaded for this record type.
+                      </p>
+                    ) : null}
+
                     {(!slot.hasFile || isEditMode) && uploadPanel}
                   </div>
                 );
               })}
             </div>
 
-            {canUpload && (
+            {canUpload && !allUploaded && (
               <button
                 type="button"
                 onClick={() => setConfirmAction({ type: "upload" })}
@@ -551,10 +619,10 @@ export default function ScanMedicalRecordsPage() {
               </p>
             )}
 
-            {isMultiType && canUpload && !isEditMode && (
+            {isMultiType && canUpload && !isEditMode && !allUploaded && (
               <p className="mt-4 text-[10px] text-[#64748B]">
-                Review Records completes when every record type has been uploaded.
-                You can upload one type at a time and return later for the rest.
+                Upload each record type separately. Completed types stay marked
+                as uploaded until all required types are done.
               </p>
             )}
           </div>

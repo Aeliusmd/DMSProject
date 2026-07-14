@@ -859,6 +859,18 @@ async function fulfillSuccessfulCheckoutSession(session) {
 
   await Order.syncOrderStatusFromWorkflow(orderId);
 
+  try {
+    const {
+      maybeAdvanceCompanyPortalAfterInvoicesPaid,
+    } = require("./companyPortalStageHooks");
+    await maybeAdvanceCompanyPortalAfterInvoicesPaid(orderId);
+  } catch (error) {
+    console.warn(
+      "[company-portal] Paid-stage advance skipped:",
+      error.message || error
+    );
+  }
+
   const [updatedRows] = await pool.execute(
     `SELECT s.*, o.order_number,
             COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
