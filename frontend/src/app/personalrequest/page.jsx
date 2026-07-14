@@ -19,7 +19,6 @@ import {
 } from "@/lib/validations/personalRequestValidation";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import {
-  clearPersonalRequestDraft,
   loadPersonalRequestDraft,
   savePersonalRequestDraft,
 } from "@/lib/personal-request/personalRequestDraft";
@@ -111,31 +110,19 @@ export default function PersonalRequestPage() {
   const canceled = searchParams.get("canceled") === "1";
   const fileInputRef = useRef(null);
   const otpRefs = useRef([]);
-  const draft = loadPersonalRequestDraft();
+  const draftHydratedRef = useRef(false);
 
   const [config, setConfig] = useState({ processingFee: "35.00", lookupDays: 7 });
-  const [step, setStep] = useState(() => (canceled && draft?.emailVerified ? 2 : 1));
-  const [form, setForm] = useState(() => ({
-    ...INITIAL_FORM,
-    ...(draft?.form || {}),
-    driverLicenseFile: null,
-  }));
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState(INITIAL_FORM);
   const [touched, setTouched] = useState({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [apiErrors, setApiErrors] = useState({});
-  const [bannerError, setBannerError] = useState(() => {
-    if (!canceled) return "";
-    if (draft?.emailVerified) {
-      return "Payment was canceled. Re-upload your driver's license if needed, then pay again.";
-    }
-    return "Payment was canceled. Please verify your email again to continue.";
-  });
+  const [bannerError, setBannerError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const [emailVerified, setEmailVerified] = useState(() => Boolean(draft?.emailVerified));
-  const [emailVerificationToken, setEmailVerificationToken] = useState(
-    () => draft?.emailVerificationToken || ""
-  );
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [emailVerificationToken, setEmailVerificationToken] = useState("");
   const [otpSessionToken, setOtpSessionToken] = useState("");
   const [otpSent, setOtpSent] = useState(false);
   const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
@@ -143,6 +130,44 @@ export default function PersonalRequestPage() {
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [draftReady, setDraftReady] = useState(false);
+
+  useEffect(() => {
+    if (draftHydratedRef.current) return;
+    draftHydratedRef.current = true;
+
+    const draft = loadPersonalRequestDraft();
+    if (draft?.form) {
+      setForm({
+        ...INITIAL_FORM,
+        ...draft.form,
+        driverLicenseFile: null,
+      });
+    }
+
+    const verified = Boolean(draft?.emailVerified && draft?.emailVerificationToken);
+    if (verified) {
+      setEmailVerified(true);
+      setEmailVerificationToken(draft.emailVerificationToken);
+      setOtpSent(false);
+    }
+
+    if (canceled && verified) {
+      setStep(2);
+      setBannerError(
+        "Payment was canceled. Re-upload your driver's license if needed, then pay again."
+      );
+    } else if (canceled && !verified) {
+      setStep(1);
+      setBannerError(
+        "Payment was canceled. Please verify your email with OTP to continue."
+      );
+    } else if (verified && draft?.step === 2) {
+      setStep(2);
+    }
+
+    setDraftReady(true);
+  }, [canceled]);
 
   useEffect(() => {
     fetchPersonalRequestConfig()
@@ -151,6 +176,8 @@ export default function PersonalRequestPage() {
   }, []);
 
   useEffect(() => {
+    if (!draftReady) return;
+
     savePersonalRequestDraft({
       form: {
         ...form,
@@ -160,7 +187,7 @@ export default function PersonalRequestPage() {
       emailVerificationToken,
       step,
     });
-  }, [form, emailVerified, emailVerificationToken, step]);
+  }, [form, emailVerified, emailVerificationToken, step, draftReady]);
   useEffect(() => {
     if (countdown <= 0) return undefined;
     const timer = setTimeout(() => setCountdown((prev) => prev - 1), 1000);
@@ -285,6 +312,12 @@ export default function PersonalRequestPage() {
       setEmailVerified(true);
       setEmailVerificationToken(data.emailVerificationToken);
       setOtpSent(false);
+      savePersonalRequestDraft({
+        form: { ...form, driverLicenseFile: null },
+        emailVerified: true,
+        emailVerificationToken: data.emailVerificationToken,
+        step,
+      });
     } catch (err) {
       setOtpError(getApiErrorMessage(err, "Invalid verification code"));
       setOtpDigits(["", "", "", "", "", ""]);
@@ -313,6 +346,14 @@ export default function PersonalRequestPage() {
       setBannerError("Please complete all required fields before continuing.");
       return;
     }
+
+    // Keep verified email so returning from Stripe does not require another OTP
+    savePersonalRequestDraft({
+      form: { ...form, driverLicenseFile: null },
+      emailVerified: true,
+      emailVerificationToken,
+      step: 2,
+    });
 
     setStep(2);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -347,17 +388,30 @@ export default function PersonalRequestPage() {
       payload.append("dob", toApiDate(form.dob));
       payload.append("treatingFacilityName", form.treatingFacilityName.trim());
       payload.append("treatingFacilityAddress", form.treatingFacilityAddress.trim());
+      if (form.facilityId) {
+        payload.append("facilityId", String(form.facilityId));
+      }
       payload.append("recordsDateBegin", toApiDate(form.recordsDateBegin));
       payload.append("recordsDateEnd", toApiDate(form.recordsDateEnd));
       payload.append("recordTypes", JSON.stringify(selectedTypes));
       payload.append("driverLicenseNumber", form.driverLicenseNumber.trim());
       payload.append("deliveryPreference", form.deliveryPreference || "download");
+      if (form.deliveryPreference === "mail" && form.mailAddress) {
+        payload.append("mailAddress", form.mailAddress.trim());
+      }
       payload.append("driverLicenseFile", form.driverLicenseFile);
+
+      // Persist verified email before leaving for Stripe so cancel does not force OTP again
+      savePersonalRequestDraft({
+        form: { ...form, driverLicenseFile: null },
+        emailVerified: true,
+        emailVerificationToken,
+        step: 2,
+      });
 
       const result = await submitPersonalRequest(payload);
 
       if (result?.checkoutUrl) {
-        // Keep draft until payment completes so cancel can restore verified email
         window.location.href = result.checkoutUrl;
         return;
       }
@@ -371,9 +425,12 @@ export default function PersonalRequestPage() {
       setBannerError(errorMessage);
 
       if (/email verification/i.test(errorMessage)) {
+        setEmailVerified(false);
+        setEmailVerificationToken("");
         setBannerError(
-          "Email verification expired. Tap Back, verify your email with OTP again, then continue."
+          "Email verification expired. Please verify your email with OTP again, then continue."
         );
+        setStep(1);
       }
     } finally {
       setSubmitting(false);
@@ -384,7 +441,13 @@ export default function PersonalRequestPage() {
     <PersonalRequestShell>
       <RequestStepper currentStep={step} />
 
-      {step === 2 ? (
+      {!draftReady ? (
+        <section className="rounded-[12px] border border-[#E5E7EB] bg-white p-6 shadow-sm sm:p-8">
+          <p className="py-8 text-center text-[13px] text-[#64748B]">Loading…</p>
+        </section>
+      ) : null}
+
+      {draftReady && step === 2 ? (
         <section className="rounded-[12px] border border-[#E5E7EB] bg-white p-6 shadow-sm sm:p-8">
           <div className="mb-6 text-center">
             <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#E6F7FA] text-[#0097B2]">
@@ -484,7 +547,7 @@ export default function PersonalRequestPage() {
         </section>
       ) : null}
 
-      {step === 1 ? (
+      {draftReady && step === 1 ? (
       <section className="rounded-[12px] border border-[#E5E7EB] bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-[#E6F7FA] text-[#0097B2]">

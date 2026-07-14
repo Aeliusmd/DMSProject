@@ -3,6 +3,7 @@ export const PAYMENT_TYPE_LABELS = {
   regular: "Regular",
   custodian: "Custodian",
   xray: "X-Ray",
+  personal_portal: "Personal",
 };
 
 /**

@@ -102,6 +102,17 @@ function validatePersonalRequestSubmit(body = {}) {
     addNoHtmlMarkupError(errors, "treatingFacilityAddress", body.treatingFacilityAddress);
   }
 
+  let facilityId = null;
+  const rawFacilityId = trimToString(body.facilityId);
+  if (!isBlank(rawFacilityId)) {
+    const parsedFacilityId = Number(rawFacilityId);
+    if (!Number.isInteger(parsedFacilityId) || parsedFacilityId <= 0) {
+      errors.push({ field: "facilityId", message: "Invalid treating facility selection" });
+    } else {
+      facilityId = parsedFacilityId;
+    }
+  }
+
   const recordsBeginIso = parseMmDdYyyy(body.recordsDateBegin);
   const recordsEndIso = parseMmDdYyyy(body.recordsDateEnd);
 
@@ -198,6 +209,7 @@ function validatePersonalRequestSubmit(body = {}) {
       firstName: trimToString(body.firstName),
       lastName: trimToString(body.lastName),
       dobIso,
+      facilityId,
       treatingFacilityName: trimToString(body.treatingFacilityName),
       treatingFacilityAddress: trimToString(body.treatingFacilityAddress),
       recordsDateBeginIso: recordsBeginIso,
