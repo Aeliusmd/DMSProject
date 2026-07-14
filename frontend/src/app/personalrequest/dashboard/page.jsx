@@ -4,14 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
+import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
 import CompanyPortalStatCard from "@/components/company-portal/CompanyPortalStatCard";
 import {
-  getPersonalCurrentUser,
   getPersonalDashboard,
 } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
   getPersonalAccessToken,
+  getStoredPersonalUser,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
@@ -47,13 +48,11 @@ export default function PersonalPortalDashboardPage() {
         return;
       }
 
+      setUser(getStoredPersonalUser());
+
       try {
-        const [userRes, dashRes] = await Promise.all([
-          getPersonalCurrentUser(),
-          getPersonalDashboard(),
-        ]);
+        const dashRes = await getPersonalDashboard();
         if (!active) return;
-        setUser(userRes?.data?.user || null);
         setStats(dashRes?.data?.stats || EMPTY_STATS);
         setRecentRequests(dashRes?.data?.recentRequests || []);
       } catch (err) {
@@ -228,13 +227,14 @@ export default function PersonalPortalDashboardPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      {request.canDownload && request.downloadUrl ? (
-                        <a
-                          href={request.downloadUrl}
+                      {request.canDownload &&
+                      (request.downloadToken || request.downloadUrl) ? (
+                        <PersonalRecordsDownloadButton
+                          downloadToken={request.downloadToken}
+                          downloadUrl={request.downloadUrl}
+                          label="Download"
                           className="font-semibold text-[#16A34A] hover:underline"
-                        >
-                          Download
-                        </a>
+                        />
                       ) : (
                         <Link
                           href={`/personalrequest/status?ref=${encodeURIComponent(

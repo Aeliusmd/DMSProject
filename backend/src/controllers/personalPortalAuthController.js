@@ -1,6 +1,6 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
-const ApiError = require("../utils/ApiError");
+const { throwIfInvalid } = require("../utils/validationUtils");
 const personalPortalAuthService = require("../services/personalPortalAuthService");
 const {
   validatePersonalRegister,
@@ -20,10 +20,7 @@ function getRequestMeta(req) {
 
 exports.register = asyncHandler(async (req, res) => {
   const validation = validatePersonalRegister(req.body);
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.register(validation.data);
   return ApiResponse.created(res, result, result.message);
@@ -31,10 +28,7 @@ exports.register = asyncHandler(async (req, res) => {
 
 exports.login = asyncHandler(async (req, res) => {
   const validation = validatePersonalLogin(req.body);
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.login({
     email: validation.data.email,
@@ -47,10 +41,7 @@ exports.login = asyncHandler(async (req, res) => {
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
   const validation = validatePersonalTwoFactor(req.body);
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.verifyTwoFactor({
     sessionToken: validation.sessionToken,
@@ -63,10 +54,7 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
 
 exports.resendTwoFactor = asyncHandler(async (req, res) => {
   const validation = validatePersonalResendTwoFactor(req.body);
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.resendTwoFactor({
     sessionToken: validation.sessionToken,
@@ -77,24 +65,22 @@ exports.resendTwoFactor = asyncHandler(async (req, res) => {
 
 exports.refresh = asyncHandler(async (req, res) => {
   const validation = validatePersonalRefresh(req.body);
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.refreshTokens({
-    refreshToken: req.body.refreshToken,
+    refreshToken: validation.refreshToken,
   });
 
   return ApiResponse.success(res, result, "Token refreshed");
 });
 
 exports.logout = asyncHandler(async (req, res) => {
-  validatePersonalLogout(req.body);
+  const validation = validatePersonalLogout(req.body);
+  throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.logout({
-    refreshToken: req.body.refreshToken,
-    sessionToken: req.body.sessionToken,
+    refreshToken: validation.refreshToken,
+    sessionToken: validation.sessionToken,
   });
 
   return ApiResponse.success(res, result, result.message);

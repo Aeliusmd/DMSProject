@@ -5,6 +5,27 @@
 
 const { getPool } = require("../config/database");
 
+function encodeCreatedCursor(createdAt, id) {
+  if (!createdAt || !id) return null;
+  const dateValue =
+    createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+  return `${dateValue}|${id}`;
+}
+
+function decodeCreatedCursor(rawCursor) {
+  if (rawCursor == null || rawCursor === "") return null;
+
+  const value = String(rawCursor);
+  const separatorIndex = value.lastIndexOf("|");
+  if (separatorIndex <= 0) return null;
+
+  const createdAt = value.slice(0, separatorIndex);
+  const id = Number(value.slice(separatorIndex + 1));
+  if (!createdAt || !Number.isFinite(id) || id <= 0) return null;
+
+  return { createdAt, id };
+}
+
 class PersonalRequestOrder {
   static async create(data, connection = null) {
     const executor = connection || getPool();
@@ -25,25 +46,63 @@ class PersonalRequestOrder {
     return result.insertId;
   }
 
-  static async findByPortalUserId(portalUserId, { limit = 20 } = {}) {
+  static async findByPortalUserId(
+    portalUserId,
+    { pageSize = 10, cursor = null, paidOnly = false, status = null } = {}
+  ) {
     const pool = getPool();
-    const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 100);
+    const queryLimit = safePageSize + 1;
+
+    const conditions = ["o.portal_user_id = :portalUserId"];
+    const params = { portalUserId };
+
+    if (paidOnly) {
+      conditions.push("o.processing_fee_paid = 1");
+    }
+
+    if (status) {
+      conditions.push("o.portal_status = :status");
+      params.status = status;
+    }
+
+    const decodedCursor = decodeCreatedCursor(cursor);
+    if (decodedCursor) {
+      conditions.push(`(
+        o.created_at < :cursorCreatedAt
+        OR (o.created_at = :cursorCreatedAt AND o.id < :cursorId)
+      )`);
+      params.cursorCreatedAt = decodedCursor.createdAt;
+      params.cursorId = decodedCursor.id;
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
     const [rows] = await pool.execute(
-      `SELECT o.*,
-              (
-                SELECT prf.facility_name
-                FROM personal_request_facilities prf
-                WHERE prf.personal_request_order_id = o.id
-                ORDER BY prf.sort_order ASC, prf.id ASC
-                LIMIT 1
-              ) AS treating_facility_name
+      `SELECT o.*
        FROM personal_request_orders o
-       WHERE o.portal_user_id = :portalUserId
-       ORDER BY o.created_at DESC
-       LIMIT ${safeLimit}`,
-      { portalUserId }
+       ${whereClause}
+       ORDER BY o.created_at DESC, o.id DESC
+       LIMIT ${queryLimit}`,
+      params
     );
-    return rows;
+
+    const hasMore = rows.length > safePageSize;
+    const pageRows = hasMore ? rows.slice(0, safePageSize) : rows;
+    const lastRow = pageRows[pageRows.length - 1] || null;
+
+    return {
+      rows: pageRows,
+      pagination: {
+        type: "keyset",
+        pageSize: safePageSize,
+        hasMore,
+        nextCursor:
+          hasMore && lastRow
+            ? encodeCreatedCursor(lastRow.created_at, lastRow.id)
+            : null,
+      },
+    };
   }
 
   static async countByPortalUserId(portalUserId) {
@@ -224,10 +283,13 @@ class PersonalRequestOrder {
 
   static async findByConfirmationReference(reference) {
     const pool = getPool();
+    const normalized = `${reference || ""}`.trim().toUpperCase();
+    if (!normalized) return null;
+
     const [rows] = await pool.execute(
       `SELECT * FROM personal_request_orders
        WHERE confirmation_reference = :reference LIMIT 1`,
-      { reference }
+      { reference: normalized }
     );
     return rows[0] || null;
   }

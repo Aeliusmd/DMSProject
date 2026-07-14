@@ -1,19 +1,22 @@
 const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
+const { throwIfInvalid } = require("../utils/validationUtils");
+const { validateSearchQuery } = require("../validators/queryValidators");
+const { sanitizeSearchText } = require("../utils/sanitize");
 const personalPortalService = require("../services/personalPortalService");
 const {
   validateEmailOtpRequest,
   validateEmailOtpConfirm,
   validatePersonalRequestSubmit,
   validateStatusLookup,
+  validatePersonalRequestsListQuery,
+  validatePersonalCheckoutResultQuery,
 } = require("../validators/personalPortalValidator");
 
 exports.sendEmailOtp = asyncHandler(async (req, res) => {
   const validation = validateEmailOtpRequest(req.body);
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const data = await personalPortalService.sendEmailOtp(validation.email);
   return ApiResponse.success(res, data, "Verification code sent");
@@ -42,14 +45,14 @@ exports.submitRequest = asyncHandler(async (req, res) => {
     ...req.body,
     emailVerificationToken: req.body.emailVerificationToken,
   });
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   if (!req.file) {
     throw new ApiError(400, "Validation failed", [
-      { field: "driverLicenseFile", message: "Driver's license image is required" },
+      {
+        field: "driverLicenseFile",
+        message: "Driver's license image is required",
+      },
     ]);
   }
 
@@ -58,7 +61,11 @@ exports.submitRequest = asyncHandler(async (req, res) => {
     req.file
   );
 
-  return ApiResponse.success(res, data, "Proceed to payment to submit your request");
+  return ApiResponse.success(
+    res,
+    data,
+    "Proceed to payment to submit your request"
+  );
 });
 
 exports.submitAuthenticatedRequest = asyncHandler(async (req, res) => {
@@ -71,14 +78,14 @@ exports.submitAuthenticatedRequest = asyncHandler(async (req, res) => {
     },
     { authenticated: true }
   );
-
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   if (!req.file) {
     throw new ApiError(400, "Validation failed", [
-      { field: "driverLicenseFile", message: "Driver's license image is required" },
+      {
+        field: "driverLicenseFile",
+        message: "Driver's license image is required",
+      },
     ]);
   }
 
@@ -91,35 +98,50 @@ exports.submitAuthenticatedRequest = asyncHandler(async (req, res) => {
     { portalUserId: req.personalUser.id }
   );
 
-  return ApiResponse.success(res, data, "Proceed to payment to submit your request");
+  return ApiResponse.success(
+    res,
+    data,
+    "Proceed to payment to submit your request"
+  );
 });
 
 exports.getDashboard = asyncHandler(async (req, res) => {
-  const data = await personalPortalService.getDashboardForUser(req.personalUser.id);
+  const data = await personalPortalService.getDashboardForUser(
+    req.personalUser.id
+  );
   return ApiResponse.success(res, data, "Dashboard loaded");
 });
 
 exports.listRequests = asyncHandler(async (req, res) => {
-  const data = await personalPortalService.getDashboardForUser(req.personalUser.id);
-  return ApiResponse.success(
-    res,
-    { requests: data.recentRequests, stats: data.stats },
-    "Requests loaded"
+  const validation = validatePersonalRequestsListQuery(req.query);
+  throwIfInvalid(validation);
+
+  const data = await personalPortalService.listRequestsForUser(
+    req.personalUser.id,
+    {
+      pageSize: validation.pageSize,
+      cursor: validation.cursor,
+      status: validation.status,
+    }
   );
+
+  return ApiResponse.success(res, data, "Requests loaded");
 });
 
 exports.getCheckoutResult = asyncHandler(async (req, res) => {
-  const requestId = req.query.request_id;
-  const sessionId = req.query.session_id;
-  const data = await personalPortalService.getCheckoutResult(requestId, sessionId);
+  const validation = validatePersonalCheckoutResultQuery(req.query);
+  throwIfInvalid(validation);
+
+  const data = await personalPortalService.getCheckoutResult(
+    validation.requestId,
+    validation.sessionId
+  );
   return ApiResponse.success(res, data, "Payment result retrieved");
 });
 
 exports.lookupStatus = asyncHandler(async (req, res) => {
   const validation = validateStatusLookup(req.body);
-  if (!validation.valid) {
-    throw new ApiError(400, "Validation failed", validation.errors);
-  }
+  throwIfInvalid(validation);
 
   const data = await personalPortalService.lookupRequestStatus({
     confirmationReference: validation.confirmationReference,
@@ -132,14 +154,18 @@ exports.lookupStatus = asyncHandler(async (req, res) => {
 exports.getConfig = asyncHandler(async (_req, res) => {
   const config = require("../config");
   return ApiResponse.success(res, {
-    processingFee: ((config.personalPortal?.processingFeeCents || 3500) / 100).toFixed(2),
+    processingFee: (
+      (config.personalPortal?.processingFeeCents || 3500) / 100
+    ).toFixed(2),
     lookupDays: config.personalPortal?.lookupDays || 7,
     stripePublishableKey: config.stripe?.publishableKey || "",
   });
 });
 
 exports.searchFacilities = asyncHandler(async (req, res) => {
-  const q = `${req.query.q || ""}`.trim();
+  throwIfInvalid(validateSearchQuery(req.query));
+
+  const q = sanitizeSearchText(req.query.q);
   if (q.length < 2) {
     return ApiResponse.success(res, { facilities: [] });
   }

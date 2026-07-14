@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import CompanyPortalSidebar from "@/components/company-portal/CompanyPortalSidebar";
+import useIsClient from "@/hooks/useIsClient";
 import { getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStorage";
 
 export default function CompanyPortalDashboardShell({ children, title }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const user = getStoredCompanyUser();
+  const isClient = useIsClient();
+  const user = isClient ? getStoredCompanyUser() : null;
   const companyName = user?.companyName || "Company Portal";
 
   return (

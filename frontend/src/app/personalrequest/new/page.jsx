@@ -24,6 +24,7 @@ import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import {
   loadPersonalRequestDraft,
   savePersonalRequestDraft,
+  savePersonalRequestDraftDebounced,
 } from "@/lib/personal-request/personalRequestDraft";
 
 const INITIAL_FORM = {
@@ -169,7 +170,7 @@ export default function PersonalNewRequestPage() {
   useEffect(() => {
     if (!draftReady) return;
 
-    savePersonalRequestDraft({
+    savePersonalRequestDraftDebounced({
       form: {
         ...form,
         driverLicenseFile: null,
