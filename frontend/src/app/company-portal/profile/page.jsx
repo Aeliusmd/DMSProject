@@ -2,44 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import CompanyPortalShell from "@/components/company-portal/CompanyPortalShell";
-import PrimaryButton from "@/components/ui/PrimaryButton";
-import {
-  getCompanyCurrentUser,
-  logoutCompany,
-} from "@/lib/company-portal/companyPortalAuthApi";
+import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPortalDashboardShell";
+import CompanyPortalProfileCard from "@/components/company-portal/CompanyPortalProfileCard";
+import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
   clearCompanyAuth,
   getCompanyAccessToken,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
-function ProfileRow({ label, value }) {
-  return (
-    <div className="border-b border-[#F1F5F9] py-3 last:border-b-0">
-      <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#94A3B8]">
-        {label}
-      </p>
-      <p className="mt-1 text-[14px] font-medium text-[#111827]">
-        {value || "—"}
-      </p>
-    </div>
-  );
-}
-
 export default function CompanyPortalProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let active = true;
 
     async function loadProfile() {
       const accessToken = getCompanyAccessToken();
-
       if (!accessToken) {
         router.replace("/company-portal/login");
         return;
@@ -60,24 +43,19 @@ export default function CompanyPortalProfilePage() {
     }
 
     loadProfile();
-
     return () => {
       active = false;
     };
   }, [router]);
 
-  const handleLogout = async () => {
-    setIsLoggingOut(true);
-    try {
-      await logoutCompany();
-    } finally {
-      router.replace("/company-portal/login");
-    }
+  const handleEdit = () => {
+    setNotice("Profile editing will be available soon.");
+    window.setTimeout(() => setNotice(""), 2800);
   };
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center text-[13px] text-[#64748B]">
+      <main className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-[13px] text-[#64748B]">
         Loading profile...
       </main>
     );
@@ -85,42 +63,33 @@ export default function CompanyPortalProfilePage() {
 
   if (!user) {
     return (
-      <main className="flex min-h-screen items-center justify-center text-[13px] text-red-500">
+      <main className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-[13px] text-red-500">
         {error || "Unable to load profile"}
       </main>
     );
   }
 
-  const address = [
-    user.addressLine1,
-    user.addressLine2,
-    [user.city, user.state, user.zip].filter(Boolean).join(", "),
-  ]
-    .filter(Boolean)
-    .join(", ");
-
   return (
-    <CompanyPortalShell
-      title="Company profile"
-      subtitle="Company Portal"
-      maxWidthClassName="max-w-[560px]"
-    >
-      <div className="mb-2">
-        <ProfileRow label="Company name" value={user.companyName} />
-        <ProfileRow label="Email" value={user.email} />
-        <ProfileRow label="Phone" value={user.phone} />
-        <ProfileRow label="Address" value={address} />
+    <CompanyPortalDashboardShell title="Profile">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#111827]">
+            Company profile
+          </h1>
+          <p className="mt-1 text-[13px] text-[#64748B]">
+            View and manage your registered company account details.
+          </p>
+        </div>
+        {notice ? (
+          <p className="rounded-[8px] border border-[#D0E8ED] bg-[#E6F7FA] px-3 py-2 text-[12px] font-medium text-[#0B7C8E]">
+            {notice}
+          </p>
+        ) : null}
       </div>
 
-      <div className="mt-5">
-        <PrimaryButton
-          type="button"
-          disabled={isLoggingOut}
-          onClick={handleLogout}
-        >
-          {isLoggingOut ? "Signing out..." : "Sign out"}
-        </PrimaryButton>
+      <div className="max-w-[640px]">
+        <CompanyPortalProfileCard user={user} onEdit={handleEdit} />
       </div>
-    </CompanyPortalShell>
+    </CompanyPortalDashboardShell>
   );
 }

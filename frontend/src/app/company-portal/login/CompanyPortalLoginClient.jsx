@@ -43,7 +43,7 @@ export default function CompanyPortalLoginClient() {
 
   useEffect(() => {
     if (isCompanyAuthenticated()) {
-      router.replace("/company-portal/profile");
+      router.replace("/company-portal/dashboard");
     }
   }, [router]);
 
@@ -197,7 +197,7 @@ export default function CompanyPortalLoginClient() {
         onSuccess={() => {
           setIsTwoFactorOpen(false);
           setSessionToken("");
-          router.push("/company-portal/profile");
+          router.push("/company-portal/dashboard");
         }}
       />
     </>

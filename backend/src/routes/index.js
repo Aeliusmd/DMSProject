@@ -2,6 +2,7 @@ const express = require("express");
 
 const authRoutes = require("./authRoutes");
 const companyPortalAuthRoutes = require("./companyPortalAuthRoutes");
+const companyPortalOrderRoutes = require("./companyPortalOrderRoutes");
 const orderRoutes = require("./orderRoutes");
 const providerRoutes = require("./providerRoutes");
 const facilityRoutes = require("./facilityRoutes");
@@ -19,6 +20,7 @@ const router = express.Router();
 
 router.use("/auth", authRoutes);
 router.use("/company-portal/auth", companyPortalAuthRoutes);
+router.use("/company-portal", companyPortalOrderRoutes);
 router.use("/orders", orderRoutes);
 router.use("/providers", providerRoutes);
 router.use("/facilities", facilityRoutes);

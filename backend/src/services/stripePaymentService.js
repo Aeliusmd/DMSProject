@@ -840,6 +840,16 @@ async function handleStripeWebhook(rawBody, signature) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object;
+      if (session.metadata?.portal === "company") {
+        if (session.payment_status === "paid") {
+          const companyPortalOrderService = require("./companyPortalOrderService");
+          await companyPortalOrderService.fulfillCompanyPortalCheckoutSession(
+            session
+          );
+        }
+        break;
+      }
+
       if (session.payment_status === "paid") {
         await fulfillSuccessfulCheckoutSession(session);
       } else {
