@@ -295,6 +295,94 @@ export function parseUsAddress(fullAddress) {
   };
 }
 
+function looksLikeAddressSegment(segment = "") {
+  const text = `${segment || ""}`.trim();
+  if (!text) return false;
+
+  return (
+    /^\d/.test(text) ||
+    /^(suite|ste\.?|apt\.?|unit|p\.?\s*o\.?\s*box)\b/i.test(text) ||
+    /\b(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|hwy|highway|ct|court|plaza|pkwy|parkway)\b/i.test(
+      text
+    ) ||
+    /\b[A-Za-z]{2}\s+\d{5}(?:-\d{4})?\b/.test(text)
+  );
+}
+
+/**
+ * Split "Facility Name, 123 Main St, City, CA 90017" into { name, address }.
+ */
+export function splitNameAndAddress(raw) {
+  const text = String(raw || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return { name: "", address: "" };
+  }
+
+  const lines = String(raw || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length >= 2) {
+    return {
+      name: lines[0],
+      address: lines.slice(1).join(", "),
+    };
+  }
+
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+
+  if (parts.length >= 2) {
+    let addressStart = -1;
+
+    for (let index = 1; index < parts.length; index += 1) {
+      if (looksLikeAddressSegment(parts[index])) {
+        addressStart = index;
+        break;
+      }
+    }
+
+    if (addressStart > 0) {
+      return {
+        name: parts.slice(0, addressStart).join(", "),
+        address: parts.slice(addressStart).join(", "),
+      };
+    }
+  }
+
+  const inlineMatch = text.match(/^(.+?)\s+(\d{1,6}\s+.+)$/);
+  if (inlineMatch && looksLikeAddressSegment(inlineMatch[2])) {
+    return {
+      name: inlineMatch[1].trim(),
+      address: inlineMatch[2].trim(),
+    };
+  }
+
+  return { name: text, address: "" };
+}
+
+function resolveFacilityLabelFromHints(hints = {}) {
+  const fromFacilityName = splitNameAndAddress(hints.facilityName || "");
+  if (fromFacilityName.name && fromFacilityName.address) {
+    return fromFacilityName;
+  }
+
+  const fromCustomer = splitNameAndAddress(hints.customer || "");
+  if (fromCustomer.name) {
+    return {
+      name: fromCustomer.name,
+      address: fromCustomer.address || fromFacilityName.address || "",
+    };
+  }
+
+  return {
+    name: fromFacilityName.name || hints.facilityName || hints.customer || "",
+    address: fromFacilityName.address || "",
+  };
+}
+
 function applyParsedServeAddress(updates, fullAddress) {
   const parsed = parseUsAddress(fullAddress);
   updates.address = parsed.address || String(fullAddress).trim();
@@ -338,7 +426,6 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
       parseSingleDateToInput(hints.dateOfBirth) || hints.dateOfBirth;
   }
   applyDateOfInjuryFromHints(updates, hints);
-  if (hints.companyAddress) applyParsedServeAddress(updates, hints.companyAddress);
   if (hints.extractedDoctorName) {
     meta.extractedDoctorName = hints.extractedDoctorName;
   } else if (hints.specificDoctor && !hints.specificDoctorIsDefault) {
@@ -378,20 +465,36 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
     }
   }
 
-  const facilityMatch = findFacilityMatch(hints.customer, facilityList);
+  const facilityLabel = resolveFacilityLabelFromHints(hints);
+  const facilitySearchName = facilityLabel.name;
+  const facilityAddressParts = facilityLabel.address
+    ? parseUsAddress(facilityLabel.address)
+    : { address: "", city: "", state: "", zip: "" };
+
+  const facilityMatch = findFacilityMatch(facilitySearchName, facilityList);
   if (hints.facilityId) {
     updates.facility = String(hints.facilityId);
     updates.facilityName =
-      hints.facilityName || hints.customer || getFacilityLabel(facilityMatch);
+      facilitySearchName ||
+      hints.facilityName ||
+      getFacilityLabel(facilityMatch);
     meta.facilityName = updates.facilityName;
     meta.facilityCreated = Boolean(hints.facilityCreated);
     meta.facilityProfileIncomplete = Boolean(hints.facilityProfileIncomplete);
   } else if (facilityMatch) {
     updates.facility = String(facilityMatch.id);
-    meta.facilityName = getFacilityLabel(facilityMatch);
-  } else if (hints.customer) {
-    updates.facilityName = hints.customer;
-    meta.pendingFacilityName = hints.customer;
+    updates.facilityName = getFacilityLabel(facilityMatch);
+    meta.facilityName = updates.facilityName;
+  } else if (facilitySearchName) {
+    updates.facilityName = facilitySearchName;
+    meta.pendingFacilityName = facilitySearchName;
+  }
+
+  if (facilityAddressParts.address || facilityAddressParts.city) {
+    meta.facilityAddress = facilityAddressParts.address || facilityLabel.address;
+    meta.facilityCity = facilityAddressParts.city || "";
+    meta.facilityState = facilityAddressParts.state || "";
+    meta.facilityZip = facilityAddressParts.zip || "";
   }
 
   if (hints.missingDefaultDoctor) {
@@ -404,7 +507,10 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
     meta.missingDefaultDoctor = false;
   }
 
-  const providerName = hints.companyName;
+  const providerSplit = splitNameAndAddress(hints.companyName || "");
+  const providerName = providerSplit.name || hints.companyName;
+  const companyAddressSource =
+    providerSplit.address || hints.companyAddress || "";
 
   if (hints.providerId) {
     const matched =
@@ -413,7 +519,7 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
 
     updates.providerId = String(hints.providerId);
     updates.serveCompanyName =
-      hints.companyName || getProviderLabel(matched) || updates.serveCompanyName || "";
+      providerName || getProviderLabel(matched) || updates.serveCompanyName || "";
 
     if (matched) {
       updates.address = matched.address || updates.address || "";
@@ -423,8 +529,8 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
       updates.phone = matched.phone || updates.phone || "";
       updates.fax = matched.fax || updates.fax || "";
       updates.email = matched.email || updates.email || "";
-    } else if (hints.companyAddress) {
-      applyParsedServeAddress(updates, hints.companyAddress);
+    } else if (companyAddressSource) {
+      applyParsedServeAddress(updates, companyAddressSource);
     }
 
     meta.providerName = updates.serveCompanyName;
@@ -444,7 +550,12 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
       meta.providerName = getProviderLabel(providerMatch);
     } else {
       updates.serveCompanyName = providerName;
+      if (companyAddressSource) {
+        applyParsedServeAddress(updates, companyAddressSource);
+      }
     }
+  } else if (companyAddressSource) {
+    applyParsedServeAddress(updates, companyAddressSource);
   }
 
   fillMissingServeAddressParts(updates);

@@ -13,10 +13,16 @@ const {
 const subpoenaExtractionService = require("./subpoenaExtractionService");
 const { resolveProviderFromHints } = require("./providerService");
 const { resolveFacilityFromHints, resolveDoctorFromExtractHints } = require("./facilityService");
+const { splitNameAndAddress } = require("../utils/addressParseUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const { withTransaction } = require("../config/database");
 
 const MIME_PDF = "application/pdf";
+
+function resolveCustomerFacilityName(customer = "") {
+  const split = splitNameAndAddress(customer);
+  return split.name || `${customer || ""}`.trim();
+}
 
 function buildDocumentId() {
   return randomUUID().replace(/-/g, "");
@@ -73,11 +79,13 @@ async function mapExtractRowToApi(row) {
   if (orderHints.customer) {
     facilityResolution = await resolveFacilityFromHints(orderHints);
     if (facilityResolution.facility) {
+      const customerName = resolveCustomerFacilityName(orderHints.customer);
+
       orderHints = {
         ...orderHints,
         facilityId: facilityResolution.facility.id,
         facilityName:
-          facilityResolution.facility.facilityName || orderHints.customer,
+          facilityResolution.facility.facilityName || customerName,
         facilityCreated: facilityResolution.created,
         facilityProfileIncomplete: Boolean(
           facilityResolution.facility.isProfileIncomplete
@@ -129,7 +137,9 @@ async function mapExtractRowToApi(row) {
     orderHints,
     facilityId: facilityResolution.facility?.id || null,
     facilityName:
-      facilityResolution.facility?.facilityName || orderHints.customer || null,
+      facilityResolution.facility?.facilityName ||
+      resolveCustomerFacilityName(orderHints.customer) ||
+      null,
     facilityCreated: facilityResolution.created,
     facilityProfileIncomplete: Boolean(
       facilityResolution.facility?.isProfileIncomplete

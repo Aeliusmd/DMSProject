@@ -257,19 +257,45 @@ async function findOrCreateFacility(data, connection = null) {
 }
 
 async function resolveFacilityFromHints(hints = {}, connection = null) {
-  const facilityName = `${hints.customer || hints.facilityName || ""}`.trim();
+  const {
+    parseUsAddress,
+    splitNameAndAddress,
+  } = require("../utils/addressParseUtils");
+
+  const fromCustomer = splitNameAndAddress(
+    hints.customer || hints.facilityName || ""
+  );
+  const facilityName = `${fromCustomer.name || hints.customer || hints.facilityName || ""}`.trim();
 
   if (!facilityName) {
     return { facility: null, created: false };
   }
 
+  const addressSource =
+    fromCustomer.address ||
+    hints.facilityAddress ||
+    hints.doctorAddress ||
+    hints.address ||
+    "";
+  const parsed = parseUsAddress(addressSource);
+
   const { facility, created } = await findOrCreateFacility(
     {
       facilityName,
-      address: hints.facilityAddress || hints.address || "",
-      city: hints.facilityCity || hints.city || "",
-      state: hints.facilityState || hints.state || "",
-      zipCode: hints.facilityZip || hints.zip || "",
+      address:
+        hints.facilityAddress ||
+        parsed.address ||
+        addressSource ||
+        hints.address ||
+        "",
+      city: hints.facilityCity || parsed.city || hints.city || "",
+      state: hints.facilityState || parsed.state || hints.state || "",
+      zipCode:
+        hints.facilityZip ||
+        parsed.zip ||
+        hints.zip ||
+        hints.zipCode ||
+        "",
     },
     connection
   );

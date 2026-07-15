@@ -36,7 +36,6 @@ const ALLOWED_CNR_DELIVERY = new Set(["email", "fax", "pickup"]);
 const WORKFLOW_STAGE_NAMES = [
   "Review Records",
   "Serve",
-  "Custodian",
   "SENT",
 ];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
@@ -51,7 +50,7 @@ const PHONE_FIELDS = [
   "contact2Phone",
   "contact2Fax",
 ];
-const PAYMENT_PREFIXES = ["prepayment", "custodian", "xray"];
+const PAYMENT_PREFIXES = ["prepayment", "xray"];
 
 function hasRecordTypesSelected(body = {}) {
   return [
@@ -154,7 +153,7 @@ function validateOrderPayload(body = {}, options = {}) {
   addOrganizationNameFormatError(errors, "defendant", body.defendant);
   addMaxLengthError(errors, "address", body.address, FIELD_LIMITS.VARCHAR_255);
   addMaxLengthError(errors, "city", body.city, FIELD_LIMITS.VARCHAR_100);
-  addMaxLengthError(errors, "specificRecord", body.specificRecord, FIELD_LIMITS.VARCHAR_255);
+  addMaxLengthError(errors, "specificRecord", body.specificRecord, FIELD_LIMITS.TEXT);
   addMaxLengthError(errors, "court", body.court, 50);
   addMaxLengthError(errors, "caseNumber", body.caseNumber, 50);
   addMaxLengthError(errors, "recNumber", body.recNumber, 50);

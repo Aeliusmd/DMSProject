@@ -66,12 +66,10 @@ const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
 const WORKFLOW_STAGE_NAMES = [
   "Review Records",
   "Serve",
-  "Custodian",
   "SENT",
 ];
 const WORKFLOW_STAGE_STATUSES = ["pending", "complete", "failed", "sent"];
 const DEFAULT_PREPAYMENT_CHARGE = 15;
-const DEFAULT_CUSTODIAN_CHARGE = 15;
 const STATUS_FILTER_MAP = {
   active: "Active",
   ready_pickup: "Ready to Pickup",
@@ -120,7 +118,7 @@ function assertValidCnrDeliveryDate(data = {}) {
   }
 }
 
-const PAYMENT_PREFIXES = ["prepayment", "custodian", "xray"];
+const PAYMENT_PREFIXES = ["prepayment", "xray"];
 
 const RECORD_TITLES = {
   medical: "Medical Records",
@@ -436,7 +434,7 @@ function buildOrderDbPayload(data) {
     readyDate: dateOrNull(data.readyDate),
     invoiceDate: dateOrNull(data.invoiceDate),
     xrayInvoiceDate: dateOrNull(data.xrayInvoiceDate),
-    specificRecord: trimOrNull(data.specificRecord, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    specificRecord: trimOrNull(data.specificRecord, { maxLength: FIELD_LIMITS.TEXT }),
     specificDoctor: trimOrNull(data.specificDoctor, { maxLength: FIELD_LIMITS.VARCHAR_200 }),
     specificDoctorIsDefault: boolToInt(data.specificDoctorIsDefault),
     fullAddress: trimOrNull(data.fullAddress, { maxLength: FIELD_LIMITS.TEXT }),
@@ -483,10 +481,6 @@ async function syncOrderWorkflowFromState(
   {
     payments = [],
     invoiceServiceFee = 0,
-    invoiceCustodianFee = 0,
-    skipCustodian = false,
-    resolvedCustodianDue = null,
-    invoiceRow = null,
   } = {}
 ) {
   const prepayment = getPrepaymentPayment(payments);
@@ -513,40 +507,6 @@ async function syncOrderWorkflowFromState(
       null,
       connection
     );
-  }
-
-  const custodian = getPaymentByType(payments, "custodian");
-  const custodianPaid = parsePaymentAmount(custodian?.amount);
-  const custodianDue = parsePaymentAmount(custodian?.dueAmount);
-  const custodianDueAmount =
-    resolvedCustodianDue !== null && resolvedCustodianDue !== undefined
-      ? parsePaymentAmount(resolvedCustodianDue)
-      : custodianDue;
-  const custodianCharge = DEFAULT_CUSTODIAN_CHARGE;
-
-  if (!skipCustodian) {
-    const custodianIsComplete =
-      custodianCharge > 0 &&
-      (custodianPaid >= custodianCharge ||
-        (custodianDueAmount <= 0 && custodianPaid > 0));
-
-    if (custodianIsComplete) {
-      await Order.upsertWorkflowStage(
-        orderId,
-        "Custodian",
-        "complete",
-        new Date(),
-        connection
-      );
-    } else {
-      await Order.upsertWorkflowStage(
-        orderId,
-        "Custodian",
-        "pending",
-        null,
-        connection
-      );
-    }
   }
 }
 
@@ -586,13 +546,9 @@ function buildPaymentPayload(data, prefix) {
 }
 
 function collectPayments(data) {
-  const prefixes = isCnrOrder(data)
-    ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
-    : PAYMENT_PREFIXES;
-
-  return prefixes
-    .map((prefix) => buildPaymentPayload(data, prefix))
-    .filter(Boolean);
+  return PAYMENT_PREFIXES.map((prefix) => buildPaymentPayload(data, prefix)).filter(
+    Boolean
+  );
 }
 
 function resolvePrepaymentDueAmount(data) {
@@ -635,56 +591,8 @@ async function ensurePrepaymentPayment(connection, orderId, data) {
   });
 }
 
-async function ensureCustodianPayment(connection, orderId, data) {
-  if (isCnrOrder(data)) {
-    return;
-  }
-
-  const payment = buildPaymentPayload(data, "custodian");
-  const dueAmount = resolveCustodianDueAmount(data);
-  const paid = parsePaymentAmount(trimOrNull(data.custodianPaid));
-
-  if (payment) {
-    await Order.upsertPayment(connection, {
-      ...payment,
-      orderId,
-      dueAmount: payment.dueAmount ?? dueAmount,
-    });
-    return;
-  }
-
-  await Order.upsertPayment(connection, {
-    orderId,
-    paymentType: "custodian",
-    checkNumber: null,
-    paymentDate: null,
-    amount: paid > 0 ? paid : null,
-    dueAmount,
-    isPaid: paid > 0 ? 1 : 0,
-    memo: null,
-  });
-}
-
-function resolveCustodianDueAmount(data) {
-  const paid = parsePaymentAmount(trimOrNull(data.custodianPaid));
-  const rawDue = trimOrNull(data.custodianDue);
-
-  if (rawDue !== null) {
-    const due = Number(rawDue);
-    if (!Number.isNaN(due)) {
-      return Math.max(0, due);
-    }
-  }
-
-  return Math.max(0, DEFAULT_CUSTODIAN_CHARGE - paid);
-}
-
 async function syncOrderPayments(connection, orderId, data) {
-  const prefixes = isCnrOrder(data)
-    ? PAYMENT_PREFIXES.filter((prefix) => prefix !== "custodian")
-    : PAYMENT_PREFIXES;
-
-  for (const prefix of prefixes) {
+  for (const prefix of PAYMENT_PREFIXES) {
     const payment = buildPaymentPayload(data, prefix);
 
     if (payment) {
@@ -694,19 +602,9 @@ async function syncOrderPayments(connection, orderId, data) {
     }
   }
 
-  if (isCnrOrder(data)) {
-    await Order.deletePaymentByType(connection, orderId, "custodian");
-  }
-
   await ensurePrepaymentPayment(connection, orderId, data);
 
-  if (!isCnrOrder(data)) {
-    await ensureCustodianPayment(connection, orderId, data);
-  }
-
-  await invoiceService.syncOrderPaymentDuesFromInvoice(connection, orderId, {
-    skipCustodian: isCnrOrder(data),
-  });
+  await invoiceService.syncOrderPaymentDuesFromInvoice(connection, orderId);
 }
 
 function mapPaymentsToForm(payments = []) {
@@ -758,12 +656,6 @@ function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = [])
   paymentForm.prepaymentDue = Math.max(
     0,
     DEFAULT_PREPAYMENT_CHARGE - prepaymentPaid
-  ).toFixed(2);
-
-  const custodianPaid = parsePaymentAmount(paymentForm.custodianPaid);
-  paymentForm.custodianDue = Math.max(
-    0,
-    DEFAULT_CUSTODIAN_CHARGE - custodianPaid
   ).toFixed(2);
 
   const targets = [
@@ -2302,8 +2194,6 @@ async function createOrder(data, actorId, files, options = {}) {
     await syncOrderWorkflowFromState(connection, orderId, {
       payments,
       invoiceServiceFee: 0,
-      invoiceCustodianFee: 0,
-      skipCustodian: isCnrOrder(orderInput),
     });
 
     await connection.commit();
@@ -2380,10 +2270,13 @@ async function createOrderFromExtract(extractId, actorId) {
 
   if (orderHints.customer) {
     const facilityService = require("./facilityService");
+    const { splitNameAndAddress } = require("../utils/addressParseUtils");
     const { facility } = await facilityService.resolveFacilityFromHints(orderHints);
     if (facility) {
+      const customerName =
+        splitNameAndAddress(orderHints.customer).name || orderHints.customer;
       payload.facility = String(facility.id);
-      payload.facilityName = facility.facilityName || orderHints.customer;
+      payload.facilityName = facility.facilityName || customerName;
     }
   }
 
@@ -2575,18 +2468,14 @@ async function updateOrder(id, data, actorId, files) {
     });
 
     const savedPayments = await Order.findPaymentsByOrderId(existing.id, connection);
-    const resolvedCustodianDue = invoiceService.resolveCustodianPaymentDue(
-      null,
-      savedPayments
-    );
 
     await syncOrderWorkflowFromState(connection, existing.id, {
-      payments: isCnrOrder(data)
-        ? payments.filter((payment) => payment.paymentType !== "custodian")
-        : payments,
+      payments: savedPayments.map((payment) => ({
+        paymentType: payment.payment_type,
+        amount: payment.amount,
+        dueAmount: payment.due_amount,
+      })),
       invoiceServiceFee: 0,
-      skipCustodian: isCnrOrder(data),
-      resolvedCustodianDue,
     });
 
     await connection.commit();

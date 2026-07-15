@@ -267,7 +267,7 @@ CREATE TABLE orders (
   ready_date      DATE            NULL COMMENT 'Mail sent or pickup date',
   invoice_date    DATE            NULL,
   xray_invoice_date DATE          NULL,
-  specific_record VARCHAR(255)    NULL,
+  specific_record TEXT            NULL,
   specific_doctor VARCHAR(200)    NULL,
   specific_doctor_is_default TINYINT(1) NOT NULL DEFAULT 0
     COMMENT '1 when specific_doctor was set from facility default doctor during auto order creation',
