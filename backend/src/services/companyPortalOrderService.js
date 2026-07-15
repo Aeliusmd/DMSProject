@@ -768,18 +768,38 @@ async function confirmCheckoutResult(companyUserId, sessionId) {
   return order;
 }
 
-async function listOrders(companyUserId, { limit = 20 } = {}) {
+async function listOrders(
+  companyUserId,
+  { limit = 20, pagination = null, cursor = null, pageSize = 10 } = {}
+) {
+  const useKeyset = String(pagination || "").toLowerCase() === "keyset";
+
+  if (useKeyset) {
+    const keyset = await CompanyPortalOrder.listForUserKeyset(companyUserId, {
+      cursor,
+      pageSize,
+    });
+
+    return {
+      orders: keyset.rows.map(formatOrder),
+      pagination: {
+        type: "keyset",
+        pageSize: keyset.pageSize,
+        hasMore: keyset.hasMore,
+        nextCursor: keyset.nextCursor,
+      },
+    };
+  }
+
   const rows = await CompanyPortalOrder.listForUser(companyUserId, { limit });
-  return rows.map(formatOrder);
+  return {
+    orders: rows.map(formatOrder),
+  };
 }
 
 async function getDashboard(companyUserId) {
-  const [stats, recentOrders] = await Promise.all([
-    CompanyPortalOrder.getStatsForUser(companyUserId),
-    listOrders(companyUserId, { limit: 10 }),
-  ]);
-
-  return { stats, recentOrders };
+  const stats = await CompanyPortalOrder.getStatsForUser(companyUserId);
+  return { stats };
 }
 
 function getSubpoenaFile(orderId, companyUserId) {

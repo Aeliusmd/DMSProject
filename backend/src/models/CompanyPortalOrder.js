@@ -16,6 +16,27 @@ const SELECT_COLUMNS = `
   created_at, updated_at
 `;
 
+function encodeCreatedCursor(createdAt, id) {
+  if (!createdAt || !id) return null;
+  const dateValue =
+    createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+  return `${dateValue}|${id}`;
+}
+
+function decodeCreatedCursor(rawCursor) {
+  if (rawCursor == null || rawCursor === "") return null;
+
+  const value = String(rawCursor);
+  const separatorIndex = value.lastIndexOf("|");
+  if (separatorIndex <= 0) return null;
+
+  const createdAt = value.slice(0, separatorIndex);
+  const id = Number(value.slice(separatorIndex + 1));
+  if (!createdAt || !Number.isFinite(id) || id <= 0) return null;
+
+  return { createdAt, id };
+}
+
 class CompanyPortalOrder {
   static async findById(id, connection = null) {
     const db = connection || getPool();
@@ -230,6 +251,56 @@ class CompanyPortalOrder {
       { companyUserId }
     );
     return rows;
+  }
+
+  static async listForUserKeyset(
+    companyUserId,
+    { cursor = null, pageSize = 10 } = {},
+    connection = null
+  ) {
+    const db = connection || getPool();
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 50);
+    const queryLimit = safePageSize + 1;
+    const params = { companyUserId };
+    let cursorCondition = "";
+
+    const decoded = decodeCreatedCursor(cursor);
+    if (decoded) {
+      cursorCondition = `AND (
+        created_at < :cursorCreatedAt
+        OR (
+          created_at = :cursorCreatedAt
+          AND id < :cursorId
+        )
+      )`;
+      params.cursorCreatedAt = decoded.createdAt;
+      params.cursorId = decoded.id;
+    }
+
+    const [rows] = await db.execute(
+      `SELECT ${SELECT_COLUMNS}
+       FROM company_portal_orders
+       WHERE company_user_id = :companyUserId
+         AND status <> 'Draft'
+         AND order_number IS NOT NULL
+         ${cursorCondition}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > safePageSize;
+    const pageRows = hasMore ? rows.slice(0, safePageSize) : rows;
+    const lastRow = pageRows[pageRows.length - 1] || null;
+
+    return {
+      rows: pageRows,
+      pageSize: safePageSize,
+      hasMore,
+      nextCursor: hasMore && lastRow
+        ? encodeCreatedCursor(lastRow.created_at, lastRow.id)
+        : null,
+    };
   }
 
   static async getStatsForUser(companyUserId, connection = null) {

@@ -31,10 +31,18 @@ exports.getDashboard = asyncHandler(async (req, res) => {
 });
 
 exports.listOrders = asyncHandler(async (req, res) => {
-  const orders = await companyPortalOrderService.listOrders(req.companyUser.id, {
+  const result = await companyPortalOrderService.listOrders(req.companyUser.id, {
     limit: req.query.limit,
+    pagination: req.query.pagination,
+    cursor: req.query.cursor,
+    pageSize: req.query.pageSize,
   });
-  return ApiResponse.success(res, { orders });
+
+  if (Array.isArray(result)) {
+    return ApiResponse.success(res, { orders: result });
+  }
+
+  return ApiResponse.success(res, result);
 });
 
 exports.trackOrder = asyncHandler(async (req, res) => {
