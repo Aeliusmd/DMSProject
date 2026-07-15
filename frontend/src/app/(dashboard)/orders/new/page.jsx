@@ -967,6 +967,10 @@ function NewOrderPageContent() {
     if (unresolvedFacilityName) {
       const resolved = await resolvePendingFacility({
         facilityName: unresolvedFacilityName,
+        address: meta.facilityAddress || "",
+        city: meta.facilityCity || "",
+        state: meta.facilityState || "",
+        zip: meta.facilityZip || "",
       });
       nextUpdates = {
         ...nextUpdates,
@@ -1489,11 +1493,6 @@ function NewOrderPageContent() {
         cnrDelivery: checked ? prev.cnrDelivery : "",
         cnrDateSent: checked ? prev.cnrDateSent : "",
         cnrMemo: checked ? prev.cnrMemo : false,
-        custodianCheck: checked ? "" : prev.custodianCheck,
-        custodianDate: checked ? "" : prev.custodianDate,
-        custodianPaid: checked ? "" : prev.custodianPaid,
-        custodianDue: checked ? "0" : "15.00",
-        custodianMemo: checked ? "" : prev.custodianMemo,
       }));
 
       return;
@@ -2647,24 +2646,6 @@ function PaymentForm({
         getError={getError}
         onValuesChange={onValuesChange}
       />
-
-      {!formData.certificateNoRecords && (
-        <PaymentChargeCard
-          title="Custodian Charge"
-          chargeAmount={getPaymentChargeForType("custodian", invoiceFees)}
-          paidAmount={formData.custodianPaid}
-          showPaidField
-          autoDueOnPaidChange
-          capPaidToDue
-          theme="purple"
-          prefix="custodian"
-          formData={formData}
-          onChange={onChange}
-          onBlur={onBlur}
-          getError={getError}
-          onValuesChange={onValuesChange}
-        />
-      )}
 
       <PaymentChargeCard
         title="Xray Charge"

@@ -56,20 +56,36 @@ function getTransporter() {
     return null;
   }
 
+  const isGmail = String(config.smtp.host || "").includes("gmail.com");
+
   transporter = nodemailer.createTransport({
     host: config.smtp.host,
     port: config.smtp.port,
-    secure: config.smtp.secure,
+    secure: Boolean(config.smtp.secure),
     auth: {
       user: config.smtp.user,
       pass: config.smtp.pass,
     },
-    ...(config.smtp.host.includes("gmail.com")
-      ? { tls: { rejectUnauthorized: true } }
+    connectionTimeout: config.smtp.connectionTimeout,
+    greetingTimeout: config.smtp.greetingTimeout,
+    socketTimeout: config.smtp.socketTimeout,
+    ...(isGmail
+      ? {
+          tls: { rejectUnauthorized: true },
+          requireTLS: !config.smtp.secure,
+        }
       : {}),
   });
 
   return transporter;
+}
+
+function throwEmailDeliveryError(error) {
+  const detail = error?.message || "Unknown SMTP error";
+  throw new ApiError(
+    503,
+    `Email delivery failed: ${detail}. Check SMTP settings and network access to ${config.smtp.host}:${config.smtp.port}.`
+  );
 }
 
 function buildMailOptions({ to, subject, text, html, attachments }) {
@@ -231,17 +247,7 @@ async function sendInvoiceEmail({
   } catch (error) {
     logger.error("Failed to send invoice email", { to, error: error.message });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Invoice email fallback", {
-        to,
-        subject,
-        text: emailText,
-        attachments: attachments.map((file) => file.filename),
-      });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -407,17 +413,7 @@ async function sendOrderCompletedMail({
       error: error.message,
     });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Order completed mail fallback", {
-        to,
-        subject,
-        text,
-        downloadUrl,
-      });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -496,12 +492,7 @@ async function sendCopyServiceLetterEmail({
       error: error.message,
     });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Copy service letter email fallback", { to, subject, text });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -597,12 +588,7 @@ async function sendCnrRecordEmail({
       error: error.message,
     });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] CNR record email fallback", { to, subject, text });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -674,12 +660,7 @@ async function sendCnrMemoEmail({
       error: error.message,
     });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] CNR memo email fallback", { to, subject, text });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -751,12 +732,7 @@ async function sendCertificateOfRecordsEmail({
       error: error.message,
     });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Certificate of records email fallback", { to, subject, text });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -824,12 +800,7 @@ async function sendPaymentResultEmail({
       error: error.message,
     });
 
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Payment result email fallback", { to, subject, text });
-      return { delivered: false, devLogged: true };
-    }
-
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 
@@ -891,11 +862,7 @@ async function sendPersonalPortalConfirmation({
       to,
       error: error.message,
     });
-    if (config.nodeEnv === "development") {
-      logger.warn("[DEV] Personal portal confirmation fallback", { to, text });
-      return { delivered: false, devLogged: true };
-    }
-    rethrowServiceError(error);
+        throwEmailDeliveryError(error);
   }
 }
 

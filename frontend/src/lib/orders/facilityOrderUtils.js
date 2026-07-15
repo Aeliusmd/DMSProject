@@ -157,6 +157,11 @@ export function isSameFacilityLabel(left, right) {
 export async function resolvePendingFacility({
   facilityName,
   facilityId = "",
+  address = "",
+  city = "",
+  state = "",
+  zip = "",
+  zipCode = "",
 } = {}) {
   const trimmedName = `${facilityName || ""}`.trim();
   const existingId = `${facilityId || ""}`.trim();
@@ -196,7 +201,14 @@ export async function resolvePendingFacility({
     };
   }
 
-  const { facility, created } = await resolveFacility({ facilityName: trimmedName });
+  const { facility, created } = await resolveFacility({
+    facilityName: trimmedName,
+    address: `${address || ""}`.trim() || undefined,
+    city: `${city || ""}`.trim() || undefined,
+    state: `${state || ""}`.trim() || undefined,
+    zipCode: `${zipCode || zip || ""}`.trim() || undefined,
+    zip: `${zip || zipCode || ""}`.trim() || undefined,
+  });
 
   return {
     facilityId: String(facility.id),

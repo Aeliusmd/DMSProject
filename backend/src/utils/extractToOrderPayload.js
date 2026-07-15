@@ -7,6 +7,7 @@ const {
   enrichOrderHintsFromRow,
   resolveExtractionSchema,
 } = require("./extractionMapper");
+const { splitNameAndAddress, parseUsAddress } = require("./addressParseUtils");
 
 const ORDER_TYPE_KEYWORDS = {
   billing: ["billing"],
@@ -73,40 +74,6 @@ function applyRecordFlags(updates, recordText) {
   }
 }
 
-function parseUsAddress(fullAddress) {
-  const trimmed = String(fullAddress || "").trim();
-  if (!trimmed) {
-    return { address: "", city: "", state: "", zip: "" };
-  }
-
-  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length === 1) {
-    return { address: trimmed, city: "", state: "", zip: "" };
-  }
-
-  const last = parts[parts.length - 1];
-  const cityStateZipMatch = last.match(
-    /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-  );
-
-  if (cityStateZipMatch) {
-    return {
-      address: parts.slice(0, -1).join(", "),
-      city: cityStateZipMatch[1].trim(),
-      state: cityStateZipMatch[2].toUpperCase(),
-      zip: cityStateZipMatch[3],
-    };
-  }
-
-  return {
-    address: parts.slice(0, -1).join(", "),
-    city: parts[parts.length - 1],
-    state: "",
-    zip: "",
-  };
-}
-
 function applyParsedServeAddress(updates, fullAddress) {
   const parsed = parseUsAddress(fullAddress);
   updates.address = parsed.address || String(fullAddress).trim();
@@ -144,20 +111,27 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
     Object.assign(payload, splitApplicantName(hints.applicantName));
   }
 
-  const facilityMatch = findFacilityByNameMatch(hints.customer, facilities);
+  const facilitySplit = splitNameAndAddress(hints.customer || "");
+  const facilityName = facilitySplit.name || hints.customer;
+  const facilityMatch = findFacilityByNameMatch(facilityName, facilities);
   if (facilityMatch) {
     payload.facility = String(facilityMatch.id);
   }
 
+  const companySplit = splitNameAndAddress(hints.companyName || "");
+  const companyName = companySplit.name || hints.companyName;
+  const companyAddressSource =
+    companySplit.address || hints.companyAddress || "";
+
   if (hints.providerId) {
     payload.providerId = String(hints.providerId);
-    payload.serveCompanyName = hints.companyName || "";
-  } else if (hints.companyName) {
-    payload.serveCompanyName = hints.companyName;
+    payload.serveCompanyName = companyName || "";
+  } else if (companyName) {
+    payload.serveCompanyName = companyName;
   }
 
-  if (hints.companyAddress) {
-    applyParsedServeAddress(payload, hints.companyAddress);
+  if (companyAddressSource) {
+    applyParsedServeAddress(payload, companyAddressSource);
   }
 
   const recordText = `${hints.recordType || ""} ${hints.requestedRecord || ""}`;

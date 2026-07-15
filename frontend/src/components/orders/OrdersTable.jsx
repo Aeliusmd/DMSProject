@@ -214,7 +214,6 @@ function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "")
 const WORKFLOW_STAGES = [
   "Review Records",
   "Serve",
-  "Custodian",
   "SENT",
 ];
 
@@ -372,16 +371,13 @@ function buildWorkflowStagesForOrder(order, companyPortalMode = false) {
   }
 
   const prepaymentPaid = parsePaymentAmount(order.invoice?.prepaymentPaid);
-  const custodianPaid = parsePaymentAmount(order.invoice?.custodianPaid);
   const hasAllRecordsUploaded = Boolean(order.records?.allRecordsUploaded);
   const hasAnyRecordsUploaded = Boolean(
     order.records?.anyRecordsUploaded || order.records?.hasMedicalRecords
   );
   const isCnrOrder = Boolean(order.certificateNoRecords);
 
-  return mapWorkflowStages(order.workflowStages)
-    .filter((stage) => !(isCnrOrder && stage.key === "Custodian"))
-    .map((stage) => {
+  return mapWorkflowStages(order.workflowStages).map((stage) => {
     if (stage.key === "Review Records") {
       if (isCnrOrder) {
         return {
@@ -416,19 +412,6 @@ function buildWorkflowStagesForOrder(order, companyPortalMode = false) {
         paidAmount:
           isComplete && prepaymentPaid > 0
             ? formatMoneyAmount(prepaymentPaid)
-            : null,
-      };
-    }
-
-    if (stage.key === "Custodian") {
-      const isComplete = isWorkflowStageComplete(stage.status);
-
-      return {
-        ...stage,
-        label: isComplete ? "Custodian" : "Custodian Payment",
-        paidAmount:
-          isComplete && custodianPaid > 0
-            ? formatMoneyAmount(custodianPaid)
             : null,
       };
     }
@@ -2601,15 +2584,6 @@ function getWorkflowStageHref(stage, order) {
 
   if (
     stage.key === "Serve" &&
-    !isWorkflowStageComplete(stage.status)
-  ) {
-    return `/orders/new?mode=edit&orderId=${encodeURIComponent(
-      order.dbId
-    )}&panel=payment`;
-  }
-
-  if (
-    stage.key === "Custodian" &&
     !isWorkflowStageComplete(stage.status)
   ) {
     return `/orders/new?mode=edit&orderId=${encodeURIComponent(

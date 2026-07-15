@@ -130,10 +130,6 @@ export function capPaymentPaidEntry(
 export function validateOrderPaymentAmounts(data = {}, invoiceFees = {}) {
   const errors = {};
 
-  if (!data.certificateNoRecords) {
-    validatePaymentPaidCap(errors, "custodian", data, invoiceFees);
-  }
-
   validatePaymentPaidCap(errors, "xray", data, invoiceFees);
 
   return errors;
@@ -184,19 +180,12 @@ export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0) {
 
 export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFees || {}) {
   const next = { ...formData };
-  const fixedChargePrefixes = ["prepayment", "custodian"];
 
-  for (const prefix of fixedChargePrefixes) {
-    if (prefix === "custodian" && formData.certificateNoRecords) {
-      continue;
-    }
-
-    const charge = getPaymentChargeForType(prefix, invoiceFees);
-    next[`${prefix}Due`] = dueAmountFromFee(
-      charge,
-      formData[`${prefix}Paid`]
-    ).toFixed(2);
-  }
+  const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+  next.prepaymentDue = dueAmountFromFee(
+    prepaymentCharge,
+    formData.prepaymentPaid
+  ).toFixed(2);
 
   if (!formData.certificateNoRecords && invoiceFees?.hasXrayInvoice) {
     next.xrayDue = resolveXrayDue(invoiceFees, formData.xrayPaid).toFixed(2);

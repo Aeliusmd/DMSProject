@@ -120,7 +120,6 @@ function appendOrderSearchFilter(conditions, params, rawSearch) {
 const REQUIRED_WORKFLOW_COMPLETION = {
   "Review Records": "complete",
   Serve: "complete",
-  Custodian: "complete",
   SENT: "sent",
 };
 
@@ -848,7 +847,7 @@ class Order {
   }
 
   static async seedWorkflowStages(connection, orderId) {
-    const stages = ["Review Records", "Serve", "Custodian", "SENT"];
+    const stages = ["Review Records", "Serve", "SENT"];
 
     for (const stageName of stages) {
       await connection.execute(
@@ -868,7 +867,7 @@ class Order {
       `SELECT id, order_id, stage_name, stage_status, completed_at
        FROM order_workflow_stages
        WHERE order_id = :orderId
-       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'Custodian', 'SENT')`,
+       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'SENT')`,
       { orderId }
     );
 
@@ -890,7 +889,7 @@ class Order {
       `SELECT id, order_id, stage_name, stage_status, completed_at
        FROM order_workflow_stages
        WHERE order_id IN (${placeholders})
-       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'Custodian', 'SENT')`,
+       ORDER BY FIELD(stage_name, 'Review Records', 'Serve', 'SENT')`,
       params
     );
 

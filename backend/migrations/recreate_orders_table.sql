@@ -75,7 +75,7 @@ CREATE TABLE orders (
   flag_employment_records TINYINT(1) NOT NULL DEFAULT 0,
   flag_xrays              TINYINT(1) NOT NULL DEFAULT 0,
   flag_other_record       TINYINT(1) NOT NULL DEFAULT 0,
-  specific_record VARCHAR(255)    NULL,
+  specific_record TEXT            NULL,
   specific_doctor VARCHAR(200)    NULL,
   full_address    TEXT            NULL,
   certificate_no_records  TINYINT(1) NOT NULL DEFAULT 0,

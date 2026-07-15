@@ -1163,8 +1163,7 @@ async function syncOrderCustodianDueFromInvoice(connection, orderId) {
   }
 }
 
-async function syncOrderPaymentDuesFromInvoice(connection, orderId, options = {}) {
-  const skipCustodian = options.skipCustodian === true;
+async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {}) {
   const order = await Order.findById(orderId, connection);
 
   if (!order) {
@@ -1174,10 +1173,6 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, options = {}
   const invoice = await Invoice.findByOrderId(orderId, connection);
   const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
   const payments = await Order.findPaymentsByOrderId(orderId, connection);
-
-  if (!skipCustodian && !order.certificate_no_records) {
-    await syncOrderCustodianDueFromInvoice(connection, orderId);
-  }
 
   if (xrayRow) {
     const xrayDue = resolveXrayPaymentDue(xrayRow, payments);
@@ -3239,13 +3234,13 @@ async function deliverInvoiceEmail(
         : null,
     });
 
-    if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
-      const hint =
+    if (!result.delivered) {
+      throw new ApiError(
+        500,
         config.nodeEnv === "development" && result.devLogged
-          ? "SMTP is not configured or delivery failed (check backend logs)."
-          : "Failed to deliver invoice email.";
-
-      throw new ApiError(500, hint);
+          ? "SMTP is not configured. Set SMTP_USER / SMTP_PASS in backend .env."
+          : "Failed to deliver invoice email."
+      );
     }
 
     deliveredTo.push(email);
@@ -3338,13 +3333,13 @@ async function deliverXrayInvoiceEmail(
       attachments,
     });
 
-    if (!result.delivered && !(config.nodeEnv === "development" && result.devLogged)) {
-      const hint =
+    if (!result.delivered) {
+      throw new ApiError(
+        500,
         config.nodeEnv === "development" && result.devLogged
-          ? "SMTP is not configured or delivery failed (check backend logs)."
-          : "Failed to deliver X-Ray invoice email.";
-
-      throw new ApiError(500, hint);
+          ? "SMTP is not configured. Set SMTP_USER / SMTP_PASS in backend .env."
+          : "Failed to deliver X-Ray invoice email."
+      );
     }
 
     deliveredTo.push(email);

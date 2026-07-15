@@ -42,11 +42,14 @@ module.exports = {
 
   smtp: {
     host: process.env.SMTP_HOST || "smtp.gmail.com",
-    port: Number(process.env.SMTP_PORT) || 465,
-    secure: process.env.SMTP_SECURE !== "false",
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === "true",
     user: (process.env.SMTP_USER || "").trim(),
     pass: (process.env.SMTP_PASS || "").replace(/\s+/g, ""),
     from: (process.env.SMTP_FROM || process.env.SMTP_USER || "").trim(),
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT_MS) || 30000,
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT_MS) || 30000,
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT_MS) || 60000,
   },
 
   invoiceReminder: {

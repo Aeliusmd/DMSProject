@@ -32,19 +32,16 @@ export const phoneFields = [
 
 export const numericOnlyFields = [
   "prepaymentCheck",
-  "custodianCheck",
   "xrayCheck",
 ];
 
 export const moneyFields = [
   "prepaymentPaid",
-  "custodianPaid",
-  "custodianDue",
   "xrayPaid",
   "xrayDue",
 ];
 
-export const paymentPrefixes = ["prepayment", "custodian", "xray"];
+export const paymentPrefixes = ["prepayment", "xray"];
 
 export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
