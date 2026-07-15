@@ -181,8 +181,29 @@ export async function getCompanyPortalDashboard() {
   });
 }
 
-export async function listCompanyPortalOrders(limit = 20) {
-  return companyAuthFetch(`/company-portal/orders?limit=${limit}`, {
+export async function listCompanyPortalOrders({
+  limit = 20,
+  pagination = null,
+  cursor = null,
+  pageSize = 10,
+} = {}) {
+  const params = new URLSearchParams();
+
+  if (pagination) {
+    params.set("pagination", String(pagination));
+  }
+  if (cursor) {
+    params.set("cursor", String(cursor));
+  }
+  if (pageSize) {
+    params.set("pageSize", String(pageSize));
+  }
+  if (!pagination && limit) {
+    params.set("limit", String(limit));
+  }
+
+  const query = params.toString();
+  return companyAuthFetch(`/company-portal/orders${query ? `?${query}` : ""}`, {
     method: "GET",
   });
 }

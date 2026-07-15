@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPortalDashboardShell";
 import CompanyPortalQuickActions from "@/components/company-portal/CompanyPortalQuickActions";
@@ -11,7 +11,10 @@ import {
   clearCompanyAuth,
   getCompanyAccessToken,
 } from "@/lib/company-portal/companyPortalAuthStorage";
-import { getCompanyPortalDashboard } from "@/lib/company-portal/companyPortalOrderApi";
+import {
+  getCompanyPortalDashboard,
+  listCompanyPortalOrders,
+} from "@/lib/company-portal/companyPortalOrderApi";
 import { mapDashboardOrderRow } from "@/lib/company-portal/companyPortalOrderStatus";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
@@ -23,6 +26,8 @@ const EMPTY_STATS = {
   released: 0,
 };
 
+const ORDERS_PAGE_SIZE = 10;
+
 export default function CompanyPortalDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
@@ -33,6 +38,50 @@ export default function CompanyPortalDashboardPage() {
   const [error, setError] = useState("");
   const [trackInput, setTrackInput] = useState("");
   const [trackError, setTrackError] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+  const requestIdRef = useRef(0);
+
+  const loadOrdersPage = useCallback(async (page = 1, cursor = null) => {
+    const requestId = (requestIdRef.current += 1);
+    setOrdersLoading(true);
+
+    try {
+      const response = await listCompanyPortalOrders({
+        pagination: "keyset",
+        cursor,
+        pageSize: ORDERS_PAGE_SIZE,
+      });
+      if (requestId !== requestIdRef.current) return;
+
+      const data = response?.data || {};
+      const pagination = data.pagination || {};
+      setRecentOrders((data.orders || []).map(mapDashboardOrderRow));
+      setHasMore(Boolean(pagination.hasMore));
+      setNextCursor(pagination.nextCursor || null);
+      setCurrentPage(page);
+      setCursorHistory((prev) => {
+        const next = prev.slice(0, page - 1);
+        next[page - 1] = cursor;
+        if (pagination.hasMore && pagination.nextCursor) {
+          next[page] = pagination.nextCursor;
+        }
+        return next;
+      });
+    } catch (err) {
+      if (requestId !== requestIdRef.current) return;
+      setRecentOrders([]);
+      setHasMore(false);
+      setNextCursor(null);
+      setError(getApiErrorMessage(err, "Unable to load orders"));
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setOrdersLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -53,9 +102,8 @@ export default function CompanyPortalDashboardPage() {
         if (!active) return;
         setUser(userResponse?.data?.user || null);
         setStats(dashboardResponse?.data?.stats || EMPTY_STATS);
-        setRecentOrders(
-          (dashboardResponse?.data?.recentOrders || []).map(mapDashboardOrderRow)
-        );
+        setError("");
+        await loadOrdersPage(1, null);
       } catch (err) {
         if (!active) return;
         clearCompanyAuth();
@@ -64,7 +112,6 @@ export default function CompanyPortalDashboardPage() {
       } finally {
         if (active) {
           setLoading(false);
-          setOrdersLoading(false);
         }
       }
     }
@@ -73,7 +120,7 @@ export default function CompanyPortalDashboardPage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [router, loadOrdersPage]);
 
   const summaryCards = useMemo(
     () => [
@@ -146,6 +193,17 @@ export default function CompanyPortalDashboardPage() {
     if (actionId === "edit-profile") {
       router.push("/company-portal/profile");
     }
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage <= 1 || ordersLoading) return;
+    const previousCursor = cursorHistory[currentPage - 2] ?? null;
+    loadOrdersPage(currentPage - 1, previousCursor);
+  };
+
+  const handleNextPage = () => {
+    if (!hasMore || ordersLoading || !nextCursor) return;
+    loadOrdersPage(currentPage + 1, nextCursor);
   };
 
   if (loading) {
@@ -226,7 +284,22 @@ export default function CompanyPortalDashboardPage() {
         <CompanyPortalRecentOrders
           orders={recentOrders}
           loading={ordersLoading}
+          title="Your orders"
+          subtitle="Browse your requests, 10 orders per page"
           onViewAll={() => router.push("/company-portal/orders/track")}
+          onSelectOrder={(order) => {
+            if (!order?.orderNumber) return;
+            router.push(
+              `/company-portal/orders/track/${encodeURIComponent(
+                order.orderNumber
+              )}`
+            );
+          }}
+          currentPage={currentPage}
+          hasMore={hasMore}
+          pageSize={ORDERS_PAGE_SIZE}
+          onPreviousPage={handlePreviousPage}
+          onNextPage={handleNextPage}
         />
       </div>
     </CompanyPortalDashboardShell>
