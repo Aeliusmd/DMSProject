@@ -66,3 +66,7 @@ body {
     animation: none;
   }
 }
+
+.portal-navigation-hidden a[href] {
+  display: none !important;
+}

@@ -11,9 +11,14 @@ import {
 import {
   buildPaymentLinesFromOrder,
   formatMoneyAmount,
+  formatPaidBracket,
   getPaymentLineAmount,
+  isQuickRecordsFeeInvoice,
   mapDueFormToInvoiceFees,
   mapInvoiceFeesToDueForm,
+  PAYMENT_CHARGE_AMOUNTS,
+  QUICK_RECORDS_FEE,
+  REQUEST_TOTAL_WITH_RECORDS_FEE,
   resolveFullFeeAmounts,
   resolvePersistedInvoiceAmounts,
 } from "@/lib/orders/paymentUtils";
@@ -59,8 +64,11 @@ export default function CreateInvoiceModal({
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [paymentLines, setPaymentLines] = useState([]);
   const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
+  const [loadedPrepaymentAmount, setLoadedPrepaymentAmount] = useState(0);
   const [rushLevel, setRushLevel] = useState(null);
   const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
+  const [quickRecordsFee, setQuickRecordsFee] = useState(false);
+  const [savedDetailedFees, setSavedDetailedFees] = useState(null);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -70,8 +78,16 @@ export default function CreateInvoiceModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
-      setFormData(getInitialInvoiceFormData(order, isEditMode));
+      const isCnr = Boolean(order?.certificateNoRecords);
+      setFormData(getInitialInvoiceFormData(order, isEditMode, isCnr));
       setErrors({});
+      // CNR: fees locked at $0. Normal create: start detailed; user clicks $20 button.
+      setQuickRecordsFee(
+        isEditMode && !isCnr
+          ? isQuickRecordsFeeInvoice(order?.invoice || {})
+          : false
+      );
+      setSavedDetailedFees(null);
     }
   }
 
@@ -94,7 +110,10 @@ export default function CreateInvoiceModal({
         const loadedPaymentLines = buildPaymentLinesFromOrder(orderData);
         setPaymentLines(loadedPaymentLines);
         const loadedPrepayment = getPaymentLineAmount(loadedPaymentLines, "prepayment");
-        setPrepaymentAmount(loadedPrepayment > 0 ? loadedPrepayment.toFixed(2) : "0.00");
+        setLoadedPrepaymentAmount(loadedPrepayment);
+        setPrepaymentAmount(
+          loadedPrepayment > 0 ? loadedPrepayment.toFixed(2) : "0.00"
+        );
 
         const invoiceId = order.invoiceId || order.invoice?.invoiceId;
 
@@ -102,21 +121,39 @@ export default function CreateInvoiceModal({
           const invoice = await getInvoice(invoiceId);
           if (cancelled) return;
 
+          const mapped = mapInvoiceFeesToDueForm(mapInvoiceToFormData(invoice, order));
+          const isCnr = Boolean(
+            order.certificateNoRecords || orderData.certificateNoRecords
+          );
           setFormData(
-            mapInvoiceFeesToDueForm(mapInvoiceToFormData(invoice, order))
+            isCnr
+              ? {
+                  ...mapped,
+                  ...zeroInvoiceFeeFields(),
+                  notes: mapped.notes || "",
+                }
+              : mapped
           );
           setPersistedInvoiceMeta({
             status: invoice.status,
             writeoffAmount: invoice.writeoffAmount || 0,
           });
           setRushLevel(invoice.rushLevel || derivedRushLevel);
+          setQuickRecordsFee(!isCnr && isQuickRecordsFeeInvoice(invoice));
+          setSavedDetailedFees(null);
           return;
         }
 
+        const isCnr = Boolean(
+          order.certificateNoRecords || orderData.certificateNoRecords
+        );
         setPersistedInvoiceMeta(null);
+        setQuickRecordsFee(false);
+        setSavedDetailedFees(null);
         setFormData({
-          ...getInitialInvoiceFormData(order, isEditMode),
+          ...getInitialInvoiceFormData(order, isEditMode, isCnr),
           rushOrder: Boolean(derivedRushLevel),
+          notes: "",
         });
       } catch (error) {
         if (!cancelled) {
@@ -143,7 +180,10 @@ export default function CreateInvoiceModal({
     if (!openSession) {
       setPaymentLines([]);
       setPrepaymentAmount("0.00");
+      setLoadedPrepaymentAmount(0);
       setRushLevel(null);
+      setQuickRecordsFee(false);
+      setSavedDetailedFees(null);
     }
   }, [openSession]);
 
@@ -185,9 +225,15 @@ export default function CreateInvoiceModal({
     return toNumber(prepaymentAmount);
   }, [prepaymentAmount]);
 
+  // Flat $20 records fee is separate from the $15 witness prepayment — do not
+  // credit prepayment against the records-fee invoice due. Detailed invoices
+  // keep the existing prepayment-credit behavior.
   const amountPaid = useMemo(() => {
+    if (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) {
+      return 0;
+    }
     return prepaymentPaid;
-  }, [prepaymentPaid]);
+  }, [quickRecordsFee, formData, prepaymentPaid]);
 
   const invoiceTotals = useMemo(
     () =>
@@ -205,18 +251,55 @@ export default function CreateInvoiceModal({
   const willCreateInvoice = !(
     (isEditMode || completingXrayOnlyStub) && invoiceIdForValidation
   );
+  const isCnrOrder = Boolean(order?.certificateNoRecords);
 
-  const clientValidationErrors = useMemo(
-    () =>
-      validateInvoiceForm(formData, {
-        requirePositiveTotal: willCreateInvoice,
-      }),
-    [formData, willCreateInvoice]
-  );
+  const clientValidationErrors = useMemo(() => {
+    const errors = validateInvoiceForm(formData, {
+      // CNR invoices may be $0 (only the prior $15 witness fee applies).
+      requirePositiveTotal: willCreateInvoice && !isCnrOrder,
+    });
+
+    if (
+      !isCnrOrder &&
+      (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) &&
+      loadedPrepaymentAmount < PAYMENT_CHARGE_AMOUNTS.prepayment
+    ) {
+      errors.prepaymentAmount = `Prepayment $${PAYMENT_CHARGE_AMOUNTS.prepayment.toFixed(2)} must be paid on the order first.`;
+    }
+
+    return errors;
+  }, [
+    formData,
+    willCreateInvoice,
+    isCnrOrder,
+    quickRecordsFee,
+    loadedPrepaymentAmount,
+  ]);
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
     invoiceTotals;
+
+  const feesLocked = isCnrOrder || quickRecordsFee;
+  const canToggleQuickRecordsFee = !isCnrOrder;
+  const isQuickMode =
+    !isCnrOrder && (quickRecordsFee || isQuickRecordsFeeInvoice(formData));
+  const witnessFeeRequired = PAYMENT_CHARGE_AMOUNTS.prepayment;
+  const witnessFeeShortfall = Math.max(0, witnessFeeRequired - prepaymentPaid);
+  const prepaymentDueForCnr = isCnrOrder ? witnessFeeShortfall : 0;
+  // $20 quick fee + unpaid witness fee (if not paid earlier) = up to $35 to collect.
+  const quickCollectTotal = isQuickMode
+    ? QUICK_RECORDS_FEE +
+      Math.max(0, witnessFeeRequired - loadedPrepaymentAmount)
+    : null;
+  const requestTotalDisplay = isQuickMode
+    ? REQUEST_TOTAL_WITH_RECORDS_FEE
+    : null;
+  const displayDue = isCnrOrder
+    ? prepaymentDueForCnr
+    : isQuickMode
+      ? quickCollectTotal
+      : amountDue;
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -290,30 +373,47 @@ export default function CreateInvoiceModal({
     clearValidationFeedback("clericalTimeHours");
   };
 
-  const handlePrepaymentChange = (e) => {
-    const cleanValue = e.target.value
-      .replace(/[^\d.]/g, "")
-      .replace(/(\..*)\./g, "$1")
-      .replace(/^(\d*\.\d{0,2}).*$/, "$1");
+  const handleQuickRecordsFeeToggle = () => {
+    if (!canToggleQuickRecordsFee) return;
 
-    const amount = toNumber(cleanValue);
-    setPrepaymentAmount(cleanValue);
-    clearValidationFeedback();
+    clearValidationFeedback(
+      "storageFee",
+      "pages",
+      "perPageAmount",
+      "clericalTimeHours",
+      "clericalHourlyRate",
+      "shippingHandling",
+      "totalAmount",
+      "prepaymentAmount"
+    );
 
-    setPaymentLines((prev) => {
-      const others = prev.filter((line) => line.type !== "prepayment");
-      if (amount <= 0) return others;
+    if (quickRecordsFee) {
+      setQuickRecordsFee(false);
+      setFormData((prev) => ({
+        ...prev,
+        ...(savedDetailedFees || {
+          storageFee: "0.00",
+          pages: "0",
+          perPageAmount: "0.00",
+          clericalTimeHours: "0",
+          clericalHourlyRate: "0.00",
+          shippingHandling: "0.00",
+        }),
+      }));
+      setSavedDetailedFees(null);
+      return;
+    }
 
-      return [
-        ...others,
-        {
-          type: "prepayment",
-          label: "Prepayment",
-          amount,
-          bracketLabel: `Prepayment (${formatMoney(amount)})`,
-        },
-      ];
+    setSavedDetailedFees({
+      storageFee: formData.storageFee,
+      pages: formData.pages,
+      perPageAmount: formData.perPageAmount,
+      clericalTimeHours: formData.clericalTimeHours,
+      clericalHourlyRate: formData.clericalHourlyRate,
+      shippingHandling: formData.shippingHandling,
     });
+    setQuickRecordsFee(true);
+    setFormData((prev) => applyQuickRecordsFeeFields(prev));
   };
 
   const handleSubmit = async () => {
@@ -323,8 +423,17 @@ export default function CreateInvoiceModal({
     const willCreate = !((isEditMode || completingXrayOnlyStub) && invoiceId);
 
     const validationErrors = validateInvoiceForm(formData, {
-      requirePositiveTotal: willCreate,
+      requirePositiveTotal: willCreate && !isCnrOrder,
     });
+
+    if (
+      (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) &&
+      !isCnrOrder &&
+      loadedPrepaymentAmount < PAYMENT_CHARGE_AMOUNTS.prepayment
+    ) {
+      validationErrors.prepaymentAmount = `Prepayment $${PAYMENT_CHARGE_AMOUNTS.prepayment.toFixed(2)} must be paid on the order first.`;
+    }
+
     setErrors(validationErrors);
     setSubmitError("");
 
@@ -339,7 +448,7 @@ export default function CreateInvoiceModal({
       pagesAmount,
       clericalAmount,
       totalAmount,
-      prepaymentAmount: toNumber(prepaymentAmount),
+      // Prepayment is managed on the order — do not overwrite from invoice.
     };
 
     setSubmitting(true);
@@ -404,9 +513,23 @@ export default function CreateInvoiceModal({
               linkStyle
             />
 
-            <MetaItem label="Invoiced" value={formatMoney(totalAmount)} />
-            <MetaItem label="Paid" value={formatMoney(amountPaid)} />
-            <MetaItem label="Due" value={formatMoney(amountDue)} />
+            <MetaItem
+              label="Invoiced"
+              value={formatMoney(
+                isCnrOrder
+                  ? PAYMENT_CHARGE_AMOUNTS.prepayment
+                  : isQuickMode
+                    ? REQUEST_TOTAL_WITH_RECORDS_FEE
+                    : totalAmount
+              )}
+            />
+            <MetaItem
+              label="Paid"
+              value={formatMoney(
+                isCnrOrder || isQuickMode ? prepaymentPaid : amountPaid
+              )}
+            />
+            <MetaItem label="Due" value={formatMoney(displayDue)} />
             {persistedInvoiceMeta?.writeoffAmount > 0 && (
               <MetaItem
                 label="Written Off"
@@ -431,27 +554,57 @@ export default function CreateInvoiceModal({
                 value={formData.invoiceDate}
                 onChange={handleChange}
                 error={errors.invoiceDate}
+                disabled={isCnrOrder && isEditMode}
               />
             </div>
 
             <SectionTitle title="Fees" />
 
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[#D0E8ED] bg-[#F0FAFC] px-3 py-2.5">
+              <p className="text-[12px] font-semibold text-[#0B7C8E]">
+                {isCnrOrder
+                  ? "CNR — $15 witness fee only"
+                  : `Records fee $${QUICK_RECORDS_FEE.toFixed(2)}`}
+              </p>
+              {canToggleQuickRecordsFee ? (
+                <button
+                  type="button"
+                  onClick={handleQuickRecordsFeeToggle}
+                  disabled={loadingInvoice || submitting}
+                  className={`inline-flex h-[32px] shrink-0 items-center justify-center rounded-[7px] px-3 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    quickRecordsFee
+                      ? "border border-[#0B7C8E] bg-white text-[#0B7C8E] hover:bg-[#E6F7FA]"
+                      : "bg-[#0097B2] text-white hover:bg-[#0086A0]"
+                  }`}
+                >
+                  {quickRecordsFee
+                    ? "Use detailed"
+                    : `Apply $${QUICK_RECORDS_FEE.toFixed(2)}`}
+                </button>
+              ) : (
+                <span className="text-[11px] font-medium text-[#64748B]">
+                  Locked
+                </span>
+              )}
+            </div>
+
             <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <MoneyField
+              <ReadOnlyMoneyField
                 label="Prepayment"
-                name="prepaymentAmount"
-                value={prepaymentAmount}
-                onChange={handlePrepaymentChange}
+                value={loadedPrepaymentAmount}
+                paymentHint={formatPaidBracket(witnessFeeRequired)}
+                error={errors.prepaymentAmount}
               />
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <MoneyField
-                label="Storage Fee"
+                label={feesLocked ? "Records Fee" : "Storage Fee"}
                 name="storageFee"
                 value={formData.storageFee}
                 onChange={handleMoneyChange}
                 error={errors.storageFee}
+                disabled={feesLocked}
               />
             </div>
 
@@ -462,6 +615,7 @@ export default function CreateInvoiceModal({
                 value={formData.pages}
                 onChange={handlePagesChange}
                 error={errors.pages}
+                disabled={feesLocked}
               />
 
               <MoneyField
@@ -470,6 +624,7 @@ export default function CreateInvoiceModal({
                 value={formData.perPageAmount}
                 onChange={handleMoneyChange}
                 error={errors.perPageAmount}
+                disabled={feesLocked}
               />
 
               <ReadOnlyMoneyField label="Pages Amount" value={pagesAmount} />
@@ -484,6 +639,7 @@ export default function CreateInvoiceModal({
                 value={formData.clericalTimeHours}
                 onChange={handleClericalHoursChange}
                 error={errors.clericalTimeHours}
+                disabled={feesLocked}
               />
 
               <MoneyField
@@ -492,6 +648,7 @@ export default function CreateInvoiceModal({
                 value={formData.clericalHourlyRate}
                 onChange={handleMoneyChange}
                 error={errors.clericalHourlyRate}
+                disabled={feesLocked}
               />
 
               <ReadOnlyMoneyField
@@ -509,6 +666,7 @@ export default function CreateInvoiceModal({
                 value={formData.shippingHandling}
                 onChange={handleMoneyChange}
                 error={errors.shippingHandling}
+                disabled={feesLocked}
               />
             </div>
 
@@ -554,8 +712,18 @@ export default function CreateInvoiceModal({
             </h3>
 
             <div className="space-y-3">
+              {requestTotalDisplay ? (
+                <SummaryRow
+                  label="Total ($15 + $20)"
+                  value={formatMoney(requestTotalDisplay)}
+                />
+              ) : null}
               <SummaryRow
-                label="Storage Fee"
+                label={
+                  quickRecordsFee || isQuickRecordsFeeInvoice(formData)
+                    ? "Records Fee"
+                    : "Storage Fee"
+                }
                 value={formatMoney(fullFees.storageFee)}
               />
               <SummaryRow label="Pages" value={formatMoney(pagesAmount)} />
@@ -570,13 +738,47 @@ export default function CreateInvoiceModal({
             </div>
 
             <div className="mt-4 space-y-3 border-t border-[#E2E8F0] pt-4">
-              <SummaryRow label="Subtotal" value={formatMoney(totalAmount)} />
-              {prepaymentPaid > 0 && (
-                <SummaryRow
-                  label="Prepayment"
-                  value={`-${formatMoney(prepaymentPaid)}`}
-                  muted
-                />
+              <SummaryRow label="Invoice subtotal" value={formatMoney(totalAmount)} />
+              {isCnrOrder ? (
+                <>
+                  <SummaryRow
+                    label={`Prepayment ${formatPaidBracket(PAYMENT_CHARGE_AMOUNTS.prepayment)}`}
+                    value={formatMoney(prepaymentPaid)}
+                    muted={prepaymentDueForCnr <= 0}
+                  />
+                  {prepaymentDueForCnr > 0 ? (
+                    <SummaryRow
+                      label="Due"
+                      value={formatMoney(prepaymentDueForCnr)}
+                    />
+                  ) : (
+                    <SummaryRow
+                      label="Paid"
+                      value={formatMoney(prepaymentPaid)}
+                      muted
+                    />
+                  )}
+                </>
+              ) : isQuickMode ? (
+                <>
+                  <SummaryRow
+                    label={`Prepayment ${formatPaidBracket(witnessFeeRequired)}`}
+                    value={formatMoney(loadedPrepaymentAmount)}
+                    muted={loadedPrepaymentAmount >= witnessFeeRequired}
+                  />
+                  <SummaryRow
+                    label="Records fee"
+                    value={formatMoney(QUICK_RECORDS_FEE)}
+                  />
+                </>
+              ) : (
+                prepaymentPaid > 0 && (
+                  <SummaryRow
+                    label="Prepayment"
+                    value={`-${formatMoney(prepaymentPaid)}`}
+                    muted
+                  />
+                )
               )}
               {persistedInvoiceMeta?.writeoffAmount > 0 && (
                 <SummaryRow
@@ -585,8 +787,13 @@ export default function CreateInvoiceModal({
                   muted
                 />
               )}
-              <SummaryRow label="Due" value={formatMoney(amountDue)} highlight />
-              {isOverpaid && (
+              <SummaryRow
+                label="Due"
+                value={formatMoney(displayDue)}
+                highlight={displayDue <= 0}
+                unpaid={displayDue > 0}
+              />
+              {isOverpaid && !isCnrOrder && !isQuickMode && (
                 <SummaryRow
                   label="Credit"
                   value={formatMoney(overpayment)}
@@ -602,7 +809,7 @@ export default function CreateInvoiceModal({
                 </span>
 
                 <span className="text-[15px] font-bold text-[#007F96]">
-                  {formatMoney(amountDue)}
+                  {formatMoney(displayDue)}
                 </span>
               </div>
               {errors.totalAmount && (
@@ -644,12 +851,42 @@ export default function CreateInvoiceModal({
   );
 }
 
-function getInitialInvoiceFormData(order, isEditMode) {
+function zeroInvoiceFeeFields() {
+  return {
+    storageFee: "0.00",
+    pages: "0",
+    perPageAmount: "0.00",
+    clericalTimeHours: "0",
+    clericalHourlyRate: "0.00",
+    shippingHandling: "0.00",
+  };
+}
+
+function applyQuickRecordsFeeFields(form = {}) {
+  return {
+    ...form,
+    storageFee: QUICK_RECORDS_FEE.toFixed(2),
+    pages: "0",
+    perPageAmount: "0.00",
+    clericalTimeHours: "0",
+    clericalHourlyRate: "0.00",
+    shippingHandling: "0.00",
+  };
+}
+
+function getInitialInvoiceFormData(order, isEditMode, isCnr = false) {
   if (!isEditMode) {
-    return {
+    const base = {
       ...initialFormData,
       invoiceDate: getTodayInputDate(),
     };
+
+    // CNR: no records fee — only the prior $15 witness/prepayment applies.
+    if (isCnr || order?.certificateNoRecords) {
+      return { ...base, ...zeroInvoiceFeeFields() };
+    }
+
+    return base;
   }
 
   const invoice = order?.invoice || {};
@@ -663,7 +900,7 @@ function getInitialInvoiceFormData(order, isEditMode) {
     clericalTimeHours: invoice.clericalTimeHours || "0",
     clericalHourlyRate: invoice.clericalHourlyRate || "0.00",
     shippingHandling: invoice.shippingHandling || "0.00",
-    notes: invoice.notes || `Editing invoice for order ${order?.id || order?.orderNo || ""}`,
+    notes: invoice.notes || "",
     sendOrderDetails: Boolean(invoice.sendOrderDetails),
     rushOrder: Boolean(invoice.rushOrder),
   };
@@ -742,7 +979,7 @@ function SectionTitle({ title }) {
   );
 }
 
-function DateField({ label, name, value, onChange, error = "" }) {
+function DateField({ label, name, value, onChange, error = "", disabled = false }) {
   return (
     <div>
       <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
@@ -754,10 +991,17 @@ function DateField({ label, name, value, onChange, error = "" }) {
         name={name}
         value={value}
         onChange={onChange}
-        className={`h-[34px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+        disabled={disabled}
+        className={`h-[34px] w-full rounded-[6px] border px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+          disabled
+            ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+            : "bg-white"
+        } ${
           error
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-            : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+            : disabled
+              ? ""
+              : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
         }`}
       />
 
@@ -766,13 +1010,19 @@ function DateField({ label, name, value, onChange, error = "" }) {
   );
 }
 
-function FieldLabel({ label, paymentHint, helperText }) {
+function FieldLabel({ label, paymentHint, helperText, helperTone = "muted" }) {
   return (
     <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
       {label}
       {paymentHint ? ` ${paymentHint}` : ""}
       {helperText ? (
-        <span className="ml-1 font-normal text-[#94A3B8]">· {helperText}</span>
+        <span
+          className={`ml-1 font-normal ${
+            helperTone === "danger" ? "text-red-600" : "text-[#94A3B8]"
+          }`}
+        >
+          · {helperText}
+        </span>
       ) : null}
     </label>
   );
@@ -786,6 +1036,9 @@ function MoneyField({
   error = "",
   paymentHint,
   helperText,
+  helperTone = "muted",
+  disabled = false,
+  unpaid = false,
 }) {
   return (
     <div>
@@ -793,10 +1046,15 @@ function MoneyField({
         label={label}
         paymentHint={paymentHint}
         helperText={helperText}
+        helperTone={helperTone}
       />
 
       <div className="relative">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#94A3B8]">
+        <span
+          className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] ${
+            unpaid ? "text-red-500" : "text-[#94A3B8]"
+          }`}
+        >
           $
         </span>
 
@@ -806,10 +1064,19 @@ function MoneyField({
           name={name}
           value={value}
           onChange={onChange}
-          className={`h-[34px] w-full rounded-[6px] border bg-white pl-7 pr-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
-            error
+          disabled={disabled}
+          className={`h-[34px] w-full rounded-[6px] border pl-7 pr-3 text-[12px] outline-none focus:ring-2 ${
+            unpaid ? "font-semibold text-red-600" : "text-[#111827]"
+          } ${
+            disabled
+              ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC]"
+              : "bg-white"
+          } ${
+            error || unpaid
               ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-              : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+              : disabled
+                ? ""
+                : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
           }`}
         />
       </div>
@@ -819,17 +1086,30 @@ function MoneyField({
   );
 }
 
-function ReadOnlyMoneyField({ label, value, paymentHint, helperText }) {
+function ReadOnlyMoneyField({
+  label,
+  value,
+  paymentHint,
+  helperText,
+  helperTone = "muted",
+  unpaid = false,
+  error = "",
+}) {
   return (
     <div>
       <FieldLabel
         label={label}
         paymentHint={paymentHint}
         helperText={helperText}
+        helperTone={helperTone}
       />
 
       <div className="relative">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] text-[#94A3B8]">
+        <span
+          className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[12px] ${
+            unpaid ? "text-red-500" : "text-[#94A3B8]"
+          }`}
+        >
           $
         </span>
 
@@ -837,14 +1117,19 @@ function ReadOnlyMoneyField({ label, value, paymentHint, helperText }) {
           type="text"
           value={Number(value).toFixed(2)}
           readOnly
-          className="h-[34px] w-full cursor-not-allowed rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] pl-7 pr-3 text-[12px] font-semibold text-[#007F96] outline-none"
+          className={`h-[34px] w-full cursor-not-allowed rounded-[6px] border bg-[#F8FAFC] pl-7 pr-3 text-[12px] font-semibold outline-none ${
+            unpaid || error
+              ? "border-red-500 text-red-600"
+              : "border-[#E2E8F0] text-[#007F96]"
+          }`}
         />
       </div>
+      {error ? <p className="mt-1 text-[11px] text-red-500">{error}</p> : null}
     </div>
   );
 }
 
-function NumberField({ label, name, value, onChange, error = "" }) {
+function NumberField({ label, name, value, onChange, error = "", disabled = false }) {
   return (
     <div>
       <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
@@ -857,10 +1142,17 @@ function NumberField({ label, name, value, onChange, error = "" }) {
         name={name}
         value={value}
         onChange={onChange}
-        className={`h-[34px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+        disabled={disabled}
+        className={`h-[34px] w-full rounded-[6px] border px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+          disabled
+            ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+            : "bg-white"
+        } ${
           error
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-            : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+            : disabled
+              ? ""
+              : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
         }`}
       />
 
@@ -884,17 +1176,31 @@ function CheckboxField({ label, name, checked, onChange }) {
   );
 }
 
-function SummaryRow({ label, value, highlight = false, muted = false }) {
+function SummaryRow({
+  label,
+  value,
+  highlight = false,
+  muted = false,
+  unpaid = false,
+}) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-[10px] text-[#64748B]">{label}</span>
+      <span
+        className={`text-[10px] ${
+          unpaid ? "font-semibold text-red-600" : "text-[#64748B]"
+        }`}
+      >
+        {label}
+      </span>
       <span
         className={`text-[11px] font-semibold ${
-          highlight
-            ? "text-[#059669]"
-            : muted
-              ? "text-red-500"
-              : "text-[#334155]"
+          unpaid
+            ? "text-red-600"
+            : highlight
+              ? "text-[#059669]"
+              : muted
+                ? "text-[#94A3B8]"
+                : "text-[#334155]"
         }`}
       >
         {value}
