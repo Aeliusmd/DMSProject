@@ -79,6 +79,7 @@ async function login({ identifier, password, ipAddress, userAgent }) {
     email: tokenService.maskEmail(employee.email),
     expiresInMinutes: config.twoFactor.expiresMinutes,
     devCodeLogged: emailResult.devLogged === true,
+    ...(config.loadTestMode ? { devOtp: otpCode } : {}),
   };
 }
 
@@ -185,6 +186,7 @@ async function resendTwoFactor({ sessionToken }) {
     email: tokenService.maskEmail(session.email),
     expiresInMinutes: config.twoFactor.expiresMinutes,
     devCodeLogged: emailResult.devLogged === true,
+    ...(config.loadTestMode ? { devOtp: otpCode } : {}),
   };
 }
 

@@ -7,6 +7,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node database/seed.js",
+    "seed:load-test": "node scripts/seed-load-test-data.js",
+    "seed:load-test:cleanup": "node scripts/cleanup-load-test-data.js",
     "test": "echo \"Tests not configured yet\" && exit 0"
   },
   "keywords": [
@@ -19,6 +21,13 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "^0.78.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "^0.220.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-metrics": "^2.9.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0",
     "archiver": "^8.0.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
@@ -32,5 +41,8 @@
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.19.1",
     "stripe": "^22.3.0"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^9.9.0"
   }
 }

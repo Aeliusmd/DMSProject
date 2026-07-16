@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+const { startOpenTelemetry } = require("./src/telemetry");
+startOpenTelemetry();
+
 const app = require("./src/app");
 const config = require("./src/config");
 const { connectDatabase } = require("./src/config/database");
@@ -31,6 +34,9 @@ async function startServer() {
 
     app.listen(PORT, () => {
       logger.info(`DMS API running in ${config.nodeEnv} mode on port ${PORT}`);
+      if (config.loadTestMode) {
+        logger.warn("LOAD_TEST_MODE enabled — login responses include devOtp");
+      }
       startEmployeeReactivationJob();
       startInvoiceReminderJob();
     });

@@ -40,6 +40,17 @@ module.exports = {
     devLogCode: process.env.TWO_FACTOR_DEV_LOG_CODE === "true",
   },
 
+  loadTestMode:
+    process.env.LOAD_TEST_MODE === "true" &&
+    (process.env.NODE_ENV || "development") === "development",
+
+  otel: {
+    enabled: process.env.OTEL_ENABLED === "true",
+    serviceName: process.env.OTEL_SERVICE_NAME || "dms-api",
+    exporterUrl:
+      process.env.OTEL_EXPORTER_OTLP_ENDPOINT || "http://127.0.0.1:4318",
+  },
+
   smtp: {
     host: process.env.SMTP_HOST || "smtp.gmail.com",
     port: Number(process.env.SMTP_PORT) || 587,
