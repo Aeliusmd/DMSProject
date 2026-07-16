@@ -112,10 +112,10 @@ export async function registerCompany(payload) {
   });
 }
 
-export async function loginCompany({ email, password }) {
+export async function loginCompany({ email }) {
   return request("/company-portal/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email }),
   });
 }
 

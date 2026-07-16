@@ -6,44 +6,8 @@ const {
 } = require("./validationHelpers");
 const { sanitizeText } = require("../utils/sanitize");
 
-const MAX_PASSWORD_LENGTH = 128;
-const MIN_PASSWORD_LENGTH = 8;
-
 function sanitizeField(value, maxLength) {
   return sanitizeText(value, { maxLength, allowEmpty: true });
-}
-
-function validatePasswordPair(password, confirmPassword, errors) {
-  if (!password) {
-    errors.push({ field: "password", message: "Password is required" });
-  } else if (password.length < MIN_PASSWORD_LENGTH) {
-    errors.push({
-      field: "password",
-      message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
-    });
-  } else if (password.length > MAX_PASSWORD_LENGTH) {
-    errors.push({
-      field: "password",
-      message: `Password must be ${MAX_PASSWORD_LENGTH} characters or less`,
-    });
-  } else if (/\s/.test(password)) {
-    errors.push({
-      field: "password",
-      message: "Password cannot contain spaces",
-    });
-  }
-
-  if (!confirmPassword) {
-    errors.push({
-      field: "confirmPassword",
-      message: "Please re-enter your password",
-    });
-  } else if (password && confirmPassword !== password) {
-    errors.push({
-      field: "confirmPassword",
-      message: "Passwords do not match",
-    });
-  }
 }
 
 function validateCompanyRegister(body = {}) {
@@ -52,13 +16,6 @@ function validateCompanyRegister(body = {}) {
   const companyName = sanitizeField(body.companyName, 255);
   const phoneRaw = sanitizeField(body.phone || body.companyPhone, 30);
   const email = sanitizeField(body.email || body.companyEmail, 255).toLowerCase();
-  const password = typeof body.password === "string" ? body.password : "";
-  const confirmPassword =
-    typeof body.confirmPassword === "string"
-      ? body.confirmPassword
-      : typeof body.reEnterPassword === "string"
-        ? body.reEnterPassword
-        : "";
   const addressLine1 = sanitizeField(
     body.addressLine1 || body.address || body.companyAddress,
     255
@@ -91,8 +48,6 @@ function validateCompanyRegister(body = {}) {
   } else {
     addMaxLengthError(errors, "email", email, 255);
   }
-
-  validatePasswordPair(password, confirmPassword, errors);
 
   if (!addressLine1) {
     errors.push({
@@ -133,7 +88,6 @@ function validateCompanyRegister(body = {}) {
       companyName,
       phone: phoneDigits,
       email,
-      password,
       addressLine1,
       addressLine2: addressLine2 || null,
       city,
@@ -147,7 +101,6 @@ function validateCompanyLogin(body = {}) {
   const errors = [];
 
   const email = sanitizeField(body.email || body.identifier, 255).toLowerCase();
-  const password = typeof body.password === "string" ? body.password : "";
 
   if (!email) {
     errors.push({ field: "email", message: "Email is required" });
@@ -157,19 +110,10 @@ function validateCompanyLogin(body = {}) {
     addMaxLengthError(errors, "email", email, 255);
   }
 
-  if (!password) {
-    errors.push({ field: "password", message: "Password is required" });
-  } else if (password.length > MAX_PASSWORD_LENGTH) {
-    errors.push({
-      field: "password",
-      message: `Password must be ${MAX_PASSWORD_LENGTH} characters or less`,
-    });
-  }
-
   return {
     valid: errors.length === 0,
     errors,
-    data: { email, password },
+    data: { email },
   };
 }
 

@@ -6,12 +6,8 @@ export default function CompanyRegisterFormFields({
   form,
   errors,
   touched,
-  showPassword,
-  showConfirmPassword,
   onChange,
   onBlur,
-  onTogglePassword,
-  onToggleConfirmPassword,
 }) {
   const field = (name) => ({
     value: form[name],
@@ -42,37 +38,10 @@ export default function CompanyRegisterFormFields({
         {...field("email")}
       />
 
-      <AuthInput
-        label="Password"
-        type={showPassword ? "text" : "password"}
-        placeholder="Create a password"
-        {...field("password")}
-        rightIcon={
-          <button
-            type="button"
-            onClick={onTogglePassword}
-            className="text-[11px] font-medium text-[#0097B2] hover:underline"
-          >
-            {showPassword ? "Hide" : "Show"}
-          </button>
-        }
-      />
-
-      <AuthInput
-        label="Re-enter Password"
-        type={showConfirmPassword ? "text" : "password"}
-        placeholder="Confirm password"
-        {...field("confirmPassword")}
-        rightIcon={
-          <button
-            type="button"
-            onClick={onToggleConfirmPassword}
-            className="text-[11px] font-medium text-[#0097B2] hover:underline"
-          >
-            {showConfirmPassword ? "Hide" : "Show"}
-          </button>
-        }
-      />
+      <p className="text-[12px] leading-relaxed text-[#6B7280]">
+        You&apos;ll sign in with this email using a one-time verification code.
+        No password is required.
+      </p>
 
       <AuthInput
         label="Company Address"

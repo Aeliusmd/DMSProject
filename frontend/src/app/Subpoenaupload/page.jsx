@@ -22,8 +22,6 @@ const INITIAL_FORM = {
   companyName: "",
   phone: "",
   email: "",
-  password: "",
-  confirmPassword: "",
   addressLine1: "",
   addressLine2: "",
   city: "",
@@ -38,8 +36,6 @@ export default function SubpoenaUploadRegisterPage() {
   const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const localErrors = useMemo(() => validateCompanyRegisterForm(form), [form]);
   const errors = { ...localErrors, ...apiFieldErrors };
@@ -67,8 +63,6 @@ export default function SubpoenaUploadRegisterPage() {
       companyName: true,
       phone: true,
       email: true,
-      password: true,
-      confirmPassword: true,
       addressLine1: true,
       city: true,
       state: true,
@@ -121,14 +115,8 @@ export default function SubpoenaUploadRegisterPage() {
           form={form}
           errors={errors}
           touched={touched}
-          showPassword={showPassword}
-          showConfirmPassword={showConfirmPassword}
           onChange={handleChange}
           onBlur={handleBlur}
-          onTogglePassword={() => setShowPassword((prev) => !prev)}
-          onToggleConfirmPassword={() =>
-            setShowConfirmPassword((prev) => !prev)
-          }
         />
 
         {submitError ? (

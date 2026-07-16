@@ -17,7 +17,6 @@ import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthSt
 import {
   sanitizeInput,
   validateCompanyEmail,
-  validatePassword,
 } from "@/lib/company-portal/companyPortalValidation";
 import {
   applyApiFieldErrors,
@@ -31,9 +30,7 @@ export default function CompanyPortalLoginClient() {
   const registered = searchParams.get("registered") === "1";
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [touched, setTouched] = useState({ email: false, password: false });
+  const [touched, setTouched] = useState({ email: false });
   const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [loginError, setLoginError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,12 +45,11 @@ export default function CompanyPortalLoginClient() {
   }, [router]);
 
   const emailError = apiFieldErrors.email || validateCompanyEmail(email);
-  const passwordError = apiFieldErrors.password || validatePassword(password);
-  const isFormValid = !emailError && !passwordError;
+  const isFormValid = !emailError;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setTouched({ email: true, password: true });
+    setTouched({ email: true });
 
     if (!isFormValid || isSubmitting) return;
 
@@ -64,7 +60,6 @@ export default function CompanyPortalLoginClient() {
     try {
       const response = await loginCompany({
         email: sanitizeInput(email, 255).toLowerCase(),
-        password,
       });
 
       const payload = response?.data || {};
@@ -110,7 +105,8 @@ export default function CompanyPortalLoginClient() {
       >
         {registered ? (
           <p className="mb-4 rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-medium text-emerald-700">
-            Registration successful. Please sign in to continue.
+            Registration successful. Enter your company email to receive a
+            verification code.
           </p>
         ) : null}
 
@@ -134,34 +130,10 @@ export default function CompanyPortalLoginClient() {
               error={touched.email ? emailError : ""}
             />
 
-            <AuthInput
-              label="Password"
-              type={showPassword ? "text" : "password"}
-              placeholder="Enter your password"
-              value={password}
-              onChange={(event) => {
-                setPassword(event.target.value);
-                setApiFieldErrors((prev) => {
-                  if (!prev.password) return prev;
-                  const next = { ...prev };
-                  delete next.password;
-                  return next;
-                });
-              }}
-              onBlur={() =>
-                setTouched((prev) => ({ ...prev, password: true }))
-              }
-              error={touched.password ? passwordError : ""}
-              rightIcon={
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  className="text-[11px] font-medium text-[#0097B2] hover:underline"
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              }
-            />
+            <p className="text-[12px] leading-relaxed text-[#6B7280]">
+              We&apos;ll send a one-time verification code to this email. No
+              password required.
+            </p>
           </div>
 
           {loginError ? (
@@ -175,7 +147,7 @@ export default function CompanyPortalLoginClient() {
               type="submit"
               disabled={!isFormValid || isSubmitting}
             >
-              {isSubmitting ? "Signing in..." : "Sign In"}
+              {isSubmitting ? "Sending code..." : "Send verification code"}
             </PrimaryButton>
           </div>
         </form>

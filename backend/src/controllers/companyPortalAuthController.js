@@ -39,11 +39,14 @@ exports.login = asyncHandler(async (req, res) => {
 
   const result = await companyPortalAuthService.login({
     email: validation.data.email,
-    password: validation.data.password,
     ...getRequestMeta(req),
   });
 
-  return ApiResponse.success(res, result, "Two-factor authentication required");
+  return ApiResponse.success(
+    res,
+    result,
+    "Verification code sent to your email"
+  );
 });
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
