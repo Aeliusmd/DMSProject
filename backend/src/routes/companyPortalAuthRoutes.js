@@ -13,6 +13,8 @@ router.post("/resend-2fa", companyPortalAuthController.resendTwoFactor);
 router.post("/refresh", companyPortalAuthController.refresh);
 router.post("/logout", companyPortalAuthController.logout);
 
+router.post("/employee/login", companyPortalAuthController.employeeLogin);
+
 router.get("/me", authenticateCompanyPortal, companyPortalAuthController.me);
 
 module.exports = router;

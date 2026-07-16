@@ -11,6 +11,7 @@ import {
   downloadBlobAsFile,
   fetchCompanyPortalPaymentReceiptBlob,
   fetchCompanyPortalSubpoenaBlob,
+  trackCompanyPortalOrder,
 } from "@/lib/company-portal/companyPortalOrderApi";
 import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
@@ -34,11 +35,20 @@ function CompanyOrderCompleteClient() {
 
     let active = true;
     const sessionId = searchParams.get("session_id");
+    const orderNumber = searchParams.get("order_number");
 
-    confirmCompanyPortalPayment(sessionId)
-      .then((response) => {
+    const loadOrder = orderNumber
+      ? trackCompanyPortalOrder(orderNumber).then(
+          (response) => response?.data?.order || null
+        )
+      : confirmCompanyPortalPayment(sessionId).then(
+          (response) => response?.data?.order || null
+        );
+
+    loadOrder
+      .then((loadedOrder) => {
         if (!active) return;
-        setOrder(response?.data?.order || null);
+        setOrder(loadedOrder);
         clearCompanyOrderWizardState();
       })
       .catch((err) => {

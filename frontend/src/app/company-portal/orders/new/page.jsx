@@ -20,7 +20,11 @@ import {
   createEmptyCompanyOrderForm,
   validateCompanyOrderForm,
 } from "@/lib/company-portal/companyPortalOrderUtils";
-import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthStorage";
+import {
+  getStoredCompanyUser,
+  isCompanyAuthenticated,
+} from "@/lib/company-portal/companyPortalAuthStorage";
+import { getCompanyWalletSummary } from "@/lib/company-portal/companyPortalManagementApi";
 import {
   applyApiFieldErrors,
   getApiErrorMessage,
@@ -41,6 +45,14 @@ function CompanyOrderCreateClient() {
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState("");
   const [canceled, setCanceled] = useState(false);
+  const [walletBalance, setWalletBalance] = useState(null);
+  const [walletLoading, setWalletLoading] = useState(true);
+  const storedUser = getStoredCompanyUser();
+  const isEmployee = storedUser?.isAdmin === false;
+  const availableWalletBalance = isEmployee
+    ? Number(storedUser?.walletBalance || 0)
+    : Number(walletBalance || 0);
+  const hasEnoughWalletBalance = availableWalletBalance >= COMPANY_PORTAL_ORDER_FEE;
 
   useEffect(() => {
     if (!isCompanyAuthenticated()) {
@@ -68,6 +80,33 @@ function CompanyOrderCreateClient() {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (isEmployee) {
+      setWalletLoading(false);
+      return;
+    }
+
+    let active = true;
+    setWalletLoading(true);
+
+    getCompanyWalletSummary()
+      .then((response) => {
+        if (!active) return;
+        setWalletBalance(response?.data?.unallocatedBalance || 0);
+      })
+      .catch(() => {
+        if (!active) return;
+        setWalletBalance(0);
+      })
+      .finally(() => {
+        if (active) setWalletLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isEmployee]);
 
   const persistWizard = (next = {}) => {
     saveCompanyOrderWizardState({
@@ -113,6 +152,15 @@ function CompanyOrderCreateClient() {
 
   const handleProcess = async () => {
     if (!localFile || extracting) return;
+
+    if (!hasEnoughWalletBalance) {
+      setError(
+        `Wallet balance is below $${COMPANY_PORTAL_ORDER_FEE.toFixed(
+          2
+        )}. Please top up before creating an order.`
+      );
+      return;
+    }
 
     setExtracting(true);
     setError("");
@@ -211,7 +259,6 @@ function CompanyOrderCreateClient() {
 
     setPaying(true);
     setError("");
-    setCanceled(false);
     persistWizard({ step: 3 });
 
     try {
@@ -219,7 +266,17 @@ function CompanyOrderCreateClient() {
         uploadToken,
         ...form,
       });
-      const checkoutUrl = response?.data?.checkoutUrl;
+      const payload = response?.data || {};
+
+      if (payload.paymentMethod === "wallet" && payload.order?.orderNumber) {
+        clearCompanyOrderWizardState();
+        router.push(
+          `/company-portal/orders/complete?order_number=${encodeURIComponent(payload.order.orderNumber)}`
+        );
+        return;
+      }
+
+      const checkoutUrl = payload.checkoutUrl;
       if (!checkoutUrl) {
         throw new Error("Unable to start checkout");
       }
@@ -244,15 +301,37 @@ function CompanyOrderCreateClient() {
           <CompanyOrderStepper currentStep={step} />
 
           {step === 1 ? (
-            <CompanyOrderUploadStep
-              fileMeta={fileMeta}
-              previewUrl={previewUrl}
-              extracting={extracting}
-              error={error}
-              onFileSelected={handleFileSelected}
-              onRemoveFile={handleRemoveFile}
-              onProcess={handleProcess}
-            />
+            <>
+              {!walletLoading && !hasEnoughWalletBalance ? (
+                <div className="mb-5 rounded-[10px] border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-[13px] font-semibold text-amber-800">
+                    Wallet balance is too low
+                  </p>
+                  <p className="mt-1 text-[12px] text-amber-700">
+                    You need at least ${COMPANY_PORTAL_ORDER_FEE.toFixed(2)} to
+                    upload and process a subpoena. Current balance: $
+                    {availableWalletBalance.toFixed(2)}.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/company-portal/money")}
+                    className="mt-3 inline-flex h-9 items-center justify-center rounded-[8px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+                  >
+                    Top up wallet
+                  </button>
+                </div>
+              ) : null}
+
+              <CompanyOrderUploadStep
+                fileMeta={fileMeta}
+                previewUrl={previewUrl}
+                extracting={extracting}
+                error={error}
+                onFileSelected={handleFileSelected}
+                onRemoveFile={handleRemoveFile}
+                onProcess={handleProcess}
+              />
+            </>
           ) : null}
 
           {step === 2 ? (
@@ -272,11 +351,13 @@ function CompanyOrderCreateClient() {
               form={form}
               fileName={fileMeta?.name}
               amount={COMPANY_PORTAL_ORDER_FEE}
+              isEmployee={isEmployee}
+              walletBalance={availableWalletBalance}
               onBack={() => setStep(2)}
               onPay={handlePay}
               paying={paying}
               error={error}
-              canceled={canceled}
+              canceled={false}
             />
           ) : null}
         </section>

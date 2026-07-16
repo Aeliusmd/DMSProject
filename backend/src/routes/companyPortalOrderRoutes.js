@@ -21,6 +21,14 @@ router.get(
   "/orders/track/:orderNumber",
   companyPortalOrderController.trackOrder
 );
+router.post(
+  "/orders/track/:orderNumber/invoices/pay",
+  companyPortalOrderController.payInvoice
+);
+router.post(
+  "/orders/track/:orderNumber/invoices/confirm",
+  companyPortalOrderController.confirmInvoicePayment
+);
 router.post("/orders/checkout", companyPortalOrderController.createCheckout);
 router.post(
   "/orders/confirm-payment",

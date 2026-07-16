@@ -9,6 +9,7 @@ import AuthInput from "@/components/ui/AuthInput";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import {
   loginCompany,
+  loginCompanyEmployee,
   resendCompanyTwoFactor,
   saveCompanyAuthSession,
   verifyCompanyTwoFactor,
@@ -17,6 +18,7 @@ import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthSt
 import {
   sanitizeInput,
   validateCompanyEmail,
+  validatePassword,
 } from "@/lib/company-portal/companyPortalValidation";
 import {
   applyApiFieldErrors,
@@ -29,8 +31,11 @@ export default function CompanyPortalLoginClient() {
   const searchParams = useSearchParams();
   const registered = searchParams.get("registered") === "1";
 
+  const [loginMode, setLoginMode] = useState("company");
   const [email, setEmail] = useState("");
-  const [touched, setTouched] = useState({ email: false });
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [touched, setTouched] = useState({ email: false, password: false });
   const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [loginError, setLoginError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,11 +50,12 @@ export default function CompanyPortalLoginClient() {
   }, [router]);
 
   const emailError = apiFieldErrors.email || validateCompanyEmail(email);
-  const isFormValid = !emailError;
+  const passwordError = apiFieldErrors.password || validatePassword(password);
+  const isFormValid = !emailError && !passwordError;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setTouched({ email: true });
+    setTouched({ email: true, password: true });
 
     if (!isFormValid || isSubmitting) return;
 
@@ -58,8 +64,20 @@ export default function CompanyPortalLoginClient() {
     setApiFieldErrors({});
 
     try {
+      if (loginMode === "employee") {
+        const response = await loginCompanyEmployee({
+          email: sanitizeInput(email, 255).toLowerCase(),
+          password,
+        });
+        const payload = response?.data || {};
+        saveCompanyAuthSession(payload);
+        router.push("/company-portal/dashboard");
+        return;
+      }
+
       const response = await loginCompany({
         email: sanitizeInput(email, 255).toLowerCase(),
+        password,
       });
 
       const payload = response?.data || {};
@@ -89,33 +107,73 @@ export default function CompanyPortalLoginClient() {
   return (
     <>
       <CompanyPortalShell
-        title="Company sign in"
-        subtitle="Company Portal"
+        title="Company Portal sign in"
+        subtitle="External company access"
         footer={
-          <p>
-            Need an account?{" "}
-            <Link
-              href="/Subpoenaupload"
-              className="font-medium text-[#0097B2] hover:underline"
-            >
-              Register your company
-            </Link>
-          </p>
+          loginMode === "company" ? (
+            <p>
+              Need an account?{" "}
+              <Link
+                href="/Subpoenaupload"
+                className="font-medium text-[#0097B2] hover:underline"
+              >
+                Register your company
+              </Link>
+            </p>
+          ) : (
+            <p className="text-[12px] text-[#64748B]">
+              Employee accounts are created by your company administrator.
+            </p>
+          )
         }
       >
-        {registered ? (
+        {registered && loginMode === "company" ? (
           <p className="mb-4 rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-medium text-emerald-700">
-            Registration successful. Enter your company email to receive a
-            verification code.
+            Registration successful. Please sign in to continue.
           </p>
         ) : null}
+
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-[8px] bg-[#F8FAFC] p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setLoginMode("company");
+              setLoginError("");
+              setApiFieldErrors({});
+            }}
+            className={`rounded-[6px] px-3 py-2 text-[12px] font-medium ${
+              loginMode === "company"
+                ? "bg-white text-[#0097B2] shadow-sm"
+                : "text-[#64748B]"
+            }`}
+          >
+            Company admin
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLoginMode("employee");
+              setLoginError("");
+              setApiFieldErrors({});
+            }}
+            className={`rounded-[6px] px-3 py-2 text-[12px] font-medium ${
+              loginMode === "employee"
+                ? "bg-white text-[#0097B2] shadow-sm"
+                : "text-[#64748B]"
+            }`}
+          >
+            Employee
+          </button>
+        </div>
 
         <form onSubmit={handleSubmit} noValidate>
           <div className="space-y-4">
             <AuthInput
-              label="Company Email"
+              label={
+                loginMode === "employee" ? "Employee Email" : "Company Email"
+              }
               type="email"
-              placeholder="company@email.com"
+              placeholder="email@company.com"
               value={email}
               onChange={(event) => {
                 setEmail(event.target.value);
@@ -130,10 +188,34 @@ export default function CompanyPortalLoginClient() {
               error={touched.email ? emailError : ""}
             />
 
-            <p className="text-[12px] leading-relaxed text-[#6B7280]">
-              We&apos;ll send a one-time verification code to this email. No
-              password required.
-            </p>
+            <AuthInput
+              label="Password"
+              type={showPassword ? "text" : "password"}
+              placeholder="Enter your password"
+              value={password}
+              onChange={(event) => {
+                setPassword(event.target.value);
+                setApiFieldErrors((prev) => {
+                  if (!prev.password) return prev;
+                  const next = { ...prev };
+                  delete next.password;
+                  return next;
+                });
+              }}
+              onBlur={() =>
+                setTouched((prev) => ({ ...prev, password: true }))
+              }
+              error={touched.password ? passwordError : ""}
+              rightIcon={
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="text-[11px] font-medium text-[#0097B2] hover:underline"
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              }
+            />
           </div>
 
           {loginError ? (
@@ -147,7 +229,7 @@ export default function CompanyPortalLoginClient() {
               type="submit"
               disabled={!isFormValid || isSubmitting}
             >
-              {isSubmitting ? "Sending code..." : "Send verification code"}
+              {isSubmitting ? "Signing in..." : "Sign In"}
             </PrimaryButton>
           </div>
         </form>

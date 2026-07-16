@@ -90,3 +90,16 @@ exports.getOrderPaymentDetail = asyncHandler(async (req, res) => {
   const detail = await paymentService.getOrderPaymentDetail(req.params.orderId);
   return ApiResponse.success(res, detail);
 });
+
+exports.downloadCompanyPortalWalletReceipt = asyncHandler(async (req, res) => {
+  const pdfBuffer = await paymentService.generateCompanyPortalWalletReceiptPdf(
+    req.params.orderId
+  );
+
+  res.set({
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `attachment; filename="wallet-payment-receipt-${req.params.orderId}.pdf"`,
+    "Content-Length": pdfBuffer.length,
+  });
+  return res.send(pdfBuffer);
+});

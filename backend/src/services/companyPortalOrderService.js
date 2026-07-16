@@ -27,7 +27,7 @@ const {
 } = require("../utils/companyPortalRecordTypes");
 const { toInputDate } = require("../utils/dateUtils");
 
-const COMPANY_PORTAL_ORDER_FEE = 35;
+const COMPANY_PORTAL_ORDER_FEE = 15;
 const MIME_PDF = "application/pdf";
 
 let stripeClient = null;
@@ -209,12 +209,18 @@ function formatOrder(row) {
       ? Number(row.subpoena_file_size)
       : 0,
     hasSubpoena: Boolean(row.subpoena_storage_path),
-    canDownloadDocuments: row.status === "Released",
+    canDownloadDocuments: false,
+    downloadExpired: false,
+    downloadExpiresAt: null,
+    downloadUnavailableReason: null,
     paymentAmount: toNumber(row.payment_amount || COMPANY_PORTAL_ORDER_FEE),
     paymentAmountDisplay: formatMoney(
       row.payment_amount || COMPANY_PORTAL_ORDER_FEE
     ),
     paymentStatus: row.payment_status,
+    paymentMethod: row.payment_method || "stripe",
+    placedByName: row.placed_by_name || null,
+    placedByEmployeeId: row.company_portal_employee_id || null,
     paidAt: row.paid_at || null,
     stripeCheckoutSessionId: row.stripe_checkout_session_id || null,
     stripePaymentIntentId: row.stripe_payment_intent_id || null,
@@ -222,6 +228,193 @@ function formatOrder(row) {
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
   };
+}
+
+async function resolvePortalDownloadAvailability(portalOrder) {
+  if (!portalOrder || portalOrder.status !== "Released") {
+    return {
+      canDownloadDocuments: false,
+      downloadExpired: false,
+      downloadExpiresAt: null,
+      downloadUnavailableReason: portalOrder?.status
+        ? "Download is disabled until this order reaches Released status."
+        : null,
+    };
+  }
+
+  if (!portalOrder.internal_order_id) {
+    return {
+      canDownloadDocuments: false,
+      downloadExpired: false,
+      downloadExpiresAt: null,
+      downloadUnavailableReason:
+        "Download records is not available yet. Records become available after they are emailed.",
+    };
+  }
+
+  const {
+    getRecordsDownloadWindow,
+  } = require("./recordDownloadService");
+  const window = await getRecordsDownloadWindow(portalOrder.internal_order_id);
+
+  return {
+    canDownloadDocuments: Boolean(window.canDownload),
+    downloadExpired: Boolean(window.expired),
+    downloadExpiresAt: window.expiresAt
+      ? window.expiresAt.toISOString()
+      : null,
+    downloadUnavailableReason: window.reason,
+  };
+}
+
+async function withPortalDownloadAvailability(formatted, portalOrder) {
+  const availability = await resolvePortalDownloadAvailability(portalOrder);
+  return {
+    ...formatted,
+    ...availability,
+  };
+}
+
+async function buildPortalOrderPaymentSummary(portalOrder) {
+  const feePaid =
+    portalOrder?.payment_status === "paid"
+      ? toNumber(portalOrder.payment_amount || COMPANY_PORTAL_ORDER_FEE)
+      : 0;
+
+  const summary = {
+    processingFeePaid: feePaid,
+    processingFeePaidDisplay: formatMoney(feePaid),
+    invoicePaid: 0,
+    invoicePaidDisplay: formatMoney(0),
+    totalPaid: feePaid,
+    totalPaidDisplay: formatMoney(feePaid),
+    paymentLines: [],
+    outstandingDue: 0,
+    outstandingDueDisplay: formatMoney(0),
+  };
+
+  if (feePaid > 0) {
+    summary.paymentLines.push({
+      label: "Processing fee (prepayment)",
+      amount: feePaid,
+      amountDisplay: formatMoney(feePaid),
+    });
+  }
+
+  const internalOrderId = Number(portalOrder?.internal_order_id);
+  if (!Number.isFinite(internalOrderId) || internalOrderId <= 0) {
+    return summary;
+  }
+
+  try {
+    const { getPool } = require("../config/database");
+    const Invoice = require("../models/Invoice");
+    const InvoiceXray = require("../models/InvoiceXray");
+    const {
+      hasStandardInvoiceFields,
+      hasXrayInvoiceFields,
+    } = require("../utils/orderInvoicePayment");
+
+    const pool = getPool();
+    const [onlineRows] = await pool.execute(
+      `SELECT amount, invoice_type, payment_method_type, stripe_payment_intent_id, invoice_number
+       FROM stripe_online_payments
+       WHERE order_id = :orderId
+         AND status = 'succeeded'
+       ORDER BY id ASC`,
+      { orderId: internalOrderId }
+    );
+
+    let invoicePaidFromLedger = 0;
+    for (const row of onlineRows) {
+      const amount = toNumber(row.amount);
+      if (amount <= 0) continue;
+
+      const intentId = String(row.stripe_payment_intent_id || "");
+      const isProcessingFee =
+        row.payment_method_type === "wallet" && intentId.startsWith("wallet_tx_");
+
+      // Processing fee already counted from portal order payment_amount.
+      if (isProcessingFee) continue;
+
+      invoicePaidFromLedger += amount;
+      const typeLabel =
+        row.invoice_type === "xray" ? "X-Ray invoice" : "Regular invoice";
+      summary.paymentLines.push({
+        label: row.invoice_number
+          ? `${typeLabel} (${row.invoice_number})`
+          : typeLabel,
+        amount,
+        amountDisplay: formatMoney(amount),
+      });
+    }
+
+    // Fallback if invoice was marked paid without a ledger row yet.
+    if (invoicePaidFromLedger <= 0) {
+      const [invoice, xray] = await Promise.all([
+        Invoice.findByOrderId(internalOrderId),
+        InvoiceXray.findByOrderId(internalOrderId),
+      ]);
+
+      if (invoice && hasStandardInvoiceFields(invoice)) {
+        const paid = toNumber(invoice.amount_paid);
+        if (paid > 0) {
+          // Invoice amount_paid is the full invoice total; subtract fee already shown.
+          const invoicePortion = Math.max(0, paid - feePaid);
+          if (invoicePortion > 0) {
+            invoicePaidFromLedger += invoicePortion;
+            summary.paymentLines.push({
+              label: invoice.invoice_number
+                ? `Regular invoice (${invoice.invoice_number})`
+                : "Regular invoice",
+              amount: invoicePortion,
+              amountDisplay: formatMoney(invoicePortion),
+            });
+          }
+        }
+      }
+
+      if (xray && hasXrayInvoiceFields(xray)) {
+        const paid = toNumber(xray.amount_paid);
+        if (paid > 0) {
+          invoicePaidFromLedger += paid;
+          summary.paymentLines.push({
+            label: xray.invoice_number
+              ? `X-Ray invoice (${xray.invoice_number})`
+              : "X-Ray invoice",
+            amount: paid,
+            amountDisplay: formatMoney(paid),
+          });
+        }
+      }
+    }
+
+    summary.invoicePaid = Number(invoicePaidFromLedger.toFixed(2));
+    summary.invoicePaidDisplay = formatMoney(summary.invoicePaid);
+    summary.totalPaid = Number((feePaid + summary.invoicePaid).toFixed(2));
+    summary.totalPaidDisplay = formatMoney(summary.totalPaid);
+
+    // Outstanding unpaid invoice balances for display context.
+    const {
+      buildCompanyPortalInvoicePaymentLinks,
+    } = require("./companyPortalStageHooks");
+    const unpaidLinks = await buildCompanyPortalInvoicePaymentLinks(
+      internalOrderId
+    );
+    summary.outstandingDue = Number(
+      unpaidLinks
+        .reduce((sum, link) => sum + toNumber(link.due), 0)
+        .toFixed(2)
+    );
+    summary.outstandingDueDisplay = formatMoney(summary.outstandingDue);
+  } catch (error) {
+    console.warn(
+      "[company-portal] Unable to build payment summary:",
+      error.message || error
+    );
+  }
+
+  return summary;
 }
 
 async function extractStripePaymentDetails(session) {
@@ -405,10 +598,10 @@ async function getOrder(orderId, companyUserId) {
   if (!order || order.status === "Draft") {
     throw new ApiError(404, "Order not found");
   }
-  return formatOrder(order);
+  return withPortalDownloadAvailability(formatOrder(order), order);
 }
 
-async function trackOrderByNumber(orderNumber, companyUserId) {
+async function trackOrderByNumber(orderNumber, companyUserId, { employeeId = null } = {}) {
   const cleaned = String(orderNumber || "").trim().toUpperCase();
   if (!cleaned) {
     throw new ApiError(400, "Order number is required");
@@ -441,15 +634,41 @@ async function trackOrderByNumber(orderNumber, companyUserId) {
     }
   }
 
+  let walletBalance = null;
+  try {
+    const companyPortalWalletService = require("./companyPortalWalletService");
+    walletBalance = await companyPortalWalletService.getAvailableOrderBalance(
+      companyUserId,
+      employeeId
+    );
+  } catch (error) {
+    console.warn(
+      "[company-portal] Unable to load wallet balance for track page:",
+      error.message || error
+    );
+  }
+
+  const paymentSummary = await buildPortalOrderPaymentSummary(order);
+
   return {
-    ...formatted,
-    canDownloadDocuments: order.status === "Released",
+    ...(await withPortalDownloadAvailability(formatted, order)),
     paymentLinks,
     hasUnpaidInvoices: paymentLinks.length > 0,
+    walletBalance: walletBalance?.amount ?? null,
+    walletBalanceDisplay:
+      walletBalance != null ? formatMoney(walletBalance.amount) : null,
+    walletBalanceSource: walletBalance?.source || null,
+    // Track/details page should show total collected, not only the $15 fee.
+    paymentAmount: paymentSummary.totalPaid,
+    paymentAmountDisplay: paymentSummary.totalPaidDisplay,
+    paymentSummary,
   };
 }
 
-async function createCheckout(companyUserId, { uploadToken, details }) {
+async function createCheckout(
+  companyUserId,
+  { uploadToken, details, paymentMethod = "wallet", employeeId = null, placedByName = null }
+) {
   if (!uploadToken) {
     throw new ApiError(400, "Upload token is required. Please re-upload the subpoena.");
   }
@@ -503,58 +722,21 @@ async function createCheckout(companyUserId, { uploadToken, details }) {
     recordType: formatRecordTypesLabel(recordFlags) || details.recordType || null,
   };
 
-  const stripe = getStripe();
-  const amountCents = Math.round(COMPANY_PORTAL_ORDER_FEE * 100);
-  const baseClient = (config.clientUrl || "http://localhost:3000").replace(
-    /\/$/,
-    ""
-  );
+  const resolvedPlacedByName =
+    placedByName ||
+    (employeeId ? null : companyUser?.company_name || "Company Account");
 
-  const successUrl = `${baseClient}/company-portal/orders/complete?session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${baseClient}/company-portal/orders/new?step=payment&canceled=1`;
+  if (paymentMethod !== "wallet") {
+    throw new ApiError(400, "Company portal orders must be paid from wallet balance");
+  }
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    payment_method_types: ["card"],
-    line_items: [
-      {
-        price_data: {
-          currency: config.stripe.currency || "usd",
-          product_data: {
-            name: "Company Portal Subpoena Request",
-            description: "Fixed processing fee for external company order",
-          },
-          unit_amount: amountCents,
-        },
-        quantity: 1,
-      },
-    ],
-    customer_email: details.contactEmail || companyUser?.email || undefined,
-    metadata: {
-      portal: "company",
-      pending_checkout_id: String(pending.id),
-      upload_token: uploadToken,
-      company_user_id: String(companyUserId),
-      amount: String(COMPANY_PORTAL_ORDER_FEE),
-      currency: config.stripe.currency || "usd",
-    },
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-  });
-
-  await CompanyPortalPendingCheckout.updatePayloadAndSession(pending.id, {
+  return payWithWallet(companyUserId, {
+    pending,
     payload,
-    sessionId: session.id,
-    paymentAmount: COMPANY_PORTAL_ORDER_FEE,
-  });
-
-  return {
-    checkoutUrl: session.url,
-    sessionId: session.id,
     uploadToken,
-    amount: COMPANY_PORTAL_ORDER_FEE,
-    amountDisplay: formatMoney(COMPANY_PORTAL_ORDER_FEE),
-  };
+    employeeId,
+    placedByName: resolvedPlacedByName,
+  });
 }
 
 async function formatPaidPortalOrder(orderRow) {
@@ -579,13 +761,24 @@ async function formatPaidPortalOrder(orderRow) {
   return formatOrder(orderRow);
 }
 
-async function createOrderFromPending(pending, session, stripeDetails) {
+async function createOrderFromPending(
+  pending,
+  session,
+  stripeDetails,
+  {
+    employeeId = null,
+    placedByName = null,
+    paymentMethod = "stripe",
+  } = {}
+) {
   const payload = parsePendingPayload(pending);
   const recordFlags = normalizeRecordTypeFlags(payload);
   const orderNumber = await allocateOrderNumber();
 
   const order = await CompanyPortalOrder.createPaidOrder({
     companyUserId: pending.company_user_id,
+    companyPortalEmployeeId: employeeId || null,
+    placedByName: placedByName || null,
     orderNumber,
     facilityName: payload.facilityName || "",
     facilityAddress: payload.facilityAddress || "",
@@ -625,21 +818,35 @@ async function createOrderFromPending(pending, session, stripeDetails) {
         : JSON.stringify(pending.extraction_raw)
       : null,
     paymentAmount: pending.payment_amount || COMPANY_PORTAL_ORDER_FEE,
-    stripeCheckoutSessionId: session.id,
+    paymentMethod,
+    stripeCheckoutSessionId: session?.id || null,
     stripePaymentIntentId:
       stripeDetails?.paymentIntentId ||
-      (typeof session.payment_intent === "string"
+      (typeof session?.payment_intent === "string"
         ? session.payment_intent
-        : session.payment_intent?.id || null),
+        : session?.payment_intent?.id || null),
     stripeReceiptUrl: stripeDetails?.receiptUrl || null,
   });
 
+  if (paymentMethod === "wallet") {
+    const companyPortalWalletService = require("./companyPortalWalletService");
+    await companyPortalWalletService.debitForOrder({
+      companyUserId: pending.company_user_id,
+      employeeId,
+      amount: pending.payment_amount || COMPANY_PORTAL_ORDER_FEE,
+      orderId: order.id,
+      description: `Order ${orderNumber} payment`,
+    });
+  }
+
   await CompanyPortalPendingCheckout.deleteById(pending.id);
+
+  const refreshedOrder = await CompanyPortalOrder.findById(order.id);
 
   try {
     const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
     await companyPortalInternalSyncService.ensureInternalOrderForPortalOrder(
-      order
+      refreshedOrder || order
     );
   } catch (error) {
     console.warn(
@@ -720,7 +927,71 @@ async function fulfillCompanyPortalCheckoutSession(session) {
     return null;
   }
 
-  return createOrderFromPending(pending, session, stripeDetails);
+  return createOrderFromPending(pending, session, stripeDetails, {
+    paymentMethod: "stripe",
+  });
+}
+
+async function payWithWallet(
+  companyUserId,
+  { pending, payload, uploadToken, employeeId, placedByName }
+) {
+  const companyPortalWalletService = require("./companyPortalWalletService");
+  const fee = COMPANY_PORTAL_ORDER_FEE;
+
+  if (employeeId) {
+    const CompanyPortalEmployee = require("../models/CompanyPortalEmployee");
+    const employee = await CompanyPortalEmployee.findByIdForCompany(
+      employeeId,
+      companyUserId
+    );
+    if (companyPortalWalletService.toMoney(employee?.wallet_balance) < fee) {
+      throw new ApiError(400, "Insufficient employee wallet balance", [
+        {
+          field: "paymentMethod",
+          message: "Your allocated balance is too low for this order",
+        },
+      ]);
+    }
+  } else {
+    const CompanyPortalWallet = require("../models/CompanyPortalWallet");
+    const wallet = await CompanyPortalWallet.ensureForCompany(companyUserId);
+    if (companyPortalWalletService.toMoney(wallet?.unallocated_balance) < fee) {
+      throw new ApiError(400, "Insufficient company wallet balance", [
+        {
+          field: "paymentMethod",
+          message:
+            "Company wallet balance is too low. Top up funds or pay by card.",
+        },
+      ]);
+    }
+  }
+
+  await CompanyPortalPendingCheckout.updatePayloadAndSession(pending.id, {
+    payload,
+    sessionId: null,
+    paymentAmount: fee,
+  });
+
+  const refreshedPending = await CompanyPortalPendingCheckout.findById(pending.id);
+  const order = await createOrderFromPending(
+    refreshedPending || pending,
+    { id: null },
+    null,
+    {
+      employeeId,
+      placedByName,
+      paymentMethod: "wallet",
+    }
+  );
+
+  return {
+    paymentMethod: "wallet",
+    order,
+    uploadToken,
+    amount: fee,
+    amountDisplay: formatMoney(fee),
+  };
 }
 
 async function confirmCheckoutResult(companyUserId, sessionId) {
@@ -770,7 +1041,13 @@ async function confirmCheckoutResult(companyUserId, sessionId) {
 
 async function listOrders(
   companyUserId,
-  { limit = 20, pagination = null, cursor = null, pageSize = 10 } = {}
+  {
+    limit = 20,
+    pagination = null,
+    cursor = null,
+    pageSize = 10,
+    employeeId = null,
+  } = {}
 ) {
   const useKeyset = String(pagination || "").toLowerCase() === "keyset";
 
@@ -778,6 +1055,7 @@ async function listOrders(
     const keyset = await CompanyPortalOrder.listForUserKeyset(companyUserId, {
       cursor,
       pageSize,
+      employeeId,
     });
 
     return {
@@ -791,14 +1069,19 @@ async function listOrders(
     };
   }
 
-  const rows = await CompanyPortalOrder.listForUser(companyUserId, { limit });
+  const rows = await CompanyPortalOrder.listForUser(companyUserId, {
+    limit,
+    employeeId,
+  });
   return {
     orders: rows.map(formatOrder),
   };
 }
 
-async function getDashboard(companyUserId) {
-  const stats = await CompanyPortalOrder.getStatsForUser(companyUserId);
+async function getDashboard(companyUserId, { employeeId = null } = {}) {
+  const stats = await CompanyPortalOrder.getStatsForUser(companyUserId, {
+    employeeId,
+  });
   return { stats };
 }
 
@@ -835,6 +1118,15 @@ async function getReleasedDocuments(orderId, companyUserId) {
     throw new ApiError(
       403,
       "Documents are available for download only after the order is Released"
+    );
+  }
+
+  const availability = await resolvePortalDownloadAvailability(order);
+  if (!availability.canDownloadDocuments) {
+    throw new ApiError(
+      availability.downloadExpired ? 410 : 403,
+      availability.downloadUnavailableReason ||
+        "Download records is not available because 7 days have passed since the records were sent."
     );
   }
 
@@ -876,35 +1168,48 @@ async function generatePaymentReceiptPdf(orderId, companyUserId) {
   }
 
   let stripeDetails = {
-    paymentMethodType: "card",
+    paymentMethodType:
+      order.payment_method === "wallet" ? "wallet" : "card",
     cardBrand: null,
     cardLast4: null,
     customerEmail: order.contact_email || null,
     customerName: order.company_name || null,
     receiptUrl: order.stripe_receipt_url || null,
+    paymentIntentId: null,
   };
 
-  const sessionId = order.stripe_checkout_session_id;
-  if (sessionId) {
-    try {
-      const stripe = getStripe();
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
-      stripeDetails = {
-        ...stripeDetails,
-        ...(await extractStripePaymentDetails(session)),
-      };
+  if (order.payment_method === "wallet") {
+    const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
+    const walletTx =
+      await CompanyPortalWalletTransaction.findOrderPaymentByPortalOrderId(
+        order.id
+      );
+    if (walletTx) {
+      stripeDetails.paymentIntentId = `wallet_tx_${walletTx.id}`;
+    }
+  } else {
+    const sessionId = order.stripe_checkout_session_id;
+    if (sessionId) {
+      try {
+        const stripe = getStripe();
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        stripeDetails = {
+          ...stripeDetails,
+          ...(await extractStripePaymentDetails(session)),
+        };
 
-      if (!order.stripe_receipt_url && stripeDetails.receiptUrl) {
-        await CompanyPortalOrder.updateReceiptUrl(
-          order.id,
-          stripeDetails.receiptUrl
+        if (!order.stripe_receipt_url && stripeDetails.receiptUrl) {
+          await CompanyPortalOrder.updateReceiptUrl(
+            order.id,
+            stripeDetails.receiptUrl
+          );
+        }
+      } catch (error) {
+        console.warn(
+          "[company-portal] Unable to enrich receipt from Stripe:",
+          error.message
         );
       }
-    } catch (error) {
-      console.warn(
-        "[company-portal] Unable to enrich receipt from Stripe:",
-        error.message
-      );
     }
   }
 

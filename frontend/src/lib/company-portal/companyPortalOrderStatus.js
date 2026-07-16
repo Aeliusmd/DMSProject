@@ -26,6 +26,7 @@ export function mapDashboardOrderRow(order = {}) {
     orderNumber: order.orderNumber || "—",
     applicant: order.applicantName || "—",
     facility: order.facilityName || "—",
+    placedBy: order.placedByName || "Company Account",
     status: order.status || "—",
     dateRequested:
       order.dateRequested ||

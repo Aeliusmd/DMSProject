@@ -5,8 +5,18 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { logoutCompany } from "@/lib/company-portal/companyPortalAuthApi";
+import { getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStorage";
 
-const navItems = [
+const adminNavItems = [
+  { label: "Dashboard", href: "/company-portal/dashboard", icon: <DashboardIcon /> },
+  { label: "Create Order", href: "/company-portal/orders/new", icon: <OrdersIcon /> },
+  { label: "Track Order", href: "/company-portal/orders/track", icon: <TrackIcon /> },
+  { label: "Employees", href: "/company-portal/employees", icon: <EmployeesIcon /> },
+  { label: "Money Management", href: "/company-portal/money", icon: <MoneyIcon /> },
+  { label: "Profile", href: "/company-portal/profile", icon: <ProfileIcon /> },
+];
+
+const employeeNavItems = [
   { label: "Dashboard", href: "/company-portal/dashboard", icon: <DashboardIcon /> },
   { label: "Create Order", href: "/company-portal/orders/new", icon: <OrdersIcon /> },
   { label: "Track Order", href: "/company-portal/orders/track", icon: <TrackIcon /> },
@@ -17,6 +27,9 @@ export default function CompanyPortalSidebar({ isCollapsed }) {
   const pathname = usePathname();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const storedUser = getStoredCompanyUser();
+  const navItems =
+    storedUser?.isAdmin === false ? employeeNavItems : adminNavItems;
 
   const handleLogout = async () => {
     if (isLoggingOut) return;
@@ -167,6 +180,30 @@ function ProfileIcon() {
         strokeWidth="1.8"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function EmployeesIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="17" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M4 19c0-2.2 2.2-4 5-4M14 19c0-1.8 1.8-3.5 4-3.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function MoneyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.8" />
     </svg>
   );
 }

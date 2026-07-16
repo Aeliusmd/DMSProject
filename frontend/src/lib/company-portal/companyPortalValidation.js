@@ -34,6 +34,20 @@ export function validateCompanyEmail(value) {
   return "";
 }
 
+export function validatePassword(value) {
+  if (!value) return "Password is required";
+  if (value.length < 8) return "Password must be at least 8 characters";
+  if (value.length > 128) return "Password must be 128 characters or less";
+  if (/\s/.test(value)) return "Password cannot contain spaces";
+  return "";
+}
+
+export function validateConfirmPassword(password, confirmPassword) {
+  if (!confirmPassword) return "Please re-enter your password";
+  if (confirmPassword !== password) return "Passwords do not match";
+  return "";
+}
+
 export function validateAddressLine1(value) {
   const cleaned = sanitizeInput(value, 255);
   if (!cleaned) return "Company address is required";
@@ -65,6 +79,8 @@ export function buildCompanyRegisterPayload(form) {
     companyName: sanitizeInput(form.companyName, 255),
     phone: getDigits(form.phone),
     email: sanitizeInput(form.email, 255).toLowerCase(),
+    password: form.password,
+    confirmPassword: form.confirmPassword,
     addressLine1: sanitizeInput(form.addressLine1, 255),
     addressLine2: sanitizeInput(form.addressLine2 || "", 255) || null,
     city: sanitizeInput(form.city, 100),
@@ -78,6 +94,11 @@ export function validateCompanyRegisterForm(form) {
     companyName: validateCompanyName(form.companyName),
     phone: validateCompanyPhone(form.phone),
     email: validateCompanyEmail(form.email),
+    password: validatePassword(form.password),
+    confirmPassword: validateConfirmPassword(
+      form.password,
+      form.confirmPassword
+    ),
     addressLine1: validateAddressLine1(form.addressLine1),
     city: validateCity(form.city),
     state: validateState(form.state),

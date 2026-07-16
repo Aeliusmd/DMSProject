@@ -21,7 +21,7 @@ const COMPANY_PORTAL_STAGES = [
   "Released",
 ];
 
-const DEFAULT_PORTAL_FEE = 35;
+const DEFAULT_PORTAL_FEE = 15;
 
 function splitApplicantName(fullName) {
   const parts = String(fullName || "")
@@ -58,9 +58,25 @@ function resolvePortalFeeAmount(portalOrder) {
   return DEFAULT_PORTAL_FEE;
 }
 
-function buildPortalPrepaymentFields(portalOrder) {
+async function resolveWalletTransactionId(portalOrder) {
+  if (!portalOrder?.id || portalOrder.payment_method !== "wallet") {
+    return null;
+  }
+
+  const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
+  const walletTx = await CompanyPortalWalletTransaction.findOrderPaymentByPortalOrderId(
+    portalOrder.id
+  );
+  return walletTx?.id || null;
+}
+
+function buildPortalPrepaymentFields(portalOrder, walletTransactionId = null) {
   const paid = resolvePortalFeeAmount(portalOrder);
+  const paymentMethod = String(portalOrder?.payment_method || "stripe").trim();
   const intentId = String(portalOrder?.stripe_payment_intent_id || "").trim();
+  const walletRef = walletTransactionId
+    ? `WALLET-TX-${walletTransactionId}`
+    : "WALLET-CP";
 
   return {
     prepaymentPaid: paid.toFixed(2),
@@ -69,10 +85,16 @@ function buildPortalPrepaymentFields(portalOrder) {
       toDateOnly(portalOrder?.paid_at) ||
       toDateOnly(portalOrder?.created_at) ||
       toDateOnly(new Date()),
-    prepaymentCheck: intentId
-      ? intentId.slice(0, 50)
-      : "STRIPE-CP",
-    prepaymentMemo: "Company portal processing fee",
+    prepaymentCheck:
+      paymentMethod === "wallet"
+        ? walletRef.slice(0, 50)
+        : intentId
+          ? intentId.slice(0, 50)
+          : "STRIPE-CP",
+    prepaymentMemo:
+      paymentMethod === "wallet"
+        ? "Company portal wallet prepayment"
+        : "Company portal processing fee",
   };
 }
 
@@ -162,7 +184,8 @@ async function ensurePortalPrepaymentRecord(internalOrderId, portalOrder) {
     return false;
   }
 
-  const fields = buildPortalPrepaymentFields(portalOrder);
+  const walletTransactionId = await resolveWalletTransactionId(portalOrder);
+  const fields = buildPortalPrepaymentFields(portalOrder, walletTransactionId);
   const paid = resolvePortalFeeAmount(portalOrder);
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -182,6 +205,18 @@ async function ensurePortalPrepaymentRecord(internalOrderId, portalOrder) {
   } finally {
     connection.release();
   }
+}
+
+async function ensureWalletOrderOnlinePaymentRecord(internalOrderId, portalOrder) {
+  if (!internalOrderId || !portalOrder) return false;
+  if (portalOrder.payment_method !== "wallet") return false;
+  if (portalOrder.payment_status !== "paid") return false;
+
+  const stripePaymentService = require("./stripePaymentService");
+  return stripePaymentService.recordCompanyPortalWalletOrderPayment(
+    internalOrderId,
+    portalOrder
+  );
 }
 
 async function linkPortalOrderToInternalOrder(portalOrder, internalOrderId) {
@@ -300,6 +335,10 @@ async function ensureInternalOrderForPortalOrder(portalOrder) {
       existingInternal.id
     );
     await ensurePortalPrepaymentRecord(existingInternal.id, linkedPortal);
+    await ensureWalletOrderOnlinePaymentRecord(
+      existingInternal.id,
+      linkedPortal
+    );
     return {
       portalOrder: linkedPortal,
       internalOrderId: existingInternal.id,
@@ -324,6 +363,7 @@ async function ensureInternalOrderForPortalOrder(portalOrder) {
   );
   // createOrder already syncs payments from payload; keep a safety net.
   await ensurePortalPrepaymentRecord(internalOrderId, portalOrder);
+  await ensureWalletOrderOnlinePaymentRecord(internalOrderId, portalOrder);
 
   await CompanyPortalOrder.setInternalOrderId(portalOrder.id, internalOrderId);
 

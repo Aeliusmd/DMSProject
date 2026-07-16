@@ -13,6 +13,12 @@ exports.uploadSubpoena = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Subpoena PDF is required");
   }
 
+  const companyPortalWalletService = require("../services/companyPortalWalletService");
+  await companyPortalWalletService.assertSufficientOrderBalance(
+    req.companyUser.id,
+    req.companyUser.employeeId || null
+  );
+
   const result = await companyPortalOrderService.uploadAndExtract({
     companyUserId: req.companyUser.id,
     file: req.file,
@@ -26,7 +32,9 @@ exports.uploadSubpoena = asyncHandler(async (req, res) => {
 });
 
 exports.getDashboard = asyncHandler(async (req, res) => {
-  const data = await companyPortalOrderService.getDashboard(req.companyUser.id);
+  const data = await companyPortalOrderService.getDashboard(req.companyUser.id, {
+    employeeId: req.companyUser.employeeId || null,
+  });
   return ApiResponse.success(res, data);
 });
 
@@ -36,6 +44,7 @@ exports.listOrders = asyncHandler(async (req, res) => {
     pagination: req.query.pagination,
     cursor: req.query.cursor,
     pageSize: req.query.pageSize,
+    employeeId: req.companyUser.employeeId || null,
   });
 
   if (Array.isArray(result)) {
@@ -48,9 +57,55 @@ exports.listOrders = asyncHandler(async (req, res) => {
 exports.trackOrder = asyncHandler(async (req, res) => {
   const order = await companyPortalOrderService.trackOrderByNumber(
     req.params.orderNumber,
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
   return ApiResponse.success(res, { order });
+});
+
+exports.payInvoice = asyncHandler(async (req, res) => {
+  const invoiceType = `${req.body?.invoiceType || ""}`.trim().toLowerCase();
+  if (invoiceType !== "regular" && invoiceType !== "xray") {
+    throw new ApiError(400, "invoiceType must be regular or xray");
+  }
+
+  const paymentMethod = `${req.body?.paymentMethod || "wallet"}`.trim().toLowerCase();
+  if (paymentMethod !== "wallet" && paymentMethod !== "stripe") {
+    throw new ApiError(400, "paymentMethod must be wallet or stripe");
+  }
+
+  const companyPortalInvoicePaymentService = require("../services/companyPortalInvoicePaymentService");
+  const result = await companyPortalInvoicePaymentService.payInvoice({
+    companyUserId: req.companyUser.id,
+    employeeId: req.companyUser.employeeId || null,
+    orderNumber: req.params.orderNumber,
+    invoiceType,
+    paymentMethod,
+  });
+
+  const message =
+    paymentMethod === "stripe"
+      ? "Redirect to complete card payment"
+      : "Invoice paid successfully from wallet";
+
+  return ApiResponse.success(res, result, message);
+});
+
+exports.confirmInvoicePayment = asyncHandler(async (req, res) => {
+  const sessionId =
+    req.body?.sessionId || req.body?.session_id || req.query?.session_id || "";
+
+  const companyPortalInvoicePaymentService = require("../services/companyPortalInvoicePaymentService");
+  const order = await companyPortalInvoicePaymentService.confirmInvoiceStripePayment(
+    {
+      companyUserId: req.companyUser.id,
+      employeeId: req.companyUser.employeeId || null,
+      orderNumber: req.params.orderNumber,
+      sessionId,
+    }
+  );
+
+  return ApiResponse.success(res, { order }, "Invoice payment confirmed");
 });
 
 exports.getOrder = asyncHandler(async (req, res) => {
@@ -80,10 +135,17 @@ exports.createCheckout = asyncHandler(async (req, res) => {
     {
       uploadToken,
       details: validation.data,
+      paymentMethod: "wallet",
+      employeeId: req.companyUser.employeeId || null,
+      placedByName: req.companyUser.employeeName || null,
     }
   );
 
-  return ApiResponse.success(res, result, "Checkout session created");
+  return ApiResponse.success(
+    res,
+    result,
+    "Order placed successfully using wallet balance"
+  );
 });
 
 exports.confirmPayment = asyncHandler(async (req, res) => {

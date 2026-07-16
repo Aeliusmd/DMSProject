@@ -10,6 +10,8 @@ export default function CompanyOrderPaymentStep({
   form,
   fileName,
   amount = COMPANY_PORTAL_ORDER_FEE,
+  isEmployee = false,
+  walletBalance = null,
   onBack,
   onPay,
   paying,
@@ -19,6 +21,7 @@ export default function CompanyOrderPaymentStep({
   const amountDisplay = `$${Number(amount).toFixed(2)}`;
   const addressDisplay = formatFacilityAddressDisplay(form);
   const recordsDisplay = getRecordTypesSummary(form);
+  const payLabel = `Pay ${amountDisplay} from wallet`;
 
   return (
     <div>
@@ -31,8 +34,8 @@ export default function CompanyOrderPaymentStep({
             Payment Required
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[#64748B]">
-            A payment is required to begin processing your subpoena request. You
-            will receive your order number immediately after payment.
+            This order will be paid from your wallet balance. You will receive
+            your order number immediately after payment.
           </p>
         </div>
       </div>
@@ -61,11 +64,19 @@ export default function CompanyOrderPaymentStep({
         </p>
       </div>
 
-      {canceled ? (
-        <p className="mt-4 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-medium text-amber-700">
-          Payment was canceled. You can try again when ready.
+      <div className="mt-5 rounded-[12px] border border-[#E2E8F0] bg-white p-4">
+        <p className="text-[13px] font-semibold text-[#0F172A]">
+          {isEmployee ? "Employee wallet payment" : "Company wallet payment"}
         </p>
-      ) : null}
+        <p className="mt-1 text-[12px] text-[#64748B]">
+          Current wallet balance:
+          {" "}
+          {walletBalance != null
+            ? `$${Number(walletBalance).toFixed(2)}`
+            : "Unavailable"}
+          . The fixed order fee is {amountDisplay}.
+        </p>
+      </div>
 
       {error ? (
         <p className="mt-4 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600">
@@ -87,12 +98,12 @@ export default function CompanyOrderPaymentStep({
           onClick={onPay}
           className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] bg-[#0097B2] px-5 text-[13px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:bg-[#0097B2]/45"
         >
-          {paying ? "Redirecting..." : `Pay ${amountDisplay}`}
+          {paying ? "Processing..." : payLabel}
         </button>
       </div>
 
       <p className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-[#94A3B8]">
-        <LockIcon /> Secure payment processing
+        <LockIcon /> Wallet balance will be debited automatically
       </p>
     </div>
   );

@@ -866,6 +866,64 @@ async function sendPersonalPortalConfirmation({
   }
 }
 
+async function sendCompanyEmployeeCredentials({ to, name, email, password }) {
+  const portalUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/company-portal/login`;
+  const subject = "Your Company Portal employee account";
+  const text = [
+    `Hello ${name},`,
+    "",
+    "Your company administrator created an employee account for you.",
+    "",
+    `Portal: ${portalUrl}`,
+    `Email: ${email}`,
+    `Password: ${password}`,
+    "",
+    "Use the Employee sign-in option on the login page.",
+    "",
+    "Keep these credentials secure.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#0F172A;line-height:1.6;max-width:560px;">
+      <h2 style="color:#0097B2;">Company Portal Employee Account</h2>
+      <p>Hello ${escapeHtml(name)},</p>
+      <p>Your company administrator created an employee account for you.</p>
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:16px;margin:16px 0;">
+        <p style="margin:0 0 8px;"><strong>Portal:</strong> <a href="${escapeHtml(portalUrl)}">${escapeHtml(portalUrl)}</a></p>
+        <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(email)}</p>
+        <p style="margin:0;"><strong>Password:</strong> ${escapeHtml(password)}</p>
+      </div>
+      <p>Use the <strong>Employee sign-in</strong> option on the login page.</p>
+      <p style="color:#64748B;font-size:13px;">Keep these credentials secure.</p>
+    </div>`;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    logger.warn("[DEV] Company employee credentials", {
+      to,
+      email,
+      password,
+      hint: "Set SMTP credentials in .env to send real emails",
+    });
+    return { devLogged: true };
+  }
+
+  try {
+    await mailTransporter.sendMail(
+      buildMailOptions({ to, subject, text, html })
+    );
+    logger.info("Company employee credentials email sent", { to });
+    return { delivered: true };
+  } catch (error) {
+    logger.error("Failed to send company employee credentials", {
+      to,
+      error: error.message,
+    });
+    throwEmailDeliveryError(error);
+  }
+}
+
 module.exports = {
   sendTwoFactorCode,
   sendInvoiceEmail,
@@ -876,4 +934,5 @@ module.exports = {
   sendCnrMemoEmail,
   sendCertificateOfRecordsEmail,
   sendPersonalPortalConfirmation,
+  sendCompanyEmployeeCredentials,
 };

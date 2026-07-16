@@ -113,6 +113,61 @@ async function getValidLink(token) {
   return row;
 }
 
+/**
+ * Shared 7-day download window used by emailed links and company portal UI.
+ * Aligns portal "Download Documents" with the latest records email link.
+ */
+async function getRecordsDownloadWindow(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    return {
+      canDownload: false,
+      expired: false,
+      expiresAt: null,
+      reason: "Records download is not available for this order.",
+    };
+  }
+
+  const link = await RecordDownloadLink.findLatestByOrderId(orderId);
+  if (!link) {
+    return {
+      canDownload: false,
+      expired: false,
+      expiresAt: null,
+      reason:
+        "Download records is not available yet. Records become available after they are emailed.",
+    };
+  }
+
+  const expiresAt = link.expires_at ? new Date(link.expires_at) : null;
+  if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
+    return {
+      canDownload: false,
+      expired: true,
+      expiresAt: null,
+      reason:
+        "Download records is not available because the download window has expired.",
+    };
+  }
+
+  if (expiresAt.getTime() <= Date.now()) {
+    return {
+      canDownload: false,
+      expired: true,
+      expiresAt,
+      reason:
+        "Download records is not available because 7 days have passed since the records were sent.",
+    };
+  }
+
+  return {
+    canDownload: true,
+    expired: false,
+    expiresAt,
+    reason: null,
+  };
+}
+
 async function getDownloadMetadata(token) {
   const link = await getValidLink(token);
   const order = await Order.findById(link.order_id);
@@ -194,6 +249,7 @@ module.exports = {
   addExpiryDate,
   createDownloadLinkForOrder,
   getDownloadMetadata,
+  getRecordsDownloadWindow,
   streamDownloadByToken,
   resolveOrderRecordFiles,
 };

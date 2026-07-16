@@ -39,14 +39,11 @@ exports.login = asyncHandler(async (req, res) => {
 
   const result = await companyPortalAuthService.login({
     email: validation.data.email,
+    password: validation.data.password,
     ...getRequestMeta(req),
   });
 
-  return ApiResponse.success(
-    res,
-    result,
-    "Verification code sent to your email"
-  );
+  return ApiResponse.success(res, result, "Two-factor authentication required");
 });
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
@@ -109,6 +106,41 @@ exports.logout = asyncHandler(async (req, res) => {
 });
 
 exports.me = asyncHandler(async (req, res) => {
+  if (req.companyUser.employeeId) {
+    const companyPortalEmployeeAuthService = require("../services/companyPortalEmployeeAuthService");
+    const user = await companyPortalEmployeeAuthService.getCurrentUser(
+      req.companyUser.employeeId
+    );
+    return ApiResponse.success(res, { user });
+  }
+
   const user = await companyPortalAuthService.getCurrentUser(req.companyUser.id);
   return ApiResponse.success(res, { user });
+});
+
+exports.employeeLogin = asyncHandler(async (req, res) => {
+  const email = `${req.body.email || ""}`.trim().toLowerCase();
+  const password = typeof req.body.password === "string" ? req.body.password : "";
+
+  if (!email) {
+    throw new ApiError(400, "Email is required", [
+      { field: "email", message: "Email is required" },
+    ]);
+  }
+
+  if (!password) {
+    throw new ApiError(400, "Password is required", [
+      { field: "password", message: "Password is required" },
+    ]);
+  }
+
+  const companyPortalEmployeeAuthService = require("../services/companyPortalEmployeeAuthService");
+  const result = await companyPortalEmployeeAuthService.login({
+    email,
+    password,
+    ...getRequestMeta(req),
+    trustDevice: Boolean(req.body.trustDevice),
+  });
+
+  return ApiResponse.success(res, result, "Authentication successful");
 });

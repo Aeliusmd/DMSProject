@@ -1,6 +1,7 @@
 const ApiError = require("../utils/ApiError");
-const tokenService = require("../services/tokenService");
+const CompanyPortalEmployeeSession = require("../models/CompanyPortalEmployeeSession");
 const CompanyPortalSession = require("../models/CompanyPortalSession");
+const tokenService = require("../services/tokenService");
 
 async function authenticateCompanyPortal(req, _res, next) {
   try {
@@ -12,6 +13,35 @@ async function authenticateCompanyPortal(req, _res, next) {
     }
 
     const decoded = tokenService.verifyCompanyAccessToken(token);
+    const companyUserId = decoded.companyUserId || decoded.sub;
+
+    if (decoded.employeeId) {
+      const session = await CompanyPortalEmployeeSession.findById(
+        decoded.sessionId
+      );
+
+      if (!session || Number(session.employee_id) !== Number(decoded.employeeId)) {
+        throw new ApiError(401, "Session expired or invalid");
+      }
+
+      if (!session.employee_is_active) {
+        throw new ApiError(403, "Your employee account is inactive");
+      }
+
+      req.companyUser = {
+        id: companyUserId,
+        employeeId: decoded.employeeId,
+        employeeName: session.employee_name,
+        email: session.employee_email,
+        companyName: session.company_name,
+        role: "CompanyEmployee",
+        isAdmin: false,
+        sessionId: decoded.sessionId,
+      };
+      req.companySession = session;
+      return next();
+    }
+
     const session = await CompanyPortalSession.findById(decoded.sessionId);
 
     if (!session) {
@@ -23,8 +53,10 @@ async function authenticateCompanyPortal(req, _res, next) {
     }
 
     req.companyUser = {
-      id: decoded.sub,
+      id: companyUserId,
+      employeeId: null,
       role: "Company",
+      isAdmin: true,
       sessionId: decoded.sessionId,
     };
 
@@ -39,4 +71,11 @@ async function authenticateCompanyPortal(req, _res, next) {
   }
 }
 
-module.exports = { authenticateCompanyPortal };
+function requireCompanyAdmin(req, _res, next) {
+  if (!req.companyUser?.isAdmin) {
+    return next(new ApiError(403, "Company admin access required"));
+  }
+  return next();
+}
+
+module.exports = { authenticateCompanyPortal, requireCompanyAdmin };

@@ -1,4 +1,3 @@
-const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
@@ -10,11 +9,6 @@ const tokenService = require("./tokenService");
 
 function companyOtpKey(sessionId) {
   return `company:${sessionId}`;
-}
-
-/** Unusable hash so password_hash stays NOT NULL; login is OTP-only. */
-async function generateUnusedPasswordHash() {
-  return bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
 }
 
 function formatCompanyUser(row) {
@@ -32,6 +26,7 @@ function formatCompanyUser(row) {
     zip: row.zip,
     role: "Company",
     portal: "company",
+    isAdmin: true,
   };
 }
 
@@ -44,7 +39,7 @@ async function register(data) {
     ]);
   }
 
-  const passwordHash = await generateUnusedPasswordHash();
+  const passwordHash = await bcrypt.hash(data.password, 10);
 
   const user = await CompanyPortalUser.create({
     companyName: data.companyName,
@@ -60,18 +55,21 @@ async function register(data) {
 
   return {
     user: formatCompanyUser(user),
-    message:
-      "Registration successful. Sign in with your company email to receive a verification code.",
+    message: "Registration successful. Please sign in to continue.",
   };
 }
 
-async function login({ email, ipAddress, userAgent }) {
+async function login({ email, password, ipAddress, userAgent }) {
   const user = await CompanyPortalUser.findByEmailForAuth(email);
 
   if (!user) {
-    throw new ApiError(401, "No company account found for this email", [
-      { field: "email", message: "No company account found for this email" },
-    ]);
+    throw new ApiError(401, "Invalid email or password");
+  }
+
+  const passwordMatches = await bcrypt.compare(password, user.password_hash);
+
+  if (!passwordMatches) {
+    throw new ApiError(401, "Invalid email or password");
   }
 
   if (!user.is_active) {
@@ -218,6 +216,11 @@ async function refreshTokens({ refreshToken }) {
     throw new ApiError(401, "Invalid or expired refresh token");
   }
 
+  if (decoded.employeeId) {
+    const companyPortalEmployeeAuthService = require("./companyPortalEmployeeAuthService");
+    return companyPortalEmployeeAuthService.refreshTokens({ refreshToken });
+  }
+
   const session = await CompanyPortalSession.findById(decoded.sessionId);
 
   if (!session || session.session_token !== decoded.sessionToken) {
@@ -248,6 +251,21 @@ async function refreshTokens({ refreshToken }) {
 }
 
 async function logout({ refreshToken, sessionToken }) {
+  if (refreshToken) {
+    try {
+      const decoded = tokenService.verifyCompanyRefreshToken(refreshToken);
+      if (decoded.employeeId) {
+        const companyPortalEmployeeAuthService = require("./companyPortalEmployeeAuthService");
+        return companyPortalEmployeeAuthService.logout({
+          refreshToken,
+          sessionToken,
+        });
+      }
+    } catch {
+      // Continue with company admin logout flow.
+    }
+  }
+
   let deleted = false;
   let companyUserId = null;
 

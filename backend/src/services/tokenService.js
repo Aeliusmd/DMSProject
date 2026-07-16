@@ -37,7 +37,9 @@ function generateCompanyAccessToken(payload) {
   return jwt.sign(
     {
       sub: payload.companyUserId,
-      role: "Company",
+      companyUserId: payload.companyUserId,
+      employeeId: payload.employeeId || null,
+      role: payload.role || "Company",
       sessionId: payload.sessionId,
       type: "company_access",
       portal: "company",
@@ -51,6 +53,9 @@ function generateCompanyRefreshToken(payload) {
   return jwt.sign(
     {
       sub: payload.companyUserId,
+      companyUserId: payload.companyUserId,
+      employeeId: payload.employeeId || null,
+      role: payload.role || "Company",
       sessionId: payload.sessionId,
       sessionToken: payload.sessionToken,
       type: "company_refresh",

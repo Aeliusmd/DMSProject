@@ -26,6 +26,25 @@ class RecordDownloadLink {
 
     return rows[0] || null;
   }
+
+  static async findLatestByOrderId(orderId, connection = null) {
+    const db = connection || getPool();
+    const normalizedId = Number(orderId);
+    if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
+      return null;
+    }
+
+    const [rows] = await db.execute(
+      `SELECT id, order_id, token, expires_at, created_at
+       FROM order_record_download_links
+       WHERE order_id = :orderId
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      { orderId: normalizedId }
+    );
+
+    return rows[0] || null;
+  }
 }
 
 module.exports = RecordDownloadLink;
