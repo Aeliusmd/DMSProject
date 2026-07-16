@@ -254,27 +254,11 @@ export default function CreateInvoiceModal({
   const isCnrOrder = Boolean(order?.certificateNoRecords);
 
   const clientValidationErrors = useMemo(() => {
-    const errors = validateInvoiceForm(formData, {
+    return validateInvoiceForm(formData, {
       // CNR invoices may be $0 (only the prior $15 witness fee applies).
       requirePositiveTotal: willCreateInvoice && !isCnrOrder,
     });
-
-    if (
-      !isCnrOrder &&
-      (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) &&
-      loadedPrepaymentAmount < PAYMENT_CHARGE_AMOUNTS.prepayment
-    ) {
-      errors.prepaymentAmount = `Prepayment $${PAYMENT_CHARGE_AMOUNTS.prepayment.toFixed(2)} must be paid on the order first.`;
-    }
-
-    return errors;
-  }, [
-    formData,
-    willCreateInvoice,
-    isCnrOrder,
-    quickRecordsFee,
-    loadedPrepaymentAmount,
-  ]);
+  }, [formData, willCreateInvoice, isCnrOrder]);
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
@@ -425,14 +409,6 @@ export default function CreateInvoiceModal({
     const validationErrors = validateInvoiceForm(formData, {
       requirePositiveTotal: willCreate && !isCnrOrder,
     });
-
-    if (
-      (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) &&
-      !isCnrOrder &&
-      loadedPrepaymentAmount < PAYMENT_CHARGE_AMOUNTS.prepayment
-    ) {
-      validationErrors.prepaymentAmount = `Prepayment $${PAYMENT_CHARGE_AMOUNTS.prepayment.toFixed(2)} must be paid on the order first.`;
-    }
 
     setErrors(validationErrors);
     setSubmitError("");
