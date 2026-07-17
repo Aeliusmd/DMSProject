@@ -166,9 +166,24 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   paymentPrefixes.forEach((prefix) => {
     const checkField = `${prefix}Check`;
     const paidField = `${prefix}Paid`;
+    const isPersonalPortalPrepayment =
+      data.creationSource === "personal_portal" && prefix === "prepayment";
 
-    if (data[checkField] && !/^\d+$/.test(data[checkField])) {
+    if (
+      data[checkField] &&
+      !isPersonalPortalPrepayment &&
+      !/^\d+$/.test(data[checkField])
+    ) {
       errors[checkField] = "Check number must contain only numbers";
+    }
+
+    if (
+      data[checkField] &&
+      isPersonalPortalPrepayment &&
+      data[checkField] !== "STRIPE-PORTAL" &&
+      !/^[\d-]+$/.test(data[checkField])
+    ) {
+      errors[checkField] = "Receipt number must contain only numbers";
     }
 
     if (data[paidField] && !isValidMoney(data[paidField])) {

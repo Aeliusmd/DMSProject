@@ -92,11 +92,16 @@ export default function PaymentChargeCard({
   paymentType = "",
   capPaidToDue = false,
   onValuesChange,
+  checkLabel = "Check #",
+  checkPlaceholder = "Check number",
+  checkDisplayValue = null,
+  checkReadOnly = false,
 }) {
   const colors = paymentThemes[theme];
   const [paidCapError, setPaidCapError] = useState("");
   const lockPaid = paidReadOnly ?? amountsReadOnly;
   const lockFields = fieldsReadOnly || lockPaid;
+  const lockCheck = checkReadOnly || lockFields;
   const dueFieldName = `${prefix}Due`;
   const type = paymentType || prefix;
   const invoiceLinkedDue = usesInvoiceDueRules(type, invoiceFees);
@@ -207,15 +212,19 @@ export default function PaymentChargeCard({
         )}
 
         <NewOrderField
-          label="Check #"
+          label={checkLabel}
           name={`${prefix}Check`}
-          value={formData[`${prefix}Check`]}
+          value={
+            checkDisplayValue !== null && checkDisplayValue !== undefined
+              ? checkDisplayValue
+              : formData[`${prefix}Check`]
+          }
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="Check number"
-          disabled={lockFields}
-          inputMode="numeric"
-          maxLength={12}
+          placeholder={checkPlaceholder}
+          disabled={lockCheck}
+          inputMode={checkReadOnly ? "text" : "numeric"}
+          maxLength={checkReadOnly ? 50 : 12}
           error={getError(`${prefix}Check`)}
         />
 

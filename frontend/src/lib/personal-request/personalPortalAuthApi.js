@@ -228,3 +228,17 @@ export async function submitAuthenticatedPersonalRequest(formData) {
     headers: {},
   });
 }
+
+export async function createPersonalResearchFeeCheckout(requestId) {
+  return authRequest(`/personal-portal/requests/${requestId}/research-fee/checkout`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function fulfillPersonalResearchFeeCheckout(sessionId) {
+  return authRequest("/personal-portal/research-fee/fulfill", {
+    method: "POST",
+    body: JSON.stringify({ sessionId }),
+  });
+}

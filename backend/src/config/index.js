@@ -67,6 +67,7 @@ module.exports = {
 
   personalPortal: {
     processingFeeCents: Number(process.env.PERSONAL_PORTAL_FEE_CENTS) || 3500,
+    researchFeeCents: Number(process.env.PERSONAL_PORTAL_RESEARCH_FEE_CENTS) || 500,
     lookupDays: Number(process.env.PERSONAL_PORTAL_LOOKUP_DAYS) || 7,
   },
 };

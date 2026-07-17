@@ -389,6 +389,43 @@ class PersonalRequestOrder {
     );
   }
 
+  static async markResearchFeeRequested(id, sessionId = null, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_status = 'pending',
+           research_fee_requested_at = COALESCE(research_fee_requested_at, NOW()),
+           research_fee_checkout_session_id = COALESCE(:sessionId, research_fee_checkout_session_id),
+           updated_at = NOW()
+       WHERE id = :id
+         AND research_fee_status IN ('none', 'pending')`,
+      { id, sessionId }
+    );
+  }
+
+  static async markResearchFeePaid(id, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_status = 'paid',
+           research_fee_paid_at = NOW(),
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async setResearchFeeCheckoutSessionId(id, sessionId, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_checkout_session_id = :sessionId,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id, sessionId }
+    );
+  }
+
   static async updatePortalStatus(id, portalStatus, connection = null) {
     const executor = connection || getPool();
     await executor.execute(

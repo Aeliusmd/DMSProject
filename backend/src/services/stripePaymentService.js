@@ -668,12 +668,30 @@ async function extractStripePaymentDetails(session) {
     customerEmail: session.customer_details?.email || charge?.billing_details?.email || null,
     customerName: session.customer_details?.name || charge?.billing_details?.name || null,
     receiptUrl: charge?.receipt_url || null,
+    receiptNumber: charge?.receipt_number || null,
     processingFee: charge?.balance_transaction
       ? null
       : null,
     netAmount: charge?.amount ? charge.amount / 100 : null,
     failureMessage: paymentIntent?.last_payment_error?.message || charge?.failure_message || null,
   };
+}
+
+async function fetchStripeReceiptNumber(chargeId) {
+  const normalized = `${chargeId || ""}`.trim();
+  if (!normalized) return null;
+
+  try {
+    const stripe = getStripe();
+    const charge = await stripe.charges.retrieve(normalized);
+    return charge?.receipt_number || null;
+  } catch (error) {
+    logger.warn("Unable to fetch Stripe receipt number", {
+      chargeId: normalized,
+      message: error.message,
+    });
+    return null;
+  }
 }
 
 async function fulfillInvoicePayment(connection, orderId, invoiceType) {
@@ -850,6 +868,12 @@ async function fulfillSuccessfulCheckoutSession(session) {
   if (session.metadata?.payment_kind === "personal_portal") {
     const personalPortalService = require("./personalPortalService");
     await personalPortalService.fulfillPersonalPortalPayment(session);
+    return;
+  }
+
+  if (session.metadata?.payment_kind === "personal_portal_research_fee") {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.fulfillPersonalPortalResearchFeePayment(session);
     return;
   }
 
@@ -1297,6 +1321,30 @@ async function recordPersonalPortalStripePayment(session) {
       });
     }
 
+    if (request.order_id && stripeDetails.receiptNumber) {
+      const orderPayments = await Order.findPaymentsByOrderId(
+        request.order_id,
+        connection
+      );
+      const prepayment = orderPayments.find(
+        (row) => row.payment_type === "prepayment"
+      );
+      await Order.upsertPayment(connection, {
+        orderId: request.order_id,
+        paymentType: "prepayment",
+        checkNumber: stripeDetails.receiptNumber,
+        paymentDate:
+          prepayment?.payment_date ||
+          paidAt.toISOString().slice(0, 10),
+        amount: prepayment?.amount ?? amount,
+        dueAmount: prepayment?.due_amount ?? 0,
+        isPaid: prepayment?.is_paid ?? 1,
+        memo:
+          prepayment?.memo ||
+          "Personal portal processing fee ($35 prepayment)",
+      });
+    }
+
     // Also mirror into staff online payments list when table + DMS order exist
     if (request.order_id) {
       const [tableRows] = await connection.execute(
@@ -1606,6 +1654,7 @@ module.exports = {
   fulfillSuccessfulCheckoutSession,
   fulfillInvoicePayment,
   extractStripePaymentDetails,
+  fetchStripeReceiptNumber,
   recordPersonalPortalStripePayment,
   recordCompanyPortalWalletOrderPayment,
   recordCompanyPortalWalletInvoicePayment,

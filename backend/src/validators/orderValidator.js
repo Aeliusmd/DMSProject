@@ -214,8 +214,12 @@ function validateOrderPayload(body = {}, options = {}) {
   PAYMENT_PREFIXES.forEach((prefix) => {
     const checkField = `${prefix}Check`;
     const paidField = `${prefix}Paid`;
+    const checkValue = trimToString(body[checkField]);
+    const isPrepaymentReceipt =
+      prefix === "prepayment" &&
+      (checkValue === "STRIPE-PORTAL" || /^[\d-]+$/.test(checkValue));
 
-    if (!isBlank(body[checkField]) && !/^\d+$/.test(trimToString(body[checkField]))) {
+    if (!isBlank(body[checkField]) && !isPrepaymentReceipt && !/^\d+$/.test(checkValue)) {
       errors.push({
         field: checkField,
         message: "Check number must contain only numbers",

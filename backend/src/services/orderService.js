@@ -1525,6 +1525,54 @@ async function getOrderStats() {
   };
 }
 
+async function resolvePersonalPortalPrepaymentReceipt(orderId, payments = []) {
+  const prepayment = payments.find((row) => row.payment_type === "prepayment");
+  const currentCheck = `${prepayment?.check_number || ""}`.trim();
+
+  if (currentCheck && currentCheck !== "STRIPE-PORTAL") {
+    return currentCheck;
+  }
+
+  const PersonalRequestStripePayment = require("../models/PersonalRequestStripePayment");
+  const stripePaymentService = require("./stripePaymentService");
+
+  const stripePayment =
+    await PersonalRequestStripePayment.findSucceededProcessingFeeByOrderId(
+      orderId
+    );
+
+  if (stripePayment?.stripe_charge_id) {
+    const receiptNumber = await stripePaymentService.fetchStripeReceiptNumber(
+      stripePayment.stripe_charge_id
+    );
+    if (receiptNumber) {
+      return receiptNumber;
+    }
+  }
+
+  const pool = getPool();
+  const [onlineRows] = await pool.execute(
+    `SELECT stripe_charge_id
+     FROM stripe_online_payments
+     WHERE order_id = :orderId
+       AND status = 'succeeded'
+     ORDER BY paid_at DESC, id DESC
+     LIMIT 1`,
+    { orderId }
+  );
+
+  const onlineChargeId = onlineRows[0]?.stripe_charge_id;
+  if (onlineChargeId) {
+    const receiptNumber =
+      await stripePaymentService.fetchStripeReceiptNumber(onlineChargeId);
+    if (receiptNumber) {
+      return receiptNumber;
+    }
+  }
+
+  return currentCheck || "";
+}
+
 async function getOrderById(id) {
   const order = await Order.findById(id);
 
@@ -1540,7 +1588,7 @@ async function getOrderById(id) {
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
   const orderRecords = await OrderRecord.findByOrderId(order.id);
 
-  return mapOrderDetail(
+  const mapped = mapOrderDetail(
     order,
     payments,
     documents,
@@ -1550,6 +1598,15 @@ async function getOrderById(id) {
     xrayRow,
     orderRecords
   );
+
+  if (mapped.creationSource === "personal_portal") {
+    mapped.prepaymentCheck = await resolvePersonalPortalPrepaymentReceipt(
+      order.id,
+      payments
+    );
+  }
+
+  return mapped;
 }
 
 async function resolveAuthorName(actorId) {
@@ -2365,12 +2422,28 @@ async function updateOrderFacility(id, data, actorId) {
 
     await connection.commit();
 
-    return getOrderById(existing.id);
+    const updated = await getOrderById(existing.id);
+    await maybeRequestPersonalPortalResearchFee(existing.id);
+    return updated;
   } catch (error) {
     await connection.rollback();
     rethrowServiceError(error);
   } finally {
     connection.release();
+  }
+}
+
+async function maybeRequestPersonalPortalResearchFee(dmsOrderId) {
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.requestResearchFeeAfterFacilityVerification(
+      dmsOrderId
+    );
+  } catch (error) {
+    logger.warn("Failed to request personal portal research fee", {
+      dmsOrderId,
+      message: error.message,
+    });
   }
 }
 
@@ -2483,7 +2556,9 @@ async function updateOrder(id, data, actorId, files) {
 
     await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 
-    return getOrderById(existing.id);
+    const updated = await getOrderById(existing.id);
+    await maybeRequestPersonalPortalResearchFee(existing.id);
+    return updated;
   } catch (error) {
     await connection.rollback();
     rethrowServiceError(error);

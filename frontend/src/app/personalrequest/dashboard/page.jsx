@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
 import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
+import PersonalResearchFeeBanner from "@/components/personal-request/PersonalResearchFeeBanner";
 import CompanyPortalStatCard from "@/components/company-portal/CompanyPortalStatCard";
 import {
+  fulfillPersonalResearchFeeCheckout,
   getPersonalDashboard,
+  createPersonalResearchFeeCheckout,
 } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
@@ -33,12 +36,14 @@ const STATUS_STYLES = {
 
 export default function PersonalPortalDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState(null);
   const [stats, setStats] = useState(EMPTY_STATS);
   const [recentRequests, setRecentRequests] = useState([]);
   const [lookupDays, setLookupDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [bannerMessage, setBannerMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -51,7 +56,30 @@ export default function PersonalPortalDashboardPage() {
 
       setUser(getStoredPersonalUser());
 
+      const sessionId = searchParams.get("session_id");
+      const researchFeePaid = searchParams.get("researchFeePaid") === "1";
+      const payResearchFeeId = searchParams.get("payResearchFee");
+
       try {
+        if (sessionId && researchFeePaid) {
+          await fulfillPersonalResearchFeeCheckout(sessionId);
+          if (active) {
+            setBannerMessage("Facility verification fee paid successfully.");
+          }
+        }
+
+        if (payResearchFeeId) {
+          const checkout = await createPersonalResearchFeeCheckout(
+            Number(payResearchFeeId)
+          );
+          const checkoutUrl =
+            checkout?.data?.checkoutUrl || checkout?.checkoutUrl;
+          if (checkoutUrl) {
+            window.location.href = checkoutUrl;
+            return;
+          }
+        }
+
         const dashRes = await getPersonalDashboard();
         if (!active) return;
         setStats(dashRes?.data?.stats || EMPTY_STATS);
@@ -59,9 +87,13 @@ export default function PersonalPortalDashboardPage() {
         setLookupDays(dashRes?.data?.lookupDays || 7);
       } catch (err) {
         if (!active) return;
-        clearPersonalAuth();
+        if (err?.status === 401) {
+          clearPersonalAuth();
+          setError(getApiErrorMessage(err, "Unable to load dashboard"));
+          router.replace("/personalrequest/login");
+          return;
+        }
         setError(getApiErrorMessage(err, "Unable to load dashboard"));
-        router.replace("/personalrequest/login");
       } finally {
         if (active) setLoading(false);
       }
@@ -71,7 +103,7 @@ export default function PersonalPortalDashboardPage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [router, searchParams]);
 
   const cards = useMemo(
     () => [
@@ -131,6 +163,14 @@ export default function PersonalPortalDashboardPage() {
           {error}
         </p>
       ) : null}
+
+      {bannerMessage ? (
+        <p className="mb-4 rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700">
+          {bannerMessage}
+        </p>
+      ) : null}
+
+      <PersonalResearchFeeBanner requests={recentRequests} />
 
       <div className="mb-6">
         <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#111827]">

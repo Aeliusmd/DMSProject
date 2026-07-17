@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
 import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
+import PersonalResearchFeeBanner from "@/components/personal-request/PersonalResearchFeeBanner";
 import { listPersonalRequests } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
@@ -125,6 +126,8 @@ export default function PersonalRequestsListPage() {
           {error}
         </p>
       ) : null}
+
+      <PersonalResearchFeeBanner requests={requests} />
 
       <section className="overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="overflow-x-auto">

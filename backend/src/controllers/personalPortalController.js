@@ -129,6 +129,46 @@ exports.listRequests = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, data, "Requests loaded");
 });
 
+exports.createResearchFeeCheckout = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const data = await personalPortalService.createResearchFeeCheckout(
+    requestId,
+    req.personalUser.id
+  );
+
+  return ApiResponse.success(res, data, "Research fee checkout created");
+});
+
+exports.fulfillResearchFeeCheckout = asyncHandler(async (req, res) => {
+  const sessionId = `${req.body?.sessionId || req.query?.session_id || ""}`.trim();
+  if (!sessionId) {
+    throw new ApiError(400, "session_id is required");
+  }
+
+  const stripePaymentService = require("../services/stripePaymentService");
+  const config = require("../config");
+  const Stripe = require("stripe");
+  const stripe = new Stripe(config.stripe.secretKey);
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+  if (session.payment_status === "paid") {
+    await stripePaymentService.fulfillSuccessfulCheckoutSession(session);
+  }
+
+  return ApiResponse.success(
+    res,
+    {
+      paid: session.payment_status === "paid",
+      requestId: Number(session.metadata?.personal_request_id) || null,
+    },
+    "Research fee payment processed"
+  );
+});
+
 exports.getCheckoutResult = asyncHandler(async (req, res) => {
   const validation = validatePersonalCheckoutResultQuery(req.query);
   throwIfInvalid(validation);

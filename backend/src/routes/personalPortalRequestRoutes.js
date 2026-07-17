@@ -12,6 +12,14 @@ router.use(authenticatePersonalPortal);
 router.get("/dashboard", personalPortalController.getDashboard);
 router.get("/requests", personalPortalController.listRequests);
 router.post(
+  "/requests/:id/research-fee/checkout",
+  personalPortalController.createResearchFeeCheckout
+);
+router.post(
+  "/research-fee/fulfill",
+  personalPortalController.fulfillResearchFeeCheckout
+);
+router.post(
   "/requests",
   uploadPersonalPortalLicense,
   personalPortalController.submitAuthenticatedRequest

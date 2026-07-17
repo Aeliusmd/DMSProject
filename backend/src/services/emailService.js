@@ -57,11 +57,13 @@ function getTransporter() {
   }
 
   const isGmail = String(config.smtp.host || "").includes("gmail.com");
+  const port = Number(config.smtp.port) || 587;
+  const secure = Boolean(config.smtp.secure) || port === 465;
 
   transporter = nodemailer.createTransport({
     host: config.smtp.host,
-    port: config.smtp.port,
-    secure: Boolean(config.smtp.secure),
+    port,
+    secure,
     auth: {
       user: config.smtp.user,
       pass: config.smtp.pass,
@@ -69,15 +71,24 @@ function getTransporter() {
     connectionTimeout: config.smtp.connectionTimeout,
     greetingTimeout: config.smtp.greetingTimeout,
     socketTimeout: config.smtp.socketTimeout,
-    ...(isGmail
+    pool: false,
+    tls: {
+      minVersion: "TLSv1.2",
+      // Gmail / corporate SMTP often break on strict MITM inspection locally.
+      rejectUnauthorized: process.env.SMTP_TLS_REJECT_UNAUTHORIZED !== "false",
+    },
+    ...(isGmail || port === 587
       ? {
-          tls: { rejectUnauthorized: true },
-          requireTLS: !config.smtp.secure,
+          requireTLS: !secure,
         }
       : {}),
   });
 
   return transporter;
+}
+
+function resetTransporter() {
+  transporter = null;
 }
 
 function throwEmailDeliveryError(error) {
@@ -86,6 +97,32 @@ function throwEmailDeliveryError(error) {
     503,
     `Email delivery failed: ${detail}. Check SMTP settings and network access to ${config.smtp.host}:${config.smtp.port}.`
   );
+}
+
+async function sendMailWithRetry(mailOptions, { attempts = 2 } = {}) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const mailTransporter = getTransporter();
+    if (!mailTransporter) {
+      return null;
+    }
+
+    try {
+      await mailTransporter.sendMail(mailOptions);
+      return { delivered: true };
+    } catch (error) {
+      lastError = error;
+      logger.warn("SMTP send attempt failed", {
+        attempt,
+        to: mailOptions?.to,
+        error: error.message,
+      });
+      resetTransporter();
+    }
+  }
+
+  throw lastError;
 }
 
 function buildMailOptions({ to, subject, text, html, attachments }) {
@@ -136,7 +173,7 @@ async function sendTwoFactorCode({ to, name, code, subtitle }) {
   const mailOptions = buildMailOptions({ to, subject, text, html });
 
   try {
-    await mailTransporter.sendMail(mailOptions);
+    await sendMailWithRetry(mailOptions);
     logger.info("2FA email sent", { to });
     return { delivered: true, devLogged: false };
   } catch (error) {
@@ -827,7 +864,7 @@ async function sendPersonalPortalConfirmation({
     "",
     `Confirmation reference: ${confirmationReference}`,
     "",
-    `You can check your request status at ${portalUrl} using your confirmation reference or driver's license number.`,
+    `You can check your request status at ${portalUrl} using your confirmation reference and date of birth.`,
     `Status lookup is available until ${expiresText}.`,
     "",
     "— DMS Document Management System",
@@ -848,21 +885,29 @@ async function sendPersonalPortalConfirmation({
       <h2 style="color:#0097B2;">Request Confirmed</h2>
       <p>Hi ${safeName}, your personal records request has been received and your processing fee payment was confirmed.</p>
       <p style="font-size:18px;font-weight:700;">Reference: ${escapeHtml(confirmationReference)}</p>
-      <p>Check status at <a href="${escapeHtml(portalUrl)}">${escapeHtml(portalUrl)}</a> using your confirmation reference or driver's license number.</p>
+      <p>Check status at <a href="${escapeHtml(portalUrl)}">${escapeHtml(portalUrl)}</a> using your confirmation reference and date of birth.</p>
       <p style="color:#64748B;font-size:13px;">Status lookup available until ${escapeHtml(expiresText)}.</p>
     </div>`;
 
   try {
-    await mailTransporter.sendMail(
-      buildMailOptions({ to, subject, text, html })
-    );
+    await sendMailWithRetry(buildMailOptions({ to, subject, text, html }));
     return { delivered: true };
   } catch (error) {
     logger.error("Failed to send personal portal confirmation", {
       to,
       error: error.message,
     });
-        throwEmailDeliveryError(error);
+
+    // Never fail payment/fulfillment because of SMTP — log and soft-fail.
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Personal portal confirmation email (SMTP failed)", {
+        to,
+        text,
+      });
+      return { delivered: false, devLogged: true, error: error.message };
+    }
+
+    return { delivered: false, error: error.message };
   }
 }
 
@@ -924,6 +969,72 @@ async function sendCompanyEmployeeCredentials({ to, name, email, password }) {
   }
 }
 
+async function sendPersonalPortalResearchFeeRequest({
+  to,
+  name,
+  confirmationReference,
+  amount,
+  payUrl,
+}) {
+  const amountLabel = Number(amount).toFixed(2);
+  const subject = `Action required: $${amountLabel} facility verification fee — ${confirmationReference}`;
+  const text = [
+    `Hello ${name || "Patient"},`,
+    "",
+    "Your personal records request has been verified by our team and the treating facility has been confirmed.",
+    "",
+    `Confirmation reference: ${confirmationReference}`,
+    `Amount due: $${amountLabel}`,
+    "",
+    "Please pay this facility verification / research fee to continue processing:",
+    payUrl,
+    "",
+    "You can also pay from your Personal Request Portal dashboard.",
+    "",
+    "— DMS Document Management System",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827;">
+      <h2 style="color:#0097B2;">Facility Verification Fee Due</h2>
+      <p>Hi ${escapeHtml(name || "Patient")}, your request <strong>${escapeHtml(
+        confirmationReference
+      )}</strong> has been verified and the treating facility has been confirmed on our side.</p>
+      <p style="font-size:18px;font-weight:700;">Amount due: $${escapeHtml(amountLabel)}</p>
+      <p>
+        <a href="${escapeHtml(payUrl)}"
+           style="display:inline-block;background:#0097B2;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:700;">
+          Pay $${escapeHtml(amountLabel)} now
+        </a>
+      </p>
+      <p style="color:#64748B;font-size:13px;">You can also pay from your Personal Request Portal dashboard.</p>
+    </div>`;
+
+  const mailTransporter = getTransporter();
+  if (!mailTransporter) {
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Personal portal research fee email", { to, text });
+      return { delivered: false, devLogged: true };
+    }
+    throw new ApiError(503, "Email service is not configured");
+  }
+
+  try {
+    await sendMailWithRetry(buildMailOptions({ to, subject, text, html }));
+    return { delivered: true };
+  } catch (error) {
+    logger.error("Failed to send personal portal research fee email", {
+      to,
+      error: error.message,
+    });
+    if (config.nodeEnv === "development") {
+      logger.warn("[DEV] Research fee email (SMTP failed)", { to, text });
+      return { delivered: false, devLogged: true, error: error.message };
+    }
+    return { delivered: false, error: error.message };
+  }
+}
+
 module.exports = {
   sendTwoFactorCode,
   sendInvoiceEmail,
@@ -934,5 +1045,6 @@ module.exports = {
   sendCnrMemoEmail,
   sendCertificateOfRecordsEmail,
   sendPersonalPortalConfirmation,
+  sendPersonalPortalResearchFeeRequest,
   sendCompanyEmployeeCredentials,
 };

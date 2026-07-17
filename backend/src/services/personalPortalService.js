@@ -399,6 +399,7 @@ async function createPendingRequest(parsed, driverLicenseFile, options = {}) {
 
   await PersonalRequestStripePayment.createPending({
     personalRequestOrderId: requestId,
+    paymentKind: "processing_fee",
     amount: feeAmount,
     currency,
     stripeCheckoutSessionId: session.id,
@@ -506,12 +507,21 @@ async function fulfillPersonalPortalPayment(session) {
     connection.release();
   }
 
-  await emailService.sendPersonalPortalConfirmation({
-    to: order.email,
-    name: `${order.first_name} ${order.last_name}`.trim(),
-    confirmationReference,
-    lookupExpiresAt,
-  });
+  try {
+    await emailService.sendPersonalPortalConfirmation({
+      to: order.email,
+      name: `${order.first_name} ${order.last_name}`.trim(),
+      confirmationReference,
+      lookupExpiresAt,
+    });
+  } catch (error) {
+    // Payment is already committed — never fail checkout on email issues.
+    logger.error("Personal portal confirmation email failed after payment", {
+      requestId,
+      to: order.email,
+      message: error.message,
+    });
+  }
 
   try {
     const stripePaymentService = require("./stripePaymentService");
@@ -857,6 +867,7 @@ async function mapPublicRequestStatus(bundle, options = {}) {
     orderId: includePayment ? order.order_id || null : undefined,
     createdAt: order.created_at,
     payment,
+    researchFee: mapResearchFee(refreshed || order),
   };
 }
 
@@ -887,6 +898,7 @@ function mapListRequest(bundle) {
     receiptUrl: null,
     lookupExpiresAt: order.lookup_expires_at || null,
     createdAt: order.created_at,
+    researchFee: mapResearchFee(order),
   };
 }
 
@@ -1047,11 +1059,299 @@ async function backfillMissingDmsOrderLinks() {
   }
 }
 
+function getResearchFeeAmount() {
+  return Number(
+    ((config.personalPortal?.researchFeeCents || 500) / 100).toFixed(2)
+  );
+}
+
+function mapResearchFee(order) {
+  const status = order?.research_fee_status || "none";
+  if (status === "none") return null;
+
+  return {
+    status,
+    amount: getResearchFeeAmount(),
+    amountDisplay: getResearchFeeAmount().toFixed(2),
+    requestedAt: order.research_fee_requested_at || null,
+    paidAt: order.research_fee_paid_at || null,
+    canPay: status === "pending",
+  };
+}
+
+/**
+ * After DMS staff verifies a personal-portal order and completes the facility,
+ * request the $5 fee, email the user, and surface it on the portal dashboard.
+ */
+async function requestResearchFeeAfterFacilityVerification(dmsOrderId) {
+  const normalizedId = Number(dmsOrderId);
+  if (!Number.isFinite(normalizedId) || normalizedId <= 0) return null;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(normalizedId);
+  if (!requestOrder || !requestOrder.processing_fee_paid) return null;
+
+  const status = requestOrder.research_fee_status || "none";
+  if (status === "paid" || status === "waived" || status === "pending") {
+    return {
+      skipped: true,
+      reason: status === "pending" ? "already_pending" : status,
+      requestId: requestOrder.id,
+    };
+  }
+
+  await PersonalRequestOrder.markResearchFeeRequested(requestOrder.id);
+
+  const amount = getResearchFeeAmount();
+  const baseClient = (config.clientUrl || "http://localhost:3000").replace(
+    /\/$/,
+    ""
+  );
+  const payUrl = `${baseClient}/personalrequest/dashboard?payResearchFee=${requestOrder.id}`;
+
+  try {
+    await emailService.sendPersonalPortalResearchFeeRequest({
+      to: requestOrder.email,
+      name: `${requestOrder.first_name || ""} ${requestOrder.last_name || ""}`.trim(),
+      confirmationReference:
+        requestOrder.confirmation_reference || `PR-${requestOrder.id}`,
+      amount,
+      payUrl,
+    });
+  } catch (error) {
+    logger.error("Failed to email personal portal research fee request", {
+      requestId: requestOrder.id,
+      message: error.message,
+    });
+  }
+
+  logger.info("Personal portal research fee requested", {
+    requestId: requestOrder.id,
+    dmsOrderId: normalizedId,
+    amount,
+  });
+
+  return {
+    requested: true,
+    requestId: requestOrder.id,
+    amount,
+    payUrl,
+  };
+}
+
+async function createResearchFeeCheckout(personalRequestId, portalUserId) {
+  const requestOrder = await PersonalRequestOrder.findById(personalRequestId);
+  if (!requestOrder) {
+    throw new ApiError(404, "Request not found");
+  }
+
+  if (
+    portalUserId &&
+    requestOrder.portal_user_id &&
+    Number(requestOrder.portal_user_id) !== Number(portalUserId)
+  ) {
+    throw new ApiError(403, "You do not have access to this request");
+  }
+
+  if ((requestOrder.research_fee_status || "none") !== "pending") {
+    throw new ApiError(400, "No research fee is currently due for this request");
+  }
+
+  const stripe = getStripe();
+  const feeCents = config.personalPortal?.researchFeeCents || 500;
+  const feeAmount = getResearchFeeAmount();
+  const currency = config.stripe.currency || "usd";
+  const baseClient = (config.clientUrl || "http://localhost:3000").replace(
+    /\/$/,
+    ""
+  );
+  const successUrl = `${baseClient}/personalrequest/dashboard?researchFeePaid=1&request_id=${requestOrder.id}&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${baseClient}/personalrequest/dashboard?researchFeeCanceled=1`;
+
+  const checkoutPayload = {
+    mode: "payment",
+    payment_method_types: ["card"],
+    wallet_options: {
+      link: { display: "never" },
+    },
+    line_items: [
+      {
+        price_data: {
+          currency,
+          product_data: {
+            name: "Personal Records — Facility Verification Fee",
+            description:
+              "Fee after DMS verification and facility confirmation for your personal records request",
+          },
+          unit_amount: feeCents,
+        },
+        quantity: 1,
+      },
+    ],
+    customer_email: requestOrder.email,
+    metadata: {
+      payment_kind: "personal_portal_research_fee",
+      personal_request_id: String(requestOrder.id),
+      email: requestOrder.email || "",
+      amount: String(feeAmount),
+      currency,
+    },
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+  };
+
+  let session;
+  try {
+    session = await stripe.checkout.sessions.create(checkoutPayload);
+  } catch (error) {
+    if (/wallet_options|unknown parameter/i.test(error?.message || "")) {
+      const { wallet_options: _ignored, ...fallbackPayload } = checkoutPayload;
+      session = await stripe.checkout.sessions.create(fallbackPayload);
+    } else {
+      throw error;
+    }
+  }
+
+  await PersonalRequestOrder.setResearchFeeCheckoutSessionId(
+    requestOrder.id,
+    session.id
+  );
+
+  await PersonalRequestStripePayment.createPending({
+    personalRequestOrderId: requestOrder.id,
+    paymentKind: "research_fee",
+    amount: feeAmount,
+    currency,
+    stripeCheckoutSessionId: session.id,
+    customerEmail: requestOrder.email,
+    customerName: `${requestOrder.first_name || ""} ${
+      requestOrder.last_name || ""
+    }`.trim(),
+  });
+
+  return {
+    requestId: requestOrder.id,
+    checkoutUrl: session.url,
+    sessionId: session.id,
+    amount: feeAmount.toFixed(2),
+  };
+}
+
+async function fulfillPersonalPortalResearchFeePayment(session) {
+  const requestId = Number(session.metadata?.personal_request_id);
+  if (!requestId) {
+    logger.warn("Research fee session missing request id", {
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  const requestOrder = await PersonalRequestOrder.findById(requestId);
+  if (!requestOrder) {
+    logger.warn("Research fee request not found", { requestId });
+    return;
+  }
+
+  if (requestOrder.research_fee_status === "paid") {
+    return;
+  }
+
+  const feeAmount = getResearchFeeAmount();
+  const currency = config.stripe.currency || "usd";
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const existingPayment =
+      await PersonalRequestStripePayment.findByCheckoutSessionId(
+        session.id,
+        connection
+      );
+
+    if (existingPayment?.status === "succeeded") {
+      await connection.commit();
+      return;
+    }
+
+    if (existingPayment) {
+      await PersonalRequestStripePayment.markSucceeded(
+        connection,
+        existingPayment.id,
+        {
+          orderId: requestOrder.order_id || null,
+          amount: feeAmount,
+          currency,
+          stripePaymentIntentId: session.payment_intent || null,
+          stripeChargeId: null,
+          stripeCustomerId: session.customer || null,
+          paymentMethodType: "card",
+          cardBrand: null,
+          cardLast4: null,
+          customerEmail: requestOrder.email,
+          customerName: `${requestOrder.first_name || ""} ${
+            requestOrder.last_name || ""
+          }`.trim(),
+          receiptUrl: null,
+          processingFee: null,
+          netAmount: feeAmount,
+          paidAt: new Date(),
+        }
+      );
+    } else {
+      await PersonalRequestStripePayment.insertSucceeded(connection, {
+        personalRequestOrderId: requestId,
+        orderId: requestOrder.order_id || null,
+        amount: feeAmount,
+        currency,
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId: session.payment_intent || null,
+        stripeChargeId: null,
+        stripeCustomerId: session.customer || null,
+        paymentMethodType: "card",
+        cardBrand: null,
+        cardLast4: null,
+        customerEmail: requestOrder.email,
+        customerName: `${requestOrder.first_name || ""} ${
+          requestOrder.last_name || ""
+        }`.trim(),
+        receiptUrl: null,
+        processingFee: null,
+        netAmount: feeAmount,
+        paidAt: new Date(),
+      });
+    }
+
+    await PersonalRequestOrder.markResearchFeePaid(requestId, connection);
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback();
+    rethrowServiceError(error);
+  } finally {
+    connection.release();
+  }
+
+  try {
+    const pool2 = getPool();
+    await pool2.execute(
+      `UPDATE personal_request_stripe_payments
+       SET payment_kind = 'research_fee'
+       WHERE stripe_checkout_session_id = :sessionId`,
+      { sessionId: session.id }
+    );
+  } catch {
+    // ignore if column missing
+  }
+}
+
 module.exports = {
   sendEmailOtp,
   confirmEmailOtp,
   createPendingRequest,
   fulfillPersonalPortalPayment,
+  fulfillPersonalPortalResearchFeePayment,
+  requestResearchFeeAfterFacilityVerification,
+  createResearchFeeCheckout,
   getCheckoutResult,
   lookupRequestStatus,
   updateRequestNotificationEmail,
