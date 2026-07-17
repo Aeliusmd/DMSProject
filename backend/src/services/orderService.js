@@ -605,6 +605,7 @@ async function syncOrderPayments(connection, orderId, data) {
   await ensurePrepaymentPayment(connection, orderId, data);
 
   await invoiceService.syncOrderPaymentDuesFromInvoice(connection, orderId);
+  await invoiceService.syncServeWorkflowFromPrepayment(connection, orderId);
 }
 
 function mapPaymentsToForm(payments = []) {

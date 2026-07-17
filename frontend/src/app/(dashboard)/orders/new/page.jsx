@@ -164,7 +164,7 @@ const initialFormData = {
   custodianCheck: "",
   custodianDate: "",
   custodianPaid: "",
-  custodianDue: "15.00",
+  custodianDue: "0.00",
   custodianMemo: "",
 
   xrayCheck: "",

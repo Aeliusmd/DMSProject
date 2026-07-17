@@ -198,8 +198,20 @@ export async function getPersonalDashboard() {
   return authRequest("/personal-portal/dashboard", { method: "GET" });
 }
 
-export async function listPersonalRequests() {
-  return authRequest("/personal-portal/requests", { method: "GET" });
+export async function listPersonalRequests({
+  pageSize = 10,
+  cursor = null,
+  status = "",
+} = {}) {
+  const params = new URLSearchParams();
+  params.set("pagination", "keyset");
+  params.set("pageSize", String(pageSize));
+  if (cursor) params.set("cursor", String(cursor));
+  if (status) params.set("status", status);
+
+  return authRequest(`/personal-portal/requests?${params.toString()}`, {
+    method: "GET",
+  });
 }
 
 export async function submitAuthenticatedPersonalRequest(formData) {

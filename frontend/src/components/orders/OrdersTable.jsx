@@ -410,8 +410,8 @@ function buildWorkflowStagesForOrder(order, companyPortalMode = false) {
         ...stage,
         label: isComplete ? "Serve" : "Serve Payment",
         paidAmount:
-          isComplete && prepaymentPaid > 0
-            ? formatMoneyAmount(prepaymentPaid)
+          prepaymentPaid > 0
+            ? `(${formatMoneyAmount(prepaymentPaid)})`
             : null,
       };
     }
@@ -1897,7 +1897,7 @@ export default function OrdersTable({
                         onCnrReasonClick={() =>
                           openCnrTextModal(setCnrTextModal, order, "Reason")
                         }
-                        allowStandardInvoice={!order.certificateNoRecords}
+                        allowStandardInvoice={true}
                         providerEmail={
                           order.providerEmail ||
                           order.invoice?.providerEmail ||
@@ -3062,7 +3062,74 @@ function InvoiceBlock({
   ) : null;
 
   if (isCnr) {
-    return <div className="space-y-1 text-[10px]">{cnrSection}</div>;
+    const cnrInvoiceSection = invoice.createOnly ? (
+      <>
+        {allowStandardInvoice ? (
+          <>
+            <button
+              type="button"
+              onClick={onCreateInvoice}
+              className="block text-left text-[#007F96] underline"
+            >
+              Create Invoice
+            </button>
+
+            <button
+              type="button"
+              onClick={onCoverSheet}
+              className="block text-left text-[#007F96] underline"
+            >
+              Cover Sheet
+            </button>
+
+            {sendInvoiceButton}
+            {resendInvoiceButton}
+          </>
+        ) : null}
+      </>
+    ) : allowStandardInvoice ? (
+      <>
+        <InvoiceReviewRows
+          label={
+            <button
+              type="button"
+              onClick={onReviewInvoice}
+              className="text-[#007F96] underline"
+            >
+              Review Invoice
+            </button>
+          }
+          dateCompact={invoice.invoiceDateCompact || invoice.reviewDate}
+          dueAmount={invoice.due}
+        />
+
+        <button
+          type="button"
+          onClick={onPrintInvoice}
+          className="block text-left text-[#007F96] underline"
+        >
+          Print Invoice
+        </button>
+
+        <button
+          type="button"
+          onClick={onCoverSheet}
+          className="block text-left text-[#007F96] underline"
+        >
+          Cover Sheet
+        </button>
+
+        {sendInvoiceButton}
+        {resendInvoiceButton}
+      </>
+    ) : null;
+
+    return (
+      <div className="space-y-1 text-[10px]">
+        {cnrInvoiceSection}
+        {cnrSection}
+      </div>
+    );
   }
 
   if (invoice.createOnly) {
