@@ -59,6 +59,76 @@ exports.emailRecords = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, result, "Records emailed with download link");
 });
 
+exports.getNewFacilityRequest = asyncHandler(async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const { portalOrder, newFacility } =
+    await companyPortalInternalSyncService.getNewFacilityContextForInternalOrder(
+      orderId
+    );
+
+  return ApiResponse.success(res, {
+    companyPortalOrderId: portalOrder.id,
+    companyPortalStatus: portalOrder.status,
+    newFacilityRequest: newFacility
+      ? {
+          id: newFacility.id,
+          status: newFacility.status,
+          facilityName: newFacility.facility_name || "",
+          facilityAddress: newFacility.facility_address || "",
+          facilityCity: newFacility.facility_city || "",
+          facilityState: newFacility.facility_state || "",
+          facilityZip: newFacility.facility_zip || "",
+          treatingDoctor: newFacility.treating_doctor || "",
+          searchFeeAmount: Number(newFacility.search_fee_amount) || 0,
+          internalFacilityId: newFacility.internal_facility_id || null,
+        }
+      : null,
+  });
+});
+
+exports.linkFacility = asyncHandler(async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const facilityId = Number(req.body?.facilityId);
+  const result = await companyPortalInternalSyncService.linkFacilityToPortalOrder(
+    orderId,
+    facilityId
+  );
+
+  return ApiResponse.success(
+    res,
+    result,
+    "Facility linked to company portal order"
+  );
+});
+
+exports.markNoFacility = asyncHandler(async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const updated =
+    await companyPortalInternalSyncService.markPortalOrderNoFacility(orderId);
+
+  return ApiResponse.success(
+    res,
+    {
+      companyPortalOrderId: updated.id,
+      companyPortalStatus: updated.status,
+      internalOrderId: updated.internal_order_id,
+    },
+    "Order marked as No facility"
+  );
+});
+
 exports.syncOrder = asyncHandler(async (req, res) => {
   const portalOrderId = Number(req.params.portalOrderId);
   if (!Number.isFinite(portalOrderId) || portalOrderId <= 0) {

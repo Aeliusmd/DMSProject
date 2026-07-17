@@ -1,6 +1,9 @@
 "use client";
 
-export default function CompanyPortalQuickActions({ onAction }) {
+export default function CompanyPortalQuickActions({
+  onAction,
+  isEmployee = false,
+}) {
   const actions = [
     {
       id: "create-order",
@@ -19,7 +22,9 @@ export default function CompanyPortalQuickActions({ onAction }) {
     {
       id: "edit-profile",
       title: "Profile",
-      description: "View company account details",
+      description: isEmployee
+        ? "View your employee account details"
+        : "View company account details",
       accent: "#059669",
       bg: "#ECFDF5",
     },
@@ -30,7 +35,9 @@ export default function CompanyPortalQuickActions({ onAction }) {
       <div className="mb-4">
         <h2 className="text-[15px] font-semibold text-[#111827]">Quick actions</h2>
         <p className="mt-1 text-[12px] text-[#64748B]">
-          Common tasks for your company account
+          {isEmployee
+            ? "Common tasks for your employee account"
+            : "Common tasks for your company account"}
         </p>
       </div>
 

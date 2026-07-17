@@ -24,7 +24,8 @@ async function authenticateCompanyPortal(req, _res, next) {
         throw new ApiError(401, "Session expired or invalid");
       }
 
-      if (!session.employee_is_active) {
+      // MySQL may return TINYINT as 0/1; treat only explicit inactive as blocked.
+      if (Number(session.employee_is_active) === 0) {
         throw new ApiError(403, "Your employee account is inactive");
       }
 
@@ -55,6 +56,8 @@ async function authenticateCompanyPortal(req, _res, next) {
     req.companyUser = {
       id: companyUserId,
       employeeId: null,
+      companyName: session.company_name || null,
+      email: session.email || null,
       role: "Company",
       isAdmin: true,
       sessionId: decoded.sessionId,

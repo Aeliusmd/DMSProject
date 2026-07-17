@@ -20,6 +20,7 @@ import OrderPickupModal from "@/components/orders/OrderPickupModal";
 import OrderFaxModal from "@/components/orders/OrderFaxModal";
 import OrderCancelModal from "@/components/orders/OrderCancelModal";
 import ConfirmModal from "@/components/ui/ConfirmModal";
+import CompanyOrderFacilityModal from "@/components/orders/CompanyOrderFacilityModal";
 import OrderStatusBadge from "@/components/orders/OrderStatusBadge";
 import CompletedDeliveryLink from "@/components/orders/CompletedDeliveryLink";
 import {
@@ -313,6 +314,21 @@ function mapWorkflowStages(stages = []) {
 
 function buildCompanyPortalStages(order) {
   const status = resolveEffectiveCompanyPortalStatus(order);
+
+  // Order was ended because the facility could not be located.
+  if (status === "No facility") {
+    return COMPANY_PORTAL_STAGES.map((stageName) => ({
+      key: stageName,
+      label: stageName,
+      status: stageName === "In Process" ? "failed" : "pending",
+      isCompanyPortalStage: true,
+      canAdvance: false,
+      showScanRecordsLink: false,
+      showEmailRecords: false,
+      showPreviewRecords: false,
+    }));
+  }
+
   const invoiceComplete =
     Boolean(order.companyPortalInvoiceSent) ||
     ["Invoice", "Paid", "Released"].includes(status);
@@ -603,6 +619,9 @@ function toRenderOrder(order, companyPortalMode = false) {
     creationSource: order.creationSource || "manual",
     companyPortalStatus: order.companyPortalStatus || null,
     companyPortalOrderId: order.companyPortalOrderId || null,
+    facilityNotInSystem: Boolean(order.facilityNotInSystem),
+    newFacilityRequest: order.newFacilityRequest || null,
+    pendingFacilitySearchFee: Number(order.pendingFacilitySearchFee) || 0,
     companyPortalInvoiceSent: Boolean(order.companyPortalInvoiceSent),
     companyPortalAllInvoicesPaid: Boolean(order.companyPortalAllInvoicesPaid),
     companyPortalCanScanRecords: Boolean(order.companyPortalCanScanRecords),
@@ -678,6 +697,7 @@ export default function OrdersTable({
   const [selectedCertificationOrder, setSelectedCertificationOrder] = useState(null);
   const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
+  const [facilityModalState, setFacilityModalState] = useState(null);
   const [selectedNoteListOrder, setSelectedNoteListOrder] = useState(null);
   const [selectedAddNoteOrder, setSelectedAddNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
@@ -1529,7 +1549,13 @@ export default function OrdersTable({
           >
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
-                <th className="w-[90px] px-4 py-3">ID</th>
+                <th
+                  className={`${
+                    companyPortalMode ? "w-[132px]" : "w-[90px]"
+                  } px-4 py-3`}
+                >
+                  ID
+                </th>
                 <th className="w-[110px] px-4 py-3">Notes</th>
                 <th className="w-[150px] px-4 py-3">
                   {personalMode ? "Applicant" : "Case"}
@@ -1591,38 +1617,89 @@ export default function OrdersTable({
                     className={getOrderRowClassName(order.orderStatus)}
                   >
                     <td className="px-4 py-5 align-top">
-                      <div className="inline-flex items-start gap-1">
-                        {order.hasIncompleteRequiredFields && (
-                          <IncompleteOrderIndicator
-                            missingFields={order.missingRequiredFields}
-                          />
+                      <div className="w-full min-w-0">
+                        <div className="inline-flex items-start gap-1">
+                          {order.hasIncompleteRequiredFields && (
+                            <IncompleteOrderIndicator
+                              missingFields={order.missingRequiredFields}
+                            />
+                          )}
+                          <Link
+                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
+                              order.dbId
+                            )}`}
+                            className="font-semibold text-[#007F96] hover:underline"
+                          >
+                            {order.id}
+                          </Link>
+                        </div>
+
+                        {order.creationSource === "auto" && (
+                          <p className="mt-1 text-[10px] italic text-[#64748B]">
+                            Unprocessed
+                          </p>
                         )}
-                        <Link
-                          href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                            order.dbId
-                          )}`}
-                          className="font-semibold text-[#007F96] hover:underline"
-                        >
-                          {order.id}
-                        </Link>
+                        {order.creationSource === "personal_portal" && (
+                          <p className="mt-1 text-[10px] font-medium text-[#0097B2]">
+                            Personal Portal
+                          </p>
+                        )}
+
+                        {companyPortalMode && order.facilityNotInSystem && (
+                          <div className="mt-1.5 w-full space-y-1">
+                            <div className="flex w-full items-start gap-1 rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1">
+                              <span
+                                className="mt-px shrink-0 text-[11px] font-bold leading-none text-red-500"
+                                title="Facility not in our system"
+                                aria-hidden="true"
+                              >
+                                !
+                              </span>
+                              <p className="min-w-0 flex-1 text-[10px] font-medium leading-snug text-red-600">
+                                Facility not in our system
+                              </p>
+                            </div>
+                            <div className="flex w-full flex-col items-start gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFacilityModalState({
+                                    order,
+                                    startAtConfirm: false,
+                                  })
+                                }
+                                className="text-left text-[10px] font-semibold text-[#007F96] hover:underline"
+                              >
+                                View details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setFacilityModalState({
+                                    order,
+                                    startAtConfirm: true,
+                                  })
+                                }
+                                className="text-left text-[10px] font-semibold text-red-600 hover:underline"
+                              >
+                                Facility couldn&apos;t be found
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {companyPortalMode &&
+                          order.companyPortalStatus === "No facility" && (
+                            <p className="mt-1.5 w-full rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1 text-[10px] font-medium leading-snug text-red-600">
+                              No facility — order ended
+                            </p>
+                          )}
+
+                        {order.year && (
+                          <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                            {order.year}
+                          </p>
+                        )}
                       </div>
-
-                      {order.creationSource === "auto" && (
-                        <p className="mt-1 text-[10px] italic text-[#64748B]">
-                          Unprocessed
-                        </p>
-                      )}
-                      {order.creationSource === "personal_portal" && (
-                        <p className="mt-1 text-[10px] font-medium text-[#0097B2]">
-                          Personal Portal
-                        </p>
-                      )}
-
-                      {order.year && (
-                        <p className="mt-1 text-[10px] font-medium text-[#64748B]">
-                          {order.year}
-                        </p>
-                      )}
 
                       {order.dateRequestedDisplay || order.dateRequested ? (
                         <p className="mt-1 text-[10px] font-medium text-[#64748B]">
@@ -2256,6 +2333,14 @@ export default function OrdersTable({
         isOpen={Boolean(selectedLogOrder)}
         order={selectedLogOrder}
         onClose={() => setSelectedLogOrder(null)}
+      />
+
+      <CompanyOrderFacilityModal
+        open={Boolean(facilityModalState?.order)}
+        order={facilityModalState?.order}
+        startAtConfirm={Boolean(facilityModalState?.startAtConfirm)}
+        onClose={() => setFacilityModalState(null)}
+        onNoFacility={() => fetchOrders({ silent: true, force: true })}
       />
 
       <OrderNotesListModal

@@ -624,3 +624,28 @@ export async function emailCompanyOrderRecords(orderId, payload = {}) {
   });
   return data?.data || {};
 }
+
+export async function getCompanyOrderNewFacility(orderId) {
+  const data = await request(`/company-orders/${orderId}/new-facility`, {
+    auth: true,
+    cache: "no-store",
+  });
+  return data?.data || {};
+}
+
+export async function linkCompanyOrderFacility(orderId, facilityId) {
+  const data = await request(`/company-orders/${orderId}/link-facility`, {
+    method: "POST",
+    auth: true,
+    body: { facilityId },
+  });
+  return data?.data || {};
+}
+
+export async function markCompanyOrderNoFacility(orderId) {
+  const data = await request(`/company-orders/${orderId}/no-facility`, {
+    method: "POST",
+    auth: true,
+  });
+  return data?.data || {};
+}

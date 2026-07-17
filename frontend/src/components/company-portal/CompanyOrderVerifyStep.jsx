@@ -1,6 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import RecordTypeMultiSelect from "@/components/orders/new-order/RecordTypeMultiSelect";
+import CompanyPortalFacilitySearchField from "@/components/company-portal/CompanyPortalFacilitySearchField";
+import CompanyPortalAddFacilityModal from "@/components/company-portal/CompanyPortalAddFacilityModal";
+import {
+  COMPANY_PORTAL_FACILITY_SEARCH_FEE,
+  formatFacilityAddressDisplay,
+} from "@/lib/company-portal/companyPortalOrderUtils";
 
 function Field({
   label,
@@ -44,10 +51,31 @@ export default function CompanyOrderVerifyStep({
   errors,
   onChange,
   onRecordTypesChange,
+  onFacilityInputChange,
+  onFacilitySelect,
+  onAddNewFacility,
+  onClearNewFacility,
   onBack,
   onContinue,
   saving,
 }) {
+  const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
+
+  const isNewFacilityMode =
+    form.requestNewFacilitySearch && form.facilitySelectionMode === "new";
+  const isExistingFacilityMode =
+    form.facilitySelectionMode === "existing" && form.internalFacilityId;
+  const facilitySearchError =
+    errors.facilitySelectionMode ||
+    errors.internalFacilityId ||
+    errors.facilityName ||
+    "";
+
+  const handleAddFacility = (values) => {
+    onAddNewFacility?.(values);
+    setShowAddFacilityModal(false);
+  };
+
   return (
     <div>
       <div className="mb-6 flex items-start gap-3">
@@ -66,53 +94,48 @@ export default function CompanyOrderVerifyStep({
       </div>
 
       <div className="space-y-4">
-        <Field
-          label="Treating Facility Name"
-          required
-          name="facilityName"
+        <CompanyPortalFacilitySearchField
+          label="Treating Facility"
           value={form.facilityName}
-          onChange={onChange}
-          error={errors.facilityName}
-          placeholder="Facility name only"
-        />
-        <Field
-          label="Street Address"
+          disabled={isNewFacilityMode}
+          onInputChange={onFacilityInputChange}
+          onSelect={onFacilitySelect}
           required
-          name="facilityAddress"
-          value={form.facilityAddress}
-          onChange={onChange}
-          error={errors.facilityAddress}
-          placeholder="Street address"
+          error={facilitySearchError}
         />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Field
-            label="City"
-            required
-            name="facilityCity"
-            value={form.facilityCity}
-            onChange={onChange}
-            error={errors.facilityCity}
-            placeholder="City"
+
+        {!isNewFacilityMode ? (
+          <button
+            type="button"
+            onClick={() => setShowAddFacilityModal(true)}
+            className="text-[12px] font-medium text-[#0097B2] hover:text-[#0086A0] hover:underline"
+          >
+            Add your facility name and address
+          </button>
+        ) : null}
+
+        {isExistingFacilityMode ? (
+          <FacilitySummaryCard
+            title="Selected facility"
+            name={form.facilityName}
+            address={formatFacilityAddressDisplay(form)}
+            doctor={form.treatingDoctor}
+            onClear={onClearNewFacility}
+            clearLabel="Change facility"
           />
-          <Field
-            label="State"
-            required
-            name="facilityState"
-            value={form.facilityState}
-            onChange={onChange}
-            error={errors.facilityState}
-            placeholder="CA"
+        ) : null}
+
+        {isNewFacilityMode ? (
+          <FacilitySummaryCard
+            title="New facility search request"
+            badge={`+$${COMPANY_PORTAL_FACILITY_SEARCH_FEE.toFixed(2)} search fee`}
+            name={form.facilityName || "Facility name not provided"}
+            address={formatFacilityAddressDisplay(form)}
+            doctor={form.treatingDoctor}
+            onClear={onClearNewFacility}
+            clearLabel="Change facility"
           />
-          <Field
-            label="ZIP"
-            required
-            name="facilityZip"
-            value={form.facilityZip}
-            onChange={onChange}
-            error={errors.facilityZip}
-            placeholder="90017"
-          />
-        </div>
+        ) : null}
 
         <RecordTypeMultiSelect
           formData={form}
@@ -138,10 +161,13 @@ export default function CompanyOrderVerifyStep({
             onChange={onChange}
           />
           <Field
-            label="Case / Order Number"
+            label="Order #"
+            required
             name="caseNumber"
             value={form.caseNumber}
             onChange={onChange}
+            error={errors.caseNumber}
+            placeholder="Enter a unique order number"
           />
           <Field
             label="Case Name"
@@ -263,7 +289,64 @@ export default function CompanyOrderVerifyStep({
           onClick={onContinue}
           className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] bg-[#0097B2] px-5 text-[13px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:bg-[#0097B2]/45"
         >
-          {saving ? "Saving..." : "Continue to Payment"} →
+          {saving ? "Checking order number..." : "Continue to Payment"} →
+        </button>
+      </div>
+
+      <CompanyPortalAddFacilityModal
+        open={showAddFacilityModal}
+        onClose={() => setShowAddFacilityModal(false)}
+        onSubmit={handleAddFacility}
+        initialValues={{
+          facilityName: form.facilityName,
+          facilityAddress: form.facilityAddress,
+          facilityCity: form.facilityCity,
+          facilityState: form.facilityState,
+          facilityZip: form.facilityZip,
+          treatingDoctor: form.treatingDoctor,
+        }}
+      />
+    </div>
+  );
+}
+
+function FacilitySummaryCard({
+  title,
+  badge,
+  name,
+  address,
+  doctor,
+  onClear,
+  clearLabel = "Change",
+}) {
+  return (
+    <div className="rounded-[10px] border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-[#64748B]">
+              {title}
+            </p>
+            {badge ? (
+              <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[11px] font-medium text-[#EA580C]">
+                {badge}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-2 text-[14px] font-semibold text-[#0F172A]">{name}</p>
+          {address ? (
+            <p className="mt-1 text-[12px] text-[#64748B]">{address}</p>
+          ) : null}
+          {doctor ? (
+            <p className="mt-1 text-[12px] text-[#64748B]">Doctor: {doctor}</p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={onClear}
+          className="shrink-0 text-[12px] font-medium text-[#0097B2] hover:underline"
+        >
+          {clearLabel}
         </button>
       </div>
     </div>

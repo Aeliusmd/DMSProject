@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   payCompanyPortalInvoice,
 } from "@/lib/company-portal/companyPortalOrderApi";
+import { getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export default function CompanyInvoicePaymentPanel({
@@ -15,13 +16,20 @@ export default function CompanyInvoicePaymentPanel({
   walletBalanceSource = null,
   onOrderUpdated,
 }) {
+  const storedUser = getStoredCompanyUser();
+  const isEmployee =
+    storedUser?.isAdmin === false || walletBalanceSource === "employee";
+
   const [paymentMethod, setPaymentMethod] = useState("wallet");
   const [payingType, setPayingType] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const activePaymentMethod = isEmployee ? "wallet" : paymentMethod;
   const walletLabel =
-    walletBalanceSource === "employee" ? "Employee wallet" : "Company wallet";
+    walletBalanceSource === "employee" || isEmployee
+      ? "Employee wallet"
+      : "Company wallet";
   const canPayWithWallet =
     walletBalance != null && Number(walletBalance) > 0;
 
@@ -30,13 +38,15 @@ export default function CompanyInvoicePaymentPanel({
     setSuccess("");
     setPayingType(link.type);
 
+    const method = isEmployee ? "wallet" : paymentMethod;
+
     try {
       const result = await payCompanyPortalInvoice(orderNumber, {
         invoiceType: link.type,
-        paymentMethod,
+        paymentMethod: method,
       });
 
-      if (paymentMethod === "stripe" && result?.checkoutUrl) {
+      if (method === "stripe" && result?.checkoutUrl) {
         window.location.href = result.checkoutUrl;
         return;
       }
@@ -62,14 +72,16 @@ export default function CompanyInvoicePaymentPanel({
         Outstanding invoice payments
       </p>
       <p className="mt-1 text-[12px] text-[#0C4A6E]">
-        Pay remaining invoice balances from your wallet or by card.
+        {isEmployee
+          ? "Pay remaining invoice balances from your allocated wallet balance."
+          : "Pay remaining invoice balances from your wallet or by card."}
       </p>
 
       {walletBalanceDisplay ? (
         <p className="mt-2 text-[12px] text-[#0F172A]">
           {walletLabel} balance:{" "}
           <span className="font-semibold">{walletBalanceDisplay}</span>
-          {!canPayWithWallet ? (
+          {!canPayWithWallet && !isEmployee ? (
             <>
               {" "}
               —{" "}
@@ -84,36 +96,44 @@ export default function CompanyInvoicePaymentPanel({
         </p>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap gap-4 text-[12px]">
-        <label className="inline-flex cursor-pointer items-center gap-2">
-          <input
-            type="radio"
-            name="invoicePaymentMethod"
-            value="wallet"
-            checked={paymentMethod === "wallet"}
-            onChange={() => setPaymentMethod("wallet")}
-            className="accent-[#0097B2]"
-          />
-          <span className="font-medium text-[#0F172A]">Pay with wallet</span>
-        </label>
-        <label className="inline-flex cursor-pointer items-center gap-2">
-          <input
-            type="radio"
-            name="invoicePaymentMethod"
-            value="stripe"
-            checked={paymentMethod === "stripe"}
-            onChange={() => setPaymentMethod("stripe")}
-            className="accent-[#0097B2]"
-          />
-          <span className="font-medium text-[#0F172A]">Pay with card (Stripe)</span>
-        </label>
-      </div>
+      {!isEmployee ? (
+        <div className="mt-3 flex flex-wrap gap-4 text-[12px]">
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="invoicePaymentMethod"
+              value="wallet"
+              checked={paymentMethod === "wallet"}
+              onChange={() => setPaymentMethod("wallet")}
+              className="accent-[#0097B2]"
+            />
+            <span className="font-medium text-[#0F172A]">Pay with wallet</span>
+          </label>
+          <label className="inline-flex cursor-pointer items-center gap-2">
+            <input
+              type="radio"
+              name="invoicePaymentMethod"
+              value="stripe"
+              checked={paymentMethod === "stripe"}
+              onChange={() => setPaymentMethod("stripe")}
+              className="accent-[#0097B2]"
+            />
+            <span className="font-medium text-[#0F172A]">
+              Pay with card (Stripe)
+            </span>
+          </label>
+        </div>
+      ) : (
+        <p className="mt-3 text-[12px] font-medium text-[#0F172A]">
+          Payment method: Employee wallet only
+        </p>
+      )}
 
       <ul className="mt-4 space-y-3">
         {paymentLinks.map((link) => {
           const dueAmount = Number(link.due || 0);
           const walletTooLow =
-            paymentMethod === "wallet" &&
+            activePaymentMethod === "wallet" &&
             walletBalance != null &&
             Number(walletBalance) < dueAmount;
           const isPaying = payingType === link.type;
@@ -141,15 +161,16 @@ export default function CompanyInvoicePaymentPanel({
                 >
                   {isPaying
                     ? "Processing..."
-                    : paymentMethod === "wallet"
+                    : activePaymentMethod === "wallet"
                       ? "Pay from wallet"
                       : "Pay with card"}
                 </button>
               </div>
               {walletTooLow ? (
                 <p className="mt-2 text-[11px] text-[#B45309]">
-                  Insufficient wallet balance for this invoice. Top up or pay by
-                  card.
+                  {isEmployee
+                    ? "Insufficient wallet balance for this invoice. Ask your company to allocate more funds to your account."
+                    : "Insufficient wallet balance for this invoice. Top up or pay by card."}
                 </p>
               ) : null}
             </li>

@@ -88,39 +88,79 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
   const contactEmail = sanitizeField(body.contactEmail || body.email, 255).toLowerCase();
   const contactPhoneDigits = getDigits(body.contactPhone || body.phone);
 
+  const facilitySelectionMode = sanitizeField(body.facilitySelectionMode, 20)
+    .trim()
+    .toLowerCase();
+  const internalFacilityIdRaw = Number(body.internalFacilityId);
+  const internalFacilityId =
+    Number.isFinite(internalFacilityIdRaw) && internalFacilityIdRaw > 0
+      ? internalFacilityIdRaw
+      : null;
+  const requestNewFacilitySearch = Boolean(body.requestNewFacilitySearch);
+
   const recordFlags = normalizeRecordTypeFlags(body);
 
   if (requireFacility) {
-    if (!facilityName) {
-      errors.push({
-        field: "facilityName",
-        message: "Treating facility name is required",
-      });
-    }
-    if (!facilityAddress) {
-      errors.push({
-        field: "facilityAddress",
-        message: "Treating facility street address is required",
-      });
-    }
-    if (!facilityCity) {
-      errors.push({
-        field: "facilityCity",
-        message: "City is required",
-      });
-    }
-    validateStateZipPair(errors, {
-      state: facilityState,
-      zip: facilityZip,
-      stateField: "facilityState",
-      zipField: "facilityZip",
-      required: true,
-    });
-
     if (!hasAnyRecordType(recordFlags)) {
       errors.push({
         field: "type",
         message: "Select at least one record type",
+      });
+    }
+
+    if (!caseNumber) {
+      errors.push({
+        field: "caseNumber",
+        message: "Order number is required",
+      });
+    }
+
+    if (requestNewFacilitySearch && facilitySelectionMode === "existing") {
+      errors.push({
+        field: "facilitySelectionMode",
+        message: "Choose either an existing facility or a new facility search",
+      });
+    }
+
+    if (requestNewFacilitySearch || facilitySelectionMode === "new") {
+      if (!facilityAddress) {
+        errors.push({
+          field: "facilityAddress",
+          message: "Facility street address is required",
+        });
+      }
+      if (!facilityCity) {
+        errors.push({ field: "facilityCity", message: "City is required" });
+      }
+      validateStateZipPair(errors, {
+        state: facilityState,
+        zip: facilityZip,
+        stateField: "facilityState",
+        zipField: "facilityZip",
+        required: true,
+      });
+    } else if (facilitySelectionMode === "existing") {
+      if (!internalFacilityId) {
+        errors.push({
+          field: "internalFacilityId",
+          message: "Select a facility from the list",
+        });
+      }
+      if (
+        !facilityAddress ||
+        !facilityCity ||
+        !facilityState ||
+        !normalizeZip(facilityZip)
+      ) {
+        errors.push({
+          field: "facilitySelectionMode",
+          message: "Selected facility is missing address details",
+        });
+      }
+    } else {
+      errors.push({
+        field: "facilitySelectionMode",
+        message: "Select an existing facility or request a new facility search",
       });
     }
   } else {
@@ -202,6 +242,9 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
       depoDueDate,
       contactEmail: contactEmail || null,
       contactPhone: contactPhoneDigits || null,
+      facilitySelectionMode: facilitySelectionMode || null,
+      internalFacilityId,
+      requestNewFacilitySearch,
     },
   };
 }

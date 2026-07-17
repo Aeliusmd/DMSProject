@@ -917,6 +917,9 @@ function mapOrderListRow(
     creationSource: row.creation_source || "manual",
     companyPortalStatus: extras.companyPortalStatus || null,
     companyPortalOrderId: extras.companyPortalOrderId || null,
+    facilityNotInSystem: false,
+    newFacilityRequest: null,
+    pendingFacilitySearchFee: 0,
     portalStatus: extras.portalStatus || null,
     portalStatusLabel: extras.portalStatusLabel || null,
   };
@@ -1500,6 +1503,52 @@ async function getAllOrders(query = {}) {
         stageMeta,
         hasUploadedRecords
       );
+    }
+
+    // Flag orders whose facility is not in our internal system (external
+    // company requested a new-facility search that is still pending).
+    const portalOrderIds = mappedOrders
+      .map((order) => Number(order.companyPortalOrderId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (portalOrderIds.length) {
+      const CompanyPortalNewFacility = require("../models/CompanyPortalNewFacility");
+      const newFacilityMap = await CompanyPortalNewFacility.findByPortalOrderIds(
+        portalOrderIds
+      );
+
+      for (const order of mappedOrders) {
+        const portalOrderId = Number(order.companyPortalOrderId);
+        const row = newFacilityMap.get(portalOrderId);
+        if (!row) continue;
+
+        const searchFeeAmount = Number(row.search_fee_amount) || 0;
+        // Fee is still owed when the facility was located/linked but the $5
+        // search fee has not yet been rolled into a regular invoice.
+        const feePending =
+          row.status === "linked" && !row.invoice_billed_at && searchFeeAmount > 0;
+
+        order.newFacilityRequest = {
+          id: row.id,
+          status: row.status,
+          facilityName: row.facility_name || "",
+          facilityAddress: row.facility_address || "",
+          facilityCity: row.facility_city || "",
+          facilityState: row.facility_state || "",
+          facilityZip: row.facility_zip || "",
+          treatingDoctor: row.treating_doctor || "",
+          searchFeeAmount,
+          internalFacilityId: row.internal_facility_id || null,
+          feeBilled: Boolean(row.invoice_billed_at),
+          feePending,
+        };
+        // Amount that will be auto-added to the next regular invoice for this
+        // external company order (0 when nothing is owed).
+        order.pendingFacilitySearchFee = feePending ? searchFeeAmount : 0;
+        // "Not in system" while the request is still pending (not yet linked
+        // to a created internal facility and not cancelled).
+        order.facilityNotInSystem = row.status === "pending";
+      }
     }
   }
 

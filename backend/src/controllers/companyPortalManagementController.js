@@ -21,6 +21,14 @@ exports.createEmployee = asyncHandler(async (req, res) => {
       password: req.body.password,
     }
   );
+
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  await companyPortalActivityLogService.recordFromRequest(req, {
+    context: "employees",
+    action: "create",
+    details: `New employee ${result.employee?.name || req.body.name} (${result.employee?.email || req.body.email}) added`,
+  });
+
   return ApiResponse.created(res, result, result.message);
 });
 
@@ -51,16 +59,47 @@ exports.confirmTopup = asyncHandler(async (req, res) => {
     req.companyUser.id,
     req.body.sessionId
   );
+
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  const latestTopup = (summary?.transactions || []).find(
+    (tx) => tx.transactionType === "topup" || tx.type === "topup"
+  );
+  const amount = Number(latestTopup?.amount || 0);
+  await companyPortalActivityLogService.recordFromRequest(req, {
+    context: "wallet",
+    action: "wallet_topup",
+    details: amount
+      ? `Company wallet topped up by $${amount.toFixed(2)}`
+      : "Company wallet top-up confirmed",
+  });
+
   return ApiResponse.success(res, summary, "Wallet top-up confirmed");
 });
 
 exports.allocateToEmployee = asyncHandler(async (req, res) => {
+  const employeeId = Number(req.body.employeeId);
+  const amount = Number(req.body.amount);
+
   const summary = await companyPortalWalletService.allocateToEmployee(
     req.companyUser.id,
     {
-      employeeId: Number(req.body.employeeId),
-      amount: Number(req.body.amount),
+      employeeId,
+      amount,
     }
   );
+
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  const latestAlloc = (summary?.transactions || []).find(
+    (tx) =>
+      tx.transactionType === "allocation" || tx.type === "allocation"
+  );
+  const employeeLabel =
+    latestAlloc?.employeeName || `employee #${employeeId}`;
+  await companyPortalActivityLogService.recordFromRequest(req, {
+    context: "wallet",
+    action: "wallet_allocate",
+    details: `Allocated $${Number(amount || 0).toFixed(2)} to ${employeeLabel}`,
+  });
+
   return ApiResponse.success(res, summary, "Funds allocated successfully");
 });

@@ -7,7 +7,15 @@ import { getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStor
 export default function CompanyPortalDashboardShell({ children, title }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const user = getStoredCompanyUser();
+  const isEmployee = user?.isAdmin === false;
   const companyName = user?.companyName || "Company Portal";
+  const displayName = isEmployee
+    ? user?.name || user?.email || "Employee"
+    : companyName;
+  const subtitle = isEmployee
+    ? companyName
+    : "Company portal";
+  const initialsSource = isEmployee ? displayName : companyName;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#111827]">
@@ -38,13 +46,15 @@ export default function CompanyPortalDashboardShell({ children, title }) {
 
           <div className="flex shrink-0 items-center gap-2">
             <div className="hidden text-right sm:block">
-              <p className="max-w-[180px] truncate text-[12px] font-semibold text-[#111827]">
-                {companyName}
+              <p className="max-w-[200px] truncate text-[12px] font-semibold text-[#111827]">
+                {displayName}
               </p>
-              <p className="text-[11px] text-[#64748B]">Company portal</p>
+              <p className="max-w-[200px] truncate text-[11px] text-[#64748B]">
+                {subtitle}
+              </p>
             </div>
             <div className="flex h-[32px] w-[32px] items-center justify-center rounded-full bg-[#E6F7FA] text-[11px] font-semibold text-[#007F96]">
-              {getInitials(companyName)}
+              {getInitials(initialsSource)}
             </div>
           </div>
         </header>

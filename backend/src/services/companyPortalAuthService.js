@@ -90,24 +90,34 @@ async function login({ email, password, ipAddress, userAgent }) {
     expiresAt,
   });
 
-  const otpCode = tokenService.generateOtpCode();
-  const otpExpiresAt =
-    Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
+  // Two-factor authentication is disabled for the company portal. Mark the
+  // session as verified immediately and issue tokens directly after a valid
+  // email/password login.
+  await CompanyPortalSession.markTwoFactorVerified(session.id, {
+    trustDevice: false,
+    expiresAt,
+  });
 
-  twoFactorStore.set(companyOtpKey(session.id), otpCode, otpExpiresAt);
+  await CompanyPortalUser.updateLastLogin(user.id);
 
-  const emailResult = await sendTwoFactorCode({
-    to: user.email,
-    name: user.company_name,
-    code: otpCode,
+  const accessToken = tokenService.generateCompanyAccessToken({
+    companyUserId: user.id,
+    sessionId: session.id,
+  });
+
+  const refreshToken = tokenService.generateCompanyRefreshToken({
+    companyUserId: user.id,
+    sessionId: session.id,
+    sessionToken,
   });
 
   return {
-    requiresTwoFactor: true,
+    requiresTwoFactor: false,
+    accessToken,
+    refreshToken,
     sessionToken,
-    email: tokenService.maskEmail(user.email),
-    expiresInMinutes: config.twoFactor.expiresMinutes,
-    devCodeLogged: emailResult.devLogged === true,
+    expiresIn: tokenService.getAccessTokenExpiresInSeconds(),
+    user: formatCompanyUser(user),
   };
 }
 
@@ -268,11 +278,15 @@ async function logout({ refreshToken, sessionToken }) {
 
   let deleted = false;
   let companyUserId = null;
+  let companyName = null;
+  let performerName = null;
 
   if (sessionToken) {
     const session = await CompanyPortalSession.findBySessionToken(sessionToken);
     if (session) {
       companyUserId = session.company_user_id;
+      companyName = session.company_name || null;
+      performerName = session.company_name || "Company Admin";
       twoFactorStore.remove(companyOtpKey(session.id));
       deleted = await CompanyPortalSession.deleteBySessionToken(sessionToken);
     }
@@ -285,6 +299,8 @@ async function logout({ refreshToken, sessionToken }) {
 
       if (session) {
         companyUserId = session.company_user_id;
+        companyName = session.company_name || null;
+        performerName = session.company_name || "Company Admin";
         twoFactorStore.remove(companyOtpKey(session.id));
         await CompanyPortalSession.deleteById(session.id);
         deleted = true;
@@ -297,6 +313,9 @@ async function logout({ refreshToken, sessionToken }) {
   return {
     message: "Logged out successfully",
     companyUserId,
+    companyName,
+    performerName,
+    employeeId: null,
   };
 }
 
