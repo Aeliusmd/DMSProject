@@ -118,7 +118,11 @@ export default function PersonalNewRequestPage() {
   const draftHydratedRef = useRef(false);
   const accountUser = getStoredPersonalUser();
 
-  const [config, setConfig] = useState({ processingFee: "35.00", lookupDays: 7 });
+  const [config, setConfig] = useState({
+    processingFee: "35.00",
+    researchFee: "5.00",
+    lookupDays: 7,
+  });
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(INITIAL_FORM);
   const [touched, setTouched] = useState({});
@@ -394,8 +398,9 @@ export default function PersonalNewRequestPage() {
               ) : null}
               {!form.facilityId ? (
                 <div className="rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#92400E]">
-                  Manual facility lookup — an additional research fee may apply
-                  (amount TBD).
+                  Facility not in our list — a ${config.researchFee || "5.00"}{" "}
+                  facility search fee will be added to your invoice and you will
+                  be asked to pay when DMS creates and sends that invoice.
                 </div>
               ) : (
                 <p className="text-[11px] text-[#059669]">
@@ -551,8 +556,10 @@ export default function PersonalNewRequestPage() {
               <p className="mt-1 text-[12px] text-[#64748B]">
                 Search by facility name or address from the DMS facilities list.
                 Selecting a match fills both fields. Facility name is optional;
-                address is required. Unmatched addresses are treated as a manual
-                research lookup (you cannot create a new facility record).
+                address is required. If the facility is not in our list, DMS will
+                search for it. A ${config.researchFee || "5.00"} facility search
+                fee is added to your invoice only if we locate and add the
+                facility, and you are asked to pay when that invoice is sent.
               </p>
             </div>
 
@@ -623,9 +630,10 @@ export default function PersonalNewRequestPage() {
               />
               {!form.facilityId && form.treatingFacilityAddress.trim() ? (
                 <div className="mt-2 rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#92400E]">
-                  This address is not linked to a known facility. An additional
-                  research fee may apply (amount to be confirmed) for manual
-                  lookup.
+                  This address is not linked to a known facility. A $
+                  {config.researchFee || "5.00"} facility search fee will be
+                  added to your invoice only if we locate and add this facility.
+                  You will be asked to pay when the invoice is sent.
                 </div>
               ) : !form.facilityId ? (
                 <p className="mt-1 text-[11px] text-[#64748B]">

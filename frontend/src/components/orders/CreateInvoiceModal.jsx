@@ -69,6 +69,7 @@ export default function CreateInvoiceModal({
   const [persistedInvoiceMeta, setPersistedInvoiceMeta] = useState(null);
   const [quickRecordsFee, setQuickRecordsFee] = useState(false);
   const [savedDetailedFees, setSavedDetailedFees] = useState(null);
+  const [pendingFacilitySearchFee, setPendingFacilitySearchFee] = useState(0);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -107,6 +108,13 @@ export default function CreateInvoiceModal({
 
         const derivedRushLevel = calculateOrderRushLevel(orderData.createdAt);
         setRushLevel(derivedRushLevel);
+        setPendingFacilitySearchFee(
+          !isEditMode
+            ? toNumber(orderData.pendingFacilitySearchFee) ||
+                toNumber(order?.pendingFacilitySearchFee) ||
+                0
+            : 0
+        );
         const loadedPaymentLines = buildPaymentLinesFromOrder(orderData);
         setPaymentLines(loadedPaymentLines);
         const loadedPrepayment = getPaymentLineAmount(loadedPaymentLines, "prepayment");
@@ -182,6 +190,7 @@ export default function CreateInvoiceModal({
       setPrepaymentAmount("0.00");
       setLoadedPrepaymentAmount(0);
       setRushLevel(null);
+      setPendingFacilitySearchFee(0);
       setQuickRecordsFee(false);
       setSavedDetailedFees(null);
     }
@@ -212,13 +221,18 @@ export default function CreateInvoiceModal({
     return resolveFullFeeAmounts(formData);
   }, [formData]);
 
-  // External company orders: when DMS located/created the requested facility,
-  // a $5 facility-search fee is auto-added by the server to this regular
-  // invoice (once). Surface it here so staff can see it before saving. It is
-  // only pending on creation; once billed the server reports 0.
+  // Company / personal portal: $5 facility-search fee is auto-added into the
+  // invoice total (once) when DMS located/added an unmatched facility.
   const facilitySearchFee = useMemo(() => {
-    return !isEditMode ? toNumber(order?.pendingFacilitySearchFee) : 0;
-  }, [isEditMode, order?.pendingFacilitySearchFee]);
+    if (isEditMode) return 0;
+    return toNumber(
+      pendingFacilitySearchFee || order?.pendingFacilitySearchFee || 0
+    );
+  }, [isEditMode, pendingFacilitySearchFee, order?.pendingFacilitySearchFee]);
+
+  const isPersonalPortalOrder =
+    order?.creationSource === "personal_portal" ||
+    order?.creation_source === "personal_portal";
 
   const totalAmount = useMemo(() => {
     return (
@@ -235,14 +249,19 @@ export default function CreateInvoiceModal({
   }, [prepaymentAmount]);
 
   // Flat $20 records fee is separate from the $15 witness prepayment — do not
-  // credit prepayment against the records-fee invoice due. Detailed invoices
-  // keep the existing prepayment-credit behavior.
+  // credit prepayment against the records-fee invoice due. Personal portal
+  // processing fee stays paid/kept — do not deduct it from the invoice due.
+  const skipPrepaymentCredit = isPersonalPortalOrder;
   const amountPaid = useMemo(() => {
-    if (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) {
+    if (
+      skipPrepaymentCredit ||
+      quickRecordsFee ||
+      isQuickRecordsFeeInvoice(formData)
+    ) {
       return 0;
     }
     return prepaymentPaid;
-  }, [quickRecordsFee, formData, prepaymentPaid]);
+  }, [skipPrepaymentCredit, quickRecordsFee, formData, prepaymentPaid]);
 
   const invoiceTotals = useMemo(
     () =>
@@ -266,8 +285,9 @@ export default function CreateInvoiceModal({
     return validateInvoiceForm(formData, {
       // CNR invoices may be $0 (only the prior $15 witness fee applies).
       requirePositiveTotal: willCreateInvoice && !isCnrOrder,
+      facilitySearchFee,
     });
-  }, [formData, willCreateInvoice, isCnrOrder]);
+  }, [formData, willCreateInvoice, isCnrOrder, facilitySearchFee]);
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
@@ -280,13 +300,18 @@ export default function CreateInvoiceModal({
   const witnessFeeRequired = PAYMENT_CHARGE_AMOUNTS.prepayment;
   const witnessFeeShortfall = Math.max(0, witnessFeeRequired - prepaymentPaid);
   const prepaymentDueForCnr = isCnrOrder ? witnessFeeShortfall : 0;
-  // $20 quick fee + unpaid witness fee (if not paid earlier) = up to $35 to collect.
+  // $20 quick records fee (+ unpaid witness when applicable) + any pending
+  // facility search fee — facility fee always stacks onto records/other fees.
+  const quickWitnessDue = skipPrepaymentCredit
+    ? 0
+    : Math.max(0, witnessFeeRequired - loadedPrepaymentAmount);
   const quickCollectTotal = isQuickMode
-    ? QUICK_RECORDS_FEE +
-      Math.max(0, witnessFeeRequired - loadedPrepaymentAmount)
+    ? QUICK_RECORDS_FEE + quickWitnessDue + facilitySearchFee
     : null;
   const requestTotalDisplay = isQuickMode
-    ? REQUEST_TOTAL_WITH_RECORDS_FEE
+    ? (skipPrepaymentCredit
+        ? QUICK_RECORDS_FEE + facilitySearchFee
+        : REQUEST_TOTAL_WITH_RECORDS_FEE + facilitySearchFee)
     : null;
   const displayDue = isCnrOrder
     ? prepaymentDueForCnr
@@ -417,6 +442,7 @@ export default function CreateInvoiceModal({
 
     const validationErrors = validateInvoiceForm(formData, {
       requirePositiveTotal: willCreate && !isCnrOrder,
+      facilitySearchFee,
     });
 
     setErrors(validationErrors);
@@ -504,14 +530,16 @@ export default function CreateInvoiceModal({
                 isCnrOrder
                   ? PAYMENT_CHARGE_AMOUNTS.prepayment
                   : isQuickMode
-                    ? REQUEST_TOTAL_WITH_RECORDS_FEE
+                    ? requestTotalDisplay
                     : totalAmount
               )}
             />
             <MetaItem
               label="Paid"
               value={formatMoney(
-                isCnrOrder || isQuickMode ? prepaymentPaid : amountPaid
+                isCnrOrder || (isQuickMode && !skipPrepaymentCredit)
+                  ? prepaymentPaid
+                  : amountPaid
               )}
             />
             <MetaItem label="Due" value={formatMoney(displayDue)} />
@@ -697,9 +725,13 @@ export default function CreateInvoiceModal({
             </h3>
 
             <div className="space-y-3">
-              {requestTotalDisplay ? (
+              {requestTotalDisplay != null && !skipPrepaymentCredit ? (
                 <SummaryRow
-                  label="Total ($15 + $20)"
+                  label={
+                    facilitySearchFee > 0
+                      ? "Total ($15 + $20 + facility)"
+                      : "Total ($15 + $20)"
+                  }
                   value={formatMoney(requestTotalDisplay)}
                 />
               ) : null}
@@ -729,14 +761,22 @@ export default function CreateInvoiceModal({
             </div>
             {facilitySearchFee > 0 && (
               <p className="mt-2 rounded-[8px] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
-                A ${facilitySearchFee.toFixed(2)} facility search fee is added
-                automatically because DMS located and added the facility this
-                external order requested.
+                A ${facilitySearchFee.toFixed(2)} facility search fee is added on
+                top of records/storage and any other fees, and is included in the
+                invoice total
+                {isPersonalPortalOrder
+                  ? " for this personal request unmatched facility."
+                  : " for this external company new-facility search."}
               </p>
             )}
 
             <div className="mt-4 space-y-3 border-t border-[#E2E8F0] pt-4">
-              <SummaryRow label="Invoice subtotal" value={formatMoney(totalAmount)} />
+              <SummaryRow
+                label="Invoice total"
+                value={formatMoney(
+                  isQuickMode ? quickCollectTotal : totalAmount
+                )}
+              />
               {isCnrOrder ? (
                 <>
                   <SummaryRow
@@ -759,17 +799,26 @@ export default function CreateInvoiceModal({
                 </>
               ) : isQuickMode ? (
                 <>
-                  <SummaryRow
-                    label={`Prepayment ${formatPaidBracket(witnessFeeRequired)}`}
-                    value={formatMoney(loadedPrepaymentAmount)}
-                    muted={loadedPrepaymentAmount >= witnessFeeRequired}
-                  />
+                  {!skipPrepaymentCredit ? (
+                    <SummaryRow
+                      label={`Prepayment ${formatPaidBracket(witnessFeeRequired)}`}
+                      value={formatMoney(loadedPrepaymentAmount)}
+                      muted={loadedPrepaymentAmount >= witnessFeeRequired}
+                    />
+                  ) : null}
                   <SummaryRow
                     label="Records fee"
                     value={formatMoney(QUICK_RECORDS_FEE)}
                   />
+                  {facilitySearchFee > 0 ? (
+                    <SummaryRow
+                      label="Facility Search Fee"
+                      value={formatMoney(facilitySearchFee)}
+                    />
+                  ) : null}
                 </>
               ) : (
+                !skipPrepaymentCredit &&
                 prepaymentPaid > 0 && (
                   <SummaryRow
                     label="Prepayment"
@@ -1207,7 +1256,7 @@ function SummaryRow({
   );
 }
 
-function calculateInvoiceTotal(data) {
+function calculateInvoiceTotal(data, facilitySearchFee = 0) {
   const pagesAmount = toNumber(data.pages) * toNumber(data.perPageAmount);
   const clericalAmount =
     toNumber(data.clericalTimeHours) * toNumber(data.clericalHourlyRate);
@@ -1216,11 +1265,15 @@ function calculateInvoiceTotal(data) {
     pagesAmount +
     clericalAmount +
     toNumber(data.shippingHandling) +
-    toNumber(data.storageFee)
+    toNumber(data.storageFee) +
+    toNumber(facilitySearchFee)
   );
 }
 
-function validateInvoiceForm(data, { requirePositiveTotal = false } = {}) {
+function validateInvoiceForm(
+  data,
+  { requirePositiveTotal = false, facilitySearchFee = 0 } = {}
+) {
   const errors = {};
 
   if (!data.invoiceDate) {
@@ -1254,7 +1307,10 @@ function validateInvoiceForm(data, { requirePositiveTotal = false } = {}) {
     errors.clericalTimeHours = "Enter a valid clerical time (0 or greater)";
   }
 
-  if (requirePositiveTotal && calculateInvoiceTotal(data) <= 0) {
+  if (
+    requirePositiveTotal &&
+    calculateInvoiceTotal(data, facilitySearchFee) <= 0
+  ) {
     errors.totalAmount = "Invoice total must be greater than zero";
   }
 

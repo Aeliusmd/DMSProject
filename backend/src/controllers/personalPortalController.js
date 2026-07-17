@@ -211,6 +211,9 @@ exports.getConfig = asyncHandler(async (_req, res) => {
     processingFee: (
       (config.personalPortal?.processingFeeCents || 3500) / 100
     ).toFixed(2),
+    researchFee: (
+      (config.personalPortal?.researchFeeCents || 500) / 100
+    ).toFixed(2),
     lookupDays: config.personalPortal?.lookupDays || 7,
     stripePublishableKey: config.stripe?.publishableKey || "",
   });

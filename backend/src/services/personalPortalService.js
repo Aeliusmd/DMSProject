@@ -523,6 +523,9 @@ async function fulfillPersonalPortalPayment(session) {
     });
   }
 
+  // Facility search fee ($5) is added on the DMS invoice and the personal user
+  // is only asked to pay when that invoice is created and sent (email/system).
+
   try {
     const stripePaymentService = require("./stripePaymentService");
     await stripePaymentService.recordPersonalPortalStripePayment(session);
@@ -1080,28 +1083,55 @@ function mapResearchFee(order) {
 }
 
 /**
- * After DMS staff verifies a personal-portal order and completes the facility,
- * request the $5 fee, email the user, and surface it on the portal dashboard.
+ * Arm / email the $5 facility search fee only when staff is ready to collect —
+ * i.e. after the DMS invoice is created and sent to the personal user.
+ * Do not call this on facility verify / payment fulfill.
  */
-async function requestResearchFeeAfterFacilityVerification(dmsOrderId) {
+async function requestResearchFeeAfterFacilityVerification(
+  dmsOrderId,
+  { notify = true } = {}
+) {
   const normalizedId = Number(dmsOrderId);
   if (!Number.isFinite(normalizedId) || normalizedId <= 0) return null;
 
   const requestOrder = await PersonalRequestOrder.findByOrderId(normalizedId);
   if (!requestOrder || !requestOrder.processing_fee_paid) return null;
 
-  const status = requestOrder.research_fee_status || "none";
-  if (status === "paid" || status === "waived" || status === "pending") {
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+  const isManualLookup = Boolean(Number(primaryFacility?.is_manual_lookup));
+  if (!isManualLookup) {
     return {
       skipped: true,
-      reason: status === "pending" ? "already_pending" : status,
+      reason: "matched_facility",
       requestId: requestOrder.id,
     };
   }
 
-  await PersonalRequestOrder.markResearchFeeRequested(requestOrder.id);
+  const status = requestOrder.research_fee_status || "none";
+  if (status === "paid" || status === "waived") {
+    return {
+      skipped: true,
+      reason: status,
+      requestId: requestOrder.id,
+    };
+  }
+
+  if (status !== "pending") {
+    await PersonalRequestOrder.markResearchFeeRequested(requestOrder.id);
+  }
 
   const amount = getResearchFeeAmount();
+  if (!notify) {
+    return {
+      requested: true,
+      notified: false,
+      requestId: requestOrder.id,
+      amount,
+    };
+  }
+
   const baseClient = (config.clientUrl || "http://localhost:3000").replace(
     /\/$/,
     ""
@@ -1124,7 +1154,7 @@ async function requestResearchFeeAfterFacilityVerification(dmsOrderId) {
     });
   }
 
-  logger.info("Personal portal research fee requested", {
+  logger.info("Personal portal research fee requested after invoice send", {
     requestId: requestOrder.id,
     dmsOrderId: normalizedId,
     amount,
@@ -1132,10 +1162,114 @@ async function requestResearchFeeAfterFacilityVerification(dmsOrderId) {
 
   return {
     requested: true,
+    notified: true,
     requestId: requestOrder.id,
     amount,
     payUrl,
   };
+}
+
+/**
+ * Company-portal parity: $5 facility search fee still owed for the next
+ * regular invoice when the personal request used an unmatched facility and
+ * the fee has not yet been billed / paid.
+ * Does not email the user — that happens only when the invoice is sent.
+ */
+async function getPendingPersonalFacilitySearchFee(dmsOrderId) {
+  const normalizedId = Number(dmsOrderId);
+  if (!Number.isFinite(normalizedId) || normalizedId <= 0) return null;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(normalizedId);
+  if (!requestOrder || !requestOrder.processing_fee_paid) return null;
+
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+  if (!Boolean(Number(primaryFacility?.is_manual_lookup))) {
+    return null;
+  }
+
+  const status = requestOrder.research_fee_status || "none";
+  if (status === "paid" || status === "waived") {
+    return null;
+  }
+
+  const amount = getResearchFeeAmount();
+  if (amount <= 0) return null;
+
+  return {
+    personalRequestId: requestOrder.id,
+    amount,
+  };
+}
+
+/**
+ * After invoice email/system send: sync portal status and ask the personal
+ * user to pay (invoice payment link already emailed; surface fee on dashboard
+ * only when a facility-search fee applied and is still unpaid separately).
+ */
+async function notifyPersonalUserAfterInvoiceSent(dmsOrderId) {
+  const normalizedId = Number(dmsOrderId);
+  if (!Number.isFinite(normalizedId) || normalizedId <= 0) return null;
+
+  await syncPortalStatusForDmsOrder(normalizedId);
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(normalizedId);
+  if (!requestOrder) return null;
+
+  // Fee already folded into the invoice and marked billed → user pays via
+  // the invoice email / payment link only (no separate research-fee ask).
+  if ((requestOrder.research_fee_status || "none") === "paid") {
+    return { synced: true, separateFeeAsk: false, requestId: requestOrder.id };
+  }
+
+  const pending = await getPendingPersonalFacilitySearchFee(normalizedId);
+  if (!pending) {
+    return { synced: true, separateFeeAsk: false, requestId: requestOrder.id };
+  }
+
+  // Edge case: fee due but not yet on an invoice — ask after send.
+  return requestResearchFeeAfterFacilityVerification(normalizedId, {
+    notify: true,
+  });
+}
+
+async function markPersonalFacilitySearchFeeBilled(personalRequestId) {
+  if (!personalRequestId) return;
+  await PersonalRequestOrder.markResearchFeePaid(personalRequestId);
+}
+
+async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
+  const personalOrders = mappedOrders.filter(
+    (order) =>
+      order.creationSource === "personal_portal" &&
+      !(Number(order.pendingFacilitySearchFee) > 0)
+  );
+  if (!personalOrders.length) return mappedOrders;
+
+  await Promise.all(
+    personalOrders.map(async (order) => {
+      try {
+        const dmsOrderId = Number(order.dbId || order.id);
+        const pending = await getPendingPersonalFacilitySearchFee(dmsOrderId);
+        if (pending?.amount > 0) {
+          order.pendingFacilitySearchFee = pending.amount;
+          order.newFacilityRequest = {
+            id: pending.personalRequestId,
+            status: "linked",
+            searchFeeAmount: pending.amount,
+            feePending: true,
+            feeBilled: false,
+            source: "personal_portal",
+          };
+        }
+      } catch (_error) {
+        // Non-blocking enrichment
+      }
+    })
+  );
+
+  return mappedOrders;
 }
 
 async function createResearchFeeCheckout(personalRequestId, portalUserId) {
@@ -1178,9 +1312,9 @@ async function createResearchFeeCheckout(personalRequestId, portalUserId) {
         price_data: {
           currency,
           product_data: {
-            name: "Personal Records — Facility Verification Fee",
+            name: "Personal Records — Facility Search Fee",
             description:
-              "Fee after DMS verification and facility confirmation for your personal records request",
+              "$5 facility search fee after DMS located and confirmed a facility that was not in our list at request time",
           },
           unit_amount: feeCents,
         },
@@ -1351,6 +1485,10 @@ module.exports = {
   fulfillPersonalPortalPayment,
   fulfillPersonalPortalResearchFeePayment,
   requestResearchFeeAfterFacilityVerification,
+  getPendingPersonalFacilitySearchFee,
+  markPersonalFacilitySearchFeeBilled,
+  enrichOrdersWithPersonalFacilitySearchFees,
+  notifyPersonalUserAfterInvoiceSent,
   createResearchFeeCheckout,
   getCheckoutResult,
   lookupRequestStatus,

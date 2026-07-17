@@ -12,8 +12,20 @@ export const QUICK_RECORDS_FEE = 20;
 export const REQUEST_TOTAL_WITH_RECORDS_FEE =
   PAYMENT_CHARGE_AMOUNTS.prepayment + QUICK_RECORDS_FEE;
 
+export function extractFacilitySearchFeeFromNotes(notes = "") {
+  const match = `${notes || ""}`.match(
+    /Includes\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s+facility search fee/i
+  );
+  return match ? parsePaymentAmount(match[1]) : 0;
+}
+
 export function isQuickRecordsFeeInvoice(fees = {}) {
   const storageFee = parsePaymentAmount(fees.storageFee ?? fees.storage_fee);
+  const facilityFee = extractFacilitySearchFeeFromNotes(fees.notes);
+  const recordsFee = Math.max(
+    0,
+    Number((storageFee - facilityFee).toFixed(2))
+  );
   const pages = Math.max(0, Math.floor(parsePaymentAmount(fees.pages ?? fees.page_count)));
   const perPageAmount = parsePaymentAmount(
     fees.perPageAmount ?? fees.per_page_amount
@@ -29,7 +41,7 @@ export function isQuickRecordsFeeInvoice(fees = {}) {
   );
 
   return (
-    storageFee === QUICK_RECORDS_FEE &&
+    recordsFee === QUICK_RECORDS_FEE &&
     pages === 0 &&
     perPageAmount === 0 &&
     clericalHours === 0 &&

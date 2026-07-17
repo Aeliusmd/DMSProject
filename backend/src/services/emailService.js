@@ -977,16 +977,16 @@ async function sendPersonalPortalResearchFeeRequest({
   payUrl,
 }) {
   const amountLabel = Number(amount).toFixed(2);
-  const subject = `Action required: $${amountLabel} facility verification fee — ${confirmationReference}`;
+  const subject = `Action required: $${amountLabel} facility search fee — ${confirmationReference}`;
   const text = [
     `Hello ${name || "Patient"},`,
     "",
-    "Your personal records request has been verified by our team and the treating facility has been confirmed.",
+    "Your personal records request used a facility that was not already in our list. Our team has located and confirmed the treating facility.",
     "",
     `Confirmation reference: ${confirmationReference}`,
     `Amount due: $${amountLabel}`,
     "",
-    "Please pay this facility verification / research fee to continue processing:",
+    "Please pay this facility search fee to continue processing:",
     payUrl,
     "",
     "You can also pay from your Personal Request Portal dashboard.",
@@ -996,10 +996,10 @@ async function sendPersonalPortalResearchFeeRequest({
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#111827;">
-      <h2 style="color:#0097B2;">Facility Verification Fee Due</h2>
+      <h2 style="color:#0097B2;">Facility Search Fee Due</h2>
       <p>Hi ${escapeHtml(name || "Patient")}, your request <strong>${escapeHtml(
         confirmationReference
-      )}</strong> has been verified and the treating facility has been confirmed on our side.</p>
+      )}</strong> needed a facility search because the treating facility was not in our list. We have now located and confirmed it.</p>
       <p style="font-size:18px;font-weight:700;">Amount due: $${escapeHtml(amountLabel)}</p>
       <p>
         <a href="${escapeHtml(payUrl)}"

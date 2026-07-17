@@ -38,11 +38,11 @@ export default function PersonalResearchFeeBanner({
   return (
     <section className="mb-5 rounded-[10px] border border-[#FDE68A] bg-[#FFFBEB] p-4 shadow-sm">
       <h2 className="text-[14px] font-semibold text-[#92400E]">
-        Facility verification fee due
+        Facility search fee due
       </h2>
       <p className="mt-1 text-[12px] text-[#A16207]">
-        Your request was verified on the DMS side and the treating facility was
-        confirmed. Please pay the $5.00 fee to continue processing.
+        Your invoice has been sent. Please pay the facility search fee below to
+        continue processing.
       </p>
 
       {error ? (

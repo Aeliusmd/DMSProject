@@ -1553,6 +1553,15 @@ async function getAllOrders(query = {}) {
     }
   }
 
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.enrichOrdersWithPersonalFacilitySearchFees(
+      mappedOrders
+    );
+  } catch (_personalFeeError) {
+    // Non-blocking
+  }
+
   if (!useKeysetPagination) {
     return mappedOrders;
   }
@@ -1653,6 +1662,27 @@ async function getOrderById(id) {
       order.id,
       payments
     );
+
+    try {
+      const personalPortalService = require("./personalPortalService");
+      const pending =
+        await personalPortalService.getPendingPersonalFacilitySearchFee(
+          order.id
+        );
+      if (pending?.amount > 0) {
+        mapped.pendingFacilitySearchFee = pending.amount;
+        mapped.newFacilityRequest = {
+          id: pending.personalRequestId,
+          status: "linked",
+          searchFeeAmount: pending.amount,
+          feePending: true,
+          feeBilled: false,
+          source: "personal_portal",
+        };
+      }
+    } catch (_feeError) {
+      // Non-blocking
+    }
   }
 
   return mapped;
@@ -2472,27 +2502,12 @@ async function updateOrderFacility(id, data, actorId) {
     await connection.commit();
 
     const updated = await getOrderById(existing.id);
-    await maybeRequestPersonalPortalResearchFee(existing.id);
     return updated;
   } catch (error) {
     await connection.rollback();
     rethrowServiceError(error);
   } finally {
     connection.release();
-  }
-}
-
-async function maybeRequestPersonalPortalResearchFee(dmsOrderId) {
-  try {
-    const personalPortalService = require("./personalPortalService");
-    await personalPortalService.requestResearchFeeAfterFacilityVerification(
-      dmsOrderId
-    );
-  } catch (error) {
-    logger.warn("Failed to request personal portal research fee", {
-      dmsOrderId,
-      message: error.message,
-    });
   }
 }
 
@@ -2606,7 +2621,6 @@ async function updateOrder(id, data, actorId, files) {
     await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 
     const updated = await getOrderById(existing.id);
-    await maybeRequestPersonalPortalResearchFee(existing.id);
     return updated;
   } catch (error) {
     await connection.rollback();
