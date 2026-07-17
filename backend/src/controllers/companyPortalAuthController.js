@@ -43,7 +43,19 @@ exports.login = asyncHandler(async (req, res) => {
     ...getRequestMeta(req),
   });
 
-  return ApiResponse.success(res, result, "Two-factor authentication required");
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  await companyPortalActivityLogService.recordSafe({
+    companyUserId: result.user?.id,
+    performedByType: "admin",
+    performedByAdminId: result.user?.id,
+    performerName: result.user?.companyName || "Company Admin",
+    companyName: result.user?.companyName || null,
+    context: "auth",
+    action: "login",
+    details: "Company admin logged in successfully",
+  });
+
+  return ApiResponse.success(res, result, "Authentication successful");
 });
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
@@ -102,6 +114,23 @@ exports.logout = asyncHandler(async (req, res) => {
     sessionToken: req.body.sessionToken,
   });
 
+  if (result.companyUserId) {
+    const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+    await companyPortalActivityLogService.recordSafe({
+      companyUserId: result.companyUserId,
+      performedByType: result.employeeId ? "employee" : "admin",
+      performedByAdminId: result.employeeId ? null : result.companyUserId,
+      performedByEmployeeId: result.employeeId || null,
+      performerName: result.performerName || null,
+      companyName: result.companyName || null,
+      context: "auth",
+      action: "logout",
+      details: result.employeeId
+        ? "Company employee logged out"
+        : "Company admin logged out",
+    });
+  }
+
   return ApiResponse.success(res, result, result.message);
 });
 
@@ -140,6 +169,18 @@ exports.employeeLogin = asyncHandler(async (req, res) => {
     password,
     ...getRequestMeta(req),
     trustDevice: Boolean(req.body.trustDevice),
+  });
+
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  await companyPortalActivityLogService.recordSafe({
+    companyUserId: result.user?.companyUserId,
+    performedByType: "employee",
+    performedByEmployeeId: result.user?.id,
+    performerName: result.user?.name || "Company Employee",
+    companyName: result.user?.companyName || null,
+    context: "auth",
+    action: "login",
+    details: `Employee ${result.user?.name || email} logged in successfully`,
   });
 
   return ApiResponse.success(res, result, "Authentication successful");

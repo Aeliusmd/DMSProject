@@ -4,15 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPortalShell from "@/components/company-portal/CompanyPortalShell";
-import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
 import AuthInput from "@/components/ui/AuthInput";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import {
   loginCompany,
   loginCompanyEmployee,
-  resendCompanyTwoFactor,
   saveCompanyAuthSession,
-  verifyCompanyTwoFactor,
 } from "@/lib/company-portal/companyPortalAuthApi";
 import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
@@ -39,9 +36,6 @@ export default function CompanyPortalLoginClient() {
   const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [loginError, setLoginError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isTwoFactorOpen, setIsTwoFactorOpen] = useState(false);
-  const [sessionToken, setSessionToken] = useState("");
-  const [maskedEmail, setMaskedEmail] = useState("");
 
   useEffect(() => {
     if (isCompanyAuthenticated()) {
@@ -81,9 +75,9 @@ export default function CompanyPortalLoginClient() {
       });
 
       const payload = response?.data || {};
-      setSessionToken(payload.sessionToken || "");
-      setMaskedEmail(payload.email || email.trim());
-      setIsTwoFactorOpen(true);
+      saveCompanyAuthSession(payload);
+      router.push("/company-portal/dashboard");
+      return;
     } catch (error) {
       const { fieldErrors, message } = applyApiFieldErrors(error, {
         identifier: "email",
@@ -234,26 +228,6 @@ export default function CompanyPortalLoginClient() {
           </div>
         </form>
       </CompanyPortalShell>
-
-      <TwoFactorAuthModal
-        isOpen={isTwoFactorOpen}
-        email={maskedEmail}
-        sessionToken={sessionToken}
-        subtitle="Company Portal"
-        verifyFn={verifyCompanyTwoFactor}
-        resendFn={resendCompanyTwoFactor}
-        saveSessionFn={saveCompanyAuthSession}
-        onClose={() => {
-          setIsTwoFactorOpen(false);
-          setSessionToken("");
-          setMaskedEmail("");
-        }}
-        onSuccess={() => {
-          setIsTwoFactorOpen(false);
-          setSessionToken("");
-          router.push("/company-portal/dashboard");
-        }}
-      />
     </>
   );
 }

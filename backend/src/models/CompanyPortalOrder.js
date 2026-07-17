@@ -451,6 +451,29 @@ class CompanyPortalOrder {
     return this.findById(id, connection);
   }
 
+  static async updateFacilityDetails(id, details = {}, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE company_portal_orders
+       SET facility_name = :facilityName,
+           facility_address = :facilityAddress,
+           facility_city = :facilityCity,
+           facility_state = :facilityState,
+           facility_zip = :facilityZip,
+           updated_at = NOW()
+       WHERE id = :id`,
+      {
+        id,
+        facilityName: details.facilityName ?? "",
+        facilityAddress: details.facilityAddress ?? "",
+        facilityCity: details.facilityCity ?? null,
+        facilityState: details.facilityState ?? null,
+        facilityZip: details.facilityZip ?? null,
+      }
+    );
+    return this.findById(id, connection);
+  }
+
   static async getGlobalStageStats(connection = null) {
     const db = connection || getPool();
     const [rows] = await db.execute(

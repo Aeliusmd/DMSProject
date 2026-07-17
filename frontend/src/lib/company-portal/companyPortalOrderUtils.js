@@ -12,6 +12,9 @@ export const COMPANY_ORDER_STEPS = [
 
 export function createEmptyCompanyOrderForm() {
   return {
+    facilitySelectionMode: "",
+    internalFacilityId: null,
+    requestNewFacilitySearch: false,
     facilityName: "",
     facilityAddress: "",
     facilityCity: "",
@@ -50,6 +53,9 @@ export function createEmptyCompanyOrderForm() {
 export function mapOrderToForm(order = {}) {
   return {
     ...createEmptyCompanyOrderForm(),
+    facilitySelectionMode: order.facilitySelectionMode || "",
+    internalFacilityId: order.internalFacilityId || null,
+    requestNewFacilitySearch: Boolean(order.requestNewFacilitySearch),
     facilityName: order.facilityName || "",
     facilityAddress: order.facilityAddress || "",
     facilityCity: order.facilityCity || "",
@@ -107,37 +113,71 @@ export function formatCompanyAddressDisplay(form = {}) {
   return [form.companyAddress, cityStateZip].filter(Boolean).join(", ");
 }
 
+export const COMPANY_PORTAL_BASE_ORDER_FEE = 15;
+export const COMPANY_PORTAL_FACILITY_SEARCH_FEE = 5;
+
+export function isNewFacilitySearchRequested(form = {}) {
+  const mode = `${form.facilitySelectionMode || ""}`.trim().toLowerCase();
+  return Boolean(form.requestNewFacilitySearch) || mode === "new";
+}
+
+export function calculateCompanyPortalOrderTotal() {
+  // Prepayment is always the fixed $15 processing fee. The $5 facility-search
+  // fee is only billed later on the internal invoice if DMS locates the facility.
+  return COMPANY_PORTAL_BASE_ORDER_FEE;
+}
+
 export function validateCompanyOrderForm(form) {
   const errors = {};
+  const mode = `${form.facilitySelectionMode || ""}`.trim().toLowerCase();
+  const requestNew = Boolean(form.requestNewFacilitySearch);
+  const facilityId = Number(form.internalFacilityId);
 
-  if (!`${form.facilityName || ""}`.trim()) {
-    errors.facilityName = "Treating facility name is required";
-  }
+  if (requestNew || mode === "new") {
+    if (requestNew && mode === "existing" && facilityId > 0) {
+      errors.facilitySelectionMode =
+        "Choose either an existing facility or request a new facility search";
+    }
 
-  if (!`${form.facilityAddress || ""}`.trim()) {
-    errors.facilityAddress = "Street address is required";
-  }
+    if (!`${form.facilityAddress || ""}`.trim()) {
+      errors.facilityAddress = "Street address is required";
+    }
 
-  if (!`${form.facilityCity || ""}`.trim()) {
-    errors.facilityCity = "City is required";
-  }
+    if (!`${form.facilityCity || ""}`.trim()) {
+      errors.facilityCity = "City is required";
+    }
 
-  const state = `${form.facilityState || ""}`.trim().toUpperCase();
-  if (!state) {
-    errors.facilityState = "State is required";
-  } else if (!/^[A-Z]{2}$/.test(state)) {
-    errors.facilityState = "State must be 2 letters";
-  }
+    const state = `${form.facilityState || ""}`.trim().toUpperCase();
+    if (!state) {
+      errors.facilityState = "State is required";
+    } else if (!/^[A-Z]{2}$/.test(state)) {
+      errors.facilityState = "State must be 2 letters";
+    }
 
-  const zipDigits = `${form.facilityZip || ""}`.replace(/\D/g, "");
-  if (!zipDigits) {
-    errors.facilityZip = "ZIP code is required";
-  } else if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-    errors.facilityZip = "ZIP must be 5 digits";
+    const zipDigits = `${form.facilityZip || ""}`.replace(/\D/g, "");
+    if (!zipDigits) {
+      errors.facilityZip = "ZIP code is required";
+    } else if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+      errors.facilityZip = "ZIP must be 5 digits";
+    }
+  } else if (mode === "existing" || facilityId > 0) {
+    if (requestNew) {
+      errors.facilitySelectionMode =
+        "Choose either an existing facility or request a new facility search";
+    } else if (!Number.isFinite(facilityId) || facilityId <= 0) {
+      errors.internalFacilityId = "Select a facility from the list";
+    }
+  } else {
+    errors.facilitySelectionMode =
+      "Select an existing facility or request a new facility search";
   }
 
   if (!hasFormRecordTypesSelected(form)) {
     errors.type = "Select at least one record type";
+  }
+
+  if (!`${form.caseNumber || ""}`.trim()) {
+    errors.caseNumber = "Order number is required";
   }
 
   const companyState = `${form.companyState || ""}`.trim().toUpperCase();

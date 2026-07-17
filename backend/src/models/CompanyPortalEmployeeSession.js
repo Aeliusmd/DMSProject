@@ -25,6 +25,7 @@ class CompanyPortalEmployeeSession {
     const db = connection || getPool();
     const [rows] = await db.execute(
       `SELECT s.*, e.name AS employee_name, e.email AS employee_email,
+              e.wallet_balance, e.is_active AS employee_is_active,
               u.company_name
        FROM company_portal_employee_sessions s
        INNER JOIN company_portal_employees e ON e.id = s.employee_id

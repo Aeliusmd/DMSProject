@@ -6,6 +6,9 @@ const ApiError = require("../utils/ApiError");
 const CompanyPortalOrder = require("../models/CompanyPortalOrder");
 const CompanyPortalPendingCheckout = require("../models/CompanyPortalPendingCheckout");
 const CompanyPortalUser = require("../models/CompanyPortalUser");
+const Order = require("../models/Order");
+const Facility = require("../models/Facility");
+const CompanyPortalNewFacility = require("../models/CompanyPortalNewFacility");
 const fileStorage = require("../utils/fileStorage");
 const subpoenaExtractionService = require("./subpoenaExtractionService");
 const {
@@ -28,6 +31,7 @@ const {
 const { toInputDate } = require("../utils/dateUtils");
 
 const COMPANY_PORTAL_ORDER_FEE = 15;
+const COMPANY_PORTAL_FACILITY_SEARCH_FEE = 5;
 const MIME_PDF = "application/pdf";
 
 let stripeClient = null;
@@ -53,11 +57,6 @@ function formatMoney(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-}
-
-function generateOrderNumber() {
-  const suffix = crypto.randomInt(100000, 999999);
-  return `ORD-${suffix}`;
 }
 
 function resolveFacilityFromHints(hints = {}) {
@@ -118,6 +117,9 @@ function mapHintsToDraftFields(hints = {}, companyUser = {}) {
   );
 
   return {
+    facilitySelectionMode: "",
+    internalFacilityId: null,
+    requestNewFacilitySearch: false,
     facilityName: facility.facilityName,
     facilityAddress: facility.facilityAddress,
     facilityCity: facility.facilityCity || null,
@@ -147,6 +149,121 @@ function mapHintsToDraftFields(hints = {}, companyUser = {}) {
     contactEmail: companyUser.email || null,
     contactPhone: companyUser.phone || null,
   };
+}
+
+async function enrichDraftFieldsWithFacilityMatch(draftFields = {}) {
+  const name = `${draftFields.facilityName || ""}`.trim();
+  if (!name) {
+    return draftFields;
+  }
+
+  const match = await Facility.findBestMatch({
+    facilityName: name,
+    zipCode: draftFields.facilityZip || null,
+  });
+
+  if (!match) {
+    return draftFields;
+  }
+
+  return {
+    ...draftFields,
+    facilitySelectionMode: "existing",
+    internalFacilityId: match.id,
+    facilityName: match.facility_name || draftFields.facilityName,
+    facilityAddress: match.address || draftFields.facilityAddress,
+    facilityCity: match.city || draftFields.facilityCity,
+    facilityState: match.state || draftFields.facilityState,
+    facilityZip: match.zip_code || draftFields.facilityZip,
+  };
+}
+
+function calculatePortalOrderFee() {
+  // Prepayment is always the fixed $15 processing fee. The $5 facility-search
+  // fee is NOT charged at order creation; it is only billed later on the
+  // internal invoice if DMS staff locate and create the facility.
+  return COMPANY_PORTAL_ORDER_FEE;
+}
+
+async function validateFacilitySelection(details = {}) {
+  const mode = `${details.facilitySelectionMode || ""}`.trim().toLowerCase();
+  const requestNew = Boolean(details.requestNewFacilitySearch);
+  const facilityId = Number(details.internalFacilityId);
+
+  if (requestNew && mode === "existing" && facilityId > 0) {
+    throw new ApiError(
+      400,
+      "Choose either an existing facility or request a new facility search, not both",
+      [{ field: "facilitySelectionMode", message: "Choose one facility option only" }]
+    );
+  }
+
+  if (requestNew || mode === "new") {
+    if (
+      !`${details.facilityAddress || ""}`.trim() ||
+      !`${details.facilityCity || ""}`.trim() ||
+      !`${details.facilityState || ""}`.trim() ||
+      !`${details.facilityZip || ""}`.trim()
+    ) {
+      throw new ApiError(
+        400,
+        "Facility address, city, state, and ZIP are required for a new facility search request",
+        [
+          { field: "facilityAddress", message: "Facility address is required" },
+          { field: "facilityCity", message: "City is required" },
+          { field: "facilityState", message: "State is required" },
+          { field: "facilityZip", message: "ZIP is required" },
+        ]
+      );
+    }
+
+    return { mode: "new" };
+  }
+
+  if (mode === "existing" || facilityId > 0) {
+    if (requestNew) {
+      throw new ApiError(
+        400,
+        "Choose either an existing facility or request a new facility search, not both",
+        [{ field: "facilitySelectionMode", message: "Choose one facility option only" }]
+      );
+    }
+
+    if (!Number.isFinite(facilityId) || facilityId <= 0) {
+      throw new ApiError(400, "Select a facility from the list", [
+        { field: "internalFacilityId", message: "Select a facility from the list" },
+      ]);
+    }
+
+    const facility = await Facility.findById(facilityId);
+    if (!facility || !facility.is_active) {
+      throw new ApiError(400, "Selected facility was not found", [
+        { field: "internalFacilityId", message: "Selected facility was not found" },
+      ]);
+    }
+
+    return { mode: "existing", facilityId };
+  }
+
+  throw new ApiError(
+    400,
+    "Select an existing facility or request a new facility search",
+    [
+      {
+        field: "facilitySelectionMode",
+        message: "Select an existing facility or request a new facility search",
+      },
+    ]
+  );
+}
+
+async function searchPortalFacilities(query = "") {
+  const facilityService = require("./facilityService");
+  const cleaned = `${query || ""}`.trim();
+  if (cleaned.length < 2) {
+    return [];
+  }
+  return facilityService.searchFacilitiesForPublic(cleaned);
 }
 
 function formatOrder(row) {
@@ -475,18 +592,69 @@ function parsePendingPayload(row) {
   }
 }
 
-async function allocateOrderNumber() {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const candidate = generateOrderNumber();
-    const clash = await CompanyPortalOrder.findByOrderNumber(candidate);
-    if (!clash) return candidate;
+function normalizePortalOrderNumberInput(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+async function resolvePortalOrderNumber(payload = {}) {
+  const cleaned = normalizePortalOrderNumberInput(
+    payload.caseNumber || payload.orderNumber
+  );
+
+  if (!cleaned) {
+    throw new ApiError(400, "Order number is required", [
+      {
+        field: "caseNumber",
+        message: "Order number is required",
+      },
+    ]);
   }
-  return `ORD-${Date.now().toString().slice(-6)}`;
+
+  if (cleaned.length > 50) {
+    throw new ApiError(400, "Order number is too long", [
+      {
+        field: "caseNumber",
+        message: "Order number must be 50 characters or less",
+      },
+    ]);
+  }
+
+  const existingPortal = await CompanyPortalOrder.findByOrderNumber(cleaned);
+  if (existingPortal) {
+    throw new ApiError(409, "An order with this order number already exists", [
+      {
+        field: "caseNumber",
+        message:
+          "This order ID is already in use. Please enter a different order number.",
+      },
+    ]);
+  }
+
+  const existingInternal = await Order.findByOrderNumber(cleaned);
+  if (existingInternal) {
+    throw new ApiError(409, "An order with this order number already exists", [
+      {
+        field: "caseNumber",
+        message:
+          "This order ID is already in use. Please enter a different order number.",
+      },
+    ]);
+  }
+
+  return cleaned;
+}
+
+async function validatePortalOrderNumber(payload = {}) {
+  const orderNumber = await resolvePortalOrderNumber(payload);
+  return { orderNumber, available: true };
 }
 
 function formatDraftForm(fields = {}) {
   const recordFlags = normalizeRecordTypeFlags(fields);
   return {
+    facilitySelectionMode: fields.facilitySelectionMode || "",
+    internalFacilityId: fields.internalFacilityId || "",
+    requestNewFacilitySearch: Boolean(fields.requestNewFacilitySearch),
     facilityName: fields.facilityName || "",
     facilityAddress: fields.facilityAddress || "",
     facilityCity: fields.facilityCity || "",
@@ -565,7 +733,8 @@ async function uploadAndExtract({ companyUserId, file }) {
 
   const schema = resolveExtractionSchema(results[0]);
   const orderHints = mapSchemaToOrderHints(schema);
-  const draftFields = mapHintsToDraftFields(orderHints, companyUser);
+  let draftFields = mapHintsToDraftFields(orderHints, companyUser);
+  draftFields = await enrichDraftFieldsWithFacilityMatch(draftFields);
   const uploadToken = crypto.randomBytes(24).toString("hex");
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -702,18 +871,7 @@ async function createCheckout(
     ]);
   }
 
-  if (
-    !`${details.facilityName || ""}`.trim() ||
-    !`${details.facilityAddress || ""}`.trim() ||
-    !`${details.facilityCity || ""}`.trim() ||
-    !`${details.facilityState || ""}`.trim() ||
-    !`${details.facilityZip || ""}`.trim()
-  ) {
-    throw new ApiError(
-      400,
-      "Treating facility name and full address (street, city, state, ZIP) are required before payment"
-    );
-  }
+  await validateFacilitySelection(details);
 
   const companyUser = await CompanyPortalUser.findById(companyUserId);
   const payload = {
@@ -721,6 +879,8 @@ async function createCheckout(
     ...recordFlags,
     recordType: formatRecordTypesLabel(recordFlags) || details.recordType || null,
   };
+
+  const orderFee = calculatePortalOrderFee(payload);
 
   const resolvedPlacedByName =
     placedByName ||
@@ -730,12 +890,15 @@ async function createCheckout(
     throw new ApiError(400, "Company portal orders must be paid from wallet balance");
   }
 
+  await resolvePortalOrderNumber(details);
+
   return payWithWallet(companyUserId, {
     pending,
     payload,
     uploadToken,
     employeeId,
     placedByName: resolvedPlacedByName,
+    fee: orderFee,
   });
 }
 
@@ -773,7 +936,7 @@ async function createOrderFromPending(
 ) {
   const payload = parsePendingPayload(pending);
   const recordFlags = normalizeRecordTypeFlags(payload);
-  const orderNumber = await allocateOrderNumber();
+  const orderNumber = await resolvePortalOrderNumber(payload);
 
   const order = await CompanyPortalOrder.createPaidOrder({
     companyUserId: pending.company_user_id,
@@ -843,6 +1006,25 @@ async function createOrderFromPending(
 
   const refreshedOrder = await CompanyPortalOrder.findById(order.id);
 
+  if (
+    payload.requestNewFacilitySearch ||
+    `${payload.facilitySelectionMode || ""}`.trim().toLowerCase() === "new"
+  ) {
+    await CompanyPortalNewFacility.create({
+      companyUserId: pending.company_user_id,
+      companyPortalEmployeeId: employeeId || null,
+      portalOrderId: order.id,
+      internalFacilityId: null,
+      facilityName: payload.facilityName || null,
+      facilityAddress: payload.facilityAddress,
+      facilityCity: payload.facilityCity,
+      facilityState: payload.facilityState,
+      facilityZip: payload.facilityZip,
+      treatingDoctor: payload.treatingDoctor || null,
+      searchFeeAmount: COMPANY_PORTAL_FACILITY_SEARCH_FEE,
+    });
+  }
+
   try {
     const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
     await companyPortalInternalSyncService.ensureInternalOrderForPortalOrder(
@@ -898,7 +1080,10 @@ async function fulfillCompanyPortalCheckoutSession(session) {
       }
 
       const orderNumber =
-        existing.order_number || (await allocateOrderNumber());
+        existing.order_number ||
+        (await resolvePortalOrderNumber({
+          caseNumber: existing.case_number,
+        }));
       const updated = await CompanyPortalOrder.markPaid(legacyOrderId, {
         orderNumber,
         paymentIntentId:
@@ -934,10 +1119,11 @@ async function fulfillCompanyPortalCheckoutSession(session) {
 
 async function payWithWallet(
   companyUserId,
-  { pending, payload, uploadToken, employeeId, placedByName }
+  { pending, payload, uploadToken, employeeId, placedByName, fee }
 ) {
   const companyPortalWalletService = require("./companyPortalWalletService");
-  const fee = COMPANY_PORTAL_ORDER_FEE;
+  const orderFee =
+    Number(fee) > 0 ? Number(fee) : calculatePortalOrderFee(payload);
 
   if (employeeId) {
     const CompanyPortalEmployee = require("../models/CompanyPortalEmployee");
@@ -945,7 +1131,7 @@ async function payWithWallet(
       employeeId,
       companyUserId
     );
-    if (companyPortalWalletService.toMoney(employee?.wallet_balance) < fee) {
+    if (companyPortalWalletService.toMoney(employee?.wallet_balance) < orderFee) {
       throw new ApiError(400, "Insufficient employee wallet balance", [
         {
           field: "paymentMethod",
@@ -956,7 +1142,7 @@ async function payWithWallet(
   } else {
     const CompanyPortalWallet = require("../models/CompanyPortalWallet");
     const wallet = await CompanyPortalWallet.ensureForCompany(companyUserId);
-    if (companyPortalWalletService.toMoney(wallet?.unallocated_balance) < fee) {
+    if (companyPortalWalletService.toMoney(wallet?.unallocated_balance) < orderFee) {
       throw new ApiError(400, "Insufficient company wallet balance", [
         {
           field: "paymentMethod",
@@ -970,7 +1156,7 @@ async function payWithWallet(
   await CompanyPortalPendingCheckout.updatePayloadAndSession(pending.id, {
     payload,
     sessionId: null,
-    paymentAmount: fee,
+    paymentAmount: orderFee,
   });
 
   const refreshedPending = await CompanyPortalPendingCheckout.findById(pending.id);
@@ -1236,12 +1422,16 @@ async function generatePaymentReceiptPdf(orderId, companyUserId) {
 
 module.exports = {
   COMPANY_PORTAL_ORDER_FEE,
+  COMPANY_PORTAL_FACILITY_SEARCH_FEE,
+  calculatePortalOrderFee,
+  searchPortalFacilities,
   uploadAndExtract,
   getOrder,
   trackOrderByNumber,
   listOrders,
   getDashboard,
   createCheckout,
+  validatePortalOrderNumber,
   fulfillCompanyPortalCheckoutSession,
   confirmCheckoutResult,
   getSubpoenaFile,

@@ -405,6 +405,15 @@ function getStorageOrRecordsFeeLabel(rowOrPayload = {}) {
 }
 
 
+function appendFacilitySearchFeeNote(notes, amount) {
+  const feeText = `Includes $${Number(amount).toFixed(2)} facility search fee`;
+  const current = String(notes || "").trim();
+  if (current.toLowerCase().includes("facility search fee")) {
+    return current;
+  }
+  return current ? `${current}\n${feeText}` : feeText;
+}
+
 function boolToInt(value) {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
@@ -2725,7 +2734,29 @@ async function createInvoice(body, userId) {
     await syncInvoicePrepayment(connection, orderId, body.prepaymentAmount);
 
     const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
-    const invoicePayload = buildInvoicePayload(body, null, {
+
+    // Company portal: if a new facility was located and added for this order,
+    // add its $5 search fee to this invoice (once).
+    let invoiceBody = body;
+    let pendingFacilityFee = null;
+    try {
+      const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+      pendingFacilityFee =
+        await companyPortalInternalSyncService.getPendingFacilitySearchFee(
+          orderId
+        );
+    } catch (_feeError) {
+      pendingFacilityFee = null;
+    }
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      invoiceBody = {
+        ...body,
+        storageFee: toNumber(body.storageFee) + pendingFacilityFee.amount,
+        notes: appendFacilitySearchFeeNote(body.notes, pendingFacilityFee.amount),
+      };
+    }
+
+    const invoicePayload = buildInvoicePayload(invoiceBody, null, {
       orderPayments,
     });
     const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
@@ -2762,6 +2793,17 @@ async function createInvoice(body, userId) {
     );
 
     await connection.commit();
+
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      try {
+        const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+        await companyPortalInternalSyncService.markFacilitySearchFeeBilled(
+          pendingFacilityFee.newFacilityId
+        );
+      } catch (_billError) {
+        // Non-blocking; fee can be reconciled manually if this fails.
+      }
+    }
 
     try {
       const personalPortalService = require("./personalPortalService");
@@ -2814,7 +2856,29 @@ async function updateInvoice(id, body) {
     await syncInvoicePrepayment(connection, existing.order_id, body.prepaymentAmount);
 
     const orderPayments = await Order.findPaymentsByOrderId(existing.order_id, connection);
-    const invoicePayload = buildInvoicePayload(body, existing, {
+
+    // Company portal: fold in the $5 facility-search fee if newly added and
+    // not yet billed on this order's invoice.
+    let invoiceBody = body;
+    let pendingFacilityFee = null;
+    try {
+      const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+      pendingFacilityFee =
+        await companyPortalInternalSyncService.getPendingFacilitySearchFee(
+          existing.order_id
+        );
+    } catch (_feeError) {
+      pendingFacilityFee = null;
+    }
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      invoiceBody = {
+        ...body,
+        storageFee: toNumber(body.storageFee) + pendingFacilityFee.amount,
+        notes: appendFacilitySearchFeeNote(body.notes, pendingFacilityFee.amount),
+      };
+    }
+
+    const invoicePayload = buildInvoicePayload(invoiceBody, existing, {
       orderPayments,
     });
     const recipientEmails = order
@@ -2848,6 +2912,17 @@ async function updateInvoice(id, body) {
     );
 
     await connection.commit();
+
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      try {
+        const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+        await companyPortalInternalSyncService.markFacilitySearchFeeBilled(
+          pendingFacilityFee.newFacilityId
+        );
+      } catch (_billError) {
+        // Non-blocking; fee can be reconciled manually if this fails.
+      }
+    }
 
     try {
       const personalPortalService = require("./personalPortalService");

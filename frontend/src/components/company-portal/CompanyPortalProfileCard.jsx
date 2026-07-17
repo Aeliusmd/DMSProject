@@ -1,6 +1,10 @@
 "use client";
 
-export default function CompanyPortalProfileCard({ user, onEdit }) {
+export default function CompanyPortalProfileCard({
+  user,
+  onEdit,
+  isEmployee = false,
+}) {
   if (!user) return null;
 
   const address = [
@@ -11,6 +15,14 @@ export default function CompanyPortalProfileCard({ user, onEdit }) {
     .filter(Boolean)
     .join(", ");
 
+  const walletDisplay =
+    user.walletBalance == null
+      ? null
+      : `$${Number(user.walletBalance || 0).toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -19,24 +31,39 @@ export default function CompanyPortalProfileCard({ user, onEdit }) {
             Account details
           </h2>
           <p className="mt-1 text-[12px] text-[#64748B]">
-            Your registered company profile
+            {isEmployee
+              ? "Your employee profile for this company"
+              : "Your registered company profile"}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={onEdit}
-          className="rounded-[6px] border border-[#D0E8ED] bg-[#E6F7FA] px-3 py-1.5 text-[12px] font-medium text-[#0B7C8E] hover:bg-[#D7F1F6]"
-        >
-          Edit profile
-        </button>
+        {!isEmployee ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-[6px] border border-[#D0E8ED] bg-[#E6F7FA] px-3 py-1.5 text-[12px] font-medium text-[#0B7C8E] hover:bg-[#D7F1F6]"
+          >
+            Edit profile
+          </button>
+        ) : null}
       </div>
 
       <div className="space-y-3 text-[13px]">
-        <DetailRow label="Company" value={user.companyName} />
-        <DetailRow label="Email" value={user.email} />
-        <DetailRow label="Phone" value={user.phone} />
-        <DetailRow label="Address" value={address} />
+        {isEmployee ? (
+          <>
+            <DetailRow label="Name" value={user.name} />
+            <DetailRow label="Email" value={user.email} />
+            <DetailRow label="Company" value={user.companyName} />
+            <DetailRow label="Wallet balance" value={walletDisplay} />
+          </>
+        ) : (
+          <>
+            <DetailRow label="Company" value={user.companyName} />
+            <DetailRow label="Email" value={user.email} />
+            <DetailRow label="Phone" value={user.phone} />
+            <DetailRow label="Address" value={address} />
+          </>
+        )}
       </div>
     </section>
   );

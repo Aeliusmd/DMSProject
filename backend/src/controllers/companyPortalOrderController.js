@@ -83,6 +83,22 @@ exports.payInvoice = asyncHandler(async (req, res) => {
     paymentMethod,
   });
 
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  if (paymentMethod === "wallet") {
+    await companyPortalActivityLogService.recordFromRequest(req, {
+      context: "billing",
+      action: "pay_invoice",
+      details: `${invoiceType === "xray" ? "X-ray" : "Regular"} invoice paid from wallet for order ${req.params.orderNumber}`,
+      portalOrderId: result?.order?.id || null,
+    });
+  } else {
+    await companyPortalActivityLogService.recordFromRequest(req, {
+      context: "billing",
+      action: "pay_invoice",
+      details: `Started Stripe checkout for ${invoiceType === "xray" ? "X-ray" : "Regular"} invoice on order ${req.params.orderNumber}`,
+    });
+  }
+
   const message =
     paymentMethod === "stripe"
       ? "Redirect to complete card payment"
@@ -105,6 +121,14 @@ exports.confirmInvoicePayment = asyncHandler(async (req, res) => {
     }
   );
 
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  await companyPortalActivityLogService.recordFromRequest(req, {
+    context: "billing",
+    action: "confirm_invoice_payment",
+    details: `Stripe invoice payment confirmed for order ${req.params.orderNumber}`,
+    portalOrderId: order?.id || null,
+  });
+
   return ApiResponse.success(res, { order }, "Invoice payment confirmed");
 });
 
@@ -114,6 +138,30 @@ exports.getOrder = asyncHandler(async (req, res) => {
     req.companyUser.id
   );
   return ApiResponse.success(res, { order });
+});
+
+exports.validateOrderNumber = asyncHandler(async (req, res) => {
+  const caseNumber = `${req.body?.caseNumber || req.body?.orderNumber || ""}`.trim();
+
+  if (!caseNumber) {
+    throw new ApiError(400, "Order number is required", [
+      { field: "caseNumber", message: "Order number is required" },
+    ]);
+  }
+
+  const result = await companyPortalOrderService.validatePortalOrderNumber({
+    caseNumber,
+    orderNumber: caseNumber,
+  });
+
+  return ApiResponse.success(res, result, "Order number is available");
+});
+
+exports.searchFacilities = asyncHandler(async (req, res) => {
+  const facilities = await companyPortalOrderService.searchPortalFacilities(
+    req.query.q || ""
+  );
+  return ApiResponse.success(res, { facilities });
 });
 
 exports.createCheckout = asyncHandler(async (req, res) => {
@@ -140,6 +188,15 @@ exports.createCheckout = asyncHandler(async (req, res) => {
       placedByName: req.companyUser.employeeName || null,
     }
   );
+
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  const orderNumber = result?.order?.orderNumber || "unknown";
+  await companyPortalActivityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "place_order",
+    details: `Order ${orderNumber} placed using wallet balance`,
+    portalOrderId: result?.order?.id || null,
+  });
 
   return ApiResponse.success(
     res,
@@ -178,6 +235,14 @@ exports.downloadReleasedDocuments = asyncHandler(async (req, res) => {
     Number(req.params.orderId),
     req.companyUser.id
   );
+
+  const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+  await companyPortalActivityLogService.recordFromRequest(req, {
+    context: "orders",
+    action: "download_documents",
+    details: `Downloaded released documents for order #${req.params.orderId}`,
+    portalOrderId: Number(req.params.orderId) || null,
+  });
 
   if (payload.kind === "records") {
     const {

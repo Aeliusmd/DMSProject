@@ -140,6 +140,13 @@ export async function trackCompanyPortalOrder(orderNumber) {
   });
 }
 
+export async function validateCompanyPortalOrderNumber(caseNumber) {
+  return companyAuthFetch("/company-portal/orders/validate-order-number", {
+    method: "POST",
+    body: JSON.stringify({ caseNumber }),
+  });
+}
+
 export async function createCompanyPortalCheckout(payload = {}) {
   return companyAuthFetch(`/company-portal/orders/checkout`, {
     method: "POST",
@@ -272,3 +279,4 @@ export function clearCompanyOrderWizardState() {
 }
 
 export const COMPANY_PORTAL_ORDER_FEE = 15;
+export const COMPANY_PORTAL_FACILITY_SEARCH_FEE = 5;

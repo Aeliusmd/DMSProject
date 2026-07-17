@@ -185,7 +185,12 @@ export async function logoutCompany() {
 }
 
 export async function getCompanyCurrentUser() {
-  return authRequest("/company-portal/auth/me", { method: "GET" });
+  const payload = await authRequest("/company-portal/auth/me", { method: "GET" });
+  const user = payload?.data?.user;
+  if (user) {
+    setCompanyAuth({ user });
+  }
+  return payload;
 }
 
 export function saveCompanyAuthSession(payload) {

@@ -13,6 +13,7 @@ const adminNavItems = [
   { label: "Track Order", href: "/company-portal/orders/track", icon: <TrackIcon /> },
   { label: "Employees", href: "/company-portal/employees", icon: <EmployeesIcon /> },
   { label: "Money Management", href: "/company-portal/money", icon: <MoneyIcon /> },
+  { label: "Activity Log", href: "/company-portal/activity-log", icon: <ActivityIcon /> },
   { label: "Profile", href: "/company-portal/profile", icon: <ProfileIcon /> },
 ];
 
@@ -204,6 +205,20 @@ function MoneyIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
       <rect x="3" y="6" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
       <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function ActivityIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M4 19V5M4 19h16M8 15l3-4 2 2 4-6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
