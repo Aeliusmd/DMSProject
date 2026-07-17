@@ -212,14 +212,23 @@ export default function CreateInvoiceModal({
     return resolveFullFeeAmounts(formData);
   }, [formData]);
 
+  // External company orders: when DMS located/created the requested facility,
+  // a $5 facility-search fee is auto-added by the server to this regular
+  // invoice (once). Surface it here so staff can see it before saving. It is
+  // only pending on creation; once billed the server reports 0.
+  const facilitySearchFee = useMemo(() => {
+    return !isEditMode ? toNumber(order?.pendingFacilitySearchFee) : 0;
+  }, [isEditMode, order?.pendingFacilitySearchFee]);
+
   const totalAmount = useMemo(() => {
     return (
       pagesAmount +
       clericalAmount +
       toNumber(formData.shippingHandling) +
-      fullFees.storageFee
+      fullFees.storageFee +
+      facilitySearchFee
     );
-  }, [formData, fullFees, pagesAmount, clericalAmount]);
+  }, [formData, fullFees, pagesAmount, clericalAmount, facilitySearchFee]);
 
   const prepaymentPaid = useMemo(() => {
     return toNumber(prepaymentAmount);
@@ -711,7 +720,20 @@ export default function CreateInvoiceModal({
                 label="Shipping & Handling"
                 value={formatMoney(toNumber(formData.shippingHandling))}
               />
+              {facilitySearchFee > 0 && (
+                <SummaryRow
+                  label="Facility Search Fee"
+                  value={formatMoney(facilitySearchFee)}
+                />
+              )}
             </div>
+            {facilitySearchFee > 0 && (
+              <p className="mt-2 rounded-[8px] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
+                A ${facilitySearchFee.toFixed(2)} facility search fee is added
+                automatically because DMS located and added the facility this
+                external order requested.
+              </p>
+            )}
 
             <div className="mt-4 space-y-3 border-t border-[#E2E8F0] pt-4">
               <SummaryRow label="Invoice subtotal" value={formatMoney(totalAmount)} />

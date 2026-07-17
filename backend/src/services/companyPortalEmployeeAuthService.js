@@ -124,26 +124,53 @@ async function refreshTokens({ refreshToken }) {
 
 async function logout({ refreshToken, sessionToken }) {
   let deleted = false;
+  let companyUserId = null;
+  let employeeId = null;
+  let companyName = null;
+  let performerName = null;
 
   if (sessionToken) {
-    deleted = await CompanyPortalEmployeeSession.deleteBySessionToken(
-      sessionToken
-    );
+    const session =
+      await CompanyPortalEmployeeSession.findBySessionToken(sessionToken);
+    if (session) {
+      companyUserId = session.company_user_id;
+      employeeId = session.employee_id;
+      companyName = session.company_name || null;
+      performerName = session.employee_name || "Company Employee";
+      deleted = await CompanyPortalEmployeeSession.deleteBySessionToken(
+        sessionToken
+      );
+    }
   }
 
   if (!deleted && refreshToken) {
     try {
       const decoded = tokenService.verifyCompanyRefreshToken(refreshToken);
       if (decoded.employeeId) {
-        await CompanyPortalEmployeeSession.deleteById(decoded.sessionId);
-        deleted = true;
+        const session = await CompanyPortalEmployeeSession.findById(
+          decoded.sessionId
+        );
+        if (session) {
+          companyUserId = session.company_user_id;
+          employeeId = session.employee_id;
+          companyName = session.company_name || null;
+          performerName = session.employee_name || "Company Employee";
+          await CompanyPortalEmployeeSession.deleteById(decoded.sessionId);
+          deleted = true;
+        }
       }
     } catch {
       // Ignore invalid refresh tokens on logout.
     }
   }
 
-  return { message: "Logged out successfully" };
+  return {
+    message: "Logged out successfully",
+    companyUserId,
+    employeeId,
+    companyName,
+    performerName,
+  };
 }
 
 async function getCurrentUser(employeeId) {

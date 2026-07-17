@@ -74,10 +74,12 @@ export default function CompanyPortalProfilePage() {
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#111827]">
-            Company profile
+            {user.isAdmin === false ? "Employee profile" : "Company profile"}
           </h1>
           <p className="mt-1 text-[13px] text-[#64748B]">
-            View and manage your registered company account details.
+            {user.isAdmin === false
+              ? "View your employee account details and allocated wallet balance."
+              : "View and manage your registered company account details."}
           </p>
         </div>
         {notice ? (
@@ -88,7 +90,11 @@ export default function CompanyPortalProfilePage() {
       </div>
 
       <div className="max-w-[640px]">
-        <CompanyPortalProfileCard user={user} onEdit={handleEdit} />
+        <CompanyPortalProfileCard
+          user={user}
+          onEdit={handleEdit}
+          isEmployee={user.isAdmin === false}
+        />
       </div>
     </CompanyPortalDashboardShell>
   );

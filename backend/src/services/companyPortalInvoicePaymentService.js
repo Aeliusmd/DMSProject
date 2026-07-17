@@ -168,6 +168,13 @@ async function confirmInvoiceStripePayment({
   orderNumber,
   sessionId,
 }) {
+  if (employeeId) {
+    throw new ApiError(
+      403,
+      "Company employees cannot confirm online card payments. Use wallet payment only."
+    );
+  }
+
   if (!sessionId) {
     throw new ApiError(400, "session_id is required");
   }
@@ -210,6 +217,13 @@ async function payInvoice({
   const method = normalizePaymentMethod(paymentMethod);
 
   if (method === "stripe") {
+    if (employeeId) {
+      throw new ApiError(
+        403,
+        "Company employees can only pay invoices from their wallet. Online card payment is available to company administrators only."
+      );
+    }
+
     return startInvoiceStripeCheckout({
       companyUserId,
       orderNumber,

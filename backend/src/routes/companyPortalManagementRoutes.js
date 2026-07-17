@@ -1,5 +1,6 @@
 const express = require("express");
 const companyPortalManagementController = require("../controllers/companyPortalManagementController");
+const companyPortalActivityLogController = require("../controllers/companyPortalActivityLogController");
 const {
   authenticateCompanyPortal,
   requireCompanyAdmin,
@@ -7,19 +8,43 @@ const {
 
 const router = express.Router();
 
-router.use(authenticateCompanyPortal, requireCompanyAdmin);
+router.use(authenticateCompanyPortal);
 
-router.get("/employees", companyPortalManagementController.listEmployees);
-router.post("/employees", companyPortalManagementController.createEmployee);
+router.get(
+  "/activity-log",
+  requireCompanyAdmin,
+  companyPortalActivityLogController.list
+);
 
-router.get("/wallet", companyPortalManagementController.getWalletSummary);
-router.post("/wallet/topup", companyPortalManagementController.createTopupCheckout);
+router.get(
+  "/employees",
+  requireCompanyAdmin,
+  companyPortalManagementController.listEmployees
+);
+router.post(
+  "/employees",
+  requireCompanyAdmin,
+  companyPortalManagementController.createEmployee
+);
+
+router.get(
+  "/wallet",
+  requireCompanyAdmin,
+  companyPortalManagementController.getWalletSummary
+);
+router.post(
+  "/wallet/topup",
+  requireCompanyAdmin,
+  companyPortalManagementController.createTopupCheckout
+);
 router.post(
   "/wallet/confirm-topup",
+  requireCompanyAdmin,
   companyPortalManagementController.confirmTopup
 );
 router.post(
   "/wallet/allocate",
+  requireCompanyAdmin,
   companyPortalManagementController.allocateToEmployee
 );
 
