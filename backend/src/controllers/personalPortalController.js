@@ -10,6 +10,7 @@ const {
   validateEmailOtpConfirm,
   validatePersonalRequestSubmit,
   validateStatusLookup,
+  validateRequestEmailUpdate,
   validatePersonalRequestsListQuery,
   validatePersonalCheckoutResultQuery,
 } = require("../validators/personalPortalValidator");
@@ -145,10 +146,23 @@ exports.lookupStatus = asyncHandler(async (req, res) => {
 
   const data = await personalPortalService.lookupRequestStatus({
     confirmationReference: validation.confirmationReference,
-    driverLicenseNumber: validation.driverLicenseNumber,
+    dobIso: validation.dobIso,
   });
 
   return ApiResponse.success(res, data, "Request status retrieved");
+});
+
+exports.updateRequestEmail = asyncHandler(async (req, res) => {
+  const validation = validateRequestEmailUpdate(req.body);
+  throwIfInvalid(validation);
+
+  const data = await personalPortalService.updateRequestNotificationEmail({
+    confirmationReference: validation.confirmationReference,
+    dobIso: validation.dobIso,
+    email: validation.email,
+  });
+
+  return ApiResponse.success(res, data, data.message);
 });
 
 exports.getConfig = asyncHandler(async (_req, res) => {

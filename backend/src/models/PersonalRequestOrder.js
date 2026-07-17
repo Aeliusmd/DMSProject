@@ -48,7 +48,13 @@ class PersonalRequestOrder {
 
   static async findByPortalUserId(
     portalUserId,
-    { pageSize = 10, cursor = null, paidOnly = false, status = null } = {}
+    {
+      pageSize = 10,
+      cursor = null,
+      paidOnly = false,
+      status = null,
+      withinLookupWindow = false,
+    } = {}
   ) {
     const pool = getPool();
     const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 100);
@@ -59,6 +65,12 @@ class PersonalRequestOrder {
 
     if (paidOnly) {
       conditions.push("o.processing_fee_paid = 1");
+    }
+
+    if (withinLookupWindow) {
+      conditions.push(
+        "(o.lookup_expires_at IS NULL OR o.lookup_expires_at > NOW())"
+      );
     }
 
     if (status) {
@@ -313,6 +325,27 @@ class PersonalRequestOrder {
       { number: normalized }
     );
     return rows[0] || null;
+  }
+
+  static async updateEmail(id, email, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_orders
+       SET email = :email, updated_at = NOW()
+       WHERE id = :id`,
+      { id, email }
+    );
+    return this.findById(id, connection);
+  }
+
+  static async updateEmailForPortalUser(portalUserId, email, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_orders
+       SET email = :email, updated_at = NOW()
+       WHERE portal_user_id = :portalUserId`,
+      { portalUserId, email }
+    );
   }
 
   static async findByStripeSessionId(sessionId) {

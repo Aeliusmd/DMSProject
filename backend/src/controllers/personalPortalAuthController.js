@@ -10,6 +10,9 @@ const {
   validatePersonalRefresh,
   validatePersonalLogout,
 } = require("../validators/personalPortalAuthValidator");
+const {
+  validatePersonalAccountEmailUpdate,
+} = require("../validators/personalPortalValidator");
 
 function getRequestMeta(req) {
   return {
@@ -32,11 +35,10 @@ exports.login = asyncHandler(async (req, res) => {
 
   const result = await personalPortalAuthService.login({
     email: validation.data.email,
-    password: validation.data.password,
     ...getRequestMeta(req),
   });
 
-  return ApiResponse.success(res, result, "Two-factor authentication required");
+  return ApiResponse.success(res, result, "Verification code sent");
 });
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
@@ -89,4 +91,16 @@ exports.logout = asyncHandler(async (req, res) => {
 exports.me = asyncHandler(async (req, res) => {
   const user = await personalPortalAuthService.getCurrentUser(req.personalUser.id);
   return ApiResponse.success(res, { user });
+});
+
+exports.updateEmail = asyncHandler(async (req, res) => {
+  const validation = validatePersonalAccountEmailUpdate(req.body);
+  throwIfInvalid(validation);
+
+  const result = await personalPortalAuthService.updateAccountEmail(
+    req.personalUser.id,
+    validation.email
+  );
+
+  return ApiResponse.success(res, result, result.message);
 });

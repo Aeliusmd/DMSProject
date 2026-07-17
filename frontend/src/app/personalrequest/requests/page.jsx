@@ -107,9 +107,9 @@ export default function PersonalRequestsListPage() {
             My Requests
           </h1>
           <p className="mt-1 text-[13px] text-[#64748B]">
-            Every paid request under your registered email. After the $35
-            prepayment: In Process → Invoice (additional charges in DMS) → Paid
-            → Released.
+            Paid requests from the last 7 days under your account. After the $35
+            prepayment: In Process → Invoice → Paid → Released. Download records
+            and receipts when available.
           </p>
         </div>
         <Link
@@ -154,7 +154,7 @@ export default function PersonalRequestsListPage() {
                     colSpan={5}
                     className="px-5 py-8 text-center text-[#94A3B8]"
                   >
-                    No paid requests yet.
+                    No paid requests in the current 7-day window.
                   </td>
                 </tr>
               ) : (
@@ -184,24 +184,36 @@ export default function PersonalRequestsListPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      {request.canDownload &&
-                      (request.downloadToken || request.downloadUrl) ? (
-                        <PersonalRecordsDownloadButton
-                          downloadToken={request.downloadToken}
-                          downloadUrl={request.downloadUrl}
-                          label="Download"
-                          className="font-semibold text-[#16A34A] hover:underline"
-                        />
-                      ) : (
-                        <Link
-                          href={`/personalrequest/status?ref=${encodeURIComponent(
-                            request.confirmationReference || ""
-                          )}`}
-                          className="font-semibold text-[#0097B2] hover:underline"
-                        >
-                          View
-                        </Link>
-                      )}
+                      <div className="flex flex-wrap items-center gap-3">
+                        {request.receiptUrl ? (
+                          <a
+                            href={request.receiptUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold text-[#0097B2] hover:underline"
+                          >
+                            Receipt
+                          </a>
+                        ) : null}
+                        {request.canDownload &&
+                        (request.downloadToken || request.downloadUrl) ? (
+                          <PersonalRecordsDownloadButton
+                            downloadToken={request.downloadToken}
+                            downloadUrl={request.downloadUrl}
+                            label="Download"
+                            className="font-semibold text-[#16A34A] hover:underline"
+                          />
+                        ) : (
+                          <Link
+                            href={`/personalrequest/status?ref=${encodeURIComponent(
+                              request.confirmationReference || ""
+                            )}`}
+                            className="font-semibold text-[#0097B2] hover:underline"
+                          >
+                            View
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

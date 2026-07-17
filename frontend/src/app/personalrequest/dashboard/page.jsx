@@ -36,6 +36,7 @@ export default function PersonalPortalDashboardPage() {
   const [user, setUser] = useState(null);
   const [stats, setStats] = useState(EMPTY_STATS);
   const [recentRequests, setRecentRequests] = useState([]);
+  const [lookupDays, setLookupDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -55,6 +56,7 @@ export default function PersonalPortalDashboardPage() {
         if (!active) return;
         setStats(dashRes?.data?.stats || EMPTY_STATS);
         setRecentRequests(dashRes?.data?.recentRequests || []);
+        setLookupDays(dashRes?.data?.lookupDays || 7);
       } catch (err) {
         if (!active) return;
         clearPersonalAuth();
@@ -171,7 +173,7 @@ export default function PersonalPortalDashboardPage() {
           href="/personalrequest/status"
           className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
         >
-          Check status by confirmation #
+          Check status (Order # + DOB)
         </Link>
       </div>
 
@@ -180,7 +182,8 @@ export default function PersonalPortalDashboardPage() {
           <div>
             <h2 className="text-[15px] font-semibold text-[#111827]">Recent requests</h2>
             <p className="mt-1 text-[12px] text-[#64748B]">
-              All paid requests linked to your email account
+              Paid requests from the last {lookupDays} days linked to your email
+              account
             </p>
           </div>
           <Link
@@ -211,7 +214,8 @@ export default function PersonalPortalDashboardPage() {
               ) : recentRequests.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="px-5 py-8 text-center text-[#94A3B8]">
-                    No requests yet. Start a new personal records request to get started.
+                    No requests in the last {lookupDays} days. Start a new personal
+                    records request to get started.
                   </td>
                 </tr>
               ) : (
@@ -233,24 +237,36 @@ export default function PersonalPortalDashboardPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      {request.canDownload &&
-                      (request.downloadToken || request.downloadUrl) ? (
-                        <PersonalRecordsDownloadButton
-                          downloadToken={request.downloadToken}
-                          downloadUrl={request.downloadUrl}
-                          label="Download"
-                          className="font-semibold text-[#16A34A] hover:underline"
-                        />
-                      ) : (
-                        <Link
-                          href={`/personalrequest/status?ref=${encodeURIComponent(
-                            request.confirmationReference || ""
-                          )}`}
-                          className="font-semibold text-[#0097B2] hover:underline"
-                        >
-                          View
-                        </Link>
-                      )}
+                      <div className="flex flex-wrap items-center gap-3">
+                        {request.receiptUrl ? (
+                          <a
+                            href={request.receiptUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold text-[#0097B2] hover:underline"
+                          >
+                            Receipt
+                          </a>
+                        ) : null}
+                        {request.canDownload &&
+                        (request.downloadToken || request.downloadUrl) ? (
+                          <PersonalRecordsDownloadButton
+                            downloadToken={request.downloadToken}
+                            downloadUrl={request.downloadUrl}
+                            label="Download"
+                            className="font-semibold text-[#16A34A] hover:underline"
+                          />
+                        ) : (
+                          <Link
+                            href={`/personalrequest/status?ref=${encodeURIComponent(
+                              request.confirmationReference || ""
+                            )}`}
+                            className="font-semibold text-[#0097B2] hover:underline"
+                          >
+                            View
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

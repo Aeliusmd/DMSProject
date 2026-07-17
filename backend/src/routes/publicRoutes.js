@@ -37,5 +37,9 @@ router.post(
 );
 router.get("/personal-request/result", personalPortalController.getCheckoutResult);
 router.post("/personal-request/status", personalPortalController.lookupStatus);
+router.post(
+  "/personal-request/update-email",
+  personalPortalController.updateRequestEmail
+);
 
 module.exports = router;

@@ -4,6 +4,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { searchPersonalRequestFacilities } from "@/lib/personal-request/personalRequestApi";
 
+/**
+ * Combobox for facility name or address lookup against DMS facilities.
+ * Selecting a match fills both name and address via onSelect.
+ */
 export default function PersonalFacilitySearchField({
   value = "",
   facilityId = "",
@@ -12,6 +16,11 @@ export default function PersonalFacilitySearchField({
   onBlur,
   error = "",
   required = false,
+  searchBy = "name", // "name" | "address"
+  label,
+  placeholder,
+  helperMatched,
+  helperUnmatched,
 }) {
   const listboxId = useId();
   const rootRef = useRef(null);
@@ -20,6 +29,16 @@ export default function PersonalFacilitySearchField({
   const [suggestions, setSuggestions] = useState([]);
   const [searchError, setSearchError] = useState("");
   const [highlightIndex, setHighlightIndex] = useState(-1);
+
+  const isAddressMode = searchBy === "address";
+  const fieldLabel =
+    label ||
+    (isAddressMode ? "Treating Facility Address" : "Treating Facility Name");
+  const fieldPlaceholder =
+    placeholder ||
+    (isAddressMode
+      ? "e.g. 1234 Wilshire Blvd, Los Angeles, CA 90017"
+      : "e.g. Los Angeles Medical Center");
 
   const trimmedValue = value.trim();
   const showSuggestions = open && trimmedValue.length >= 2;
@@ -81,6 +100,8 @@ export default function PersonalFacilitySearchField({
     setHighlightIndex(-1);
   };
 
+  const normalize = (text) => `${text || ""}`.trim().toLowerCase();
+
   const trySelectExactMatch = async () => {
     const query = trimmedValue;
     if (query.length < 2) return false;
@@ -94,14 +115,31 @@ export default function PersonalFacilitySearchField({
       }
     }
 
-    const exact = list.find(
-      (facility) =>
-        `${facility.facilityName || ""}`.trim().toLowerCase() === query.toLowerCase()
-    );
+    const exact = list.find((facility) => {
+      if (isAddressMode) {
+        return (
+          normalize(facility.address) === normalize(query) ||
+          normalize(facility.streetAddress) === normalize(query)
+        );
+      }
+      return normalize(facility.facilityName) === normalize(query);
+    });
+
     if (exact) {
       selectFacility(exact);
       return true;
     }
+
+    // Single strong contains match when looking up by address
+    if (isAddressMode && list.length === 1) {
+      const only = list[0];
+      const address = normalize(only.address || only.streetAddress);
+      if (address.includes(normalize(query)) || normalize(query).includes(address)) {
+        selectFacility(only);
+        return true;
+      }
+    }
+
     return false;
   };
 
@@ -149,8 +187,12 @@ export default function PersonalFacilitySearchField({
   return (
     <div ref={rootRef} className="relative min-w-0">
       <label className="mb-1.5 block text-[12px] font-semibold text-[#334155]">
-        Treating Facility Name
-        {required ? <span className="text-red-500"> *</span> : null}
+        {fieldLabel}
+        {required ? (
+          <span className="text-red-500"> *</span>
+        ) : (
+          <span className="font-normal text-[#94A3B8]"> (optional)</span>
+        )}
       </label>
 
       <input
@@ -168,7 +210,7 @@ export default function PersonalFacilitySearchField({
           });
         }}
         onKeyDown={handleKeyDown}
-        placeholder="e.g. Los Angeles Medical Center"
+        placeholder={fieldPlaceholder}
         autoComplete="off"
         role="combobox"
         aria-expanded={showSuggestions}
@@ -182,11 +224,17 @@ export default function PersonalFacilitySearchField({
 
       {facilityId ? (
         <p className="mt-1 text-[11px] font-medium text-[#059669]">
-          Existing facility selected — address filled automatically
+          {helperMatched ||
+            (isAddressMode
+              ? "Known facility address matched — name filled automatically"
+              : "Known facility selected — address filled automatically")}
         </p>
       ) : trimmedValue.length >= 2 ? (
         <p className="mt-1 text-[11px] text-[#94A3B8]">
-          Select a match from the list, or continue typing a new facility name
+          {helperUnmatched ||
+            (isAddressMode
+              ? "Select a match from the list, or keep typing a full address. New facilities are not added to the master list."
+              : "Select a match from the list, or keep typing and enter the address below. New facilities are not added to the master list.")}
         </p>
       ) : null}
 
@@ -210,7 +258,7 @@ export default function PersonalFacilitySearchField({
           {!loading &&
             !searchError &&
             suggestions.map((facility, index) => (
-              <li key={facility.id}>
+              <li key={`${facility.id}-${isAddressMode ? "addr" : "name"}`}>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
@@ -219,17 +267,30 @@ export default function PersonalFacilitySearchField({
                     highlightIndex === index ? "bg-[#F0FBFD]" : "hover:bg-[#F0FBFD]"
                   }`}
                 >
-                  <span className="block text-[12px] font-semibold text-[#111827]">
-                    {facility.facilityName}
-                  </span>
-                  {facility.address ? (
-                    <span className="block text-[10px] text-[#94A3B8]">
-                      {facility.address}
-                    </span>
+                  {isAddressMode ? (
+                    <>
+                      <span className="block text-[12px] font-semibold text-[#111827]">
+                        {facility.address || "No address on file"}
+                      </span>
+                      <span className="block text-[10px] text-[#94A3B8]">
+                        {facility.facilityName || "Unnamed facility"}
+                      </span>
+                    </>
                   ) : (
-                    <span className="block text-[10px] text-[#94A3B8]">
-                      No address on file
-                    </span>
+                    <>
+                      <span className="block text-[12px] font-semibold text-[#111827]">
+                        {facility.facilityName}
+                      </span>
+                      {facility.address ? (
+                        <span className="block text-[10px] text-[#94A3B8]">
+                          {facility.address}
+                        </span>
+                      ) : (
+                        <span className="block text-[10px] text-[#94A3B8]">
+                          No address on file
+                        </span>
+                      )}
+                    </>
                   )}
                 </button>
               </li>
@@ -237,7 +298,9 @@ export default function PersonalFacilitySearchField({
 
           {!loading && !searchError && suggestions.length === 0 ? (
             <li className="px-3 py-2 text-[12px] text-[#94A3B8]">
-              No matching facilities — you can enter a new facility name
+              {isAddressMode
+                ? "No matching address in DMS facilities — enter the address manually. You cannot create a new facility record."
+                : "No matching facilities — enter the name and address manually. You cannot create a new facility record."}
             </li>
           ) : null}
         </ul>

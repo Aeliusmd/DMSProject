@@ -5,8 +5,14 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
 import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
-import { lookupPersonalRequestStatus } from "@/lib/personal-request/personalRequestApi";
-import { validateStatusLookupForm } from "@/lib/validations/personalRequestValidation";
+import {
+  lookupPersonalRequestStatus,
+  updatePersonalRequestEmail,
+} from "@/lib/personal-request/personalRequestApi";
+import {
+  formatDobForApi,
+  validateStatusLookupForm,
+} from "@/lib/validations/personalRequestValidation";
 import {
   clearPersonalAuth,
   getPersonalAccessToken,
@@ -40,11 +46,15 @@ export default function PersonalRequestStatusPage() {
   const [confirmationReference, setConfirmationReference] = useState(
     () => searchParams.get("ref") || ""
   );
-  const [driverLicenseNumber, setDriverLicenseNumber] = useState("");
+  const [dob, setDob] = useState("");
   const [errors, setErrors] = useState({});
   const [bannerError, setBannerError] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailMessage, setEmailMessage] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [emailSaving, setEmailSaving] = useState(false);
 
   useEffect(() => {
     if (!getPersonalAccessToken()) {
@@ -59,8 +69,10 @@ export default function PersonalRequestStatusPage() {
     e.preventDefault();
     setBannerError("");
     setResult(null);
+    setEmailMessage("");
+    setEmailError("");
 
-    const formData = { confirmationReference, driverLicenseNumber };
+    const formData = { confirmationReference, dob };
     const nextErrors = validateStatusLookupForm(formData);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -68,16 +80,52 @@ export default function PersonalRequestStatusPage() {
     setLoading(true);
     try {
       const data = await lookupPersonalRequestStatus({
-        confirmationReference: confirmationReference.trim() || undefined,
-        driverLicenseNumber: driverLicenseNumber.trim() || undefined,
+        confirmationReference: confirmationReference.trim(),
+        dob: formatDobForApi(dob),
       });
       setResult(data);
+      setEmailDraft("");
     } catch (err) {
       setBannerError(
-        getApiErrorMessage(err, "Unable to find your request. Check your details and try again.")
+        getApiErrorMessage(
+          err,
+          "Unable to find your request. Check your order number and date of birth."
+        )
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEmailUpdate = async (e) => {
+    e.preventDefault();
+    setEmailMessage("");
+    setEmailError("");
+
+    if (!emailDraft.trim()) {
+      setEmailError("Enter a valid email address");
+      return;
+    }
+
+    setEmailSaving(true);
+    try {
+      const response = await updatePersonalRequestEmail({
+        confirmationReference: confirmationReference.trim(),
+        dob: formatDobForApi(dob),
+        email: emailDraft.trim().toLowerCase(),
+      });
+      setEmailMessage(
+        response?.message ||
+          response?.data?.message ||
+          "Notification email updated."
+      );
+      setEmailDraft("");
+    } catch (err) {
+      setEmailError(
+        getApiErrorMessage(err, "Unable to update email. Please try again.")
+      );
+    } finally {
+      setEmailSaving(false);
     }
   };
 
@@ -99,8 +147,8 @@ export default function PersonalRequestStatusPage() {
             Check Request Status
           </h1>
           <p className="mt-2 text-[13px] text-[#64748B]">
-            Enter your confirmation number or driver&apos;s license number to see status and
-            download records when ready.
+            Enter your order number and date of birth to see status, download
+            records when ready, and update your notification email.
           </p>
         </div>
 
@@ -111,45 +159,44 @@ export default function PersonalRequestStatusPage() {
             </div>
           ) : null}
 
-          {errors.lookup ? (
-            <p className="text-[11px] font-medium text-red-500">{errors.lookup}</p>
-          ) : null}
-
           <div>
             <label className="mb-1.5 block text-[12px] font-semibold text-[#334155]">
-              Confirmation / Order Number
+              Order / Confirmation Number
             </label>
             <input
               value={confirmationReference}
               onChange={(e) => setConfirmationReference(e.target.value)}
               placeholder="e.g. PR-20260714-ABC123"
-              className="h-[42px] w-full rounded-[8px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-            />
-          </div>
-
-          <div className="flex items-center gap-3 text-[11px] text-[#94A3B8]">
-            <span className="h-px flex-1 bg-[#E2E8F0]" />
-            OR
-            <span className="h-px flex-1 bg-[#E2E8F0]" />
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-[12px] font-semibold text-[#334155]">
-              Driver&apos;s License Number
-            </label>
-            <input
-              value={driverLicenseNumber}
-              onChange={(e) => setDriverLicenseNumber(e.target.value)}
-              placeholder="License number used on your request"
               className={`h-[42px] w-full rounded-[8px] border bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
-                errors.driverLicenseNumber
+                errors.confirmationReference
                   ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
                   : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
               }`}
             />
-            {errors.driverLicenseNumber ? (
+            {errors.confirmationReference ? (
               <p className="mt-1 text-[11px] font-medium text-red-500">
-                {errors.driverLicenseNumber}
+                {errors.confirmationReference}
+              </p>
+            ) : null}
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-[12px] font-semibold text-[#334155]">
+              Date of Birth
+            </label>
+            <input
+              type="date"
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              className={`h-[42px] w-full rounded-[8px] border bg-white px-3 text-[13px] text-[#111827] outline-none focus:ring-2 ${
+                errors.dob
+                  ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+                  : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+              }`}
+            />
+            {errors.dob ? (
+              <p className="mt-1 text-[11px] font-medium text-red-500">
+                {errors.dob}
               </p>
             ) : null}
           </div>
@@ -181,12 +228,15 @@ export default function PersonalRequestStatusPage() {
               <div>
                 <dt className="text-[#64748B]">Name</dt>
                 <dd className="font-medium text-[#111827]">
-                  {[result.firstName, result.lastName].filter(Boolean).join(" ") || "—"}
+                  {[result.firstName, result.lastName].filter(Boolean).join(" ") ||
+                    "—"}
                 </dd>
               </div>
               <div>
-                <dt className="text-[#64748B]">Email</dt>
-                <dd className="font-medium text-[#111827]">{result.email || "—"}</dd>
+                <dt className="text-[#64748B]">Email on file</dt>
+                <dd className="font-medium text-[#111827]">
+                  {result.email || "—"}
+                </dd>
               </div>
               <div>
                 <dt className="text-[#64748B]">Facility</dt>
@@ -207,6 +257,17 @@ export default function PersonalRequestStatusPage() {
                 </dd>
               </div>
             </dl>
+
+            {result.payment?.receiptUrl ? (
+              <a
+                href={result.payment.receiptUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex text-[13px] font-semibold text-[#0097B2] hover:underline"
+              >
+                Download processing-fee receipt
+              </a>
+            ) : null}
 
             {result.canDownload &&
             (result.downloadToken || result.downloadUrl) ? (
@@ -229,9 +290,47 @@ export default function PersonalRequestStatusPage() {
               <p className="rounded-[8px] border border-[#E2E8F0] bg-white px-3 py-2.5 text-[12px] text-[#64748B]">
                 {result.status === "released"
                   ? "Records are marked released, but a download link could not be created right now."
-                  : "Your request is still in process. Check back later — status lookup is available for about 7 days after payment."}
+                  : "Your request is still in process. Status lookup stays available for about 7 days after payment."}
               </p>
             )}
+
+            <form
+              onSubmit={handleEmailUpdate}
+              className="space-y-3 rounded-[8px] border border-[#D0E8ED] bg-white p-4"
+            >
+              <div>
+                <h2 className="text-[13px] font-semibold text-[#111827]">
+                  Update notification email
+                </h2>
+                <p className="mt-1 text-[12px] text-[#64748B]">
+                  Future status updates for this order will go to the new address.
+                </p>
+              </div>
+              {emailMessage ? (
+                <p className="rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700">
+                  {emailMessage}
+                </p>
+              ) : null}
+              {emailError ? (
+                <p className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">
+                  {emailError}
+                </p>
+              ) : null}
+              <input
+                type="email"
+                value={emailDraft}
+                onChange={(e) => setEmailDraft(e.target.value)}
+                placeholder="newemail@example.com"
+                className="h-[42px] w-full rounded-[8px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              />
+              <button
+                type="submit"
+                disabled={emailSaving}
+                className="flex h-[40px] w-full items-center justify-center rounded-[8px] border border-[#0097B2] text-[13px] font-semibold text-[#0097B2] hover:bg-[#E6F7FA] disabled:opacity-60"
+              >
+                {emailSaving ? "Saving..." : "Update email"}
+              </button>
+            </form>
           </div>
         ) : null}
 

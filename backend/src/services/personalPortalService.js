@@ -16,6 +16,7 @@ const PersonalRequestOrder = require("../models/PersonalRequestOrder");
 const PersonalRequestFacility = require("../models/PersonalRequestFacility");
 const PersonalRequestOrderRecord = require("../models/PersonalRequestOrderRecord");
 const PersonalRequestStripePayment = require("../models/PersonalRequestStripePayment");
+const PersonalPortalUser = require("../models/PersonalPortalUser");
 const Order = require("../models/Order");
 const OrderRecord = require("../models/OrderRecord");
 const {
@@ -31,6 +32,9 @@ const tokenService = require("./tokenService");
 const emailService = require("./emailService");
 const orderService = require("./orderService");
 const recordDownloadService = require("./recordDownloadService");
+const {
+  normalizeStoredDob,
+} = require("../validators/personalPortalValidator");
 const logger = require("../utils/logger");
 
 let stripeClient = null;
@@ -305,8 +309,10 @@ async function createPendingRequest(parsed, driverLicenseFile, options = {}) {
       {
         personalRequestOrderId: requestId,
         facilityId: parsed.facilityId || null,
-        facilityName: parsed.treatingFacilityName,
+        facilityName: parsed.treatingFacilityName || "",
         facilityAddress: parsed.treatingFacilityAddress,
+        treatingDoctor: parsed.treatingDoctor || null,
+        isManualLookup: Boolean(parsed.isManualLookup),
         recordsDateBegin: parsed.recordsDateBeginIso,
         recordsDateEnd: parsed.recordsDateEndIso,
         sortOrder: 0,
@@ -658,20 +664,18 @@ function assertLookupNotExpired(requestOrder) {
   }
 }
 
-async function lookupRequestStatus({ confirmationReference, driverLicenseNumber }) {
-  let requestOrder = null;
-
-  if (confirmationReference) {
-    requestOrder = await PersonalRequestOrder.findByConfirmationReference(
-      confirmationReference
-    );
-  } else if (driverLicenseNumber) {
-    requestOrder = await PersonalRequestOrder.findByDriverLicenseNumber(
-      driverLicenseNumber
-    );
-  }
+async function lookupRequestStatus({ confirmationReference, dobIso }) {
+  const requestOrder = await PersonalRequestOrder.findByConfirmationReference(
+    confirmationReference
+  );
 
   if (!requestOrder) {
+    throw new ApiError(404, "No request found with the information provided.");
+  }
+
+  const storedDob = normalizeStoredDob(requestOrder.dob);
+
+  if (!storedDob || storedDob !== dobIso) {
     throw new ApiError(404, "No request found with the information provided.");
   }
 
@@ -687,6 +691,49 @@ async function lookupRequestStatus({ confirmationReference, driverLicenseNumber 
     includePayment: true,
     resolveDownloadLink: true,
   });
+}
+
+async function updateRequestNotificationEmail({
+  confirmationReference,
+  dobIso,
+  email,
+}) {
+  const requestOrder = await PersonalRequestOrder.findByConfirmationReference(
+    confirmationReference
+  );
+
+  if (!requestOrder) {
+    throw new ApiError(404, "No request found with the information provided.");
+  }
+
+  const storedDob = normalizeStoredDob(requestOrder.dob);
+
+  if (!storedDob || storedDob !== dobIso) {
+    throw new ApiError(404, "No request found with the information provided.");
+  }
+
+  if (!requestOrder.processing_fee_paid) {
+    throw new ApiError(400, "This request has not been submitted and paid yet.");
+  }
+
+  assertLookupNotExpired(requestOrder);
+
+  await PersonalRequestOrder.updateEmail(requestOrder.id, email);
+
+  if (requestOrder.portal_user_id) {
+    const existing = await PersonalPortalUser.findByEmail(email);
+    if (existing && existing.id !== requestOrder.portal_user_id) {
+      // Keep account email as-is when another account already owns this address.
+    } else {
+      await PersonalPortalUser.updateEmail(requestOrder.portal_user_id, email);
+    }
+  }
+
+  return {
+    confirmationReference: requestOrder.confirmation_reference,
+    email: tokenService.maskEmail(email),
+    message: "Notification email updated. Future updates will go to this address.",
+  };
 }
 
 async function mapPublicRequestStatus(bundle, options = {}) {
@@ -837,8 +884,29 @@ function mapListRequest(bundle) {
     ),
     canDownload: portalStatus === "released" && Boolean(downloadToken),
     downloadToken: downloadToken || undefined,
+    receiptUrl: null,
+    lookupExpiresAt: order.lookup_expires_at || null,
     createdAt: order.created_at,
   };
+}
+
+async function attachReceiptUrls(requests) {
+  const enriched = [];
+  for (const request of requests) {
+    if (!request?.id) {
+      enriched.push(request);
+      continue;
+    }
+    const payments =
+      await PersonalRequestStripePayment.findByPersonalRequestOrderId(
+        request.id
+      );
+    enriched.push({
+      ...request,
+      receiptUrl: payments[0]?.receipt_url || null,
+    });
+  }
+  return enriched;
 }
 
 async function getDashboardForUser(portalUserId) {
@@ -847,11 +915,14 @@ async function getDashboardForUser(portalUserId) {
     PersonalRequestOrder.findByPortalUserId(portalUserId, {
       pageSize: 5,
       paidOnly: true,
+      withinLookupWindow: true,
     }),
   ]);
 
   const bundles = await loadRequestBundles(listResult.rows);
-  const recentRequests = bundles.map(mapListRequest).filter(Boolean);
+  const recentRequests = await attachReceiptUrls(
+    bundles.map(mapListRequest).filter(Boolean)
+  );
 
   return {
     stats: {
@@ -862,6 +933,7 @@ async function getDashboardForUser(portalUserId) {
       released: Number(counts.released || 0),
     },
     recentRequests,
+    lookupDays: config.personalPortal?.lookupDays || 7,
   };
 }
 
@@ -876,13 +948,20 @@ async function listRequestsForUser(
       cursor,
       paidOnly: true,
       status: status || null,
+      withinLookupWindow: true,
     }
   );
 
   const bundles = await loadRequestBundles(rows);
-  const requests = bundles.map(mapListRequest).filter(Boolean);
+  const requests = await attachReceiptUrls(
+    bundles.map(mapListRequest).filter(Boolean)
+  );
 
-  return { requests, pagination };
+  return {
+    requests,
+    pagination,
+    lookupDays: config.personalPortal?.lookupDays || 7,
+  };
 }
 
 async function backfillMissingDmsOrderLinks() {
@@ -975,6 +1054,7 @@ module.exports = {
   fulfillPersonalPortalPayment,
   getCheckoutResult,
   lookupRequestStatus,
+  updateRequestNotificationEmail,
   getDashboardForUser,
   listRequestsForUser,
   syncPortalStatusForDmsOrder,

@@ -539,7 +539,7 @@ export default function CreateInvoiceModal({
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[#D0E8ED] bg-[#F0FAFC] px-3 py-2.5">
               <p className="text-[12px] font-semibold text-[#0B7C8E]">
                 {isCnrOrder
-                  ? "CNR — $15 witness fee only"
+                  ? "CNR — $15 witness fee  (Prepayment) only"
                   : `Records fee $${QUICK_RECORDS_FEE.toFixed(2)}`}
               </p>
               {canToggleQuickRecordsFee ? (

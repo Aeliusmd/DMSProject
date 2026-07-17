@@ -11,12 +11,24 @@ class PersonalRequestFacility {
     const [result] = await executor.execute(
       `INSERT INTO personal_request_facilities (
         personal_request_order_id, facility_id, facility_name, facility_address,
+        treating_doctor, is_manual_lookup,
         records_date_begin, records_date_end, sort_order
       ) VALUES (
         :personalRequestOrderId, :facilityId, :facilityName, :facilityAddress,
+        :treatingDoctor, :isManualLookup,
         :recordsDateBegin, :recordsDateEnd, :sortOrder
       )`,
-      data
+      {
+        personalRequestOrderId: data.personalRequestOrderId,
+        facilityId: data.facilityId || null,
+        facilityName: data.facilityName,
+        facilityAddress: data.facilityAddress,
+        treatingDoctor: data.treatingDoctor || null,
+        isManualLookup: data.isManualLookup ? 1 : 0,
+        recordsDateBegin: data.recordsDateBegin,
+        recordsDateEnd: data.recordsDateEnd,
+        sortOrder: data.sortOrder ?? 0,
+      }
     );
     return result.insertId;
   }

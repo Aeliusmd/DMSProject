@@ -142,7 +142,7 @@ async function searchFacilities(query) {
 }
 
 async function searchFacilitiesForPublic(query) {
-  const rows = await Facility.search(sanitizeSearchText(query));
+  const rows = await Facility.searchByNameOrAddress(sanitizeSearchText(query));
   return rows.map(mapPublicFacilitySearchRow);
 }
 

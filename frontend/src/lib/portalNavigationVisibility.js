@@ -1,4 +1,4 @@
-export const PORTAL_NAVIGATION_HIDDEN = true;
+export const PORTAL_NAVIGATION_HIDDEN = false;
 
 export const PORTAL_ROUTE_REDIRECT = "/login";
 

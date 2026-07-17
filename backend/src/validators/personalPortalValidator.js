@@ -121,16 +121,6 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     });
   }
 
-  if (isBlank(treatingFacilityName)) {
-    errors.push({
-      field: "treatingFacilityName",
-      message: "Treating facility name is required",
-    });
-  } else {
-    addMaxLengthError(errors, "treatingFacilityName", treatingFacilityName, 255);
-    addNoHtmlMarkupError(errors, "treatingFacilityName", treatingFacilityName);
-  }
-
   if (isBlank(treatingFacilityAddress)) {
     errors.push({
       field: "treatingFacilityAddress",
@@ -150,6 +140,21 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     );
   }
 
+  // Address is the gate. Facility name is optional and does not block submission.
+  if (!isBlank(treatingFacilityName)) {
+    addMaxLengthError(errors, "treatingFacilityName", treatingFacilityName, 255);
+    addNoHtmlMarkupError(errors, "treatingFacilityName", treatingFacilityName);
+  }
+
+  const treatingDoctor = sanitizeField(
+    body.treatingDoctor || body.treatingDoctorName || "",
+    255
+  );
+  if (!isBlank(treatingDoctor)) {
+    addMaxLengthError(errors, "treatingDoctor", treatingDoctor, 255);
+    addNoHtmlMarkupError(errors, "treatingDoctor", treatingDoctor);
+  }
+
   let facilityId = null;
   const rawFacilityId = trimToString(body.facilityId);
   if (!isBlank(rawFacilityId)) {
@@ -163,6 +168,10 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
       facilityId = parsedFacilityId;
     }
   }
+
+  // Manual lookup when not linked to a known facilities.id row.
+  // External users never create facilities; unmatched entries are flagged.
+  const isManualLookup = !facilityId;
 
   const recordsBeginIso = parseMmDdYyyy(body.recordsDateBegin);
   const recordsEndIso = parseMmDdYyyy(body.recordsDateEnd);
@@ -270,6 +279,8 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
       facilityId,
       treatingFacilityName,
       treatingFacilityAddress,
+      treatingDoctor: treatingDoctor || null,
+      isManualLookup,
       recordsDateBeginIso: recordsBeginIso,
       recordsDateEndIso: recordsEndIso,
       recordTypes: normalizedTypes,
@@ -282,22 +293,45 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
   };
 }
 
+function parseDobInput(value) {
+  const trimmed = trimToString(value);
+  if (!trimmed) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed) && isValidIsoDate(trimmed)) {
+    return trimmed;
+  }
+
+  return parseMmDdYyyy(trimmed);
+}
+
+function normalizeStoredDob(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  const asString = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(asString)) {
+    return asString.slice(0, 10);
+  }
+
+  return parseDobInput(asString);
+}
+
 function validateStatusLookup(body = {}) {
   const errors = [];
   const confirmationReference = sanitizeField(
     body.confirmationReference,
     MAX_CONFIRMATION_REF_LENGTH
   ).toUpperCase();
-  const driverLicenseNumber = sanitizeField(body.driverLicenseNumber, 20);
+  const dobIso = parseDobInput(body.dob);
 
-  if (isBlank(confirmationReference) && isBlank(driverLicenseNumber)) {
+  if (isBlank(confirmationReference)) {
     errors.push({
-      field: "lookup",
-      message: "Enter your confirmation reference or driver's license number",
+      field: "confirmationReference",
+      message: "Enter your order / confirmation number",
     });
-  }
-
-  if (!isBlank(confirmationReference)) {
+  } else {
     addMaxLengthError(
       errors,
       "confirmationReference",
@@ -312,10 +346,10 @@ function validateStatusLookup(body = {}) {
     }
   }
 
-  if (!isBlank(driverLicenseNumber) && !DRIVER_LICENSE_PATTERN.test(driverLicenseNumber)) {
+  if (!dobIso) {
     errors.push({
-      field: "driverLicenseNumber",
-      message: "Enter a valid driver's license number",
+      field: "dob",
+      message: "Enter date of birth as MM/DD/YYYY",
     });
   }
 
@@ -323,7 +357,44 @@ function validateStatusLookup(body = {}) {
     valid: errors.length === 0,
     errors,
     confirmationReference: confirmationReference || null,
-    driverLicenseNumber: driverLicenseNumber || null,
+    dobIso,
+  };
+}
+
+function validateRequestEmailUpdate(body = {}) {
+  const lookup = validateStatusLookup(body);
+  const errors = [...lookup.errors];
+  const email = sanitizeField(body.email, 255).toLowerCase();
+
+  if (!email || !isValidEmail(email)) {
+    errors.push({ field: "email", message: "Enter a valid email address" });
+  } else {
+    addMaxLengthError(errors, "email", email, 255);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    confirmationReference: lookup.confirmationReference,
+    dobIso: lookup.dobIso,
+    email,
+  };
+}
+
+function validatePersonalAccountEmailUpdate(body = {}) {
+  const errors = [];
+  const email = sanitizeField(body.email, 255).toLowerCase();
+
+  if (!email || !isValidEmail(email)) {
+    errors.push({ field: "email", message: "Enter a valid email address" });
+  } else {
+    addMaxLengthError(errors, "email", email, 255);
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    email,
   };
 }
 
@@ -409,8 +480,12 @@ module.exports = {
   validateEmailOtpConfirm,
   validatePersonalRequestSubmit,
   validateStatusLookup,
+  validateRequestEmailUpdate,
+  validatePersonalAccountEmailUpdate,
   validatePersonalRequestsListQuery,
   validatePersonalCheckoutResultQuery,
   parseMmDdYyyy,
+  parseDobInput,
+  normalizeStoredDob,
   MAX_LIST_PAGE_SIZE,
 };

@@ -81,9 +81,7 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
     errors.dob = "Date of birth is required";
   }
 
-  if (!data.treatingFacilityName?.trim()) {
-    errors.treatingFacilityName = "Treating facility name is required";
-  } else {
+  if (data.treatingFacilityName?.trim()) {
     const err = validateNoHtmlMarkup(data.treatingFacilityName, {
       fieldLabel: "Treating facility name",
     });
@@ -137,16 +135,29 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
 export function validateStatusLookupForm(data) {
   const errors = {};
   const hasRef = Boolean(data.confirmationReference?.trim());
-  const hasDl = Boolean(data.driverLicenseNumber?.trim());
+  const dob = String(data.dob || "").trim();
 
-  if (!hasRef && !hasDl) {
-    errors.lookup =
-      "Enter your confirmation reference or driver's license number";
+  if (!hasRef) {
+    errors.confirmationReference = "Enter your order / confirmation number";
   }
 
-  if (hasDl && !DRIVER_LICENSE_PATTERN.test(data.driverLicenseNumber.trim())) {
-    errors.driverLicenseNumber = "Enter a valid driver's license number";
+  if (!dob) {
+    errors.dob = "Date of birth is required";
+  } else if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dob) &&
+    !/^\d{2}\/\d{2}\/\d{4}$/.test(dob)
+  ) {
+    errors.dob = "Enter date of birth as MM/DD/YYYY";
   }
 
   return errors;
+}
+
+export function formatDobForApi(dob) {
+  const value = String(dob || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-");
+    return `${month}/${day}/${year}`;
+  }
+  return value;
 }

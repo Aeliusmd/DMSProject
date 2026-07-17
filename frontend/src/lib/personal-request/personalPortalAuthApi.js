@@ -140,10 +140,10 @@ export async function registerPersonal(payload) {
   });
 }
 
-export async function loginPersonal(payload) {
+export async function loginPersonal({ email }) {
   return request("/personal-portal/auth/login", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ email }),
   });
 }
 
@@ -192,6 +192,13 @@ export async function logoutPersonal() {
 
 export async function getPersonalCurrentUser() {
   return authRequest("/personal-portal/auth/me", { method: "GET" });
+}
+
+export async function updatePersonalAccountEmail(email) {
+  return authRequest("/personal-portal/auth/email", {
+    method: "PATCH",
+    body: JSON.stringify({ email }),
+  });
 }
 
 export async function getPersonalDashboard() {
