@@ -1,4 +1,9 @@
+import { redirect } from "next/navigation";
 import { Fraunces, Manrope } from "next/font/google";
+import {
+  PORTAL_NAVIGATION_HIDDEN,
+  PORTAL_ROUTE_REDIRECT,
+} from "@/lib/portalNavigationVisibility";
 
 const display = Fraunces({
   subsets: ["latin"],
@@ -19,6 +24,10 @@ export const metadata = {
 };
 
 export default function LandingPageLayout({ children }) {
+  if (PORTAL_NAVIGATION_HIDDEN) {
+    redirect(PORTAL_ROUTE_REDIRECT);
+  }
+
   return (
     <div
       className={`${display.variable} ${body.variable}`}

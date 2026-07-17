@@ -10,21 +10,30 @@ class PersonalRequestOrderRecord {
     if (!rows?.length) return [];
 
     const executor = connection || getPool();
-    const insertedIds = [];
+    const placeholders = rows
+      .map(
+        (_, index) =>
+          `(:personalRequestOrderId${index}, :personalRequestFacilityId${index}, :recordType${index})`
+      )
+      .join(", ");
+    const params = {};
+    rows.forEach((row, index) => {
+      params[`personalRequestOrderId${index}`] = row.personalRequestOrderId;
+      params[`personalRequestFacilityId${index}`] =
+        row.personalRequestFacilityId;
+      params[`recordType${index}`] = row.recordType;
+    });
 
-    for (const row of rows) {
-      const [result] = await executor.execute(
-        `INSERT INTO personal_request_order_records (
-          personal_request_order_id, personal_request_facility_id, record_type
-        ) VALUES (
-          :personalRequestOrderId, :personalRequestFacilityId, :recordType
-        )`,
-        row
-      );
-      insertedIds.push(result.insertId);
-    }
+    const [result] = await executor.execute(
+      `INSERT INTO personal_request_order_records (
+        personal_request_order_id, personal_request_facility_id, record_type
+      ) VALUES ${placeholders}`,
+      params
+    );
 
-    return insertedIds;
+    const firstId = Number(result.insertId || 0);
+    if (!firstId) return [];
+    return rows.map((_, index) => firstId + index);
   }
 
   static async findByOrderId(personalRequestOrderId, connection = null) {
@@ -34,6 +43,28 @@ class PersonalRequestOrderRecord {
        WHERE personal_request_order_id = :personalRequestOrderId
        ORDER BY FIELD(record_type, 'medical', 'billing', 'xrays'), id ASC`,
       { personalRequestOrderId }
+    );
+    return rows;
+  }
+
+  static async findByOrderIds(orderIds = [], connection = null) {
+    const ids = [...new Set(orderIds.map(Number).filter((id) => id > 0))];
+    if (!ids.length) return [];
+
+    const executor = connection || getPool();
+    const placeholders = ids.map((_, index) => `:id${index}`).join(", ");
+    const params = {};
+    ids.forEach((id, index) => {
+      params[`id${index}`] = id;
+    });
+
+    const [rows] = await executor.execute(
+      `SELECT * FROM personal_request_order_records
+       WHERE personal_request_order_id IN (${placeholders})
+       ORDER BY personal_request_order_id ASC,
+                FIELD(record_type, 'medical', 'billing', 'xrays'),
+                id ASC`,
+      params
     );
     return rows;
   }

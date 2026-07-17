@@ -92,7 +92,15 @@ exports.getById = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  throwIfInvalid(validateCreateInvoice(req.body));
+  const orderId = Number(req.body?.orderId);
+  let allowZeroTotal = false;
+
+  if (Number.isFinite(orderId)) {
+    const order = await Order.findById(orderId);
+    allowZeroTotal = Boolean(order && Number(order.certificate_no_records));
+  }
+
+  throwIfInvalid(validateCreateInvoice(req.body, { allowZeroTotal }));
 
   const invoice = await invoiceService.createInvoice(req.body, req.user?.id);
 

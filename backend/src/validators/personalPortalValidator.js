@@ -5,15 +5,27 @@ const {
   isValidIsoDate,
   isFutureDate,
   addMaxLengthError,
+  isValidPositiveIntId,
 } = require("./validationHelpers");
+const { sanitizeText } = require("../utils/sanitize");
 const {
   addPersonNameFormatError,
   addNoHtmlMarkupError,
+  hasHtmlMarkup,
+  htmlMarkupMessage,
 } = require("../utils/nameValidation");
 
 const ALLOWED_RECORD_TYPES = new Set(["medical", "billing", "xrays"]);
 const ALLOWED_DELIVERY = new Set(["download", "mail"]);
 const DRIVER_LICENSE_PATTERN = /^[A-Za-z0-9-]{4,20}$/;
+const MAX_LIST_PAGE_SIZE = 100;
+const MAX_CONFIRMATION_REF_LENGTH = 64;
+const MAX_FACILITY_ADDRESS_LENGTH = 500;
+const MAX_MAIL_ADDRESS_LENGTH = 500;
+
+function sanitizeField(value, maxLength) {
+  return sanitizeText(value, { maxLength, allowEmpty: true });
+}
 
 function parseMmDdYyyy(value) {
   const trimmed = trimToString(value);
@@ -31,7 +43,7 @@ function parseMmDdYyyy(value) {
 
 function validateEmailOtpRequest(body = {}) {
   const errors = [];
-  const email = trimToString(body.email).toLowerCase();
+  const email = sanitizeField(body.email, 255).toLowerCase();
 
   if (isBlank(email)) {
     errors.push({ field: "email", message: "Email is required" });
@@ -46,17 +58,23 @@ function validateEmailOtpRequest(body = {}) {
 
 function validateEmailOtpConfirm(body = {}) {
   const errors = [];
-  const sessionToken = trimToString(body.sessionToken);
+  const sessionToken = sanitizeField(body.sessionToken, 255);
   const code = trimToString(body.code);
 
   if (isBlank(sessionToken)) {
-    errors.push({ field: "sessionToken", message: "Verification session expired. Request a new code." });
+    errors.push({
+      field: "sessionToken",
+      message: "Verification session expired. Request a new code.",
+    });
   }
 
   if (isBlank(code)) {
     errors.push({ field: "code", message: "Verification code is required" });
   } else if (!/^\d{6}$/.test(code)) {
-    errors.push({ field: "code", message: "Enter the 6-digit verification code" });
+    errors.push({
+      field: "code",
+      message: "Enter the 6-digit verification code",
+    });
   }
 
   return { valid: errors.length === 0, errors, sessionToken, code };
@@ -64,43 +82,72 @@ function validateEmailOtpConfirm(body = {}) {
 
 function validatePersonalRequestSubmit(body = {}, options = {}) {
   const errors = [];
-  const email = trimToString(body.email).toLowerCase();
+  const firstName = sanitizeField(body.firstName, 100);
+  const lastName = sanitizeField(body.lastName, 100);
+  const treatingFacilityName = sanitizeField(body.treatingFacilityName, 255);
+  const treatingFacilityAddress = sanitizeField(
+    body.treatingFacilityAddress,
+    MAX_FACILITY_ADDRESS_LENGTH
+  );
+  const mailAddress = sanitizeField(body.mailAddress, MAX_MAIL_ADDRESS_LENGTH);
+  const driverLicenseNumber = sanitizeField(body.driverLicenseNumber, 20);
+  const email = sanitizeField(body.email, 255).toLowerCase();
+  const emailVerificationToken = sanitizeField(
+    body.emailVerificationToken,
+    512
+  );
 
-  if (isBlank(body.firstName)) {
+  if (isBlank(firstName)) {
     errors.push({ field: "firstName", message: "First name is required" });
   } else {
-    addMaxLengthError(errors, "firstName", body.firstName, 100);
-    addPersonNameFormatError(errors, "firstName", body.firstName);
+    addMaxLengthError(errors, "firstName", firstName, 100);
+    addPersonNameFormatError(errors, "firstName", firstName);
   }
 
-  if (isBlank(body.lastName)) {
+  if (isBlank(lastName)) {
     errors.push({ field: "lastName", message: "Last name is required" });
   } else {
-    addMaxLengthError(errors, "lastName", body.lastName, 100);
-    addPersonNameFormatError(errors, "lastName", body.lastName);
+    addMaxLengthError(errors, "lastName", lastName, 100);
+    addPersonNameFormatError(errors, "lastName", lastName);
   }
 
   const dobIso = parseMmDdYyyy(body.dob);
   if (!dobIso) {
     errors.push({ field: "dob", message: "Enter date of birth as MM/DD/YYYY" });
   } else if (isFutureDate(dobIso)) {
-    errors.push({ field: "dob", message: "Date of birth cannot be in the future" });
+    errors.push({
+      field: "dob",
+      message: "Date of birth cannot be in the future",
+    });
   }
 
-  if (isBlank(body.treatingFacilityName)) {
-    errors.push({ field: "treatingFacilityName", message: "Treating facility name is required" });
+  if (isBlank(treatingFacilityName)) {
+    errors.push({
+      field: "treatingFacilityName",
+      message: "Treating facility name is required",
+    });
   } else {
-    addMaxLengthError(errors, "treatingFacilityName", body.treatingFacilityName, 255);
-    addNoHtmlMarkupError(errors, "treatingFacilityName", body.treatingFacilityName);
+    addMaxLengthError(errors, "treatingFacilityName", treatingFacilityName, 255);
+    addNoHtmlMarkupError(errors, "treatingFacilityName", treatingFacilityName);
   }
 
-  if (isBlank(body.treatingFacilityAddress)) {
+  if (isBlank(treatingFacilityAddress)) {
     errors.push({
       field: "treatingFacilityAddress",
       message: "Treating facility address is required",
     });
   } else {
-    addNoHtmlMarkupError(errors, "treatingFacilityAddress", body.treatingFacilityAddress);
+    addMaxLengthError(
+      errors,
+      "treatingFacilityAddress",
+      treatingFacilityAddress,
+      MAX_FACILITY_ADDRESS_LENGTH
+    );
+    addNoHtmlMarkupError(
+      errors,
+      "treatingFacilityAddress",
+      treatingFacilityAddress
+    );
   }
 
   let facilityId = null;
@@ -108,7 +155,10 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
   if (!isBlank(rawFacilityId)) {
     const parsedFacilityId = Number(rawFacilityId);
     if (!Number.isInteger(parsedFacilityId) || parsedFacilityId <= 0) {
-      errors.push({ field: "facilityId", message: "Invalid treating facility selection" });
+      errors.push({
+        field: "facilityId",
+        message: "Invalid treating facility selection",
+      });
     } else {
       facilityId = parsedFacilityId;
     }
@@ -150,9 +200,13 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     recordTypes = [];
   }
 
-  const normalizedTypes = recordTypes
-    .map((value) => trimToString(value).toLowerCase())
-    .filter((value) => ALLOWED_RECORD_TYPES.has(value));
+  const normalizedTypes = [
+    ...new Set(
+      recordTypes
+        .map((value) => sanitizeField(value, 40).toLowerCase())
+        .filter((value) => ALLOWED_RECORD_TYPES.has(value))
+    ),
+  ];
 
   if (!normalizedTypes.length) {
     errors.push({
@@ -161,7 +215,10 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     });
   }
 
-  const deliveryPreference = trimToString(body.deliveryPreference).toLowerCase();
+  const deliveryPreference = sanitizeField(
+    body.deliveryPreference,
+    20
+  ).toLowerCase();
   if (!ALLOWED_DELIVERY.has(deliveryPreference)) {
     errors.push({
       field: "deliveryPreference",
@@ -169,16 +226,16 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     });
   }
 
-  if (deliveryPreference === "mail" && isBlank(body.mailAddress)) {
+  if (deliveryPreference === "mail" && isBlank(mailAddress)) {
     errors.push({
       field: "mailAddress",
       message: "Mailing address is required for mail delivery",
     });
-  } else if (!isBlank(body.mailAddress)) {
-    addNoHtmlMarkupError(errors, "mailAddress", body.mailAddress);
+  } else if (!isBlank(mailAddress)) {
+    addMaxLengthError(errors, "mailAddress", mailAddress, MAX_MAIL_ADDRESS_LENGTH);
+    addNoHtmlMarkupError(errors, "mailAddress", mailAddress);
   }
 
-  const driverLicenseNumber = trimToString(body.driverLicenseNumber);
   if (isBlank(driverLicenseNumber)) {
     errors.push({
       field: "driverLicenseNumber",
@@ -191,12 +248,12 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     });
   }
 
-  if (isBlank(body.email) || !isValidEmail(email)) {
+  if (isBlank(email) || !isValidEmail(email)) {
     errors.push({ field: "email", message: "A verified email is required" });
   }
 
   const skipEmailToken = Boolean(options.authenticated);
-  if (!skipEmailToken && isBlank(body.emailVerificationToken)) {
+  if (!skipEmailToken && isBlank(emailVerificationToken)) {
     errors.push({
       field: "emailVerificationToken",
       message: "Email verification is required before submitting",
@@ -207,34 +264,52 @@ function validatePersonalRequestSubmit(body = {}, options = {}) {
     valid: errors.length === 0,
     errors,
     parsed: {
-      firstName: trimToString(body.firstName),
-      lastName: trimToString(body.lastName),
+      firstName,
+      lastName,
       dobIso,
       facilityId,
-      treatingFacilityName: trimToString(body.treatingFacilityName),
-      treatingFacilityAddress: trimToString(body.treatingFacilityAddress),
+      treatingFacilityName,
+      treatingFacilityAddress,
       recordsDateBeginIso: recordsBeginIso,
       recordsDateEndIso: recordsEndIso,
       recordTypes: normalizedTypes,
       deliveryPreference,
-      mailAddress: trimToString(body.mailAddress) || null,
+      mailAddress: mailAddress || null,
       driverLicenseNumber,
       email,
-      emailVerificationToken: trimToString(body.emailVerificationToken),
+      emailVerificationToken,
     },
   };
 }
 
 function validateStatusLookup(body = {}) {
   const errors = [];
-  const confirmationReference = trimToString(body.confirmationReference);
-  const driverLicenseNumber = trimToString(body.driverLicenseNumber);
+  const confirmationReference = sanitizeField(
+    body.confirmationReference,
+    MAX_CONFIRMATION_REF_LENGTH
+  ).toUpperCase();
+  const driverLicenseNumber = sanitizeField(body.driverLicenseNumber, 20);
 
   if (isBlank(confirmationReference) && isBlank(driverLicenseNumber)) {
     errors.push({
       field: "lookup",
       message: "Enter your confirmation reference or driver's license number",
     });
+  }
+
+  if (!isBlank(confirmationReference)) {
+    addMaxLengthError(
+      errors,
+      "confirmationReference",
+      confirmationReference,
+      MAX_CONFIRMATION_REF_LENGTH
+    );
+    if (hasHtmlMarkup(confirmationReference)) {
+      errors.push({
+        field: "confirmationReference",
+        message: htmlMarkupMessage("confirmationReference"),
+      });
+    }
   }
 
   if (!isBlank(driverLicenseNumber) && !DRIVER_LICENSE_PATTERN.test(driverLicenseNumber)) {
@@ -252,10 +327,90 @@ function validateStatusLookup(body = {}) {
   };
 }
 
+function validatePersonalRequestsListQuery(query = {}) {
+  const errors = [];
+  let pageSize = 10;
+
+  if (!isBlank(query.pageSize) || !isBlank(query.limit)) {
+    const parsed = Number(query.pageSize || query.limit);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < 1 ||
+      parsed > MAX_LIST_PAGE_SIZE
+    ) {
+      errors.push({
+        field: "pageSize",
+        message: `pageSize must be between 1 and ${MAX_LIST_PAGE_SIZE}`,
+      });
+    } else {
+      pageSize = parsed;
+    }
+  }
+
+  const cursor = trimToString(query.cursor);
+  if (cursor && cursor.length > 500) {
+    errors.push({ field: "cursor", message: "Invalid cursor" });
+  } else if (cursor && hasHtmlMarkup(cursor)) {
+    errors.push({ field: "cursor", message: htmlMarkupMessage("cursor") });
+  }
+
+  const status = sanitizeField(query.status, 40).toLowerCase();
+  const allowedStatuses = new Set([
+    "",
+    "in_process",
+    "invoice",
+    "paid",
+    "released",
+  ]);
+  if (status && !allowedStatuses.has(status)) {
+    errors.push({ field: "status", message: "Invalid status filter" });
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    pageSize,
+    cursor: cursor || null,
+    status: status || null,
+  };
+}
+
+function validatePersonalCheckoutResultQuery(query = {}) {
+  const errors = [];
+  const requestIdRaw = trimToString(query.request_id || query.requestId);
+  const sessionId = sanitizeField(
+    query.session_id || query.sessionId,
+    255
+  );
+
+  if (!requestIdRaw) {
+    errors.push({ field: "request_id", message: "request_id is required" });
+  } else if (!isValidPositiveIntId(requestIdRaw)) {
+    errors.push({ field: "request_id", message: "Invalid request id" });
+  }
+
+  if (!sessionId) {
+    errors.push({ field: "session_id", message: "session_id is required" });
+  } else if (hasHtmlMarkup(sessionId)) {
+    errors.push({ field: "session_id", message: htmlMarkupMessage("session_id") });
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    requestId: Number(requestIdRaw),
+    sessionId,
+  };
+}
+
 module.exports = {
   validateEmailOtpRequest,
   validateEmailOtpConfirm,
   validatePersonalRequestSubmit,
   validateStatusLookup,
+  validatePersonalRequestsListQuery,
+  validatePersonalCheckoutResultQuery,
   parseMmDdYyyy,
+  MAX_LIST_PAGE_SIZE,
 };

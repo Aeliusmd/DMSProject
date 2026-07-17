@@ -117,7 +117,7 @@ function validatePersonalLogin(body = {}) {
 
 function validatePersonalTwoFactor(body = {}) {
   const errors = [];
-  const sessionToken = trimToString(body.sessionToken);
+  const sessionToken = sanitizeField(body.sessionToken, 255);
   const code = trimToString(body.code).replace(/\D/g, "");
 
   if (!sessionToken) {
@@ -133,7 +133,7 @@ function validatePersonalTwoFactor(body = {}) {
 
 function validatePersonalResendTwoFactor(body = {}) {
   const errors = [];
-  const sessionToken = trimToString(body.sessionToken);
+  const sessionToken = sanitizeField(body.sessionToken, 255);
   if (!sessionToken) {
     errors.push({ field: "sessionToken", message: "Session expired. Sign in again." });
   }
@@ -142,15 +142,20 @@ function validatePersonalResendTwoFactor(body = {}) {
 
 function validatePersonalRefresh(body = {}) {
   const errors = [];
-  const refreshToken = trimToString(body.refreshToken);
+  const refreshToken = sanitizeField(body.refreshToken, 1024);
   if (!refreshToken) {
     errors.push({ field: "refreshToken", message: "Refresh token is required" });
   }
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, refreshToken };
 }
 
 function validatePersonalLogout(body = {}) {
-  return { valid: true, errors: [] };
+  return {
+    valid: true,
+    errors: [],
+    refreshToken: sanitizeField(body.refreshToken, 1024) || null,
+    sessionToken: sanitizeField(body.sessionToken, 255) || null,
+  };
 }
 
 module.exports = {

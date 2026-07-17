@@ -102,10 +102,10 @@ function validateInvoicePayload(body = {}, { requireOrderId = false, blockZeroTo
   return { valid: errors.length === 0, errors };
 }
 
-function validateCreateInvoice(body = {}) {
+function validateCreateInvoice(body = {}, { allowZeroTotal = false } = {}) {
   return validateInvoicePayload(body, {
     requireOrderId: true,
-    blockZeroTotal: true,
+    blockZeroTotal: !allowZeroTotal,
   });
 }
 

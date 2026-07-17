@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { PORTAL_NAVIGATION_HIDDEN } from "@/lib/portalNavigationVisibility";
 import { SHEET_COMPANY_INFO } from "@/lib/sheetTemplateConstants";
 import styles from "./landing.module.css";
 
@@ -55,37 +56,66 @@ export default function LandingPage() {
           </div>
 
           <div className={`${styles.actions} ${styles.fadeIn} ${styles.delay5}`}>
-            <Link
-              href="/Subpoenaupload"
-              className={`${styles.cta} ${styles.ctaPrimary}`}
-            >
-              <span className={styles.sheen} aria-hidden />
-              <span>
-                <span className={styles.ctaLabel}>Company portal</span>
-                <span className={styles.ctaHint}>
-                  For law firms and organizations
-                </span>
-              </span>
-              <span className={styles.ctaArrow} aria-hidden>
-                →
-              </span>
-            </Link>
+            {PORTAL_NAVIGATION_HIDDEN ? (
+              <>
+                <div className={`${styles.cta} ${styles.ctaPrimary}`} aria-hidden>
+                  <span className={styles.sheen} aria-hidden />
+                  <span>
+                    <span className={styles.ctaLabel}>Company portal</span>
+                    <span className={styles.ctaHint}>
+                      Navigation is temporarily hidden
+                    </span>
+                  </span>
+                </div>
 
-            <Link
-              href="/personalrequest"
-              className={`${styles.cta} ${styles.ctaSecondary}`}
-            >
-              <span className={`${styles.sheen} ${styles.sheenLight}`} aria-hidden />
-              <span>
-                <span className={styles.ctaLabel}>Personal request portal</span>
-                <span className={styles.ctaHint}>
-                  For individual record requests
-                </span>
-              </span>
-              <span className={styles.ctaArrow} aria-hidden>
-                →
-              </span>
-            </Link>
+                <div className={`${styles.cta} ${styles.ctaSecondary}`} aria-hidden>
+                  <span className={`${styles.sheen} ${styles.sheenLight}`} aria-hidden />
+                  <span>
+                    <span className={styles.ctaLabel}>Personal request portal</span>
+                    <span className={styles.ctaHint}>
+                      Navigation is temporarily hidden
+                    </span>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/Subpoenaupload"
+                  className={`${styles.cta} ${styles.ctaPrimary}`}
+                >
+                  <span className={styles.sheen} aria-hidden />
+                  <span>
+                    <span className={styles.ctaLabel}>Company portal</span>
+                    <span className={styles.ctaHint}>
+                      For law firms and organizations
+                    </span>
+                  </span>
+                  <span className={styles.ctaArrow} aria-hidden>
+                    →
+                  </span>
+                </Link>
+
+                <Link
+                  href="/personalrequest"
+                  className={`${styles.cta} ${styles.ctaSecondary}`}
+                >
+                  <span
+                    className={`${styles.sheen} ${styles.sheenLight}`}
+                    aria-hidden
+                  />
+                  <span>
+                    <span className={styles.ctaLabel}>Personal request portal</span>
+                    <span className={styles.ctaHint}>
+                      For individual record requests
+                    </span>
+                  </span>
+                  <span className={styles.ctaArrow} aria-hidden>
+                    →
+                  </span>
+                </Link>
+              </>
+            )}
           </div>
         </section>
 
