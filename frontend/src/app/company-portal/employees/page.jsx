@@ -16,6 +16,7 @@ import {
   listCompanyEmployeesPaginated,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { sanitizeSearchText } from "@/lib/company-portal/companyPortalValidation";
 
 const EMPLOYEES_PAGE_SIZE = 10;
 
@@ -108,7 +109,8 @@ export default function CompanyEmployeesPage() {
 
   const handleSearch = (event) => {
     event.preventDefault();
-    const nextSearch = searchDraft.trim();
+    const nextSearch = sanitizeSearchText(searchDraft);
+    setSearchDraft(nextSearch);
     setAppliedSearch(nextSearch);
     const nextHistory = [null];
     cursorHistoryRef.current = nextHistory;
@@ -176,7 +178,9 @@ export default function CompanyEmployeesPage() {
           <input
             type="search"
             value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
+            onChange={(event) =>
+              setSearchDraft(sanitizeSearchText(event.target.value))
+            }
             placeholder="Search by name or email"
             className="h-11 flex-1 rounded-[8px] border border-[#E2E8F0] px-3 text-[13px] outline-none focus:border-[#0097B2]"
           />

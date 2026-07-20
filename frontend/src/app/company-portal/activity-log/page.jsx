@@ -13,6 +13,7 @@ import {
 import { getCompanyPortalActivityLogsPaginated } from "@/lib/company-portal/companyPortalActivityLogApi";
 import { listCompanyEmployees } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { sanitizeSearchText } from "@/lib/company-portal/companyPortalValidation";
 
 const ACTIVITY_LOGS_PER_PAGE = 10;
 
@@ -209,7 +210,9 @@ export default function CompanyPortalActivityLogPage() {
   };
 
   const handleSearch = () => {
-    setAppliedPerformerSearch(performerSearchDraft.trim());
+    const sanitized = sanitizeSearchText(performerSearchDraft);
+    setPerformerSearchDraft(sanitized);
+    setAppliedPerformerSearch(sanitized);
     resetPagination();
   };
 
@@ -462,7 +465,7 @@ function PerformerSearch({ value, onChange, onSearch, className = "" }) {
         <input
           type="text"
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => onChange(sanitizeSearchText(event.target.value))}
           onKeyDown={handleKeyDown}
           placeholder="Search by name"
           className="h-[34px] min-w-0 flex-1 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"

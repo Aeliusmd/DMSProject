@@ -5,6 +5,7 @@ const {
   addMaxLengthError,
 } = require("./validationHelpers");
 const { sanitizeText } = require("../utils/sanitize");
+const { addNoHtmlMarkupError } = require("../utils/nameValidation");
 
 const MAX_PASSWORD_LENGTH = 128;
 const MIN_PASSWORD_LENGTH = 8;
@@ -48,6 +49,18 @@ function validatePasswordPair(password, confirmPassword, errors) {
 
 function validateCompanyRegister(body = {}) {
   const errors = [];
+
+  addNoHtmlMarkupError(errors, "companyName", trimToString(body.companyName));
+  addNoHtmlMarkupError(errors, "email", trimToString(body.email || body.companyEmail));
+  addNoHtmlMarkupError(
+    errors,
+    "addressLine1",
+    trimToString(body.addressLine1 || body.address || body.companyAddress)
+  );
+  addNoHtmlMarkupError(errors, "addressLine2", trimToString(body.addressLine2));
+  addNoHtmlMarkupError(errors, "city", trimToString(body.city));
+  addNoHtmlMarkupError(errors, "state", trimToString(body.state));
+  addNoHtmlMarkupError(errors, "zip", trimToString(body.zip || body.zipCode));
 
   const companyName = sanitizeField(body.companyName, 255);
   const phoneRaw = sanitizeField(body.phone || body.companyPhone, 30);
@@ -145,6 +158,12 @@ function validateCompanyRegister(body = {}) {
 
 function validateCompanyLogin(body = {}) {
   const errors = [];
+
+  addNoHtmlMarkupError(
+    errors,
+    "email",
+    trimToString(body.email || body.identifier)
+  );
 
   const email = sanitizeField(body.email || body.identifier, 255).toLowerCase();
   const password = typeof body.password === "string" ? body.password : "";

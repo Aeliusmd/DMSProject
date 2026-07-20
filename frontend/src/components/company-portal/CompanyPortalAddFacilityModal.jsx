@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import {
   COMPANY_PORTAL_FACILITY_SEARCH_FEE,
 } from "@/lib/company-portal/companyPortalOrderUtils";
+import {
+  sanitizeCompanyOrderField,
+  validateFacilityForm,
+} from "@/lib/company-portal/companyPortalValidation";
 
 const EMPTY_FORM = {
   facilityName: "",
@@ -32,7 +36,10 @@ export default function CompanyPortalAddFacilityModal({
   if (!open) return null;
 
   const handleChange = (name, value) => {
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [name]: sanitizeCompanyOrderField(name, value),
+    }));
     setErrors((prev) => {
       if (!prev[name]) return prev;
       const next = { ...prev };
@@ -42,42 +49,16 @@ export default function CompanyPortalAddFacilityModal({
   };
 
   const validate = () => {
-    const nextErrors = {};
-    if (!`${form.facilityAddress || ""}`.trim()) {
-      nextErrors.facilityAddress = "Street address is required";
-    }
-    if (!`${form.facilityCity || ""}`.trim()) {
-      nextErrors.facilityCity = "City is required";
-    }
-    const state = `${form.facilityState || ""}`.trim().toUpperCase();
-    if (!state) {
-      nextErrors.facilityState = "State is required";
-    } else if (!/^[A-Z]{2}$/.test(state)) {
-      nextErrors.facilityState = "State must be 2 letters";
-    }
-    const zipDigits = `${form.facilityZip || ""}`.replace(/\D/g, "");
-    if (!zipDigits) {
-      nextErrors.facilityZip = "ZIP code is required";
-    } else if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-      nextErrors.facilityZip = "ZIP must be 5 digits";
-    }
-
+    const { errors: nextErrors, sanitized } = validateFacilityForm(form);
     setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    return Object.keys(nextErrors).length === 0 ? sanitized : null;
   };
 
   const handleSubmit = (event) => {
     event.preventDefault();
-    if (!validate()) return;
-
-    onSubmit?.({
-      facilityName: `${form.facilityName || ""}`.trim(),
-      facilityAddress: `${form.facilityAddress || ""}`.trim(),
-      facilityCity: `${form.facilityCity || ""}`.trim(),
-      facilityState: `${form.facilityState || ""}`.trim().toUpperCase(),
-      facilityZip: zipDigitsFrom(form.facilityZip),
-      treatingDoctor: `${form.treatingDoctor || ""}`.trim(),
-    });
+    const sanitized = validate();
+    if (!sanitized) return;
+    onSubmit?.(sanitized);
   };
 
   return (
@@ -203,10 +184,3 @@ function Field({
   );
 }
 
-function zipDigitsFrom(value) {
-  const digits = `${value || ""}`.replace(/\D/g, "");
-  if (digits.length === 9) {
-    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-  }
-  return digits;
-}

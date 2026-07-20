@@ -20,6 +20,7 @@ import {
   listCompanyWalletTransactions,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { sanitizeMoneyInput } from "@/lib/company-portal/companyPortalValidation";
 
 const TRANSACTIONS_PAGE_SIZE = 10;
 
@@ -179,7 +180,11 @@ function MoneyManagementClient() {
     setTopupLoading(true);
     setError("");
     try {
-      const response = await createCompanyWalletTopup(Number(topupAmount));
+      const amount = Number(sanitizeMoneyInput(topupAmount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Enter a valid top-up amount");
+      }
+      const response = await createCompanyWalletTopup(amount);
       const checkoutUrl = response?.data?.checkoutUrl;
       if (!checkoutUrl) throw new Error("Unable to start Stripe checkout");
       window.location.href = checkoutUrl;
@@ -195,9 +200,13 @@ function MoneyManagementClient() {
     setError("");
     setSuccessMessage("");
     try {
+      const amount = Number(sanitizeMoneyInput(allocateForm.amount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Enter a valid amount");
+      }
       const response = await allocateCompanyWalletFunds({
         employeeId: Number(allocateForm.employeeId),
-        amount: Number(allocateForm.amount),
+        amount,
       });
       setSummary(response?.data || null);
       setAllocateForm({ employeeId: "", amount: "" });
@@ -288,7 +297,9 @@ function MoneyManagementClient() {
                 min="10"
                 step="0.01"
                 value={topupAmount}
-                onChange={(event) => setTopupAmount(event.target.value)}
+                onChange={(event) =>
+                  setTopupAmount(sanitizeMoneyInput(event.target.value))
+                }
                 placeholder="100.00"
               />
               <PrimaryButton
@@ -339,7 +350,7 @@ function MoneyManagementClient() {
                 onChange={(event) =>
                   setAllocateForm((prev) => ({
                     ...prev,
-                    amount: event.target.value,
+                    amount: sanitizeMoneyInput(event.target.value),
                   }))
                 }
                 placeholder="50.00"

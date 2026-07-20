@@ -2,6 +2,11 @@ import {
   hasFormRecordTypesSelected,
   formatSelectedRecordTypesLabel,
 } from "@/lib/orders/recordTypeUtils";
+import {
+  hasHtmlMarkup,
+  htmlMarkupError,
+  sanitizeCompanyOrderForm,
+} from "@/lib/company-portal/companyPortalValidation";
 
 export const COMPANY_ORDER_STEPS = [
   { id: 1, key: "upload", label: "Upload" },
@@ -129,9 +134,38 @@ export function calculateCompanyPortalOrderTotal() {
 
 export function validateCompanyOrderForm(form) {
   const errors = {};
-  const mode = `${form.facilitySelectionMode || ""}`.trim().toLowerCase();
-  const requestNew = Boolean(form.requestNewFacilitySearch);
-  const facilityId = Number(form.internalFacilityId);
+  const sanitized = sanitizeCompanyOrderForm(form);
+  const mode = `${sanitized.facilitySelectionMode || ""}`.trim().toLowerCase();
+  const requestNew = Boolean(sanitized.requestNewFacilitySearch);
+  const facilityId = Number(sanitized.internalFacilityId);
+
+  const htmlFields = [
+    "facilityName",
+    "facilityAddress",
+    "facilityCity",
+    "facilityState",
+    "facilityZip",
+    "treatingDoctor",
+    "applicantName",
+    "caseName",
+    "caseNumber",
+    "recNumber",
+    "companyName",
+    "companyAddress",
+    "companyCity",
+    "companyState",
+    "companyZip",
+    "doctorAddress",
+    "requestedRecord",
+    "dateOfInjuryText",
+    "contactEmail",
+  ];
+
+  htmlFields.forEach((field) => {
+    if (form[field] && hasHtmlMarkup(form[field])) {
+      errors[field] = htmlMarkupError(field);
+    }
+  });
 
   if (requestNew || mode === "new") {
     if (requestNew && mode === "existing" && facilityId > 0) {
@@ -139,22 +173,22 @@ export function validateCompanyOrderForm(form) {
         "Choose either an existing facility or request a new facility search";
     }
 
-    if (!`${form.facilityAddress || ""}`.trim()) {
-      errors.facilityAddress = "Street address is required";
+    if (!`${sanitized.facilityAddress || ""}`.trim()) {
+      errors.facilityAddress = errors.facilityAddress || "Street address is required";
     }
 
-    if (!`${form.facilityCity || ""}`.trim()) {
-      errors.facilityCity = "City is required";
+    if (!`${sanitized.facilityCity || ""}`.trim()) {
+      errors.facilityCity = errors.facilityCity || "City is required";
     }
 
-    const state = `${form.facilityState || ""}`.trim().toUpperCase();
+    const state = `${sanitized.facilityState || ""}`.trim().toUpperCase();
     if (!state) {
       errors.facilityState = "State is required";
     } else if (!/^[A-Z]{2}$/.test(state)) {
       errors.facilityState = "State must be 2 letters";
     }
 
-    const zipDigits = `${form.facilityZip || ""}`.replace(/\D/g, "");
+    const zipDigits = `${sanitized.facilityZip || ""}`.replace(/\D/g, "");
     if (!zipDigits) {
       errors.facilityZip = "ZIP code is required";
     } else if (zipDigits.length !== 5 && zipDigits.length !== 9) {
@@ -172,20 +206,20 @@ export function validateCompanyOrderForm(form) {
       "Select an existing facility or request a new facility search";
   }
 
-  if (!hasFormRecordTypesSelected(form)) {
+  if (!hasFormRecordTypesSelected(sanitized)) {
     errors.type = "Select at least one record type";
   }
 
-  if (!`${form.caseNumber || ""}`.trim()) {
-    errors.caseNumber = "Order number is required";
+  if (!`${sanitized.caseNumber || ""}`.trim()) {
+    errors.caseNumber = errors.caseNumber || "Order number is required";
   }
 
-  const companyState = `${form.companyState || ""}`.trim().toUpperCase();
+  const companyState = `${sanitized.companyState || ""}`.trim().toUpperCase();
   if (companyState && !/^[A-Z]{2}$/.test(companyState)) {
     errors.companyState = "State must be 2 letters";
   }
 
-  const companyZipDigits = `${form.companyZip || ""}`.replace(/\D/g, "");
+  const companyZipDigits = `${sanitized.companyZip || ""}`.replace(/\D/g, "");
   if (
     companyZipDigits &&
     companyZipDigits.length !== 5 &&
@@ -194,7 +228,7 @@ export function validateCompanyOrderForm(form) {
     errors.companyZip = "ZIP must be 5 digits";
   }
 
-  return errors;
+  return { errors, sanitized };
 }
 
 export function getRecordTypesSummary(form = {}) {

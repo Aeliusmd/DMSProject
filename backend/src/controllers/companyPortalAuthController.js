@@ -148,25 +148,16 @@ exports.me = asyncHandler(async (req, res) => {
 });
 
 exports.employeeLogin = asyncHandler(async (req, res) => {
-  const email = `${req.body.email || ""}`.trim().toLowerCase();
-  const password = typeof req.body.password === "string" ? req.body.password : "";
+  const validation = validateCompanyLogin(req.body);
 
-  if (!email) {
-    throw new ApiError(400, "Email is required", [
-      { field: "email", message: "Email is required" },
-    ]);
-  }
-
-  if (!password) {
-    throw new ApiError(400, "Password is required", [
-      { field: "password", message: "Password is required" },
-    ]);
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
   }
 
   const companyPortalEmployeeAuthService = require("../services/companyPortalEmployeeAuthService");
   const result = await companyPortalEmployeeAuthService.login({
-    email,
-    password,
+    email: validation.data.email,
+    password: validation.data.password,
     ...getRequestMeta(req),
     trustDevice: Boolean(req.body.trustDevice),
   });

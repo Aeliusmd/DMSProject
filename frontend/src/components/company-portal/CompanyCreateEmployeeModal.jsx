@@ -7,6 +7,13 @@ import {
   applyApiFieldErrors,
   getApiErrorMessage,
 } from "@/lib/apiErrorUtils";
+import {
+  buildCreateEmployeePayload,
+  hasValidationErrors,
+  sanitizeEmail,
+  sanitizePersonName,
+  validateCreateEmployeeForm,
+} from "@/lib/company-portal/companyPortalValidation";
 
 export default function CompanyCreateEmployeeModal({
   isOpen,
@@ -25,31 +32,18 @@ export default function CompanyCreateEmployeeModal({
     setSubmitError("");
   }, [isOpen]);
 
-  const localErrors = useMemo(() => {
-    const next = {};
-    if (!form.name.trim()) next.name = "Employee name is required";
-    if (!form.email.trim()) next.email = "Email is required";
-    if (!form.password) next.password = "Password is required";
-    else if (form.password.length < 8) {
-      next.password = "Password must be at least 8 characters";
-    }
-    return next;
-  }, [form]);
+  const localErrors = useMemo(() => validateCreateEmployeeForm(form), [form]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setErrors(localErrors);
-    if (Object.keys(localErrors).length > 0 || submitting) return;
+    if (hasValidationErrors(localErrors) || submitting) return;
 
     setSubmitError("");
     try {
-      await onSubmit({
-        name: form.name.trim(),
-        email: form.email.trim().toLowerCase(),
-        password: form.password,
-      });
+      await onSubmit(buildCreateEmployeePayload(form));
     } catch (error) {
       const { fieldErrors, message } = applyApiFieldErrors(error);
       setErrors((prev) => ({ ...prev, ...fieldErrors }));
@@ -85,7 +79,12 @@ export default function CompanyCreateEmployeeModal({
           <AuthInput
             label="Full name"
             value={form.name}
-            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                name: sanitizePersonName(event.target.value),
+              }))
+            }
             error={errors.name}
             placeholder="Employee name"
           />
@@ -93,7 +92,12 @@ export default function CompanyCreateEmployeeModal({
             label="Email"
             type="email"
             value={form.email}
-            onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                email: sanitizeEmail(event.target.value),
+              }))
+            }
             error={errors.email}
             placeholder="employee@company.com"
           />

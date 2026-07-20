@@ -3,42 +3,44 @@ const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
 const companyPortalEmployeeService = require("../services/companyPortalEmployeeService");
 const companyPortalWalletService = require("../services/companyPortalWalletService");
+const {
+  validateCreateEmployee,
+  validateEmployeeListQuery,
+  validateWalletTopup,
+  validateWalletAllocate,
+} = require("../validators/companyPortalManagementValidator");
 
 exports.listEmployees = asyncHandler(async (req, res) => {
   const useKeyset =
     String(req.query.pagination || "").trim().toLowerCase() === "keyset";
 
   if (useKeyset) {
-    const pageSize = Math.min(
-      Math.max(Number(req.query.pageSize) || 10, 1),
-      50
-    );
+    const queryValidation = validateEmployeeListQuery(req.query);
     const result = await companyPortalEmployeeService.listEmployeesPaginated(
       req.companyUser.id,
-      {
-        search: req.query.search || "",
-        cursor: req.query.cursor || null,
-        pageSize,
-      }
+      queryValidation.data
     );
     return ApiResponse.success(res, result);
   }
 
+  const search = validateEmployeeListQuery(req.query).data.search;
   const employees = await companyPortalEmployeeService.listEmployees(
     req.companyUser.id,
-    { search: req.query.search || "" }
+    { search }
   );
   return ApiResponse.success(res, { employees });
 });
 
 exports.createEmployee = asyncHandler(async (req, res) => {
+  const validation = validateCreateEmployee(req.body);
+
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
   const result = await companyPortalEmployeeService.createEmployee(
     req.companyUser.id,
-    {
-      name: req.body.name,
-      email: req.body.email,
-      password: req.body.password,
-    }
+    validation.data
   );
 
   const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
@@ -71,16 +73,15 @@ exports.listWalletTransactions = asyncHandler(async (req, res) => {
 });
 
 exports.createTopupCheckout = asyncHandler(async (req, res) => {
-  const amount = Number(req.body.amount);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    throw new ApiError(400, "Enter a valid top-up amount", [
-      { field: "amount", message: "Enter a valid top-up amount" },
-    ]);
+  const validation = validateWalletTopup(req.body);
+
+  if (!validation.valid) {
+    throw new ApiError(400, validation.errors[0]?.message || "Validation failed", validation.errors);
   }
 
   const result = await companyPortalWalletService.createTopupCheckout(
     req.companyUser.id,
-    { amount }
+    validation.data
   );
   return ApiResponse.success(res, result, "Redirect to Stripe to complete top-up");
 });
@@ -108,8 +109,13 @@ exports.confirmTopup = asyncHandler(async (req, res) => {
 });
 
 exports.allocateToEmployee = asyncHandler(async (req, res) => {
-  const employeeId = Number(req.body.employeeId);
-  const amount = Number(req.body.amount);
+  const validation = validateWalletAllocate(req.body);
+
+  if (!validation.valid) {
+    throw new ApiError(400, validation.errors[0]?.message || "Validation failed", validation.errors);
+  }
+
+  const { employeeId, amount } = validation.data;
 
   const summary = await companyPortalWalletService.allocateToEmployee(
     req.companyUser.id,

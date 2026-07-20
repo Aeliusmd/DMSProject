@@ -2,6 +2,8 @@ const bcrypt = require("bcryptjs");
 const ApiError = require("../utils/ApiError");
 const CompanyPortalEmployee = require("../models/CompanyPortalEmployee");
 const { sendCompanyEmployeeCredentials } = require("./emailService");
+const { sanitizeText, sanitizeSearchText } = require("../utils/sanitize");
+const { isValidPersonName } = require("../utils/nameValidation");
 
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
@@ -47,7 +49,7 @@ function validatePassword(password) {
 
 async function listEmployees(companyUserId, { search = "" } = {}) {
   const rows = await CompanyPortalEmployee.listForCompany(companyUserId, {
-    search,
+    search: sanitizeSearchText(search, { maxLength: 200 }),
   });
   return rows.map(formatEmployee);
 }
@@ -58,7 +60,11 @@ async function listEmployeesPaginated(
 ) {
   const result = await CompanyPortalEmployee.listForCompanyKeyset(
     companyUserId,
-    { search, cursor, pageSize }
+    {
+      search: sanitizeSearchText(search, { maxLength: 200 }),
+      cursor,
+      pageSize,
+    }
   );
 
   return {
@@ -73,12 +79,22 @@ async function listEmployeesPaginated(
 }
 
 async function createEmployee(companyUserId, { name, email, password }) {
-  const cleanedName = `${name || ""}`.trim();
-  const cleanedEmail = `${email || ""}`.trim().toLowerCase();
+  const cleanedName = sanitizeText(name, { maxLength: 255 });
+  const cleanedEmail = sanitizeText(email, { maxLength: 255 }).toLowerCase();
 
   if (!cleanedName) {
     throw new ApiError(400, "Employee name is required", [
       { field: "name", message: "Employee name is required" },
+    ]);
+  }
+
+  if (!isValidPersonName(cleanedName)) {
+    throw new ApiError(400, "Enter a valid employee name", [
+      {
+        field: "name",
+        message:
+          "Name can only contain letters, spaces, hyphens, apostrophes, and periods",
+      },
     ]);
   }
 
