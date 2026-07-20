@@ -3,9 +3,23 @@ const HTML_MARKUP_PATTERN = /[<>]/;
 // Person names: letters, spaces, hyphen, apostrophe, period (O'Brien, Mary-Jane, Jr.)
 const PERSON_NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}'.\- ]*$/u;
 
-// Organizations / facilities / doctor labels: letters, digits, common business punctuation
+// Organizations / facilities / providers: letters, digits, common business punctuation
 const ORGANIZATION_NAME_PATTERN =
-  /^[\p{L}\p{M}0-9][\p{L}\p{M}0-9&.,'()#\-/ ]*$/u;
+  /^[\p{L}\p{M}0-9#("'][\p{L}\p{M}0-9&.,:'"()#\-+/;[\] ]*$/u;
+
+/**
+ * OCR / Word / PDF text often includes NBSP, smart quotes, and en/em dashes.
+ * Normalize those so legitimate company names are not rejected.
+ */
+function normalizeOrganizationNameInput(value) {
+  return `${value || ""}`
+    .replace(/[\u00A0\u202F\u2007\u2009\u200A\u2008]/g, " ")
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2212]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 const FIELD_LABELS = {
   firstName: "First name",
@@ -74,7 +88,7 @@ function personNameFormatMessage(field) {
 
 function organizationNameFormatMessage(field) {
   const label = formatFieldLabel(field);
-  return `${label} can only contain letters, numbers, spaces, and &.,'()#-/`;
+  return `${label} can only contain letters, numbers, spaces, and &.,:'"()#+-/;[]`;
 }
 
 function isValidPersonName(value) {
@@ -84,7 +98,7 @@ function isValidPersonName(value) {
 }
 
 function isValidOrganizationName(value) {
-  const trimmed = trimToString(value);
+  const trimmed = normalizeOrganizationNameInput(value);
   if (!trimmed || HTML_MARKUP_PATTERN.test(trimmed)) return false;
   return ORGANIZATION_NAME_PATTERN.test(trimmed);
 }
@@ -106,7 +120,7 @@ function addPersonNameFormatError(errors, field, value) {
 }
 
 function addOrganizationNameFormatError(errors, field, value) {
-  const trimmed = trimToString(value);
+  const trimmed = normalizeOrganizationNameInput(value);
   if (!trimmed || isValidOrganizationName(trimmed)) return;
 
   if (hasHtmlMarkup(trimmed)) {
@@ -134,6 +148,7 @@ module.exports = {
   htmlMarkupMessage,
   personNameFormatMessage,
   organizationNameFormatMessage,
+  normalizeOrganizationNameInput,
   isValidPersonName,
   isValidOrganizationName,
   hasHtmlMarkup,

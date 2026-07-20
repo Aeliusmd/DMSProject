@@ -1,8 +1,8 @@
-const bcrypt = require("bcryptjs");
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
 const PersonalPortalUser = require("../models/PersonalPortalUser");
 const PersonalPortalSession = require("../models/PersonalPortalSession");
+const PersonalRequestOrder = require("../models/PersonalRequestOrder");
 const { sendTwoFactorCode } = require("./emailService");
 const twoFactorStore = require("./twoFactorStore");
 const tokenService = require("./tokenService");
@@ -14,55 +14,37 @@ function personalOtpKey(sessionId) {
 function formatPersonalUser(row) {
   if (!row) return null;
 
+  const firstName = row.first_name || "";
+  const lastName = row.last_name || "";
+  const email = row.email || "";
+  const displayName =
+    `${firstName} ${lastName}`.trim() || email.split("@")[0] || "Patient";
+
   return {
     id: row.id || row.personal_user_id,
-    firstName: row.first_name,
-    lastName: row.last_name,
-    email: row.email,
+    firstName,
+    lastName,
+    email,
     phone: row.phone || "",
-    displayName: `${row.first_name || ""} ${row.last_name || ""}`.trim(),
+    displayName,
     role: "Personal",
     portal: "personal",
   };
 }
 
-async function register(data) {
-  const existing = await PersonalPortalUser.findByEmail(data.email);
-
-  if (existing) {
-    throw new ApiError(409, "An account with this email already exists", [
-      { field: "email", message: "An account with this email already exists" },
-    ]);
-  }
-
-  const passwordHash = await bcrypt.hash(data.password, 10);
-
-  const user = await PersonalPortalUser.create({
-    firstName: data.firstName,
-    lastName: data.lastName,
-    email: data.email,
-    passwordHash,
-    phone: data.phone,
-  });
-
-  return {
-    user: formatPersonalUser(user),
-    message: "Registration successful. Please sign in to continue.",
-  };
+/**
+ * Password-based registration is disabled. Accounts are created
+ * automatically on first email + OTP sign-in.
+ */
+async function register() {
+  throw new ApiError(
+    410,
+    "Password registration is no longer available. Sign in with your email to receive a verification code."
+  );
 }
 
-async function login({ email, password, ipAddress, userAgent }) {
-  const user = await PersonalPortalUser.findByEmailForAuth(email);
-
-  if (!user) {
-    throw new ApiError(401, "Invalid email or password");
-  }
-
-  const passwordMatches = await bcrypt.compare(password, user.password_hash);
-
-  if (!passwordMatches) {
-    throw new ApiError(401, "Invalid email or password");
-  }
+async function login({ email, ipAddress, userAgent }) {
+  const user = await PersonalPortalUser.findOrCreateLightweightByEmail(email);
 
   if (!user.is_active) {
     throw new ApiError(403, "Your account is inactive. Please contact support.");
@@ -87,7 +69,7 @@ async function login({ email, password, ipAddress, userAgent }) {
 
   const emailResult = await sendTwoFactorCode({
     to: user.email,
-    name: `${user.first_name} ${user.last_name}`.trim() || "Patient",
+    name: `${user.first_name || ""} ${user.last_name || ""}`.trim() || "Patient",
     code: otpCode,
     subtitle: "Personal Request Portal",
   });
@@ -269,6 +251,27 @@ async function getCurrentUser(personalUserId) {
   return formatPersonalUser(user);
 }
 
+async function updateAccountEmail(personalUserId, email) {
+  const existing = await PersonalPortalUser.findByEmail(email);
+  if (existing && existing.id !== personalUserId) {
+    throw new ApiError(409, "An account with this email already exists", [
+      { field: "email", message: "An account with this email already exists" },
+    ]);
+  }
+
+  const user = await PersonalPortalUser.updateEmail(personalUserId, email);
+  if (!user || !user.is_active) {
+    throw new ApiError(401, "Account not found or inactive");
+  }
+
+  await PersonalRequestOrder.updateEmailForPortalUser(personalUserId, email);
+
+  return {
+    user: formatPersonalUser(user),
+    message: "Email updated. Future notifications will use this address.",
+  };
+}
+
 module.exports = {
   register,
   login,
@@ -277,5 +280,6 @@ module.exports = {
   refreshTokens,
   logout,
   getCurrentUser,
+  updateAccountEmail,
   formatPersonalUser,
 };

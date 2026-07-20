@@ -57,6 +57,7 @@ export default function CompanyPortalRecentOrders({
               <th className="px-5 py-3">Order</th>
               <th className="px-5 py-3">Applicant</th>
               <th className="px-5 py-3">Facility</th>
+              <th className="px-5 py-3">Placed by</th>
               <th className="px-5 py-3">Requested</th>
               <th className="px-5 py-3">Status</th>
             </tr>
@@ -65,7 +66,7 @@ export default function CompanyPortalRecentOrders({
             {loading ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-5 py-8 text-center text-[#94A3B8]"
                 >
                   Loading orders...
@@ -74,7 +75,7 @@ export default function CompanyPortalRecentOrders({
             ) : orders.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-5 py-8 text-center text-[#94A3B8]"
                 >
                   No orders yet. Create your first subpoena request to get
@@ -102,6 +103,7 @@ export default function CompanyPortalRecentOrders({
                   </td>
                   <td className="px-5 py-3">{order.applicant}</td>
                   <td className="px-5 py-3">{order.facility}</td>
+                  <td className="px-5 py-3">{order.placedBy || "—"}</td>
                   <td className="px-5 py-3">
                     {formatDisplayDate(order.dateRequested)}
                   </td>

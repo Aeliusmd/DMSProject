@@ -10,13 +10,21 @@ class PersonalRequestStripePayment {
     const executor = connection || getPool();
     const [result] = await executor.execute(
       `INSERT INTO personal_request_stripe_payments (
-        personal_request_order_id, amount, currency, status,
+        personal_request_order_id, payment_kind, amount, currency, status,
         stripe_checkout_session_id, customer_email, customer_name
       ) VALUES (
-        :personalRequestOrderId, :amount, :currency, 'pending',
+        :personalRequestOrderId, :paymentKind, :amount, :currency, 'pending',
         :stripeCheckoutSessionId, :customerEmail, :customerName
       )`,
-      data
+      {
+        personalRequestOrderId: data.personalRequestOrderId,
+        paymentKind: data.paymentKind || "processing_fee",
+        amount: data.amount,
+        currency: data.currency,
+        stripeCheckoutSessionId: data.stripeCheckoutSessionId,
+        customerEmail: data.customerEmail || null,
+        customerName: data.customerName || null,
+      }
     );
     return result.insertId;
   }
@@ -41,6 +49,49 @@ class PersonalRequestStripePayment {
       { personalRequestOrderId }
     );
     return rows;
+  }
+
+  static async findByPersonalRequestOrderIds(orderIds = [], connection = null) {
+    const normalizedIds = [
+      ...new Set(orderIds.map((id) => Number(id)).filter((id) => id > 0)),
+    ];
+    if (!normalizedIds.length) return {};
+
+    const executor = connection || getPool();
+    const placeholders = normalizedIds.map((_, index) => `:id${index}`).join(", ");
+    const params = normalizedIds.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await executor.execute(
+      `SELECT * FROM personal_request_stripe_payments
+       WHERE personal_request_order_id IN (${placeholders})
+       ORDER BY created_at DESC`,
+      params
+    );
+
+    return rows.reduce((acc, row) => {
+      const key = row.personal_request_order_id;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    }, {});
+  }
+
+  static async findSucceededProcessingFeeByOrderId(orderId, connection = null) {
+    const executor = connection || getPool();
+    const [rows] = await executor.execute(
+      `SELECT *
+       FROM personal_request_stripe_payments
+       WHERE order_id = :orderId
+         AND status = 'succeeded'
+         AND payment_kind = 'processing_fee'
+       ORDER BY paid_at DESC, id DESC
+       LIMIT 1`,
+      { orderId }
+    );
+    return rows[0] || null;
   }
 
   static async markSucceeded(connection, id, data) {

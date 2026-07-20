@@ -1187,7 +1187,12 @@ export default function FacilityDetailsPage() {
         onConfirm={() => {
           setReturnToOrderModal({ open: false });
           const separator = returnToOrderPath.includes("?") ? "&" : "?";
-          router.push(`${returnToOrderPath}${separator}facilityRefresh=1`);
+          const facilityQuery = facilityId
+            ? `&applyFacilityId=${encodeURIComponent(facilityId)}`
+            : "";
+          router.push(
+            `${returnToOrderPath}${separator}facilityRefresh=1${facilityQuery}`
+          );
         }}
       />
 

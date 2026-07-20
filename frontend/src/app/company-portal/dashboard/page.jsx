@@ -122,8 +122,8 @@ export default function CompanyPortalDashboardPage() {
     };
   }, [router, loadOrdersPage]);
 
-  const summaryCards = useMemo(
-    () => [
+  const summaryCards = useMemo(() => {
+    const cards = [
       {
         label: "Total orders",
         value: stats.totalOrders,
@@ -164,9 +164,25 @@ export default function CompanyPortalDashboardPage() {
         iconBg: "#ECFDF5",
         iconColor: "#059669",
       },
-    ],
-    [stats]
-  );
+    ];
+
+    if (user?.isAdmin === false) {
+      const balance = Number(user.walletBalance || 0);
+      cards.unshift({
+        label: "My wallet",
+        value: `$${balance.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
+        hint: "Allocated by your company",
+        icon: <WalletIcon />,
+        iconBg: "#F5F3FF",
+        iconColor: "#7C3AED",
+      });
+    }
+
+    return cards;
+  }, [stats, user]);
 
   const handleTrack = (event) => {
     event.preventDefault();
@@ -227,14 +243,20 @@ export default function CompanyPortalDashboardPage() {
       <div className="mb-6">
         <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#111827]">
           Welcome back
+          {user.isAdmin === false && user.name ? `, ${user.name}` : ""}
         </h1>
         <p className="mt-1 text-[13px] text-[#64748B]">
-          Track requests and manage company portal orders for{" "}
-          {user.companyName}.
+          {user.isAdmin === false
+            ? `Track your requests and place orders for ${user.companyName} using your allocated wallet balance.`
+            : `Track requests and manage company portal orders for ${user.companyName}.`}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div
+        className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${
+          user.isAdmin === false ? "xl:grid-cols-3 2xl:grid-cols-6" : "xl:grid-cols-5"
+        }`}
+      >
         {summaryCards.map((card) => (
           <CompanyPortalStatCard key={card.label} {...card} />
         ))}
@@ -277,7 +299,10 @@ export default function CompanyPortalDashboardPage() {
       </div>
 
       <div className="mt-5">
-        <CompanyPortalQuickActions onAction={handleAction} />
+        <CompanyPortalQuickActions
+          onAction={handleAction}
+          isEmployee={user.isAdmin === false}
+        />
       </div>
 
       <div className="mt-5">
@@ -390,6 +415,24 @@ function ReleasedIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  );
+}
+
+function WalletIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect
+        x="3"
+        y="6"
+        width="18"
+        height="13"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M3 10h18" stroke="currentColor" strokeWidth="1.8" />
+      <circle cx="16.5" cy="14.5" r="1.2" fill="currentColor" />
     </svg>
   );
 }

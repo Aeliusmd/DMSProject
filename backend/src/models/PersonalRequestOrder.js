@@ -4,6 +4,8 @@
  */
 
 const { getPool } = require("../config/database");
+const { sanitizeSearchText } = require("../utils/sanitize");
+const { likeContains } = require("../utils/sqlSafety");
 
 function encodeCreatedCursor(createdAt, id) {
   if (!createdAt || !id) return null;
@@ -48,7 +50,14 @@ class PersonalRequestOrder {
 
   static async findByPortalUserId(
     portalUserId,
-    { pageSize = 10, cursor = null, paidOnly = false, status = null } = {}
+    {
+      pageSize = 10,
+      cursor = null,
+      paidOnly = false,
+      status = null,
+      search = null,
+      withinLookupWindow = false,
+    } = {}
   ) {
     const pool = getPool();
     const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 100);
@@ -61,9 +70,30 @@ class PersonalRequestOrder {
       conditions.push("o.processing_fee_paid = 1");
     }
 
+    if (withinLookupWindow) {
+      conditions.push(
+        "(o.lookup_expires_at IS NULL OR o.lookup_expires_at > NOW())"
+      );
+    }
+
     if (status) {
       conditions.push("o.portal_status = :status");
       params.status = status;
+    }
+
+    const searchTerm = sanitizeSearchText(search, { maxLength: 200 });
+    if (searchTerm) {
+      conditions.push(`(
+        o.confirmation_reference LIKE :search
+        OR o.first_name LIKE :search
+        OR o.last_name LIKE :search
+        OR EXISTS (
+          SELECT 1 FROM personal_request_facilities prf
+          WHERE prf.personal_request_order_id = o.id
+            AND prf.facility_name LIKE :search
+        )
+      )`);
+      params.search = likeContains(searchTerm);
     }
 
     const decodedCursor = decodeCreatedCursor(cursor);
@@ -105,21 +135,74 @@ class PersonalRequestOrder {
     };
   }
 
-  static async countByPortalUserId(portalUserId) {
+  static async countByPortalUserId(portalUserId, { withinLookupWindow = false } = {}) {
     const pool = getPool();
+    const lookupClause = withinLookupWindow
+      ? "AND (lookup_expires_at IS NULL OR lookup_expires_at > NOW())"
+      : "";
     const [rows] = await pool.execute(
       `SELECT
          COUNT(*) AS total,
-         SUM(CASE WHEN portal_status = 'in_process' THEN 1 ELSE 0 END) AS in_process,
-         SUM(CASE WHEN portal_status = 'invoice' THEN 1 ELSE 0 END) AS invoice,
+         SUM(
+           CASE
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') <> 'pending'
+             THEN 1 ELSE 0
+           END
+         ) AS in_process,
+         SUM(
+           CASE
+             WHEN portal_status = 'invoice' THEN 1
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') = 'pending'
+             THEN 1
+             ELSE 0
+           END
+         ) AS invoice,
          SUM(CASE WHEN portal_status = 'paid' THEN 1 ELSE 0 END) AS paid,
          SUM(CASE WHEN portal_status = 'released' THEN 1 ELSE 0 END) AS released
        FROM personal_request_orders
        WHERE portal_user_id = :portalUserId
-         AND processing_fee_paid = 1`,
+         AND processing_fee_paid = 1
+         ${lookupClause}`,
       { portalUserId }
     );
     return rows[0] || {};
+  }
+
+  static async findByIds(ids = []) {
+    const normalizedIds = [...new Set(ids.map((id) => Number(id)).filter((id) => id > 0))];
+    if (!normalizedIds.length) return [];
+
+    const pool = getPool();
+    const placeholders = normalizedIds.map((_, index) => `:id${index}`).join(", ");
+    const params = normalizedIds.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await pool.execute(
+      `SELECT * FROM personal_request_orders
+       WHERE id IN (${placeholders})
+       ORDER BY created_at DESC, id DESC`,
+      params
+    );
+    return rows;
+  }
+
+  static async findLinkedForStatusSync(portalUserId) {
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      `SELECT *
+       FROM personal_request_orders
+       WHERE portal_user_id = :portalUserId
+         AND processing_fee_paid = 1
+         AND order_id IS NOT NULL
+         AND order_id > 0
+         AND (lookup_expires_at IS NULL OR lookup_expires_at > NOW())`,
+      { portalUserId }
+    );
+    return rows;
   }
 
   static async findStaffList(filters = {}) {
@@ -131,7 +214,7 @@ class PersonalRequestOrder {
     const conditions = ["o.processing_fee_paid = 1"];
     const params = {};
 
-    const search = `${filters.search || ""}`.trim();
+    const search = sanitizeSearchText(filters.search, { maxLength: 200 });
     if (search) {
       conditions.push(`(
         o.confirmation_reference LIKE :search
@@ -145,7 +228,7 @@ class PersonalRequestOrder {
             AND prf.facility_name LIKE :search
         )
       )`);
-      params.search = `%${search}%`;
+      params.search = likeContains(search);
     }
 
     if (filters.status) {
@@ -245,8 +328,23 @@ class PersonalRequestOrder {
     const [rows] = await pool.execute(
       `SELECT
          COUNT(*) AS total,
-         SUM(CASE WHEN portal_status = 'in_process' THEN 1 ELSE 0 END) AS in_process,
-         SUM(CASE WHEN portal_status = 'invoice' THEN 1 ELSE 0 END) AS invoice,
+         SUM(
+           CASE
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') <> 'pending'
+             THEN 1 ELSE 0
+           END
+         ) AS in_process,
+         SUM(
+           CASE
+             WHEN portal_status = 'invoice' THEN 1
+             -- Facility search fee travels with the invoice stage
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') = 'pending'
+             THEN 1
+             ELSE 0
+           END
+         ) AS invoice,
          SUM(CASE WHEN portal_status = 'paid' THEN 1 ELSE 0 END) AS paid,
          SUM(CASE WHEN portal_status = 'released' THEN 1 ELSE 0 END) AS released
        FROM personal_request_orders
@@ -315,6 +413,27 @@ class PersonalRequestOrder {
     return rows[0] || null;
   }
 
+  static async updateEmail(id, email, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_orders
+       SET email = :email, updated_at = NOW()
+       WHERE id = :id`,
+      { id, email }
+    );
+    return this.findById(id, connection);
+  }
+
+  static async updateEmailForPortalUser(portalUserId, email, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_orders
+       SET email = :email, updated_at = NOW()
+       WHERE portal_user_id = :portalUserId`,
+      { portalUserId, email }
+    );
+  }
+
   static async findByStripeSessionId(sessionId) {
     const pool = getPool();
     const [rows] = await pool.execute(
@@ -353,6 +472,43 @@ class PersonalRequestOrder {
         portalStatus: data.portalStatus,
         lookupExpiresAt: data.lookupExpiresAt,
       }
+    );
+  }
+
+  static async markResearchFeeRequested(id, sessionId = null, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_status = 'pending',
+           research_fee_requested_at = COALESCE(research_fee_requested_at, NOW()),
+           research_fee_checkout_session_id = COALESCE(:sessionId, research_fee_checkout_session_id),
+           updated_at = NOW()
+       WHERE id = :id
+         AND research_fee_status IN ('none', 'pending')`,
+      { id, sessionId }
+    );
+  }
+
+  static async markResearchFeePaid(id, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_status = 'paid',
+           research_fee_paid_at = NOW(),
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async setResearchFeeCheckoutSessionId(id, sessionId, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_checkout_session_id = :sessionId,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id, sessionId }
     );
   }
 

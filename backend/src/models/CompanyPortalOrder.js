@@ -1,7 +1,8 @@
 const { getPool } = require("../config/database");
 
 const SELECT_COLUMNS = `
-  id, company_user_id, internal_order_id, order_number, status,
+  id, company_user_id, company_portal_employee_id, placed_by_name,
+  internal_order_id, order_number, status,
   facility_name, facility_address, facility_city, facility_state, facility_zip, treating_doctor,
   applicant_name, case_name, case_number, rec_number, ssn,
   date_of_birth, date_of_injury, date_of_injury_text,
@@ -11,7 +12,7 @@ const SELECT_COLUMNS = `
   subpoena_date, date_requested, depo_due_date,
   contact_email, contact_phone,
   subpoena_file_name, subpoena_storage_path, subpoena_file_size, extraction_raw,
-  payment_amount, payment_status, stripe_checkout_session_id, stripe_payment_intent_id,
+  payment_amount, payment_status, payment_method, stripe_checkout_session_id, stripe_payment_intent_id,
   stripe_receipt_url, paid_at,
   created_at, updated_at
 `;
@@ -109,7 +110,7 @@ class CompanyPortalOrder {
     const db = connection || getPool();
     const [result] = await db.execute(
       `INSERT INTO company_portal_orders
-        (company_user_id, order_number, status, facility_name, facility_address, facility_city, facility_state, facility_zip, treating_doctor,
+        (company_user_id, company_portal_employee_id, placed_by_name, order_number, status, facility_name, facility_address, facility_city, facility_state, facility_zip, treating_doctor,
          applicant_name, case_name, case_number, rec_number, ssn,
          date_of_birth, date_of_injury, date_of_injury_text,
          company_name, company_address, company_city, company_state, company_zip, doctor_address,
@@ -118,10 +119,10 @@ class CompanyPortalOrder {
          subpoena_date, date_requested, depo_due_date,
          contact_email, contact_phone,
          subpoena_file_name, subpoena_storage_path, subpoena_file_size, extraction_raw,
-         payment_amount, payment_status, stripe_checkout_session_id, stripe_payment_intent_id,
+         payment_amount, payment_status, payment_method, stripe_checkout_session_id, stripe_payment_intent_id,
          stripe_receipt_url, paid_at, created_at, updated_at)
        VALUES
-        (:companyUserId, :orderNumber, 'In Process', :facilityName, :facilityAddress, :facilityCity, :facilityState, :facilityZip, :treatingDoctor,
+        (:companyUserId, :companyPortalEmployeeId, :placedByName, :orderNumber, 'In Process', :facilityName, :facilityAddress, :facilityCity, :facilityState, :facilityZip, :treatingDoctor,
          :applicantName, :caseName, :caseNumber, :recNumber, :ssn,
          :dateOfBirth, :dateOfInjury, :dateOfInjuryText,
          :companyName, :companyAddress, :companyCity, :companyState, :companyZip, :doctorAddress,
@@ -130,7 +131,7 @@ class CompanyPortalOrder {
          :subpoenaDate, :dateRequested, :depoDueDate,
          :contactEmail, :contactPhone,
          :subpoenaFileName, :subpoenaStoragePath, :subpoenaFileSize, :extractionRaw,
-         :paymentAmount, 'paid', :stripeCheckoutSessionId, :stripePaymentIntentId,
+         :paymentAmount, 'paid', :paymentMethod, :stripeCheckoutSessionId, :stripePaymentIntentId,
          :stripeReceiptUrl, NOW(), NOW(), NOW())`,
       data
     );
@@ -237,25 +238,38 @@ class CompanyPortalOrder {
     return this.findById(id, connection);
   }
 
-  static async listForUser(companyUserId, { limit = 50 } = {}, connection = null) {
+  static async listForUser(
+    companyUserId,
+    { limit = 50, employeeId = null } = {},
+    connection = null
+  ) {
     const db = connection || getPool();
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const params = { companyUserId };
+    let employeeClause = "";
+
+    if (employeeId) {
+      employeeClause = "AND company_portal_employee_id = :employeeId";
+      params.employeeId = employeeId;
+    }
+
     const [rows] = await db.execute(
       `SELECT ${SELECT_COLUMNS}
        FROM company_portal_orders
        WHERE company_user_id = :companyUserId
          AND status <> 'Draft'
          AND order_number IS NOT NULL
+         ${employeeClause}
        ORDER BY created_at DESC, id DESC
        LIMIT ${safeLimit}`,
-      { companyUserId }
+      params
     );
     return rows;
   }
 
   static async listForUserKeyset(
     companyUserId,
-    { cursor = null, pageSize = 10 } = {},
+    { cursor = null, pageSize = 10, employeeId = null } = {},
     connection = null
   ) {
     const db = connection || getPool();
@@ -263,6 +277,12 @@ class CompanyPortalOrder {
     const queryLimit = safePageSize + 1;
     const params = { companyUserId };
     let cursorCondition = "";
+    let employeeClause = "";
+
+    if (employeeId) {
+      employeeClause = "AND company_portal_employee_id = :employeeId";
+      params.employeeId = employeeId;
+    }
 
     const decoded = decodeCreatedCursor(cursor);
     if (decoded) {
@@ -283,6 +303,7 @@ class CompanyPortalOrder {
        WHERE company_user_id = :companyUserId
          AND status <> 'Draft'
          AND order_number IS NOT NULL
+         ${employeeClause}
          ${cursorCondition}
        ORDER BY created_at DESC, id DESC
        LIMIT ${queryLimit}`,
@@ -303,8 +324,20 @@ class CompanyPortalOrder {
     };
   }
 
-  static async getStatsForUser(companyUserId, connection = null) {
+  static async getStatsForUser(
+    companyUserId,
+    { employeeId = null } = {},
+    connection = null
+  ) {
     const db = connection || getPool();
+    const params = { companyUserId };
+    let employeeClause = "";
+
+    if (employeeId) {
+      employeeClause = "AND company_portal_employee_id = :employeeId";
+      params.employeeId = employeeId;
+    }
+
     const [rows] = await db.execute(
       `SELECT
          COUNT(*) AS total_orders,
@@ -315,8 +348,9 @@ class CompanyPortalOrder {
        FROM company_portal_orders
        WHERE company_user_id = :companyUserId
          AND status <> 'Draft'
-         AND order_number IS NOT NULL`,
-      { companyUserId }
+         AND order_number IS NOT NULL
+         ${employeeClause}`,
+      params
     );
 
     const row = rows[0] || {};
@@ -413,6 +447,29 @@ class CompanyPortalOrder {
            updated_at = NOW()
        WHERE id = :id`,
       { id, status }
+    );
+    return this.findById(id, connection);
+  }
+
+  static async updateFacilityDetails(id, details = {}, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE company_portal_orders
+       SET facility_name = :facilityName,
+           facility_address = :facilityAddress,
+           facility_city = :facilityCity,
+           facility_state = :facilityState,
+           facility_zip = :facilityZip,
+           updated_at = NOW()
+       WHERE id = :id`,
+      {
+        id,
+        facilityName: details.facilityName ?? "",
+        facilityAddress: details.facilityAddress ?? "",
+        facilityCity: details.facilityCity ?? null,
+        facilityState: details.facilityState ?? null,
+        facilityZip: details.facilityZip ?? null,
+      }
     );
     return this.findById(id, connection);
   }

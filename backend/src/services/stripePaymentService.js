@@ -331,7 +331,7 @@ async function deleteAbandonedPendingPayments(orderId, invoiceType) {
   );
 }
 
-async function createCheckoutSession(token, invoiceType) {
+async function createCheckoutSession(token, invoiceType, urlOptions = {}) {
   const tokenRow = await resolveTokenRow(token);
   const payable = await assertInvoicePayable(tokenRow.order_id, invoiceType);
   const stripe = getStripe();
@@ -345,8 +345,11 @@ async function createCheckoutSession(token, invoiceType) {
   }
 
   const baseClient = (config.clientUrl || "http://localhost:3000").replace(/\/$/, "");
-  const successUrl = `${baseClient}/pay/${token}/result?session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${baseClient}/pay/${token}?canceled=1`;
+  const successUrl =
+    urlOptions.successUrl ||
+    `${baseClient}/pay/${token}/result?session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl =
+    urlOptions.cancelUrl || `${baseClient}/pay/${token}?canceled=1`;
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
@@ -391,18 +394,26 @@ function mapStripeStatus(status) {
 }
 
 function mapOnlinePaymentRow(row) {
+  const intentId = String(row.stripe_payment_intent_id || "");
+  const isWalletOrderFeePrepayment =
+    row.payment_method_type === "wallet" && intentId.startsWith("wallet_tx_");
+
   const paymentType =
-    row.invoice_type === "xray"
-      ? "xray"
-      : row.invoice_type === "personal_portal"
-        ? "personal_portal"
-        : "regular";
+    isWalletOrderFeePrepayment
+      ? "prepayment"
+      : row.invoice_type === "xray"
+        ? "xray"
+        : row.invoice_type === "personal_portal"
+          ? "personal_portal"
+          : "regular";
   const paymentTypeLabel =
     paymentType === "xray"
       ? "X-Ray"
       : paymentType === "personal_portal"
         ? "Personal"
-        : "Regular";
+        : paymentType === "prepayment"
+          ? "Prepayment"
+          : "Regular";
   const uiStatus = mapStripeStatus(row.status);
 
   return {
@@ -424,12 +435,16 @@ function mapOnlinePaymentRow(row) {
     method:
       row.payment_method_type === "card"
         ? "Card"
-        : row.payment_method_type || "Card",
+        : row.payment_method_type === "wallet"
+          ? "Wallet"
+          : row.payment_method_type || "Card",
     channel: "online",
     paymentMethod:
       row.payment_method_type === "card"
         ? "Card"
-        : row.payment_method_type || "Card",
+        : row.payment_method_type === "wallet"
+          ? "Wallet"
+          : row.payment_method_type || "Card",
     customerName: row.customer_name || "",
     customerEmail: row.customer_email || "",
     stripePaymentId: row.stripe_payment_intent_id || "",
@@ -444,6 +459,8 @@ function mapOnlinePaymentRow(row) {
     netAmountDisplay: formatMoney(row.net_amount),
     failureMessage: row.failure_message || "",
     receiptUrl: row.receipt_url || "",
+    walletReceiptOrderId:
+      row.payment_method_type === "wallet" ? row.order_id : null,
     notes: "",
   };
 }
@@ -454,6 +471,17 @@ function wantsPaymentSummary(query = {}) {
 }
 
 async function getOnlinePayments(query = {}) {
+  // Heal missing company-portal wallet invoice rows (skipped previously when
+  // $15 prepayment blocked invoice inserts).
+  try {
+    await backfillMissingWalletInvoiceOnlinePayments({ limit: 50 });
+  } catch (error) {
+    console.warn(
+      "[company-portal] wallet invoice payment backfill skipped:",
+      error.message || error
+    );
+  }
+
   const pool = getPool();
   const {
     parsePaymentListLimit,
@@ -640,12 +668,30 @@ async function extractStripePaymentDetails(session) {
     customerEmail: session.customer_details?.email || charge?.billing_details?.email || null,
     customerName: session.customer_details?.name || charge?.billing_details?.name || null,
     receiptUrl: charge?.receipt_url || null,
+    receiptNumber: charge?.receipt_number || null,
     processingFee: charge?.balance_transaction
       ? null
       : null,
     netAmount: charge?.amount ? charge.amount / 100 : null,
     failureMessage: paymentIntent?.last_payment_error?.message || charge?.failure_message || null,
   };
+}
+
+async function fetchStripeReceiptNumber(chargeId) {
+  const normalized = `${chargeId || ""}`.trim();
+  if (!normalized) return null;
+
+  try {
+    const stripe = getStripe();
+    const charge = await stripe.charges.retrieve(normalized);
+    return charge?.receipt_number || null;
+  } catch (error) {
+    logger.warn("Unable to fetch Stripe receipt number", {
+      chargeId: normalized,
+      message: error.message,
+    });
+    return null;
+  }
 }
 
 async function fulfillInvoicePayment(connection, orderId, invoiceType) {
@@ -822,6 +868,12 @@ async function fulfillSuccessfulCheckoutSession(session) {
   if (session.metadata?.payment_kind === "personal_portal") {
     const personalPortalService = require("./personalPortalService");
     await personalPortalService.fulfillPersonalPortalPayment(session);
+    return;
+  }
+
+  if (session.metadata?.payment_kind === "personal_portal_research_fee") {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.fulfillPersonalPortalResearchFeePayment(session);
     return;
   }
 
@@ -1004,6 +1056,14 @@ async function handleStripeWebhook(rawBody, signature) {
           await companyPortalOrderService.fulfillCompanyPortalCheckoutSession(
             session
           );
+        }
+        break;
+      }
+
+      if (session.metadata?.portal === "company_wallet") {
+        if (session.payment_status === "paid") {
+          const companyPortalWalletService = require("./companyPortalWalletService");
+          await companyPortalWalletService.fulfillWalletTopupSession(session);
         }
         break;
       }
@@ -1261,6 +1321,30 @@ async function recordPersonalPortalStripePayment(session) {
       });
     }
 
+    if (request.order_id && stripeDetails.receiptNumber) {
+      const orderPayments = await Order.findPaymentsByOrderId(
+        request.order_id,
+        connection
+      );
+      const prepayment = orderPayments.find(
+        (row) => row.payment_type === "prepayment"
+      );
+      await Order.upsertPayment(connection, {
+        orderId: request.order_id,
+        paymentType: "prepayment",
+        checkNumber: stripeDetails.receiptNumber,
+        paymentDate:
+          prepayment?.payment_date ||
+          paidAt.toISOString().slice(0, 10),
+        amount: prepayment?.amount ?? amount,
+        dueAmount: prepayment?.due_amount ?? 0,
+        isPaid: prepayment?.is_paid ?? 1,
+        memo:
+          prepayment?.memo ||
+          "Personal portal processing fee ($35 prepayment)",
+      });
+    }
+
     // Also mirror into staff online payments list when table + DMS order exist
     if (request.order_id) {
       const [tableRows] = await connection.execute(
@@ -1339,12 +1423,228 @@ async function recordPersonalPortalStripePayment(session) {
   }
 }
 
+async function recordCompanyPortalWalletOrderPayment(internalOrderId, portalOrder) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0 || !portalOrder) {
+    return false;
+  }
+
+  if (portalOrder.payment_method !== "wallet" || portalOrder.payment_status !== "paid") {
+    return false;
+  }
+
+  const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
+  const walletTx = await CompanyPortalWalletTransaction.findOrderPaymentByPortalOrderId(
+    portalOrder.id
+  );
+
+  if (!walletTx) {
+    return false;
+  }
+
+  const amount = Number(portalOrder.payment_amount);
+  const paidAmount =
+    Number.isFinite(amount) && amount > 0 ? Number(amount.toFixed(2)) : 15;
+  const walletRef = `wallet_tx_${walletTx.id}`;
+  const pool = getPool();
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    await connection.execute(
+      `SELECT id FROM orders WHERE id = :orderId FOR UPDATE`,
+      { orderId }
+    );
+
+    const [existingRows] = await connection.execute(
+      `SELECT id
+       FROM stripe_online_payments
+       WHERE stripe_payment_intent_id = :walletRef
+          OR (
+            order_id = :orderId
+            AND payment_method_type = 'wallet'
+            AND status = 'succeeded'
+          )
+       LIMIT 1`,
+      { walletRef, orderId }
+    );
+
+    if (existingRows[0]?.id) {
+      await connection.commit();
+      return false;
+    }
+
+    const paidAt = portalOrder.paid_at ? new Date(portalOrder.paid_at) : new Date();
+
+    await connection.execute(
+      `INSERT INTO stripe_online_payments
+         (order_id, invoice_type, invoice_number, amount, currency, status,
+          stripe_payment_intent_id, payment_method_type,
+          customer_email, customer_name, paid_at)
+       VALUES
+         (:orderId, 'regular', :invoiceNumber, :amount, :currency, 'succeeded',
+          :walletRef, 'wallet', :customerEmail, :customerName, :paidAt)`,
+      {
+        orderId,
+        invoiceNumber: portalOrder.order_number || `CP-${portalOrder.id}`,
+        amount: paidAmount,
+        currency: config.stripe.currency || "usd",
+        walletRef,
+        customerEmail: portalOrder.contact_email || null,
+        customerName: portalOrder.company_name || null,
+        paidAt,
+      }
+    );
+
+    await connection.commit();
+    return true;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function recordCompanyPortalWalletInvoicePayment(
+  connection,
+  {
+    orderId,
+    invoiceType,
+    invoiceNumber,
+    amount,
+    walletTxId,
+    customerEmail,
+    customerName,
+  }
+) {
+  const internalOrderId = Number(orderId);
+  if (!Number.isFinite(internalOrderId) || internalOrderId <= 0 || !walletTxId) {
+    return false;
+  }
+
+  const normalizedType = invoiceType === "xray" ? "xray" : "regular";
+  const paidAmount = Number(Number(amount || 0).toFixed(2));
+  if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+    return false;
+  }
+
+  // Prefixed separately from order-fee prepayments (`wallet_tx_*`) so a $15
+  // portal fee row does not block recording the real invoice wallet payment.
+  const walletRef = `wallet_inv_${walletTxId}_${normalizedType}`;
+
+  await connection.execute(
+    `SELECT id FROM orders WHERE id = :orderId FOR UPDATE`,
+    { orderId: internalOrderId }
+  );
+
+  const [existingRows] = await connection.execute(
+    `SELECT id
+     FROM stripe_online_payments
+     WHERE order_id = :orderId
+       AND status = 'succeeded'
+       AND (
+         stripe_payment_intent_id = :walletRef
+         OR (
+           payment_method_type = 'wallet'
+           AND invoice_type = :invoiceType
+           AND stripe_payment_intent_id LIKE 'wallet_inv\\_%'
+         )
+       )
+     LIMIT 1`,
+    { walletRef, orderId: internalOrderId, invoiceType: normalizedType }
+  );
+
+  if (existingRows[0]?.id) {
+    return false;
+  }
+
+  await connection.execute(
+    `INSERT INTO stripe_online_payments
+       (order_id, invoice_type, invoice_number, amount, currency, status,
+        stripe_payment_intent_id, payment_method_type,
+        customer_email, customer_name, paid_at)
+     VALUES
+       (:orderId, :invoiceType, :invoiceNumber, :amount, :currency, 'succeeded',
+        :walletRef, 'wallet', :customerEmail, :customerName, :paidAt)`,
+    {
+      orderId: internalOrderId,
+      invoiceType: normalizedType,
+      invoiceNumber: invoiceNumber || "",
+      amount: paidAmount,
+      currency: config.stripe.currency || "usd",
+      walletRef,
+      customerEmail: customerEmail || null,
+      customerName: customerName || null,
+      paidAt: new Date(),
+    }
+  );
+
+  return true;
+}
+
+async function backfillMissingWalletInvoiceOnlinePayments({ limit = 100 } = {}) {
+  const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
+  const pool = getPool();
+  const missing =
+    await CompanyPortalWalletTransaction.listInvoicePaymentsMissingOnlineRecord(
+      limit
+    );
+
+  let inserted = 0;
+
+  for (const row of missing) {
+    const description = String(row.description || "").toLowerCase();
+    const invoiceType =
+      description.includes("x-ray") || description.includes("xray")
+        ? "xray"
+        : "regular";
+    const invoiceMatch = String(row.description || "").match(
+      /Invoice\s+(\S+)/i
+    );
+    const invoiceNumber =
+      invoiceMatch?.[1] || row.order_number || `CP-${row.portal_order_id}`;
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const didInsert = await recordCompanyPortalWalletInvoicePayment(
+        connection,
+        {
+          orderId: row.internal_order_id,
+          invoiceType,
+          invoiceNumber,
+          amount: row.amount,
+          walletTxId: row.wallet_tx_id,
+          customerEmail: row.contact_email,
+          customerName: row.company_name,
+        }
+      );
+      await connection.commit();
+      if (didInsert) inserted += 1;
+    } catch (error) {
+      await connection.rollback();
+      console.warn(
+        "[company-portal] wallet invoice payment backfill failed:",
+        row.wallet_tx_id,
+        error.message || error
+      );
+    } finally {
+      connection.release();
+    }
+  }
+
+  return { checked: missing.length, inserted };
+}
+
 module.exports = {
   buildPaymentUrl,
   ensurePaymentAccessToken,
   getPaymentUrlForOrder,
   orderHasUnpaidInvoices,
   getPaymentPageData,
+  assertInvoicePayable,
   createCheckoutSession,
   getCheckoutResult,
   generatePaymentReceiptPdf,
@@ -1352,6 +1652,11 @@ module.exports = {
   getOnlinePayments,
   getOnlinePaymentsForOrder,
   fulfillSuccessfulCheckoutSession,
+  fulfillInvoicePayment,
   extractStripePaymentDetails,
+  fetchStripeReceiptNumber,
   recordPersonalPortalStripePayment,
+  recordCompanyPortalWalletOrderPayment,
+  recordCompanyPortalWalletInvoicePayment,
+  backfillMissingWalletInvoiceOnlinePayments,
 };

@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
-import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
+import PersonalRequestActionsCell from "@/components/personal-request/PersonalRequestActionsCell";
+import PersonalRequestReceiptsCell from "@/components/personal-request/PersonalRequestReceiptsCell";
+import PersonalResearchFeeBanner from "@/components/personal-request/PersonalResearchFeeBanner";
 import { listPersonalRequests } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
@@ -13,6 +15,7 @@ import {
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 const REQUESTS_PER_PAGE = 10;
+const MAX_SEARCH_LENGTH = 200;
 
 const STATUS_STYLES = {
   in_process: "bg-[#E6F7FA] text-[#007F96]",
@@ -21,11 +24,31 @@ const STATUS_STYLES = {
   released: "bg-[#DCFCE7] text-[#15803D]",
 };
 
+const STATUS_FILTER_OPTIONS = [
+  { value: "", label: "All statuses" },
+  { value: "in_process", label: "In Process" },
+  { value: "invoice", label: "Invoice" },
+  { value: "paid", label: "Paid" },
+  { value: "released", label: "Released" },
+];
+
+const defaultFilters = {
+  status: "",
+  search: "",
+};
+
+function clampSearch(value) {
+  return `${value || ""}`.trim().slice(0, MAX_SEARCH_LENGTH);
+}
+
 export default function PersonalRequestsListPage() {
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState(defaultFilters);
+  const [draftStatus, setDraftStatus] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [keysetPagination, setKeysetPagination] = useState({
     pageSize: REQUESTS_PER_PAGE,
@@ -34,13 +57,18 @@ export default function PersonalRequestsListPage() {
   });
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
+  const filtersRef = useRef(filters);
 
   useEffect(() => {
     cursorHistoryRef.current = cursorHistory;
   }, [cursorHistory]);
 
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
   const loadRequests = useCallback(
-    async (page = 1) => {
+    async (page = 1, activeFilters = filtersRef.current) => {
       if (!getPersonalAccessToken()) {
         router.replace("/personalrequest/login");
         return;
@@ -54,6 +82,8 @@ export default function PersonalRequestsListPage() {
         const response = await listPersonalRequests({
           pageSize: REQUESTS_PER_PAGE,
           cursor,
+          status: activeFilters.status || "",
+          search: activeFilters.search || "",
         });
 
         const paginationMeta = response?.data?.pagination || {};
@@ -91,8 +121,30 @@ export default function PersonalRequestsListPage() {
   );
 
   useEffect(() => {
-    loadRequests(1);
-  }, [loadRequests]);
+    setCursorHistory([null]);
+    cursorHistoryRef.current = [null];
+    loadRequests(1, filters);
+  }, [filters, loadRequests]);
+
+  const applyFilters = () => {
+    setFilters({
+      status: draftStatus,
+      search: clampSearch(searchDraft),
+    });
+  };
+
+  const applySearch = () => {
+    setFilters((prev) => ({
+      ...prev,
+      search: clampSearch(searchDraft),
+    }));
+  };
+
+  const resetFilters = () => {
+    setDraftStatus("");
+    setSearchDraft("");
+    setFilters(defaultFilters);
+  };
 
   const startRecord =
     requests.length === 0 ? 0 : (currentPage - 1) * REQUESTS_PER_PAGE + 1;
@@ -107,9 +159,9 @@ export default function PersonalRequestsListPage() {
             My Requests
           </h1>
           <p className="mt-1 text-[13px] text-[#64748B]">
-            Every paid request under your registered email. After the $35
-            prepayment: In Process → Invoice (additional charges in DMS) → Paid
-            → Released.
+            Paid requests from the last 7 days under your account. After the $35
+            prepayment: In Process → Invoice → Paid → Released. Download records
+            and receipts when available.
           </p>
         </div>
         <Link
@@ -120,11 +172,74 @@ export default function PersonalRequestsListPage() {
         </Link>
       </div>
 
+      <section className="mb-4 rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-[160px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
+            Status
+            <select
+              value={draftStatus}
+              onChange={(e) => setDraftStatus(e.target.value)}
+              className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
+            >
+              {STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={applyFilters}
+            className="h-[36px] rounded-[6px] bg-[#0097B2] px-4 text-[13px] font-semibold text-white hover:bg-[#0086A0]"
+          >
+            Apply
+          </button>
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+          >
+            Reset
+          </button>
+
+          <div className="flex min-w-[240px] flex-[2] items-end gap-2">
+            <label className="flex flex-1 flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
+              Search
+              <input
+                value={searchDraft}
+                maxLength={MAX_SEARCH_LENGTH}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applySearch();
+                  }
+                }}
+                placeholder="Confirmation #, facility, name…"
+                className="h-[36px] rounded-[6px] border border-[#E2E8F0] px-3 text-[13px] outline-none focus:border-[#0097B2]"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={applySearch}
+              className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+            >
+              Search
+            </button>
+          </div>
+        </div>
+      </section>
+
       {error ? (
         <p className="mb-4 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">
           {error}
         </p>
       ) : null}
+
+      <PersonalResearchFeeBanner requests={requests} />
 
       <section className="overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="overflow-x-auto">
@@ -135,6 +250,7 @@ export default function PersonalRequestsListPage() {
                 <th className="px-5 py-3">Facility</th>
                 <th className="px-5 py-3">Date range</th>
                 <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">Receipts</th>
                 <th className="px-5 py-3">Action</th>
               </tr>
             </thead>
@@ -142,7 +258,7 @@ export default function PersonalRequestsListPage() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-5 py-8 text-center text-[#94A3B8]"
                   >
                     Loading...
@@ -151,10 +267,10 @@ export default function PersonalRequestsListPage() {
               ) : requests.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-5 py-8 text-center text-[#94A3B8]"
                   >
-                    No paid requests yet.
+                    No paid requests match the current filters.
                   </td>
                 </tr>
               ) : (
@@ -184,24 +300,10 @@ export default function PersonalRequestsListPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      {request.canDownload &&
-                      (request.downloadToken || request.downloadUrl) ? (
-                        <PersonalRecordsDownloadButton
-                          downloadToken={request.downloadToken}
-                          downloadUrl={request.downloadUrl}
-                          label="Download"
-                          className="font-semibold text-[#16A34A] hover:underline"
-                        />
-                      ) : (
-                        <Link
-                          href={`/personalrequest/status?ref=${encodeURIComponent(
-                            request.confirmationReference || ""
-                          )}`}
-                          className="font-semibold text-[#0097B2] hover:underline"
-                        >
-                          View
-                        </Link>
-                      )}
+                      <PersonalRequestReceiptsCell request={request} />
+                    </td>
+                    <td className="px-5 py-3">
+                      <PersonalRequestActionsCell request={request} />
                     </td>
                   </tr>
                 ))

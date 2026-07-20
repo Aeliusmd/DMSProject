@@ -1,5 +1,5 @@
 import { PAYMENT_TYPE_LABELS } from "./paymentMockData";
-import { request } from "@/lib/auth/authApi";
+import { request, authFetch } from "@/lib/auth/authApi";
 
 function formatMoney(value) {
   const amount = Number(value);
@@ -313,6 +313,19 @@ export async function getOrderPaymentDetail(orderId, { channel } = {}) {
     manualPayments,
     onlinePayments,
   };
+}
+
+export async function fetchCompanyPortalWalletReceiptBlob(orderId) {
+  const response = await authFetch(
+    `/payments/orders/${orderId}/company-portal-wallet-receipt`,
+    { method: "GET" }
+  );
+
+  if (!response.ok) {
+    throw new Error("Unable to download wallet payment receipt");
+  }
+
+  return response.blob();
 }
 
 export { formatMoney, PAYMENT_TYPE_LABELS, buildManualSummary, buildOnlineSummary, filterPaymentsByOrderId, filterPaymentsByInvoiceId };

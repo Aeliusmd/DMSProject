@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { Suspense, useState, useMemo, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import { createFacility } from "@/lib/facilities/facilityApi";
+import { linkCompanyOrderFacility } from "@/lib/orders/orderApi";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   mapApiErrors,
@@ -40,8 +41,11 @@ const createEmptyManager = () => ({
   email: "",
 });
 
-export default function NewFacilityPage() {
+function NewFacilityPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const linkOrderId = searchParams.get("linkOrderId") || "";
 
   const [formData, setFormData] = useState(initialFormData);
   const [managers, setManagers] = useState([createEmptyManager()]);
@@ -49,6 +53,33 @@ export default function NewFacilityPage() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
+
+  useEffect(() => {
+    const prefill = {
+      facilityName: searchParams.get("facilityName") || "",
+      address: searchParams.get("address") || "",
+      city: searchParams.get("city") || "",
+      state: (searchParams.get("state") || "")
+        .replace(/[^a-zA-Z]/g, "")
+        .toUpperCase()
+        .slice(0, 2),
+      zipCode: (searchParams.get("zip") || "").replace(/\D/g, "").slice(0, 5),
+    };
+
+    const hasPrefill = Object.values(prefill).some((value) => value);
+    if (!hasPrefill) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      facilityName: prefill.facilityName || prev.facilityName,
+      address: prefill.address || prev.address,
+      city: prefill.city || prev.city,
+      state: prefill.state || prev.state,
+      zipCode: prefill.zipCode || prev.zipCode,
+    }));
+    // Prefill only once on mount from the query string.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const clientValidationErrors = useMemo(
     () => validateFacilityForm(formData, managers),
@@ -167,7 +198,7 @@ export default function NewFacilityPage() {
     setSaving(true);
 
     try {
-      await createFacility({
+      const facility = await createFacility({
         facilityName: formData.facilityName,
         firstName: formData.firstName,
         middleName: formData.middleName,
@@ -182,6 +213,23 @@ export default function NewFacilityPage() {
         ipAddresses: formData.ipAddresses,
         officeManagers: managers,
       });
+
+      // When arriving from a company portal order whose facility was not in our
+      // system, link the newly created facility back to that order.
+      if (linkOrderId && facility?.id) {
+        try {
+          await linkCompanyOrderFacility(linkOrderId, facility.id);
+        } catch (linkErr) {
+          setSubmitError(
+            linkErr?.message ||
+              "Facility created, but linking it to the order failed. Link it from Company Orders."
+          );
+          setSaving(false);
+          return;
+        }
+        router.push("/company-orders");
+        return;
+      }
 
       router.push("/facilities");
     } catch (err) {
@@ -415,6 +463,22 @@ export default function NewFacilityPage() {
         </section>
       </div>
     </DashboardShell>
+  );
+}
+
+export default function NewFacilityPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardShell>
+          <div className="p-6 text-[13px] text-[#64748B]">
+            Loading facility form...
+          </div>
+        </DashboardShell>
+      }
+    >
+      <NewFacilityPageContent />
+    </Suspense>
   );
 }
 

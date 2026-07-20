@@ -39,15 +39,44 @@ class PersonalPortalUser {
        VALUES
         (:firstName, :lastName, :email, :passwordHash, :phone, 1, NOW(), NOW())`,
       {
-        firstName: data.firstName,
-        lastName: data.lastName,
+        firstName: data.firstName || "",
+        lastName: data.lastName || "",
         email: data.email,
-        passwordHash: data.passwordHash,
+        passwordHash: data.passwordHash ?? null,
         phone: data.phone || null,
       }
     );
 
     return this.findById(result.insertId, connection);
+  }
+
+  /**
+   * Find an existing portal user by email, or create a lightweight
+   * passwordless account for OTP-only sign-in.
+   */
+  static async findOrCreateLightweightByEmail(email, connection = null) {
+    const existing = await this.findByEmail(email, connection);
+    if (existing) return existing;
+
+    try {
+      return await this.create(
+        {
+          firstName: "",
+          lastName: "",
+          email,
+          passwordHash: null,
+          phone: null,
+        },
+        connection
+      );
+    } catch (error) {
+      // Concurrent first login for the same email — re-fetch the winner.
+      if (error?.code === "ER_DUP_ENTRY") {
+        const raced = await this.findByEmail(email, connection);
+        if (raced) return raced;
+      }
+      throw error;
+    }
   }
 
   static async updateLastLogin(id) {
@@ -58,6 +87,18 @@ class PersonalPortalUser {
        WHERE id = :id`,
       { id }
     );
+  }
+
+  static async updateEmail(id, email, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_portal_users
+       SET email = :email, updated_at = NOW()
+       WHERE id = :id
+         AND deleted_at IS NULL`,
+      { id, email }
+    );
+    return this.findById(id, connection);
   }
 }
 

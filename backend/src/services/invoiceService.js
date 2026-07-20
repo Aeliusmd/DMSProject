@@ -55,7 +55,35 @@ function getInvoiceDisplayEmail(row) {
   );
 }
 
+function isPersonalPortalOrder(orderOrSource) {
+  if (!orderOrSource) return false;
+  if (typeof orderOrSource === "string") {
+    return orderOrSource === "personal_portal";
+  }
+  return (
+    orderOrSource.creation_source === "personal_portal" ||
+    orderOrSource.creationSource === "personal_portal"
+  );
+}
+
 async function resolveInvoiceRecipientFromOrder(order, connection = null) {
+  // Personal portal invoices go to the requesting patient, not a provider.
+  if (isPersonalPortalOrder(order) && order?.id) {
+    try {
+      const PersonalRequestOrder = require("../models/PersonalRequestOrder");
+      const request = await PersonalRequestOrder.findByOrderId(
+        order.id,
+        connection
+      );
+      const personalEmail = trimOrNull(request?.email);
+      if (personalEmail) {
+        return personalEmail;
+      }
+    } catch (_error) {
+      // fall through to provider email
+    }
+  }
+
   const providerId = order?.provider_id || null;
 
   if (providerId) {
@@ -66,7 +94,7 @@ async function resolveInvoiceRecipientFromOrder(order, connection = null) {
     }
   }
 
-  return trimOrNull(order?.provider_email);
+  return trimOrNull(order?.provider_email) || trimOrNull(order?.serve_email);
 }
 
 async function resolveInvoiceRecipientEmail(invoice, connection = null) {
@@ -182,8 +210,11 @@ function resolveXrayInvoiceNumber(xrayRow, order = null) {
 
 const ORDER_PAYMENT_TYPES = ["prepayment", "custodian", "xray"];
 const STANDARD_INVOICE_PAYMENT_TYPES = ["prepayment"];
-const DEFAULT_CUSTODIAN_CHARGE = 15;
+const DEFAULT_CUSTODIAN_CHARGE = 0;
 const DEFAULT_PREPAYMENT_CHARGE = 15;
+const QUICK_RECORDS_FEE = 20;
+const REQUEST_TOTAL_WITH_RECORDS_FEE =
+  DEFAULT_PREPAYMENT_CHARGE + QUICK_RECORDS_FEE;
 
 const ORDER_PAYMENT_LABELS = {
   prepayment: "Prepayment",
@@ -213,12 +244,36 @@ function sumStandardInvoicePayments(payments = []) {
   );
 }
 
-function resolveAmountPaid(orderPayments, existing = null) {
+function resolveAmountPaid(orderPayments, existing = null, invoiceShape = null, options = {}) {
   const fromOrderPayments =
     orderPayments !== undefined
       ? sumStandardInvoicePayments(orderPayments)
       : null;
   const fromExisting = existing ? toNumber(existing.amount_paid) : 0;
+  const shape = invoiceShape || existing;
+  const skipPrepaymentCredit = Boolean(options.skipPrepaymentCredit);
+
+  // Flat $20 records-fee invoices do not credit the separate $15 prepayment.
+  // Personal portal: $35 processing fee is kept separate — do not deduct it
+  // from the records invoice (same idea as quick records fee).
+  if ((shape && isQuickRecordsFeeInvoice(shape)) || skipPrepaymentCredit) {
+    if (
+      existing &&
+      (existing.payment_method === "manual" || existing.payment_method === "online") &&
+      existing.status === "Paid"
+    ) {
+      return fromExisting;
+    }
+    // Never credit order prepayment against personal-portal / quick invoices.
+    if (skipPrepaymentCredit) {
+      return existing &&
+        (existing.payment_method === "manual" ||
+          existing.payment_method === "online")
+        ? fromExisting
+        : 0;
+    }
+    return existing ? fromExisting : 0;
+  }
 
   // Preserve manually/online recorded full payments when invoice fee fields are edited.
   if (
@@ -288,7 +343,10 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   }
 
   const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
-  const financials = resolveRowFinancials(invoice, orderPayments);
+  const order = await Order.findById(orderId, connection);
+  const financials = resolveRowFinancials(invoice, orderPayments, {
+    skipPrepaymentCredit: isPersonalPortalOrder(order),
+  });
   const status = resolveInvoiceStatusForSave(
     invoice,
     financials.totalAmount,
@@ -338,6 +396,142 @@ function getStorageFee(rowOrPayload = {}) {
   return toNumber(rowOrPayload.other_fee ?? rowOrPayload.other);
 }
 
+function isFlatFeeInvoiceShape(rowOrPayload = {}) {
+  const pageCount = Math.max(
+    0,
+    Math.floor(toNumber(rowOrPayload.page_count ?? rowOrPayload.pages))
+  );
+  const perPageAmount = toNumber(
+    rowOrPayload.per_page_amount ?? rowOrPayload.perPageAmount
+  );
+  const clericalHours = toNumber(
+    rowOrPayload.clerical_time_hours ?? rowOrPayload.clericalTimeHours
+  );
+  const clericalRate = toNumber(
+    rowOrPayload.clerical_hourly_rate ?? rowOrPayload.clericalHourlyRate
+  );
+  const shipping = toNumber(
+    rowOrPayload.shipping_handling ?? rowOrPayload.shippingHandling
+  );
+
+  return (
+    pageCount === 0 &&
+    perPageAmount === 0 &&
+    clericalHours === 0 &&
+    clericalRate === 0 &&
+    shipping === 0
+  );
+}
+
+function extractFacilitySearchFeeFromNotes(notes = "") {
+  const match = `${notes || ""}`.match(
+    /Includes\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s+facility search fee/i
+  );
+  return match ? toNumber(match[1]) : 0;
+}
+
+function isQuickRecordsFeeInvoice(rowOrPayload = {}) {
+  if (!isFlatFeeInvoiceShape(rowOrPayload)) return false;
+  const storage = getStorageFee(rowOrPayload);
+  const facilityFee = extractFacilitySearchFeeFromNotes(
+    rowOrPayload.notes
+  );
+  const recordsFee = Math.max(0, Number((storage - facilityFee).toFixed(2)));
+  return recordsFee === QUICK_RECORDS_FEE;
+}
+
+function isCnrWitnessOnlyInvoice(invoiceRow = {}, orderRow = null) {
+  if (orderRow && !Number(orderRow.certificate_no_records)) {
+    return false;
+  }
+
+  return (
+    isFlatFeeInvoiceShape(invoiceRow) && getStorageFee(invoiceRow) === 0
+  );
+}
+
+function getStorageOrRecordsFeeLabel(rowOrPayload = {}) {
+  return isQuickRecordsFeeInvoice(rowOrPayload)
+    ? "Records Fee"
+    : "Storage Fee";
+}
+
+
+function appendFacilitySearchFeeNote(notes, amount) {
+  const feeText = `Includes $${Number(amount).toFixed(2)} facility search fee`;
+  const current = String(notes || "").trim();
+  if (current.toLowerCase().includes("facility search fee")) {
+    return current;
+  }
+  return current ? `${current}\n${feeText}` : feeText;
+}
+
+/**
+ * Resolve $5 facility-search fee for company or personal portal orders.
+ * Same invoice behavior for both: add once into storageFee.
+ */
+async function resolvePendingFacilitySearchFee(orderId) {
+  try {
+    const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+    const companyFee =
+      await companyPortalInternalSyncService.getPendingFacilitySearchFee(
+        orderId
+      );
+    if (companyFee?.amount > 0) {
+      return {
+        source: "company_portal",
+        amount: companyFee.amount,
+        newFacilityId: companyFee.newFacilityId,
+        personalRequestId: null,
+      };
+    }
+  } catch (_companyError) {
+    // fall through to personal
+  }
+
+  try {
+    const personalPortalService = require("./personalPortalService");
+    const personalFee =
+      await personalPortalService.getPendingPersonalFacilitySearchFee(orderId);
+    if (personalFee?.amount > 0) {
+      return {
+        source: "personal_portal",
+        amount: personalFee.amount,
+        newFacilityId: null,
+        personalRequestId: personalFee.personalRequestId,
+      };
+    }
+  } catch (_personalError) {
+    // ignore
+  }
+
+  return null;
+}
+
+async function markResolvedFacilitySearchFeeBilled(pendingFacilityFee) {
+  if (!pendingFacilityFee?.amount) return;
+
+  if (
+    pendingFacilityFee.source === "company_portal" &&
+    pendingFacilityFee.newFacilityId
+  ) {
+    const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+    await companyPortalInternalSyncService.markFacilitySearchFeeBilled(
+      pendingFacilityFee.newFacilityId
+    );
+    return;
+  }
+
+  if (
+    pendingFacilityFee.source === "personal_portal" &&
+    pendingFacilityFee.personalRequestId
+  ) {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.markPersonalFacilitySearchFeeBilled(
+      pendingFacilityFee.personalRequestId
+    );
+  }
+}
 
 function boolToInt(value) {
   if (typeof value === "string") {
@@ -580,7 +774,7 @@ function buildInvoiceFeeSummaryLines(row, orderPayments = []) {
   }
 
   pushFee("Shipping & Handling", totals.shippingHandling);
-  pushFee("Storage Fee", totals.storageFee);
+  pushFee(getStorageOrRecordsFeeLabel(row), totals.storageFee);
   lines.push(`Total Invoiced: ${formatMoney(financials.totalAmount)}`);
   lines.push(`Total Paid: ${formatMoney(financials.amountPaid)}`);
   lines.push(`Amount Due: ${formatMoney(financials.amountDue)}`);
@@ -669,7 +863,7 @@ function calculateTotalsWithPayments(payload = {}, orderPayments = [], options =
   );
 }
 
-function resolveRowFinancials(row, orderPayments = []) {
+function resolveRowFinancials(row, orderPayments = [], options = {}) {
   const totals = calculateTotalsWithPayments(
     {
       pages: row.page_count,
@@ -683,14 +877,20 @@ function resolveRowFinancials(row, orderPayments = []) {
   );
   const fromOrderPayments = sumStandardInvoicePayments(orderPayments);
   const fromInvoice = toNumber(row.amount_paid);
-  // Keep manual/online recorded payments visible while still respecting
-  // prepayment amounts that already live on order_payments.
+  const skipPrepaymentCredit = Boolean(options.skipPrepaymentCredit);
+  // Flat records-fee invoices ($20) are a separate charge from the $15 witness
+  // prepayment — do not credit prepayment against the records fee due.
+  // Personal portal processing fee is also kept separate (not deducted).
   const amountPaid =
-    row.payment_method === "manual" || row.payment_method === "online"
-      ? Math.max(fromInvoice, fromOrderPayments)
-      : orderPayments.length
-        ? fromOrderPayments
-        : fromInvoice;
+    isQuickRecordsFeeInvoice(row) || skipPrepaymentCredit
+      ? row.payment_method === "manual" || row.payment_method === "online"
+        ? fromInvoice
+        : 0
+      : row.payment_method === "manual" || row.payment_method === "online"
+        ? Math.max(fromInvoice, fromOrderPayments)
+        : orderPayments.length
+          ? fromOrderPayments
+          : fromInvoice;
   const writeoffAmount = toNumber(row.writeoff_amount);
   const { amountDue } = resolveInvoiceAmounts(
     totals.totalAmount,
@@ -875,23 +1075,7 @@ function pushPrintFeeLine(feeLines, line) {
   }
 }
 
-function appendPrintInvoiceDeductions(feeLines, invoiceRow, orderPayments = []) {
-  const prepaymentPaid = getOrderPaymentAmount(orderPayments, "prepayment");
-
-  if (prepaymentPaid > 0) {
-    const prepayment = orderPayments.find((row) => row.payment_type === "prepayment");
-    const checkLabel = trimOrNull(prepayment?.check_number)
-      ? `CK# ${prepayment.check_number}`
-      : "";
-
-    feeLines.push({
-      description: "Prepayment",
-      quantity: checkLabel,
-      total: -prepaymentPaid,
-      italic: true,
-    });
-  }
-
+function appendPrintInvoiceDeductions(feeLines, invoiceRow) {
   const writeoffAmount = toNumber(invoiceRow.writeoff_amount);
 
   if (writeoffAmount > 0) {
@@ -909,6 +1093,102 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
     return null;
   }
 
+  const prepaymentPaid = getOrderPaymentAmount(orderPayments, "prepayment");
+  const isCnrPrint = isCnrWitnessOnlyInvoice(invoiceRow, orderRow);
+  const isQuickPrint = isQuickRecordsFeeInvoice(invoiceRow);
+  const feeLines = [];
+  const commonMeta = {
+    customer: orderRow.serve_company_name || orderRow.provider_name || "",
+    requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
+    yourFileNumber: resolveYourFileNumber(
+      withOrderRecordTypes(orderRow, invoiceRow)
+    ),
+    ourCaseNumber: orderRow.order_number || "",
+    applicant: buildApplicantName(orderRow),
+  };
+
+  if (isCnrPrint) {
+    feeLines.push({
+      description: "Witness Fee (Prepayment)",
+      quantity: "1",
+      total: DEFAULT_PREPAYMENT_CHARGE,
+    });
+
+    if (prepaymentPaid > 0) {
+      feeLines.push({
+        description: "Prepayment Paid",
+        quantity: "",
+        total: -Math.min(prepaymentPaid, DEFAULT_PREPAYMENT_CHARGE),
+        italic: true,
+      });
+    }
+
+    const totalInvoiced = DEFAULT_PREPAYMENT_CHARGE;
+    const amountPaid = Math.min(prepaymentPaid, totalInvoiced);
+
+    return {
+      ...commonMeta,
+      feeLines,
+      totalInvoiced,
+      totalDue: Math.max(0, totalInvoiced - amountPaid),
+      amountPaid,
+    };
+  }
+
+  if (isQuickPrint) {
+    const facilityFee = extractFacilitySearchFeeFromNotes(invoiceRow.notes);
+    const skipWitnessCredit = isPersonalPortalOrder(orderRow);
+
+    if (!skipWitnessCredit) {
+      feeLines.push({
+        description: "Witness Fee (Prepayment)",
+        quantity: "1",
+        total: DEFAULT_PREPAYMENT_CHARGE,
+      });
+    }
+
+    feeLines.push({
+      description: "Records Fee",
+      quantity: "1",
+      total: QUICK_RECORDS_FEE,
+    });
+
+    if (facilityFee > 0) {
+      feeLines.push({
+        description: "Facility Search Fee",
+        quantity: "1",
+        total: facilityFee,
+      });
+    }
+
+    if (!skipWitnessCredit && prepaymentPaid > 0) {
+      feeLines.push({
+        description: "Prepayment Paid",
+        quantity: "",
+        total: -Math.min(prepaymentPaid, DEFAULT_PREPAYMENT_CHARGE),
+        italic: true,
+      });
+    }
+
+    appendPrintInvoiceDeductions(feeLines, invoiceRow);
+
+    const totalInvoiced =
+      (skipWitnessCredit ? QUICK_RECORDS_FEE : REQUEST_TOTAL_WITH_RECORDS_FEE) +
+      facilityFee;
+    const amountPaid = skipWitnessCredit
+      ? 0
+      : Math.min(prepaymentPaid, DEFAULT_PREPAYMENT_CHARGE);
+    const writeoffAmount = toNumber(invoiceRow.writeoff_amount);
+
+    return {
+      ...commonMeta,
+      feeLines,
+      totalInvoiced,
+      totalDue: Math.max(0, totalInvoiced - amountPaid - writeoffAmount),
+      amountPaid,
+    };
+  }
+
   const pageCount = Math.max(0, Math.floor(toNumber(invoiceRow.page_count)));
   const perPageAmount = toNumber(invoiceRow.per_page_amount);
   const pagesTotal = pageCount * perPageAmount;
@@ -917,8 +1197,6 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   const clericalAmount = clericalTimeHours * clericalHourlyRate;
   const shippingHandling = toNumber(invoiceRow.shipping_handling);
   const storageFee = getStorageFee(invoiceRow);
-
-  const feeLines = [];
 
   if (clericalAmount > 0) {
     pushPrintFeeLine(feeLines, {
@@ -945,25 +1223,48 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   }
 
   if (storageFee > 0) {
-    pushPrintFeeLine(feeLines, {
-      description: "Storage Fee",
-      quantity: "1",
-      total: storageFee,
+    const facilityFee = extractFacilitySearchFeeFromNotes(invoiceRow.notes);
+    const storageOnly = Math.max(0, Number((storageFee - facilityFee).toFixed(2)));
+
+    if (storageOnly > 0) {
+      pushPrintFeeLine(feeLines, {
+        description: getStorageOrRecordsFeeLabel(invoiceRow),
+        quantity: "1",
+        total: storageOnly,
+      });
+    }
+
+    if (facilityFee > 0) {
+      pushPrintFeeLine(feeLines, {
+        description: "Facility Search Fee",
+        quantity: "1",
+        total: facilityFee,
+      });
+    }
+  }
+
+  if (prepaymentPaid > 0 && !isPersonalPortalOrder(orderRow)) {
+    const prepayment = orderPayments.find((row) => row.payment_type === "prepayment");
+    const checkLabel = trimOrNull(prepayment?.check_number)
+      ? `CK# ${prepayment.check_number}`
+      : "";
+
+    feeLines.push({
+      description: "Prepayment",
+      quantity: checkLabel,
+      total: -prepaymentPaid,
+      italic: true,
     });
   }
 
-  appendPrintInvoiceDeductions(feeLines, invoiceRow, orderPayments);
+  appendPrintInvoiceDeductions(feeLines, invoiceRow);
 
-  const financials = resolveRowFinancials(invoiceRow, orderPayments);
+  const financials = resolveRowFinancials(invoiceRow, orderPayments, {
+    skipPrepaymentCredit: isPersonalPortalOrder(orderRow),
+  });
 
   return {
-    customer: orderRow.serve_company_name || orderRow.provider_name || "",
-    requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
-    yourFileNumber: resolveYourFileNumber(
-      withOrderRecordTypes(orderRow, invoiceRow)
-    ),
-    ourCaseNumber: orderRow.order_number || "",
-    applicant: buildApplicantName(orderRow),
+    ...commonMeta,
     feeLines,
     totalInvoiced: financials.totalAmount,
     totalDue: financials.amountDue,
@@ -1133,12 +1434,14 @@ async function upsertOrderPaymentDue(
 async function syncOrderCustodianDueFromInvoice(connection, orderId) {
   const order = await Order.findById(orderId, connection);
 
-  if (!order || order.certificate_no_records) {
+  if (!order) {
     return;
   }
 
   const payments = await Order.findPaymentsByOrderId(orderId, connection);
-  const dueAmount = resolveCustodianPaymentDue(null, payments);
+  // Custodian is no longer a separate $15 charge — the single $15 witness fee
+  // is tracked as prepayment only. Keep any existing custodian due at $0.
+  const dueAmount = 0;
 
   await upsertOrderPaymentDue(connection, orderId, "custodian", dueAmount, payments);
 
@@ -1598,7 +1901,29 @@ function groupOutstandingRows(rows = [], paymentsByOrderId = {}) {
 
 function buildInvoicePayload(body = {}, existing = null, options = {}) {
   const totals = calculateTotalsWithPayments({ ...body }, options.orderPayments || []);
-  const amountPaid = resolveAmountPaid(options.orderPayments, existing);
+  const invoiceShape = {
+    ...body,
+    storageFee: totals.storageFee,
+    storage_fee: totals.storageFee,
+    pages: totals.pageCount,
+    page_count: totals.pageCount,
+    perPageAmount: totals.perPageAmount,
+    per_page_amount: totals.perPageAmount,
+    clericalTimeHours: totals.clericalTimeHours,
+    clerical_time_hours: totals.clericalTimeHours,
+    clericalHourlyRate: totals.clericalHourlyRate,
+    clerical_hourly_rate: totals.clericalHourlyRate,
+    shippingHandling: totals.shippingHandling,
+    shipping_handling: totals.shippingHandling,
+  };
+  const amountPaid = resolveAmountPaid(
+    options.orderPayments,
+    existing,
+    invoiceShape,
+    {
+      skipPrepaymentCredit: Boolean(options.skipPrepaymentCredit),
+    }
+  );
   const writeoffAmount = existing ? toNumber(existing.writeoff_amount) : 0;
   const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
     totals.totalAmount,
@@ -2540,10 +2865,16 @@ async function createInvoice(body, userId) {
   }
 
   if (Number(order.certificate_no_records)) {
-    throw new ApiError(
-      400,
-      "Standard invoices cannot be created for Certificate of No Records orders"
-    );
+    // CNR: only the $15 witness/prepayment applies — no $20 records fee.
+    body = {
+      ...body,
+      pages: 0,
+      perPageAmount: 0,
+      clericalTimeHours: 0,
+      clericalHourlyRate: 0,
+      shippingHandling: 0,
+      storageFee: 0,
+    };
   }
 
   const existing = await Invoice.findByOrderId(orderId);
@@ -2565,8 +2896,27 @@ async function createInvoice(body, userId) {
     await syncInvoicePrepayment(connection, orderId, body.prepaymentAmount);
 
     const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
-    const invoicePayload = buildInvoicePayload(body, null, {
+
+    // Company / personal portal: if a new facility was located and added,
+    // add its $5 search fee to this invoice (once).
+    let invoiceBody = body;
+    let pendingFacilityFee = null;
+    try {
+      pendingFacilityFee = await resolvePendingFacilitySearchFee(orderId);
+    } catch (_feeError) {
+      pendingFacilityFee = null;
+    }
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      invoiceBody = {
+        ...body,
+        storageFee: toNumber(body.storageFee) + pendingFacilityFee.amount,
+        notes: appendFacilitySearchFeeNote(body.notes, pendingFacilityFee.amount),
+      };
+    }
+
+    const invoicePayload = buildInvoicePayload(invoiceBody, null, {
       orderPayments,
+      skipPrepaymentCredit: isPersonalPortalOrder(order),
     });
     const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
@@ -2603,6 +2953,14 @@ async function createInvoice(body, userId) {
 
     await connection.commit();
 
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      try {
+        await markResolvedFacilitySearchFeeBilled(pendingFacilityFee);
+      } catch (_billError) {
+        // Non-blocking; fee can be reconciled manually if this fails.
+      }
+    }
+
     try {
       const personalPortalService = require("./personalPortalService");
       await personalPortalService.syncPortalStatusForDmsOrder(orderId);
@@ -2633,10 +2991,16 @@ async function updateInvoice(id, body) {
   const order = await Order.findById(existing.order_id);
 
   if (order && Number(order.certificate_no_records)) {
-    throw new ApiError(
-      400,
-      "Standard invoices cannot be updated for Certificate of No Records orders"
-    );
+    // CNR invoices cannot change fee lines — notes + prepayment collection only.
+    body = {
+      ...body,
+      pages: existing.page_count,
+      perPageAmount: existing.per_page_amount,
+      clericalTimeHours: existing.clerical_time_hours,
+      clericalHourlyRate: existing.clerical_hourly_rate,
+      shippingHandling: existing.shipping_handling,
+      storageFee: getStorageFee(existing),
+    };
   }
 
   const pool = getPool();
@@ -2648,8 +3012,29 @@ async function updateInvoice(id, body) {
     await syncInvoicePrepayment(connection, existing.order_id, body.prepaymentAmount);
 
     const orderPayments = await Order.findPaymentsByOrderId(existing.order_id, connection);
-    const invoicePayload = buildInvoicePayload(body, existing, {
+
+    // Company / personal portal: fold in the $5 facility-search fee if newly
+    // added and not yet billed on this order's invoice.
+    let invoiceBody = body;
+    let pendingFacilityFee = null;
+    try {
+      pendingFacilityFee = await resolvePendingFacilitySearchFee(
+        existing.order_id
+      );
+    } catch (_feeError) {
+      pendingFacilityFee = null;
+    }
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      invoiceBody = {
+        ...body,
+        storageFee: toNumber(body.storageFee) + pendingFacilityFee.amount,
+        notes: appendFacilitySearchFeeNote(body.notes, pendingFacilityFee.amount),
+      };
+    }
+
+    const invoicePayload = buildInvoicePayload(invoiceBody, existing, {
       orderPayments,
+      skipPrepaymentCredit: isPersonalPortalOrder(order),
     });
     const recipientEmails = order
       ? await resolveInvoiceRecipientFromOrder(order, connection)
@@ -2682,6 +3067,14 @@ async function updateInvoice(id, body) {
     );
 
     await connection.commit();
+
+    if (pendingFacilityFee && pendingFacilityFee.amount > 0) {
+      try {
+        await markResolvedFacilitySearchFeeBilled(pendingFacilityFee);
+      } catch (_billError) {
+        // Non-blocking; fee can be reconciled manually if this fails.
+      }
+    }
 
     try {
       const personalPortalService = require("./personalPortalService");
@@ -3441,6 +3834,18 @@ async function sendInvoices(invoiceIds = [], options = {}) {
           error.message || error
         );
       }
+
+      try {
+        const personalPortalService = require("./personalPortalService");
+        await personalPortalService.notifyPersonalUserAfterInvoiceSent(
+          invoice.order_id
+        );
+      } catch (error) {
+        console.warn(
+          "[personal-portal] Invoice-sent notify skipped:",
+          error.message || error
+        );
+      }
     }
 
     sent.push({ invoiceId, recipient: deliveredTo });
@@ -3576,6 +3981,18 @@ async function emailInvoiceByOrderId(orderId) {
   );
 
   await Order.upsertWorkflowStage(normalizedOrderId, "SENT", "sent", new Date());
+
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.notifyPersonalUserAfterInvoiceSent(
+      normalizedOrderId
+    );
+  } catch (error) {
+    console.warn(
+      "[personal-portal] Invoice-sent notify skipped:",
+      error.message || error
+    );
+  }
 
   const sentOn = new Date();
 
@@ -4254,4 +4671,5 @@ module.exports = {
   buildPrintInvoicePdfData,
   buildPrintXrayInvoicePdfData,
   syncInvoiceAmountPaidFromOrder,
+  syncServeWorkflowFromPrepayment,
 };

@@ -10,6 +10,7 @@ const {
   validateEmailOtpConfirm,
   validatePersonalRequestSubmit,
   validateStatusLookup,
+  validateRequestEmailUpdate,
   validatePersonalRequestsListQuery,
   validatePersonalCheckoutResultQuery,
 } = require("../validators/personalPortalValidator");
@@ -122,10 +123,149 @@ exports.listRequests = asyncHandler(async (req, res) => {
       pageSize: validation.pageSize,
       cursor: validation.cursor,
       status: validation.status,
+      search: validation.search,
     }
   );
 
   return ApiResponse.success(res, data, "Requests loaded");
+});
+
+exports.createResearchFeeCheckout = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const data = await personalPortalService.createResearchFeeCheckout(
+    requestId,
+    req.personalUser.id
+  );
+
+  return ApiResponse.success(res, data, "Research fee checkout created");
+});
+
+exports.getPrepaymentReceipt = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const result = await personalPortalService.getPrepaymentReceiptPdf(
+    requestId,
+    req.personalUser.id
+  );
+
+  if (result.kind === "redirect") {
+    return ApiResponse.success(
+      res,
+      { url: result.url, label: result.label || "Prepayment receipt" },
+      "Prepayment receipt ready"
+    );
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(result.fileName || "prepayment-receipt.pdf")}"`
+  );
+  return res.send(result.buffer);
+});
+
+exports.getInvoiceReceipt = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const result = await personalPortalService.getInvoiceReceiptPdf(
+    requestId,
+    req.personalUser.id
+  );
+
+  if (result.kind === "redirect") {
+    return ApiResponse.success(
+      res,
+      { url: result.url, label: result.label || "Invoice receipt" },
+      "Invoice receipt ready"
+    );
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(result.fileName || "invoice-receipt.pdf")}"`
+  );
+  return res.send(result.buffer);
+});
+
+exports.getFacilityFeeReceipt = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const result = await personalPortalService.getFacilityFeeReceiptPdf(
+    requestId,
+    req.personalUser.id
+  );
+
+  if (result.kind === "redirect") {
+    return ApiResponse.success(
+      res,
+      { url: result.url, label: result.label || "Facility fee receipt" },
+      "Facility fee receipt ready"
+    );
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(result.fileName || "facility-fee-receipt.pdf")}"`
+  );
+  return res.send(result.buffer);
+});
+
+exports.createInvoiceCheckout = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const data = await personalPortalService.createInvoiceCheckoutForPortalUser(
+    requestId,
+    req.personalUser.id
+  );
+
+  return ApiResponse.success(res, data, "Invoice checkout created");
+});
+
+exports.fulfillResearchFeeCheckout = asyncHandler(async (req, res) => {
+  const sessionId = `${req.body?.sessionId || req.query?.session_id || ""}`.trim();
+  if (!sessionId) {
+    throw new ApiError(400, "session_id is required");
+  }
+
+  const stripePaymentService = require("../services/stripePaymentService");
+  const config = require("../config");
+  const Stripe = require("stripe");
+  const stripe = new Stripe(config.stripe.secretKey);
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+  if (session.payment_status === "paid") {
+    await stripePaymentService.fulfillSuccessfulCheckoutSession(session);
+  }
+
+  return ApiResponse.success(
+    res,
+    {
+      paid: session.payment_status === "paid",
+      requestId:
+        Number(session.metadata?.personal_request_id) ||
+        Number(session.metadata?.order_id) ||
+        null,
+    },
+    "Payment processed"
+  );
 });
 
 exports.getCheckoutResult = asyncHandler(async (req, res) => {
@@ -145,10 +285,23 @@ exports.lookupStatus = asyncHandler(async (req, res) => {
 
   const data = await personalPortalService.lookupRequestStatus({
     confirmationReference: validation.confirmationReference,
-    driverLicenseNumber: validation.driverLicenseNumber,
+    dobIso: validation.dobIso,
   });
 
   return ApiResponse.success(res, data, "Request status retrieved");
+});
+
+exports.updateRequestEmail = asyncHandler(async (req, res) => {
+  const validation = validateRequestEmailUpdate(req.body);
+  throwIfInvalid(validation);
+
+  const data = await personalPortalService.updateRequestNotificationEmail({
+    confirmationReference: validation.confirmationReference,
+    dobIso: validation.dobIso,
+    email: validation.email,
+  });
+
+  return ApiResponse.success(res, data, data.message);
 });
 
 exports.getConfig = asyncHandler(async (_req, res) => {
@@ -156,6 +309,9 @@ exports.getConfig = asyncHandler(async (_req, res) => {
   return ApiResponse.success(res, {
     processingFee: (
       (config.personalPortal?.processingFeeCents || 3500) / 100
+    ).toFixed(2),
+    researchFee: (
+      (config.personalPortal?.researchFeeCents || 500) / 100
     ).toFixed(2),
     lookupDays: config.personalPortal?.lookupDays || 7,
     stripePublishableKey: config.stripe?.publishableKey || "",

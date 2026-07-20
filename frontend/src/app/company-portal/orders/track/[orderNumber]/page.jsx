@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPortalDashboardShell";
+import CompanyInvoicePaymentPanel from "@/components/company-portal/CompanyInvoicePaymentPanel";
 import { getOrderStatusStyles } from "@/lib/company-portal/companyPortalOrderStatus";
 import {
+  confirmCompanyPortalInvoicePayment,
   downloadBlobAsFile,
   fetchCompanyPortalReleasedDocumentsBlob,
   trackCompanyPortalOrder,
@@ -15,6 +17,7 @@ import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 export default function CompanyPortalTrackResultPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams();
   const orderNumber = decodeURIComponent(params?.orderNumber || "");
 
@@ -23,6 +26,8 @@ export default function CompanyPortalTrackResultPage() {
   const [order, setOrder] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const [invoiceMessage, setInvoiceMessage] = useState("");
+  const [invoiceError, setInvoiceError] = useState("");
 
   useEffect(() => {
     if (!isCompanyAuthenticated()) {
@@ -51,7 +56,39 @@ export default function CompanyPortalTrackResultPage() {
     };
   }, [orderNumber, router]);
 
+  useEffect(() => {
+    const sessionId = searchParams.get("session_id");
+    const invoicePaid = searchParams.get("invoicePaid");
+
+    if (!sessionId || invoicePaid !== "1" || !isCompanyAuthenticated()) {
+      return;
+    }
+
+    let active = true;
+
+    confirmCompanyPortalInvoicePayment(orderNumber, sessionId)
+      .then((response) => {
+        if (!active) return;
+        setOrder(response?.data?.order || null);
+        setInvoiceMessage("Invoice payment confirmed.");
+        router.replace(`/company-portal/orders/track/${encodeURIComponent(orderNumber)}`);
+      })
+      .catch((err) => {
+        if (active) {
+          setInvoiceError(
+            getApiErrorMessage(err, "Unable to confirm invoice payment")
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [orderNumber, router, searchParams]);
+
   const canDownload = Boolean(order?.canDownloadDocuments);
+  const downloadExpired = Boolean(order?.downloadExpired);
+  const downloadUnavailableReason = order?.downloadUnavailableReason || "";
 
   const handleDownload = async () => {
     if (!canDownload || !order?.id) return;
@@ -118,43 +155,32 @@ export default function CompanyPortalTrackResultPage() {
               . Documents become available when status is Released.
             </p>
 
-            {Array.isArray(order.paymentLinks) && order.paymentLinks.length > 0 ? (
-              <div className="mt-5 rounded-[8px] border border-[#BAE6FD] bg-[#F0F9FF] px-4 py-3">
-                <p className="text-[12px] font-semibold text-[#0369A1]">
-                  Outstanding invoice payments
-                </p>
-                <p className="mt-1 text-[12px] text-[#0C4A6E]">
-                  Use the secure payment link below to pay remaining invoice
-                  balances for this order.
-                </p>
-                <ul className="mt-3 space-y-2">
-                  {order.paymentLinks.map((link) => (
-                    <li
-                      key={`${link.type}-${link.invoiceNumber || link.label}`}
-                      className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div>
-                        <p className="text-[12px] font-semibold text-[#0F172A]">
-                          {link.label}
-                          {link.invoiceNumber ? ` (${link.invoiceNumber})` : ""}
-                        </p>
-                        <p className="text-[11px] text-[#64748B]">
-                          Due: {link.dueDisplay || "—"}
-                        </p>
-                      </div>
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex h-9 items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
-                      >
-                        Pay now
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            {searchParams.get("canceled") === "1" ? (
+              <p className="mt-4 rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#92400E]">
+                Card payment was canceled. You can try again below.
+              </p>
             ) : null}
+
+            {invoiceMessage ? (
+              <p className="mt-4 rounded-[8px] border border-[#A7F3D0] bg-[#ECFDF5] px-3 py-2 text-[12px] text-[#047857]">
+                {invoiceMessage}
+              </p>
+            ) : null}
+
+            {invoiceError ? (
+              <p className="mt-4 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">
+                {invoiceError}
+              </p>
+            ) : null}
+
+            <CompanyInvoicePaymentPanel
+              orderNumber={order.orderNumber}
+              paymentLinks={order.paymentLinks}
+              walletBalance={order.walletBalance}
+              walletBalanceDisplay={order.walletBalanceDisplay}
+              walletBalanceSource={order.walletBalanceSource}
+              onOrderUpdated={setOrder}
+            />
 
             <div className="mt-5">
               <button
@@ -164,7 +190,9 @@ export default function CompanyPortalTrackResultPage() {
                 title={
                   canDownload
                     ? "Download released documents"
-                    : "Available when order status is Released"
+                    : downloadExpired
+                      ? "Download expired after 7 days"
+                      : "Available when records are released and within 7 days of email"
                 }
                 className={`inline-flex h-11 items-center justify-center rounded-[8px] px-5 text-[13px] font-semibold ${
                   canDownload
@@ -174,15 +202,27 @@ export default function CompanyPortalTrackResultPage() {
               >
                 {downloading ? "Downloading..." : "Download Documents"}
               </button>
-              {!canDownload ? (
+              {canDownload ? (
                 <p className="mt-2 text-[12px] text-[#64748B]">
-                  Download is disabled until this order reaches{" "}
-                  <span className="font-semibold">Released</span> status.
+                  Download includes the released medical/other records for this
+                  order. This download option expires 7 days after records are
+                  emailed
+                  {order.downloadExpiresAt
+                    ? ` (available until ${new Date(
+                        order.downloadExpiresAt
+                      ).toLocaleDateString()})`
+                    : ""}
+                  .
+                </p>
+              ) : downloadExpired ? (
+                <p className="mt-2 rounded-[8px] border border-[#FED7AA] bg-[#FFF7ED] px-3 py-2 text-[12px] text-[#9A3412]">
+                  {downloadUnavailableReason ||
+                    "Download records is not available because 7 days have passed since the records were sent."}
                 </p>
               ) : (
                 <p className="mt-2 text-[12px] text-[#64748B]">
-                  Download includes the released medical/other records for this
-                  order.
+                  {downloadUnavailableReason ||
+                    "Download is disabled until this order reaches Released status and records are emailed."}
                 </p>
               )}
               {downloadError ? (
@@ -218,13 +258,52 @@ export default function CompanyPortalTrackResultPage() {
               <Detail label="Contact email" value={order.contactEmail} />
               <Detail label="Contact phone" value={order.contactPhone} />
               <Detail
-                label="Payment"
-                value={order.paymentAmountDisplay || "—"}
+                label="Total paid"
+                value={
+                  order.paymentSummary?.totalPaidDisplay ||
+                  order.paymentAmountDisplay ||
+                  "—"
+                }
               />
               <Detail
                 label="Payment status"
                 value={order.paymentStatus || "—"}
               />
+              {Array.isArray(order.paymentSummary?.paymentLines) &&
+              order.paymentSummary.paymentLines.length > 0 ? (
+                <div className="sm:col-span-2 rounded-[8px] border border-[#F1F5F9] bg-[#F8FAFC] px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.05em] text-[#94A3B8]">
+                    Payment breakdown
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {order.paymentSummary.paymentLines.map((line) => (
+                      <li
+                        key={`${line.label}-${line.amountDisplay}`}
+                        className="flex items-center justify-between gap-3 text-[13px]"
+                      >
+                        <span className="text-[#475569]">{line.label}</span>
+                        <span className="font-semibold text-[#0F172A]">
+                          {line.amountDisplay}
+                        </span>
+                      </li>
+                    ))}
+                    <li className="mt-1 flex items-center justify-between gap-3 border-t border-[#E2E8F0] pt-2 text-[13px]">
+                      <span className="font-semibold text-[#0F172A]">
+                        Total paid
+                      </span>
+                      <span className="font-semibold text-[#0F172A]">
+                        {order.paymentSummary.totalPaidDisplay}
+                      </span>
+                    </li>
+                  </ul>
+                  {Number(order.paymentSummary.outstandingDue) > 0 ? (
+                    <p className="mt-2 text-[12px] text-[#B45309]">
+                      Outstanding balance:{" "}
+                      {order.paymentSummary.outstandingDueDisplay}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </section>
         </div>

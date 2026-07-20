@@ -112,6 +112,13 @@ export async function registerCompany(payload) {
   });
 }
 
+export async function loginCompanyEmployee({ email, password }) {
+  return request("/company-portal/auth/employee/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
 export async function loginCompany({ email, password }) {
   return request("/company-portal/auth/login", {
     method: "POST",
@@ -178,7 +185,12 @@ export async function logoutCompany() {
 }
 
 export async function getCompanyCurrentUser() {
-  return authRequest("/company-portal/auth/me", { method: "GET" });
+  const payload = await authRequest("/company-portal/auth/me", { method: "GET" });
+  const user = payload?.data?.user;
+  if (user) {
+    setCompanyAuth({ user });
+  }
+  return payload;
 }
 
 export function saveCompanyAuthSession(payload) {

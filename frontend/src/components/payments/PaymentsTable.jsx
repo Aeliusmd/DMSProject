@@ -29,6 +29,7 @@ function PaymentTypeBadge({ label }) {
     Custodian: "bg-[#F3E8FF] text-[#7C3AED] border-[#DDD6FE]",
     "X-Ray": "bg-[#EEF2FF] text-[#4338CA] border-[#C7D2FE]",
     Personal: "bg-[#ECFDF5] text-[#047857] border-[#A7F3D0]",
+    Prepayment: "bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]",
   };
 
   return (

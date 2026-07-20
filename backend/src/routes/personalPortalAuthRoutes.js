@@ -14,5 +14,10 @@ router.post("/refresh", personalPortalAuthController.refresh);
 router.post("/logout", personalPortalAuthController.logout);
 
 router.get("/me", authenticatePersonalPortal, personalPortalAuthController.me);
+router.patch(
+  "/email",
+  authenticatePersonalPortal,
+  personalPortalAuthController.updateEmail
+);
 
 module.exports = router;

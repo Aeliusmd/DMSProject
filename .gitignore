@@ -43,6 +43,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Local share / export archives
+*.zip
+
 # Frontend / Next.js (generated — never commit)
 frontend/.next/
 frontend/node_modules/

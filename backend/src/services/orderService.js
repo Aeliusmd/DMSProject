@@ -605,6 +605,7 @@ async function syncOrderPayments(connection, orderId, data) {
   await ensurePrepaymentPayment(connection, orderId, data);
 
   await invoiceService.syncOrderPaymentDuesFromInvoice(connection, orderId);
+  await invoiceService.syncServeWorkflowFromPrepayment(connection, orderId);
 }
 
 function mapPaymentsToForm(payments = []) {
@@ -917,6 +918,9 @@ function mapOrderListRow(
     creationSource: row.creation_source || "manual",
     companyPortalStatus: extras.companyPortalStatus || null,
     companyPortalOrderId: extras.companyPortalOrderId || null,
+    facilityNotInSystem: false,
+    newFacilityRequest: null,
+    pendingFacilitySearchFee: 0,
     portalStatus: extras.portalStatus || null,
     portalStatusLabel: extras.portalStatusLabel || null,
   };
@@ -1501,6 +1505,61 @@ async function getAllOrders(query = {}) {
         hasUploadedRecords
       );
     }
+
+    // Flag orders whose facility is not in our internal system (external
+    // company requested a new-facility search that is still pending).
+    const portalOrderIds = mappedOrders
+      .map((order) => Number(order.companyPortalOrderId))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (portalOrderIds.length) {
+      const CompanyPortalNewFacility = require("../models/CompanyPortalNewFacility");
+      const newFacilityMap = await CompanyPortalNewFacility.findByPortalOrderIds(
+        portalOrderIds
+      );
+
+      for (const order of mappedOrders) {
+        const portalOrderId = Number(order.companyPortalOrderId);
+        const row = newFacilityMap.get(portalOrderId);
+        if (!row) continue;
+
+        const searchFeeAmount = Number(row.search_fee_amount) || 0;
+        // Fee is still owed when the facility was located/linked but the $5
+        // search fee has not yet been rolled into a regular invoice.
+        const feePending =
+          row.status === "linked" && !row.invoice_billed_at && searchFeeAmount > 0;
+
+        order.newFacilityRequest = {
+          id: row.id,
+          status: row.status,
+          facilityName: row.facility_name || "",
+          facilityAddress: row.facility_address || "",
+          facilityCity: row.facility_city || "",
+          facilityState: row.facility_state || "",
+          facilityZip: row.facility_zip || "",
+          treatingDoctor: row.treating_doctor || "",
+          searchFeeAmount,
+          internalFacilityId: row.internal_facility_id || null,
+          feeBilled: Boolean(row.invoice_billed_at),
+          feePending,
+        };
+        // Amount that will be auto-added to the next regular invoice for this
+        // external company order (0 when nothing is owed).
+        order.pendingFacilitySearchFee = feePending ? searchFeeAmount : 0;
+        // "Not in system" while the request is still pending (not yet linked
+        // to a created internal facility and not cancelled).
+        order.facilityNotInSystem = row.status === "pending";
+      }
+    }
+  }
+
+  try {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.enrichOrdersWithPersonalFacilitySearchFees(
+      mappedOrders
+    );
+  } catch (_personalFeeError) {
+    // Non-blocking
   }
 
   if (!useKeysetPagination) {
@@ -1524,6 +1583,54 @@ async function getOrderStats() {
   };
 }
 
+async function resolvePersonalPortalPrepaymentReceipt(orderId, payments = []) {
+  const prepayment = payments.find((row) => row.payment_type === "prepayment");
+  const currentCheck = `${prepayment?.check_number || ""}`.trim();
+
+  if (currentCheck && currentCheck !== "STRIPE-PORTAL") {
+    return currentCheck;
+  }
+
+  const PersonalRequestStripePayment = require("../models/PersonalRequestStripePayment");
+  const stripePaymentService = require("./stripePaymentService");
+
+  const stripePayment =
+    await PersonalRequestStripePayment.findSucceededProcessingFeeByOrderId(
+      orderId
+    );
+
+  if (stripePayment?.stripe_charge_id) {
+    const receiptNumber = await stripePaymentService.fetchStripeReceiptNumber(
+      stripePayment.stripe_charge_id
+    );
+    if (receiptNumber) {
+      return receiptNumber;
+    }
+  }
+
+  const pool = getPool();
+  const [onlineRows] = await pool.execute(
+    `SELECT stripe_charge_id
+     FROM stripe_online_payments
+     WHERE order_id = :orderId
+       AND status = 'succeeded'
+     ORDER BY paid_at DESC, id DESC
+     LIMIT 1`,
+    { orderId }
+  );
+
+  const onlineChargeId = onlineRows[0]?.stripe_charge_id;
+  if (onlineChargeId) {
+    const receiptNumber =
+      await stripePaymentService.fetchStripeReceiptNumber(onlineChargeId);
+    if (receiptNumber) {
+      return receiptNumber;
+    }
+  }
+
+  return currentCheck || "";
+}
+
 async function getOrderById(id) {
   const order = await Order.findById(id);
 
@@ -1539,7 +1646,7 @@ async function getOrderById(id) {
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
   const orderRecords = await OrderRecord.findByOrderId(order.id);
 
-  return mapOrderDetail(
+  const mapped = mapOrderDetail(
     order,
     payments,
     documents,
@@ -1549,6 +1656,36 @@ async function getOrderById(id) {
     xrayRow,
     orderRecords
   );
+
+  if (mapped.creationSource === "personal_portal") {
+    mapped.prepaymentCheck = await resolvePersonalPortalPrepaymentReceipt(
+      order.id,
+      payments
+    );
+
+    try {
+      const personalPortalService = require("./personalPortalService");
+      const pending =
+        await personalPortalService.getPendingPersonalFacilitySearchFee(
+          order.id
+        );
+      if (pending?.amount > 0) {
+        mapped.pendingFacilitySearchFee = pending.amount;
+        mapped.newFacilityRequest = {
+          id: pending.personalRequestId,
+          status: "linked",
+          searchFeeAmount: pending.amount,
+          feePending: true,
+          feeBilled: false,
+          source: "personal_portal",
+        };
+      }
+    } catch (_feeError) {
+      // Non-blocking
+    }
+  }
+
+  return mapped;
 }
 
 async function resolveAuthorName(actorId) {
@@ -1816,9 +1953,8 @@ async function getOrderActivityLogs(orderId, query = {}) {
   const pageSize = Number.isFinite(pageSizeRaw)
     ? Math.min(Math.max(pageSizeRaw, 1), 100)
     : 10;
-  const cursorRaw = Number(query.cursor);
-  const cursorSortKey =
-    Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+  const cursorRaw = `${query.cursor || ""}`.trim();
+  const cursorSortKey = /^\d+$/.test(cursorRaw) ? cursorRaw : null;
   const search = query.search
     ? sanitizeSearchText(query.search) || null
     : null;
@@ -1852,16 +1988,18 @@ async function getOrderActivityLogs(orderId, query = {}) {
     ? await Order.findNotesByOrderId(order.id, false)
     : [];
 
-  const mappedOrderLogs = keyset.rows
-    .filter((row) => row.log_source === "order")
-    .map((row) => mapMergedActivityLogRow(row, notes));
-  const mappedGlobalLogs = keyset.rows
-    .filter((row) => row.log_source === "global")
-    .map((row) => mapMergedActivityLogRow(row, notes));
-  const mergedLogs = mergeOrderActivityLogs(mappedOrderLogs, mappedGlobalLogs);
+  // Keep SQL keyset order — do not re-merge/re-sort (breaks pagination).
+  const seenIds = new Set();
+  const logs = [];
+  for (const row of keyset.rows) {
+    const mapped = mapMergedActivityLogRow(row, notes);
+    if (!mapped?.id || seenIds.has(mapped.id)) continue;
+    seenIds.add(mapped.id);
+    logs.push(mapped);
+  }
 
   return {
-    logs: mergedLogs,
+    logs,
     pagination: {
       type: "keyset",
       pageSize: keyset.pageSize,
@@ -2364,7 +2502,8 @@ async function updateOrderFacility(id, data, actorId) {
 
     await connection.commit();
 
-    return getOrderById(existing.id);
+    const updated = await getOrderById(existing.id);
+    return updated;
   } catch (error) {
     await connection.rollback();
     rethrowServiceError(error);
@@ -2482,7 +2621,8 @@ async function updateOrder(id, data, actorId, files) {
 
     await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 
-    return getOrderById(existing.id);
+    const updated = await getOrderById(existing.id);
+    return updated;
   } catch (error) {
     await connection.rollback();
     rethrowServiceError(error);

@@ -6,6 +6,7 @@
 
 const ApiError = require("../utils/ApiError");
 const CompanyPortalOrder = require("../models/CompanyPortalOrder");
+const CompanyPortalNewFacility = require("../models/CompanyPortalNewFacility");
 const Order = require("../models/Order");
 const orderService = require("./orderService");
 const {
@@ -21,7 +22,7 @@ const COMPANY_PORTAL_STAGES = [
   "Released",
 ];
 
-const DEFAULT_PORTAL_FEE = 35;
+const DEFAULT_PORTAL_FEE = 15;
 
 function splitApplicantName(fullName) {
   const parts = String(fullName || "")
@@ -58,9 +59,25 @@ function resolvePortalFeeAmount(portalOrder) {
   return DEFAULT_PORTAL_FEE;
 }
 
-function buildPortalPrepaymentFields(portalOrder) {
+async function resolveWalletTransactionId(portalOrder) {
+  if (!portalOrder?.id || portalOrder.payment_method !== "wallet") {
+    return null;
+  }
+
+  const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
+  const walletTx = await CompanyPortalWalletTransaction.findOrderPaymentByPortalOrderId(
+    portalOrder.id
+  );
+  return walletTx?.id || null;
+}
+
+function buildPortalPrepaymentFields(portalOrder, walletTransactionId = null) {
   const paid = resolvePortalFeeAmount(portalOrder);
+  const paymentMethod = String(portalOrder?.payment_method || "stripe").trim();
   const intentId = String(portalOrder?.stripe_payment_intent_id || "").trim();
+  const walletRef = walletTransactionId
+    ? `WALLET-TX-${walletTransactionId}`
+    : "WALLET-CP";
 
   return {
     prepaymentPaid: paid.toFixed(2),
@@ -69,19 +86,62 @@ function buildPortalPrepaymentFields(portalOrder) {
       toDateOnly(portalOrder?.paid_at) ||
       toDateOnly(portalOrder?.created_at) ||
       toDateOnly(new Date()),
-    prepaymentCheck: intentId
-      ? intentId.slice(0, 50)
-      : "STRIPE-CP",
-    prepaymentMemo: "Company portal processing fee",
+    prepaymentCheck:
+      paymentMethod === "wallet"
+        ? walletRef.slice(0, 50)
+        : intentId
+          ? intentId.slice(0, 50)
+          : "STRIPE-CP",
+    prepaymentMemo:
+      paymentMethod === "wallet"
+        ? "Company portal wallet prepayment"
+        : "Company portal processing fee",
   };
 }
 
-function buildInternalOrderPayload(portalOrder) {
+const PLACEHOLDER_FACILITY_NAME = "Company Portal - Pending Facility";
+
+/**
+ * A single reserved facility used for company portal orders whose facility is
+ * not yet in our internal system. We intentionally do NOT create a real
+ * facility from the external company's input; internal staff create it later
+ * via the "Add this facility to system" flow, which re-points the order.
+ */
+async function resolvePlaceholderFacilityId() {
+  const facilityService = require("./facilityService");
+  const { facility } = await facilityService.findOrCreateFacility({
+    facilityName: PLACEHOLDER_FACILITY_NAME,
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+  });
+  return facility?.id || null;
+}
+
+async function portalOrderNeedsPlaceholderFacility(portalOrder) {
+  if (!portalOrder?.id) return false;
+  const newFacility = await CompanyPortalNewFacility.findByOrderId(
+    portalOrder.id
+  );
+  // Only pending (not yet linked / not cancelled) requests are "not in system".
+  return Boolean(newFacility && newFacility.status === "pending");
+}
+
+function buildInternalOrderPayload(portalOrder, options = {}) {
+  const { placeholderFacilityId = null } = options;
   const flags = flagsFromDbRow(portalOrder);
   const name = splitApplicantName(portalOrder.applicant_name);
   const ssnDigits = String(portalOrder.ssn || "").replace(/\D/g, "");
   const ssnLastFour =
     ssnDigits.length >= 4 ? ssnDigits.slice(-4) : ssnDigits || null;
+
+  // When the facility isn't in our system yet, point the internal order at the
+  // reserved placeholder facility (by id) and clear the name so resolveFacilityId
+  // does not auto-create a facility from the external company's input.
+  const usePlaceholder =
+    Number.isFinite(Number(placeholderFacilityId)) &&
+    Number(placeholderFacilityId) > 0;
 
   return {
     orderNumber: portalOrder.order_number,
@@ -92,7 +152,11 @@ function buildInternalOrderPayload(portalOrder) {
     ssnLastFour,
     caseNumber: portalOrder.case_number || "",
     recNumber: portalOrder.rec_number || "",
-    facilityName: portalOrder.facility_name || "Company Portal Facility",
+    ...(usePlaceholder
+      ? { facility: String(placeholderFacilityId), facilityName: "" }
+      : {
+          facilityName: portalOrder.facility_name || "Company Portal Facility",
+        }),
     facilityAddress: portalOrder.facility_address || "",
     facilityCity: portalOrder.facility_city || "",
     facilityState: portalOrder.facility_state || "",
@@ -162,7 +226,8 @@ async function ensurePortalPrepaymentRecord(internalOrderId, portalOrder) {
     return false;
   }
 
-  const fields = buildPortalPrepaymentFields(portalOrder);
+  const walletTransactionId = await resolveWalletTransactionId(portalOrder);
+  const fields = buildPortalPrepaymentFields(portalOrder, walletTransactionId);
   const paid = resolvePortalFeeAmount(portalOrder);
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -182,6 +247,18 @@ async function ensurePortalPrepaymentRecord(internalOrderId, portalOrder) {
   } finally {
     connection.release();
   }
+}
+
+async function ensureWalletOrderOnlinePaymentRecord(internalOrderId, portalOrder) {
+  if (!internalOrderId || !portalOrder) return false;
+  if (portalOrder.payment_method !== "wallet") return false;
+  if (portalOrder.payment_status !== "paid") return false;
+
+  const stripePaymentService = require("./stripePaymentService");
+  return stripePaymentService.recordCompanyPortalWalletOrderPayment(
+    internalOrderId,
+    portalOrder
+  );
 }
 
 async function linkPortalOrderToInternalOrder(portalOrder, internalOrderId) {
@@ -300,6 +377,10 @@ async function ensureInternalOrderForPortalOrder(portalOrder) {
       existingInternal.id
     );
     await ensurePortalPrepaymentRecord(existingInternal.id, linkedPortal);
+    await ensureWalletOrderOnlinePaymentRecord(
+      existingInternal.id,
+      linkedPortal
+    );
     return {
       portalOrder: linkedPortal,
       internalOrderId: existingInternal.id,
@@ -307,7 +388,14 @@ async function ensureInternalOrderForPortalOrder(portalOrder) {
     };
   }
 
-  const payload = buildInternalOrderPayload(portalOrder);
+  let placeholderFacilityId = null;
+  if (await portalOrderNeedsPlaceholderFacility(portalOrder)) {
+    placeholderFacilityId = await resolvePlaceholderFacilityId();
+  }
+
+  const payload = buildInternalOrderPayload(portalOrder, {
+    placeholderFacilityId,
+  });
   const created = await orderService.createOrder(payload, null, {}, {
     allowIncomplete: true,
     creationSource: "company_portal",
@@ -324,6 +412,7 @@ async function ensureInternalOrderForPortalOrder(portalOrder) {
   );
   // createOrder already syncs payments from payload; keep a safety net.
   await ensurePortalPrepaymentRecord(internalOrderId, portalOrder);
+  await ensureWalletOrderOnlinePaymentRecord(internalOrderId, portalOrder);
 
   await CompanyPortalOrder.setInternalOrderId(portalOrder.id, internalOrderId);
 
@@ -556,6 +645,137 @@ async function emailCompanyPortalRecords(
   };
 }
 
+async function getNewFacilityContextForInternalOrder(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const { order, portalOrder } =
+    await resolveCompanyPortalOrderForInternalOrder(orderId);
+
+  if (!order || order.creation_source !== "company_portal" || !portalOrder) {
+    throw new ApiError(404, "Company portal order not found");
+  }
+
+  const newFacility = await CompanyPortalNewFacility.findByOrderId(
+    portalOrder.id
+  );
+
+  return { order, portalOrder, newFacility };
+}
+
+/**
+ * Link a (newly created or existing) internal facility to a company portal
+ * order whose facility was previously not in our system. Sets the internal
+ * order's facility, mirrors the facility onto the portal order, and marks the
+ * new-facility request as linked (which also flags the $5 search fee to be
+ * billed on the next regular invoice).
+ */
+async function linkFacilityToPortalOrder(internalOrderId, facilityId) {
+  const facilityIdNum = Number(facilityId);
+  if (!Number.isFinite(facilityIdNum) || facilityIdNum <= 0) {
+    throw new ApiError(400, "A valid facility is required");
+  }
+
+  const { portalOrder, newFacility } =
+    await getNewFacilityContextForInternalOrder(internalOrderId);
+
+  if (portalOrder.status === "No facility") {
+    throw new ApiError(
+      400,
+      "This order was ended with No facility status and cannot be linked"
+    );
+  }
+
+  // Point the internal order at the resolved facility (sets orders.facility_id).
+  await orderService.updateOrderFacility(Number(internalOrderId), {
+    facility: facilityIdNum,
+  });
+
+  // Mirror the facility onto the portal order for display / tracking.
+  const Facility = require("../models/Facility");
+  const facility = await Facility.findById(facilityIdNum);
+  if (facility) {
+    await CompanyPortalOrder.updateFacilityDetails(portalOrder.id, {
+      facilityName: facility.facility_name || portalOrder.facility_name,
+      facilityAddress: facility.address || portalOrder.facility_address,
+      facilityCity: facility.city ?? portalOrder.facility_city,
+      facilityState: facility.state ?? portalOrder.facility_state,
+      facilityZip: facility.zip_code ?? portalOrder.facility_zip,
+    });
+  }
+
+  if (newFacility && newFacility.status !== "linked") {
+    await CompanyPortalNewFacility.markLinked(newFacility.id, facilityIdNum);
+  }
+
+  return {
+    internalOrderId: Number(internalOrderId),
+    companyPortalOrderId: portalOrder.id,
+    facilityId: facilityIdNum,
+    facilitySearchFee: newFacility
+      ? Number(newFacility.search_fee_amount) || 0
+      : 0,
+  };
+}
+
+/**
+ * Mark a company portal order as "No facility" when DMS could not locate the
+ * requested facility. Stops further processing; no refund is issued.
+ */
+async function markPortalOrderNoFacility(internalOrderId) {
+  const { portalOrder, newFacility } =
+    await getNewFacilityContextForInternalOrder(internalOrderId);
+
+  const updated = await CompanyPortalOrder.updateStatus(
+    portalOrder.id,
+    "No facility"
+  );
+
+  if (newFacility && newFacility.status === "pending") {
+    await CompanyPortalNewFacility.markCancelled(newFacility.id);
+  }
+
+  return updated;
+}
+
+/**
+ * If a company portal order has a linked new-facility request whose $5 search
+ * fee has not yet been billed, return its id and amount (without marking it
+ * billed). Returns null when nothing is due. Call markFacilitySearchFeeBilled
+ * after the invoice is committed to avoid losing the fee on rollback.
+ */
+async function getPendingFacilitySearchFee(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return null;
+
+  const { portalOrder } =
+    await resolveCompanyPortalOrderForInternalOrder(orderId);
+  if (!portalOrder) return null;
+
+  const newFacility = await CompanyPortalNewFacility.findByOrderId(
+    portalOrder.id
+  );
+  if (
+    !newFacility ||
+    newFacility.status !== "linked" ||
+    newFacility.invoice_billed_at
+  ) {
+    return null;
+  }
+
+  const amount = Number(newFacility.search_fee_amount) || 0;
+  if (amount <= 0) return null;
+
+  return { newFacilityId: newFacility.id, amount };
+}
+
+async function markFacilitySearchFeeBilled(newFacilityId) {
+  if (!newFacilityId) return;
+  await CompanyPortalNewFacility.markInvoiceBilled(newFacilityId);
+}
+
 async function getCompanyPortalStatusMap(internalOrderIds = []) {
   const ids = [...new Set(internalOrderIds.map(Number).filter((id) => id > 0))];
   if (!ids.length) return new Map();
@@ -585,4 +805,10 @@ module.exports = {
   buildInternalOrderPayload,
   resolveCompanyPortalOrderForInternalOrder,
   linkPortalOrderToInternalOrder,
+  getNewFacilityContextForInternalOrder,
+  linkFacilityToPortalOrder,
+  markPortalOrderNoFacility,
+  getPendingFacilitySearchFee,
+  markFacilitySearchFeeBilled,
+  resolvePlaceholderFacilityId,
 };

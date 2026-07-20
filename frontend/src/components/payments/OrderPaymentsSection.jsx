@@ -1,5 +1,18 @@
 "use client";
 
+import { useState } from "react";
+import { fetchCompanyPortalWalletReceiptBlob } from "@/lib/payments/paymentApi";
+
+function downloadBlobAsFile(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 function formatDisplayDate(value) {
   if (!value) return "—";
 
@@ -26,6 +39,7 @@ function PaymentTypeBadge({ label }) {
     Custodian: "bg-[#F3E8FF] text-[#7C3AED] border-[#DDD6FE]",
     "X-Ray": "bg-[#EEF2FF] text-[#4338CA] border-[#C7D2FE]",
     Personal: "bg-[#ECFDF5] text-[#047857] border-[#A7F3D0]",
+    Prepayment: "bg-[#FFF7ED] text-[#C2410C] border-[#FED7AA]",
   };
 
   return (
@@ -102,6 +116,27 @@ function ManualPaymentCard({ payment }) {
 }
 
 function OnlinePaymentCard({ payment }) {
+  const [downloadingReceipt, setDownloadingReceipt] = useState(false);
+  const isWalletPayment =
+    payment.paymentMethod === "Wallet" ||
+    payment.method === "Wallet" ||
+    String(payment.stripePaymentId || "").startsWith("wallet_tx_");
+
+  async function handleWalletReceiptDownload() {
+    const orderId = payment.walletReceiptOrderId || payment.orderId;
+    if (!orderId || downloadingReceipt) return;
+
+    try {
+      setDownloadingReceipt(true);
+      const blob = await fetchCompanyPortalWalletReceiptBlob(orderId);
+      downloadBlobAsFile(blob, `wallet-payment-receipt-${orderId}.pdf`);
+    } catch {
+      window.alert("Unable to download wallet payment receipt.");
+    } finally {
+      setDownloadingReceipt(false);
+    }
+  }
+
   return (
     <article className="rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -168,6 +203,20 @@ function OnlinePaymentCard({ payment }) {
               View Stripe Receipt
             </a>
           </div>
+        ) : isWalletPayment ? (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-[#94A3B8]">
+              Receipt
+            </p>
+            <button
+              type="button"
+              onClick={handleWalletReceiptDownload}
+              disabled={downloadingReceipt}
+              className="mt-1 inline-block text-[12px] font-semibold text-[#007F96] hover:underline disabled:opacity-60"
+            >
+              {downloadingReceipt ? "Preparing..." : "Download Wallet Receipt"}
+            </button>
+          </div>
         ) : null}
       </div>
     </article>
@@ -211,7 +260,7 @@ export default function OrderPaymentsSection({
                   Online Payments (Stripe)
                 </h2>
                 <p className="mt-1 text-[12px] text-[#64748B]">
-                  Card and ACH transactions with Stripe gateway details.
+                  Card, ACH, and company wallet prepayments.
                 </p>
               </div>
               <span className="inline-flex h-[24px] items-center rounded-full bg-[#E6F7FA] px-3 text-[10px] font-semibold text-[#007F96]">

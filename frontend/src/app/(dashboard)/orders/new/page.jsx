@@ -164,7 +164,7 @@ const initialFormData = {
   custodianCheck: "",
   custodianDate: "",
   custodianPaid: "",
-  custodianDue: "15.00",
+  custodianDue: "0.00",
   custodianMemo: "",
 
   xrayCheck: "",
@@ -198,16 +198,35 @@ function NewOrderPageContent() {
   const subpoenaId = searchParams.get("subpoenaId");
   const panel = searchParams.get("panel");
   const facilityRefresh = searchParams.get("facilityRefresh");
+  const applyFacilityId = searchParams.get("applyFacilityId");
+  const returnToParam = searchParams.get("returnTo");
 
   const isEditMode = Boolean(orderId);
+
+  const resolveListPath = useCallback(
+    (creationSource = "") => {
+      const normalized = `${returnToParam || ""}`.trim().replace(/^\/+/, "");
+      if (normalized === "personal-orders") return "/personal-orders";
+      if (normalized === "company-orders") return "/company-orders";
+      if (creationSource === "personal_portal") return "/personal-orders";
+      if (creationSource === "company_portal") return "/company-orders";
+      return "/orders";
+    },
+    [returnToParam]
+  );
+
   const returnToOrderPath = useMemo(() => {
     const params = new URLSearchParams();
-    if (orderId) params.set("orderId", orderId);
+    if (orderId) {
+      params.set("mode", "edit");
+      params.set("orderId", orderId);
+    }
     if (subpoenaId) params.set("subpoenaId", subpoenaId);
     if (panel) params.set("panel", panel);
+    if (returnToParam) params.set("returnTo", returnToParam);
     const query = params.toString();
     return `/orders/new${query ? `?${query}` : ""}`;
-  }, [orderId, subpoenaId, panel]);
+  }, [orderId, subpoenaId, panel, returnToParam]);
 
   const draftScope = useMemo(
     () => getDraftOrderScope({ orderId, subpoenaId }),
@@ -229,6 +248,14 @@ function NewOrderPageContent() {
   useEffect(() => {
     formDataRef.current = formData;
   }, [formData]);
+
+  const setFormDataAndRef = useCallback((updater) => {
+    setFormData((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      formDataRef.current = next;
+      return next;
+    });
+  }, []);
 
   const markCommittedFacility = (id, name) => {
     committedFacilityRef.current = {
@@ -282,15 +309,26 @@ function NewOrderPageContent() {
 
   const persistOrderDraft = useCallback(() => {
     const current = formDataRef.current;
+    const existing = readDraftOrderSession(draftScope, { allowIncomplete: true });
 
-    if (!hasDraftableOrderContent(current)) {
+    if (!hasDraftableOrderContent(current) && !existing?.facilityId) {
       return;
     }
 
     rememberDraftOrderSession(draftScope, {
-      facilityId: current.facility,
-      facilityName: current.facilityName,
-      formSnapshot: serializeFormForDraft(current),
+      // Prefer live form values, but never wipe a known facility id with a stale empty ref.
+      facilityId: current.facility || existing?.facilityId || "",
+      facilityName: current.facilityName || existing?.facilityName || "",
+      formSnapshot: serializeFormForDraft({
+        ...(existing?.formSnapshot || {}),
+        ...current,
+        facility: current.facility || existing?.facilityId || existing?.formSnapshot?.facility || "",
+        facilityName:
+          current.facilityName ||
+          existing?.facilityName ||
+          existing?.formSnapshot?.facilityName ||
+          "",
+      }),
       extractionMeta: {
         ...extractionMetaRef.current,
         doctorCreated: doctorCreatedRef.current,
@@ -503,6 +541,17 @@ function NewOrderPageContent() {
 
         const isReturnFromFacilityEdit = facilityRefresh === "1";
         const draftFacility = readDraftOrderSession(draftScope);
+        const draftFacilityId = `${
+          draftFacility?.facilityId || draftFacility?.formSnapshot?.facility || ""
+        }`.trim();
+        const orderFacilityId = `${order.facility || ""}`.trim();
+        // Restore draft when returning from facility profile, or when an unsaved
+        // facility change is still pending for this order.
+        const shouldRestoreDraft = Boolean(
+          ((isReturnFromFacilityEdit || applyFacilityId) &&
+            (draftFacility?.formSnapshot || draftFacility?.facilityId)) ||
+            (draftFacilityId && draftFacilityId !== orderFacilityId)
+        );
 
         let nextForm = syncPaymentDueFields(
           { ...initialFormData, ...order },
@@ -512,7 +561,7 @@ function NewOrderPageContent() {
         let facilityWasCreated = Boolean(order.facilityIsAutoCreated);
         let facilityLabel = order.facilityName || "";
 
-        if (isReturnFromFacilityEdit && draftFacility) {
+        if (shouldRestoreDraft) {
           if (draftFacility.formSnapshot) {
             nextForm = syncPaymentDueFields(
               { ...nextForm, ...draftFacility.formSnapshot },
@@ -522,9 +571,13 @@ function NewOrderPageContent() {
 
           try {
             const resolved = await resolvePendingFacility({
-              facilityId: draftFacility.facilityId || draftFacility.formSnapshot?.facility,
+              facilityId:
+                applyFacilityId ||
+                draftFacility.facilityId ||
+                draftFacility.formSnapshot?.facility,
               facilityName:
-                draftFacility.facilityName || draftFacility.formSnapshot?.facilityName,
+                draftFacility.facilityName ||
+                draftFacility.formSnapshot?.facilityName,
             });
 
             nextForm = {
@@ -569,15 +622,32 @@ function NewOrderPageContent() {
               // Keep the doctor already stored on the order.
             }
           } catch {
-            // Keep the facility already stored on the order.
+            // Keep the facility already stored on the order/draft.
+          }
+        } else if (applyFacilityId) {
+          try {
+            const resolved = await resolvePendingFacility({
+              facilityId: applyFacilityId,
+            });
+            nextForm = {
+              ...nextForm,
+              facility: resolved.facilityId || nextForm.facility,
+              facilityName: resolved.facilityName || nextForm.facilityName,
+            };
+            profileIncomplete = resolved.facilityProfileIncomplete;
+            facilityWasCreated = resolved.facilityCreated;
+            facilityLabel = resolved.facilityName || nextForm.facilityName;
+          } catch {
+            // Keep order facility.
           }
         } else if (!isReturnFromFacilityEdit) {
+          // No pending facility change — drop stale draft for a clean load.
           clearDraftOrderSession(draftScope);
         }
 
         if (!active) return;
 
-        if (isReturnFromFacilityEdit) {
+        if (isReturnFromFacilityEdit || applyFacilityId) {
           draftRestoredRef.current = true;
           clearFacilityRefreshParam();
         }
@@ -605,7 +675,7 @@ function NewOrderPageContent() {
           setMissingDefaultDoctor(false);
         }
 
-        setFormData(nextForm);
+        setFormDataAndRef(nextForm);
         markCommittedFacility(nextForm.facility, nextForm.facilityName);
         setFacilityProfileIncomplete(profileIncomplete);
         setFacilityCreated(facilityWasCreated);
@@ -632,7 +702,7 @@ function NewOrderPageContent() {
     return () => {
       active = false;
     };
-  }, [isEditMode, orderId, subpoenaId, facilityRefresh, draftScope, clearFacilityRefreshParam]);
+  }, [isEditMode, orderId, subpoenaId, facilityRefresh, applyFacilityId, draftScope, clearFacilityRefreshParam, setFormDataAndRef]);
 
   useEffect(() => {
     if (isEditMode || facilityRefresh !== "1") {
@@ -1175,7 +1245,7 @@ function NewOrderPageContent() {
         ) ||
         subpoenaDoctorMismatch;
 
-      setFormData((prev) => ({
+      setFormDataAndRef((prev) => ({
         ...prev,
         facility: resolved.facilityId,
         facilityName: resolved.facilityName,
@@ -1279,7 +1349,6 @@ function NewOrderPageContent() {
 
   const handleFacilityInput = (facilityName) => {
     clearCommittedFacility();
-    clearDraftOrderSession(draftScope);
     setExtractionMeta((prev) => ({
       ...prev,
       facilityName: "",
@@ -1291,7 +1360,7 @@ function NewOrderPageContent() {
     setFacilityCreated(false);
     setMissingDefaultDoctor(false);
     setDoctorCreated(false);
-    setFormData((prev) => ({
+    setFormDataAndRef((prev) => ({
       ...prev,
       facility: "",
       facilityName,
@@ -1332,7 +1401,7 @@ function NewOrderPageContent() {
         : {}),
     };
 
-    setFormData(next);
+    setFormDataAndRef(next);
     syncFacilityFromForm(next, { facilityChanged });
   };
 
@@ -1693,7 +1762,7 @@ function NewOrderPageContent() {
         await updateOrder(activeOrderId, syncedFormData);
         clearDraftOrderSession(draftScope);
         draftRestoredRef.current = false;
-        router.push("/orders");
+        router.push(resolveListPath(syncedFormData.creationSource));
         return;
       }
 
@@ -1701,7 +1770,7 @@ function NewOrderPageContent() {
       if (order?.id) {
         clearDraftOrderSession(draftScope);
         draftRestoredRef.current = false;
-        router.push("/orders");
+        router.push(resolveListPath(syncedFormData.creationSource));
         return;
       }
 
@@ -1736,10 +1805,14 @@ function NewOrderPageContent() {
           <p className="text-[13px] font-semibold text-red-500">{loadError}</p>
           <button
             type="button"
-            onClick={() => router.push("/orders")}
+            onClick={() => router.push(resolveListPath(formData.creationSource))}
             className="rounded-[6px] bg-[#0097B2] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
           >
-            Back to Orders
+            {resolveListPath(formData.creationSource) === "/personal-orders"
+              ? "Back to Personal Orders"
+              : resolveListPath(formData.creationSource) === "/company-orders"
+                ? "Back to Company Orders"
+                : "Back to Orders"}
           </button>
         </div>
       </DashboardShell>
@@ -2625,6 +2698,7 @@ function PaymentForm({
 }) {
   const invoiceFees = formData.invoiceFees;
   const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
+  const isPersonalPortalOrder = formData.creationSource === "personal_portal";
 
   return (
     <div className="space-y-5">
@@ -2645,6 +2719,14 @@ function PaymentForm({
         onBlur={onBlur}
         getError={getError}
         onValuesChange={onValuesChange}
+        checkLabel={isPersonalPortalOrder ? "Receipt Number" : "Check #"}
+        checkPlaceholder={
+          isPersonalPortalOrder ? "Receipt number" : "Check number"
+        }
+        checkDisplayValue={
+          isPersonalPortalOrder ? formData.prepaymentCheck || "" : null
+        }
+        checkReadOnly={isPersonalPortalOrder}
       />
 
       <PaymentChargeCard

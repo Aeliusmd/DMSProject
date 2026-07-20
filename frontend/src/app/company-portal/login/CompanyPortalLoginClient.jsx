@@ -4,14 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import CompanyPortalShell from "@/components/company-portal/CompanyPortalShell";
-import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
 import AuthInput from "@/components/ui/AuthInput";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import {
   loginCompany,
-  resendCompanyTwoFactor,
+  loginCompanyEmployee,
   saveCompanyAuthSession,
-  verifyCompanyTwoFactor,
 } from "@/lib/company-portal/companyPortalAuthApi";
 import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
@@ -30,6 +28,7 @@ export default function CompanyPortalLoginClient() {
   const searchParams = useSearchParams();
   const registered = searchParams.get("registered") === "1";
 
+  const [loginMode, setLoginMode] = useState("company");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -37,9 +36,6 @@ export default function CompanyPortalLoginClient() {
   const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [loginError, setLoginError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isTwoFactorOpen, setIsTwoFactorOpen] = useState(false);
-  const [sessionToken, setSessionToken] = useState("");
-  const [maskedEmail, setMaskedEmail] = useState("");
 
   useEffect(() => {
     if (isCompanyAuthenticated()) {
@@ -62,15 +58,26 @@ export default function CompanyPortalLoginClient() {
     setApiFieldErrors({});
 
     try {
+      if (loginMode === "employee") {
+        const response = await loginCompanyEmployee({
+          email: sanitizeInput(email, 255).toLowerCase(),
+          password,
+        });
+        const payload = response?.data || {};
+        saveCompanyAuthSession(payload);
+        router.push("/company-portal/dashboard");
+        return;
+      }
+
       const response = await loginCompany({
         email: sanitizeInput(email, 255).toLowerCase(),
         password,
       });
 
       const payload = response?.data || {};
-      setSessionToken(payload.sessionToken || "");
-      setMaskedEmail(payload.email || email.trim());
-      setIsTwoFactorOpen(true);
+      saveCompanyAuthSession(payload);
+      router.push("/company-portal/dashboard");
+      return;
     } catch (error) {
       const { fieldErrors, message } = applyApiFieldErrors(error, {
         identifier: "email",
@@ -94,32 +101,73 @@ export default function CompanyPortalLoginClient() {
   return (
     <>
       <CompanyPortalShell
-        title="Company sign in"
-        subtitle="Company Portal"
+        title="Company Portal sign in"
+        subtitle="External company access"
         footer={
-          <p>
-            Need an account?{" "}
-            <Link
-              href="/Subpoenaupload"
-              className="font-medium text-[#0097B2] hover:underline"
-            >
-              Register your company
-            </Link>
-          </p>
+          loginMode === "company" ? (
+            <p>
+              Need an account?{" "}
+              <Link
+                href="/Subpoenaupload"
+                className="font-medium text-[#0097B2] hover:underline"
+              >
+                Register your company
+              </Link>
+            </p>
+          ) : (
+            <p className="text-[12px] text-[#64748B]">
+              Employee accounts are created by your company administrator.
+            </p>
+          )
         }
       >
-        {registered ? (
+        {registered && loginMode === "company" ? (
           <p className="mb-4 rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-medium text-emerald-700">
             Registration successful. Please sign in to continue.
           </p>
         ) : null}
 
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-[8px] bg-[#F8FAFC] p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setLoginMode("company");
+              setLoginError("");
+              setApiFieldErrors({});
+            }}
+            className={`rounded-[6px] px-3 py-2 text-[12px] font-medium ${
+              loginMode === "company"
+                ? "bg-white text-[#0097B2] shadow-sm"
+                : "text-[#64748B]"
+            }`}
+          >
+            Company admin
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setLoginMode("employee");
+              setLoginError("");
+              setApiFieldErrors({});
+            }}
+            className={`rounded-[6px] px-3 py-2 text-[12px] font-medium ${
+              loginMode === "employee"
+                ? "bg-white text-[#0097B2] shadow-sm"
+                : "text-[#64748B]"
+            }`}
+          >
+            Employee
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} noValidate>
           <div className="space-y-4">
             <AuthInput
-              label="Company Email"
+              label={
+                loginMode === "employee" ? "Employee Email" : "Company Email"
+              }
               type="email"
-              placeholder="company@email.com"
+              placeholder="email@company.com"
               value={email}
               onChange={(event) => {
                 setEmail(event.target.value);
@@ -180,26 +228,6 @@ export default function CompanyPortalLoginClient() {
           </div>
         </form>
       </CompanyPortalShell>
-
-      <TwoFactorAuthModal
-        isOpen={isTwoFactorOpen}
-        email={maskedEmail}
-        sessionToken={sessionToken}
-        subtitle="Company Portal"
-        verifyFn={verifyCompanyTwoFactor}
-        resendFn={resendCompanyTwoFactor}
-        saveSessionFn={saveCompanyAuthSession}
-        onClose={() => {
-          setIsTwoFactorOpen(false);
-          setSessionToken("");
-          setMaskedEmail("");
-        }}
-        onSuccess={() => {
-          setIsTwoFactorOpen(false);
-          setSessionToken("");
-          router.push("/company-portal/dashboard");
-        }}
-      />
     </>
   );
 }

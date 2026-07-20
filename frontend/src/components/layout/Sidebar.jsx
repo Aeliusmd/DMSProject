@@ -7,6 +7,7 @@ import { useState } from "react";
 import { logout } from "@/lib/auth/authApi";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessNavItem } from "@/lib/auth/roles";
+import { isStaffPortalOrdersNavHidden } from "@/lib/portalNavigationVisibility";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: <DashboardIcon /> },
@@ -37,8 +38,10 @@ export default function Sidebar({ isCollapsed }) {
 
   const user = getStoredUser();
 
-  const visibleNavItems = navItems.filter((item) =>
-    canAccessNavItem(user, item.href)
+  const visibleNavItems = navItems.filter(
+    (item) =>
+      !isStaffPortalOrdersNavHidden(item.href) &&
+      canAccessNavItem(user, item.href)
   );
 
   const handleLogout = async () => {

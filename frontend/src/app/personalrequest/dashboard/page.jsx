@@ -2,12 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
-import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
+import PersonalRequestActionsCell from "@/components/personal-request/PersonalRequestActionsCell";
+import PersonalRequestReceiptsCell from "@/components/personal-request/PersonalRequestReceiptsCell";
+import PersonalResearchFeeBanner from "@/components/personal-request/PersonalResearchFeeBanner";
 import CompanyPortalStatCard from "@/components/company-portal/CompanyPortalStatCard";
 import {
+  fulfillPersonalCheckout,
+  fulfillPersonalResearchFeeCheckout,
   getPersonalDashboard,
+  createPersonalResearchFeeCheckout,
 } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
@@ -33,11 +38,14 @@ const STATUS_STYLES = {
 
 export default function PersonalPortalDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState(null);
   const [stats, setStats] = useState(EMPTY_STATS);
   const [recentRequests, setRecentRequests] = useState([]);
+  const [lookupDays, setLookupDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [bannerMessage, setBannerMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -50,16 +58,63 @@ export default function PersonalPortalDashboardPage() {
 
       setUser(getStoredPersonalUser());
 
+      const sessionId = searchParams.get("session_id");
+      const researchFeePaid = searchParams.get("researchFeePaid") === "1";
+      const invoicePaid = searchParams.get("invoicePaid") === "1";
+      const payResearchFeeId = searchParams.get("payResearchFee");
+      let successMessage = "";
+
       try {
+        if (payResearchFeeId) {
+          const checkout = await createPersonalResearchFeeCheckout(
+            Number(payResearchFeeId)
+          );
+          const checkoutUrl =
+            checkout?.data?.checkoutUrl || checkout?.checkoutUrl;
+          if (checkoutUrl) {
+            window.location.href = checkoutUrl;
+            return;
+          }
+        }
+
+        if (sessionId && researchFeePaid) {
+          await fulfillPersonalResearchFeeCheckout(sessionId);
+          successMessage = "Facility search fee paid successfully.";
+        } else if (sessionId && invoicePaid) {
+          await fulfillPersonalCheckout(sessionId);
+          successMessage = "Invoice paid successfully.";
+        } else if (invoicePaid) {
+          successMessage = "Invoice paid successfully.";
+        }
+
+        // Clear Stripe return query params without remounting (avoids double load / timeout)
+        if (
+          successMessage &&
+          typeof window !== "undefined" &&
+          (sessionId ||
+            searchParams.get("invoicePaid") ||
+            searchParams.get("researchFeePaid"))
+        ) {
+          window.history.replaceState({}, "", "/personalrequest/dashboard");
+        }
+
         const dashRes = await getPersonalDashboard();
         if (!active) return;
         setStats(dashRes?.data?.stats || EMPTY_STATS);
         setRecentRequests(dashRes?.data?.recentRequests || []);
+        setLookupDays(dashRes?.data?.lookupDays || 7);
+        if (successMessage) {
+          setBannerMessage(successMessage);
+        }
       } catch (err) {
         if (!active) return;
-        clearPersonalAuth();
+        if (err?.status === 401) {
+          clearPersonalAuth();
+          setError(getApiErrorMessage(err, "Unable to load dashboard"));
+          router.replace("/personalrequest/login");
+          return;
+        }
         setError(getApiErrorMessage(err, "Unable to load dashboard"));
-        router.replace("/personalrequest/login");
       } finally {
         if (active) setLoading(false);
       }
@@ -69,14 +124,14 @@ export default function PersonalPortalDashboardPage() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [router, searchParams]);
 
   const cards = useMemo(
     () => [
       {
         label: "Total requests",
         value: stats.totalOrders,
-        hint: "Paid and placed requests",
+        hint: `Paid requests in the last ${lookupDays} days`,
         icon: <OrdersIcon />,
         iconBg: "#E6F7FA",
         iconColor: "#0097B2",
@@ -84,7 +139,7 @@ export default function PersonalPortalDashboardPage() {
       {
         label: "In Process",
         value: stats.inProcess,
-        hint: "Being verified and processed",
+        hint: `Last ${lookupDays} days`,
         icon: <PendingIcon />,
         iconBg: "#FFF7ED",
         iconColor: "#EA580C",
@@ -92,7 +147,7 @@ export default function PersonalPortalDashboardPage() {
       {
         label: "Invoice",
         value: stats.invoice,
-        hint: "Invoice stage",
+        hint: `Last ${lookupDays} days`,
         icon: <InvoiceIcon />,
         iconBg: "#FEF3C7",
         iconColor: "#D97706",
@@ -100,7 +155,7 @@ export default function PersonalPortalDashboardPage() {
       {
         label: "Paid",
         value: stats.paid,
-        hint: "Facility payment completed",
+        hint: `Last ${lookupDays} days`,
         icon: <PaidIcon />,
         iconBg: "#EFF6FF",
         iconColor: "#2563EB",
@@ -108,13 +163,13 @@ export default function PersonalPortalDashboardPage() {
       {
         label: "Released",
         value: stats.released,
-        hint: "Documents ready to download",
+        hint: `Last ${lookupDays} days`,
         icon: <ReleasedIcon />,
         iconBg: "#ECFDF5",
         iconColor: "#059669",
       },
     ],
-    [stats]
+    [stats, lookupDays]
   );
 
   const displayName =
@@ -129,6 +184,14 @@ export default function PersonalPortalDashboardPage() {
           {error}
         </p>
       ) : null}
+
+      {bannerMessage ? (
+        <p className="mb-4 rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-700">
+          {bannerMessage}
+        </p>
+      ) : null}
+
+      <PersonalResearchFeeBanner requests={recentRequests} />
 
       <div className="mb-6">
         <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[#111827]">
@@ -171,7 +234,7 @@ export default function PersonalPortalDashboardPage() {
           href="/personalrequest/status"
           className="rounded-[10px] border border-[#E2E8F0] bg-white px-5 py-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
         >
-          Check status by confirmation #
+          Check status (Order # + DOB)
         </Link>
       </div>
 
@@ -180,7 +243,8 @@ export default function PersonalPortalDashboardPage() {
           <div>
             <h2 className="text-[15px] font-semibold text-[#111827]">Recent requests</h2>
             <p className="mt-1 text-[12px] text-[#64748B]">
-              All paid requests linked to your email account
+              Paid requests from the last {lookupDays} days linked to your email
+              account
             </p>
           </div>
           <Link
@@ -198,20 +262,22 @@ export default function PersonalPortalDashboardPage() {
                 <th className="px-5 py-3">Confirmation</th>
                 <th className="px-5 py-3">Facility</th>
                 <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">Receipts</th>
                 <th className="px-5 py-3">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-8 text-center text-[#94A3B8]">
+                  <td colSpan={5} className="px-5 py-8 text-center text-[#94A3B8]">
                     Loading requests...
                   </td>
                 </tr>
               ) : recentRequests.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-5 py-8 text-center text-[#94A3B8]">
-                    No requests yet. Start a new personal records request to get started.
+                  <td colSpan={5} className="px-5 py-8 text-center text-[#94A3B8]">
+                    No requests in the last {lookupDays} days. Start a new personal
+                    records request to get started.
                   </td>
                 </tr>
               ) : (
@@ -233,24 +299,10 @@ export default function PersonalPortalDashboardPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      {request.canDownload &&
-                      (request.downloadToken || request.downloadUrl) ? (
-                        <PersonalRecordsDownloadButton
-                          downloadToken={request.downloadToken}
-                          downloadUrl={request.downloadUrl}
-                          label="Download"
-                          className="font-semibold text-[#16A34A] hover:underline"
-                        />
-                      ) : (
-                        <Link
-                          href={`/personalrequest/status?ref=${encodeURIComponent(
-                            request.confirmationReference || ""
-                          )}`}
-                          className="font-semibold text-[#0097B2] hover:underline"
-                        >
-                          View
-                        </Link>
-                      )}
+                      <PersonalRequestReceiptsCell request={request} />
+                    </td>
+                    <td className="px-5 py-3">
+                      <PersonalRequestActionsCell request={request} />
                     </td>
                   </tr>
                 ))

@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS personal_request_facilities (
   facility_id                 BIGINT UNSIGNED NULL COMMENT 'Matched facilities.id when selected from search',
   facility_name               VARCHAR(255)    NOT NULL,
   facility_address            TEXT            NOT NULL,
+  treating_doctor             VARCHAR(255)    NULL,
+  is_manual_lookup            TINYINT(1)      NOT NULL DEFAULT 0
+    COMMENT '1 when facility was typed manually (not matched to facilities.id)',
   records_date_begin          DATE            NOT NULL,
   records_date_end            DATE            NOT NULL,
   sort_order                  INT             NOT NULL DEFAULT 0,

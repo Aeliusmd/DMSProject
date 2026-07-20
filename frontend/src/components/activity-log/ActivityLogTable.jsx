@@ -131,6 +131,7 @@ function ModuleBadge({ module }) {
     Processing: "border-[#DDD6FE] bg-[#F5F3FF] text-[#7C3AED]",
     Reports: "border-[#CBD5E1] bg-[#F1F5F9] text-[#475569]",
     Security: "border-red-200 bg-red-50 text-red-500",
+    Wallet: "border-[#A7F3D0] bg-[#ECFDF5] text-[#047857]",
   };
 
   return (
@@ -153,6 +154,7 @@ function ActionIcon({ module, action }) {
     Processing: "bg-[#F5F3FF] text-[#7C3AED]",
     Reports: "bg-[#F1F5F9] text-[#475569]",
     Security: "bg-red-50 text-red-500",
+    Wallet: "bg-[#ECFDF5] text-[#047857]",
   };
 
   return (

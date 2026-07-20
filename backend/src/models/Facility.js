@@ -208,6 +208,54 @@ class Facility {
     return rows;
   }
 
+  /**
+   * Public portal search: match facility name and/or street address
+   * (and city/state/zip) so users can look up by either field.
+   */
+  static async searchByNameOrAddress(query, limit = 10) {
+    const pool = getPool();
+    const trimmed = `${query || ""}`.trim();
+
+    if (!trimmed) return [];
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 25);
+    const escaped = Facility.escapeLikePrefix(trimmed);
+    const queryPrefix = `${escaped}%`;
+    const queryContains = `%${escaped}%`;
+
+    const [rows] = await pool.execute(
+      `SELECT id, facility_name, address, city, zip_code, state, email, phone, is_active, is_auto_created
+       FROM facilities
+       WHERE is_active = 1
+         AND (
+           facility_name LIKE :queryContains
+           OR IFNULL(address, '') LIKE :queryContains
+           OR IFNULL(city, '') LIKE :queryContains
+           OR IFNULL(zip_code, '') LIKE :queryContains
+           OR CONCAT_WS(
+                ', ',
+                NULLIF(TRIM(IFNULL(address, '')), ''),
+                NULLIF(TRIM(IFNULL(city, '')), ''),
+                NULLIF(
+                  TRIM(CONCAT_WS(' ', NULLIF(TRIM(IFNULL(state, '')), ''), NULLIF(TRIM(IFNULL(zip_code, '')), ''))),
+                  ''
+                )
+              ) LIKE :queryContains
+         )
+       ORDER BY
+         CASE
+           WHEN facility_name LIKE :queryPrefix THEN 0
+           WHEN IFNULL(address, '') LIKE :queryPrefix THEN 1
+           ELSE 2
+         END,
+         facility_name ASC
+       LIMIT ${safeLimit}`,
+      { queryPrefix, queryContains }
+    );
+
+    return rows;
+  }
+
   static async findByUserName(userName, excludeId = null) {
     const pool = getPool();
 

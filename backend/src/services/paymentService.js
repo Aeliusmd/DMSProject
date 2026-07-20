@@ -891,10 +891,30 @@ async function getOnlinePayments(query = {}) {
   return stripePaymentService.getOnlinePayments(query);
 }
 
+async function generateCompanyPortalWalletReceiptPdf(orderRef) {
+  const order = await resolveOrderByReference(orderRef);
+  const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+  const { portalOrder } =
+    await companyPortalInternalSyncService.resolveCompanyPortalOrderForInternalOrder(
+      order.id
+    );
+
+  if (!portalOrder || portalOrder.payment_method !== "wallet") {
+    throw new ApiError(404, "Wallet payment receipt not found for this order");
+  }
+
+  const companyPortalOrderService = require("./companyPortalOrderService");
+  return companyPortalOrderService.generatePaymentReceiptPdf(
+    portalOrder.id,
+    portalOrder.company_user_id
+  );
+}
+
 module.exports = {
   searchOrderInvoices,
   recordManualInvoicePayment,
   getManualPayments,
   getOnlinePayments,
   getOrderPaymentDetail,
+  generateCompanyPortalWalletReceiptPdf,
 };

@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import PersonalPortalAuthShell from "@/components/personal-request/PersonalPortalAuthShell";
 import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
 import AuthInput from "@/components/ui/AuthInput";
@@ -27,20 +26,11 @@ function validateEmail(value) {
   return "";
 }
 
-function validatePassword(value) {
-  if (!value) return "Password is required";
-  return "";
-}
-
 export default function PersonalPortalLoginClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const registered = searchParams.get("registered") === "1";
 
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [touched, setTouched] = useState({ email: false, password: false });
+  const [touched, setTouched] = useState({ email: false });
   const [apiFieldErrors, setApiFieldErrors] = useState({});
   const [loginError, setLoginError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -55,12 +45,11 @@ export default function PersonalPortalLoginClient() {
   }, [router]);
 
   const emailError = apiFieldErrors.email || validateEmail(email);
-  const passwordError = apiFieldErrors.password || validatePassword(password);
-  const isFormValid = !emailError && !passwordError;
+  const isFormValid = !emailError;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setTouched({ email: true, password: true });
+    setTouched({ email: true });
     if (!isFormValid || isSubmitting) return;
 
     setIsSubmitting(true);
@@ -70,7 +59,6 @@ export default function PersonalPortalLoginClient() {
     try {
       const response = await loginPersonal({
         email: email.trim().toLowerCase(),
-        password,
       });
       const payload = response?.data || {};
       setSessionToken(payload.sessionToken || "");
@@ -97,22 +85,17 @@ export default function PersonalPortalLoginClient() {
         title="Personal sign in"
         subtitle="Personal Request Portal"
         footer={
-          <p>
-            Need an account?{" "}
-            <Link
-              href="/personalrequest/register"
-              className="font-medium text-[#0097B2] hover:underline"
-            >
-              Register with email
-            </Link>
+          <p className="text-[12px] text-[#5B6B7C]">
+            No password needed. Enter your email and we&apos;ll send a one-time
+            verification code. A lightweight account is created automatically
+            on first sign-in.
           </p>
         }
       >
-        {registered ? (
-          <p className="mb-4 rounded-[6px] border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] font-medium text-emerald-700">
-            Registration successful. Please sign in to continue.
-          </p>
-        ) : null}
+        <p className="mb-4 rounded-[6px] border border-[#D0E8ED] bg-[#E6F7FA] px-3 py-2 text-[12px] text-[#0B7C8E]">
+          Sign in with email + OTP only. Use the same email whenever you return
+          to track your requests.
+        </p>
 
         <form onSubmit={handleSubmit} noValidate>
           <div className="space-y-4">
@@ -125,24 +108,6 @@ export default function PersonalPortalLoginClient() {
               error={touched.email ? emailError : ""}
               placeholder="you@example.com"
             />
-            <AuthInput
-              label="Password"
-              type={showPassword ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onBlur={() => setTouched((p) => ({ ...p, password: true }))}
-              error={touched.password ? passwordError : ""}
-              placeholder="Enter your password"
-              rightIcon={
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((p) => !p)}
-                  className="text-[11px] font-medium text-[#0097B2] hover:underline"
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              }
-            />
           </div>
 
           {loginError ? (
@@ -153,7 +118,7 @@ export default function PersonalPortalLoginClient() {
 
           <div className="mt-6">
             <PrimaryButton type="submit" disabled={!isFormValid || isSubmitting}>
-              {isSubmitting ? "Signing in..." : "Sign in"}
+              {isSubmitting ? "Sending code..." : "Continue with email"}
             </PrimaryButton>
           </div>
         </form>

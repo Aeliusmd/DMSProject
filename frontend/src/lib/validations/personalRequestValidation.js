@@ -81,9 +81,7 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
     errors.dob = "Date of birth is required";
   }
 
-  if (!data.treatingFacilityName?.trim()) {
-    errors.treatingFacilityName = "Treating facility name is required";
-  } else {
+  if (data.treatingFacilityName?.trim()) {
     const err = validateNoHtmlMarkup(data.treatingFacilityName, {
       fieldLabel: "Treating facility name",
     });
@@ -113,11 +111,39 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
     errors.recordsDateEnd = "End date must be on or after start date";
   }
 
+  if (data.treatingDoctor?.trim()) {
+    const err = validateNoHtmlMarkup(data.treatingDoctor, {
+      fieldLabel: "Treating doctor",
+    });
+    if (err) errors.treatingDoctor = err;
+  }
+
   const selectedTypes = RECORD_TYPE_OPTIONS.filter(
     (opt) => data.recordTypes?.[opt.id]
   );
   if (!selectedTypes.length) {
     errors.recordTypes = "Select at least one record type";
+  }
+
+  const delivery = `${data.deliveryPreference || "download"}`.toLowerCase();
+  if (delivery !== "download" && delivery !== "mail") {
+    errors.deliveryPreference = "Select download or mail delivery";
+  }
+
+  if (delivery === "mail") {
+    if (!data.mailAddress?.trim()) {
+      errors.mailAddress = "Mailing address is required for mail delivery";
+    } else {
+      const err = validateNoHtmlMarkup(data.mailAddress, {
+        fieldLabel: "Mailing address",
+      });
+      if (err) errors.mailAddress = err;
+    }
+  } else if (data.mailAddress?.trim()) {
+    const err = validateNoHtmlMarkup(data.mailAddress, {
+      fieldLabel: "Mailing address",
+    });
+    if (err) errors.mailAddress = err;
   }
 
   if (!data.driverLicenseNumber?.trim()) {
@@ -136,17 +162,35 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
 
 export function validateStatusLookupForm(data) {
   const errors = {};
-  const hasRef = Boolean(data.confirmationReference?.trim());
-  const hasDl = Boolean(data.driverLicenseNumber?.trim());
+  const ref = `${data.confirmationReference || ""}`.trim();
+  const dob = String(data.dob || "").trim();
 
-  if (!hasRef && !hasDl) {
-    errors.lookup =
-      "Enter your confirmation reference or driver's license number";
+  if (!ref) {
+    errors.confirmationReference = "Enter your order / confirmation number";
+  } else {
+    const err = validateNoHtmlMarkup(ref, {
+      fieldLabel: "Confirmation number",
+    });
+    if (err) errors.confirmationReference = err;
   }
 
-  if (hasDl && !DRIVER_LICENSE_PATTERN.test(data.driverLicenseNumber.trim())) {
-    errors.driverLicenseNumber = "Enter a valid driver's license number";
+  if (!dob) {
+    errors.dob = "Date of birth is required";
+  } else if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(dob) &&
+    !/^\d{2}\/\d{2}\/\d{4}$/.test(dob)
+  ) {
+    errors.dob = "Enter date of birth as MM/DD/YYYY";
   }
 
   return errors;
+}
+
+export function formatDobForApi(dob) {
+  const value = String(dob || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-");
+    return `${month}/${day}/${year}`;
+  }
+  return value;
 }

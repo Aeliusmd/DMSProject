@@ -35,6 +35,7 @@ const INITIAL_FORM = {
   facilityId: "",
   treatingFacilityName: "",
   treatingFacilityAddress: "",
+  treatingDoctor: "",
   recordsDateBegin: "",
   recordsDateEnd: "",
   recordTypes: { medical: false, billing: false, xrays: false },
@@ -117,7 +118,11 @@ export default function PersonalNewRequestPage() {
   const draftHydratedRef = useRef(false);
   const accountUser = getStoredPersonalUser();
 
-  const [config, setConfig] = useState({ processingFee: "35.00", lookupDays: 7 });
+  const [config, setConfig] = useState({
+    processingFee: "35.00",
+    researchFee: "5.00",
+    lookupDays: 7,
+  });
   const [step, setStep] = useState(1);
   const [form, setForm] = useState(INITIAL_FORM);
   const [touched, setTouched] = useState({});
@@ -271,6 +276,9 @@ export default function PersonalNewRequestPage() {
       payload.append("dob", toApiDate(form.dob));
       payload.append("treatingFacilityName", form.treatingFacilityName.trim());
       payload.append("treatingFacilityAddress", form.treatingFacilityAddress.trim());
+      if (form.treatingDoctor?.trim()) {
+        payload.append("treatingDoctor", form.treatingDoctor.trim());
+      }
       if (form.facilityId) {
         payload.append("facilityId", String(form.facilityId));
       }
@@ -371,9 +379,34 @@ export default function PersonalNewRequestPage() {
               <div className="flex justify-between gap-4">
                 <dt className="text-[#64748B]">Facility</dt>
                 <dd className="text-right font-medium text-[#111827]">
-                  {form.treatingFacilityName}
+                  {form.treatingFacilityName.trim() || "—"}
                 </dd>
               </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-[#64748B]">Facility address</dt>
+                <dd className="text-right font-medium text-[#111827]">
+                  {form.treatingFacilityAddress || "—"}
+                </dd>
+              </div>
+              {form.treatingDoctor?.trim() ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-[#64748B]">Treating doctor</dt>
+                  <dd className="text-right font-medium text-[#111827]">
+                    {form.treatingDoctor}
+                  </dd>
+                </div>
+              ) : null}
+              {!form.facilityId ? (
+                <div className="rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#92400E]">
+                  Facility not in our list — a ${config.researchFee || "5.00"}{" "}
+                  facility search fee will be added to your invoice and you will
+                  be asked to pay when DMS creates and sends that invoice.
+                </div>
+              ) : (
+                <p className="text-[11px] text-[#059669]">
+                  Matched to a known facility in our list.
+                </p>
+              )}
               <div className="flex justify-between gap-4">
                 <dt className="text-[#64748B]">Date Range</dt>
                 <dd className="text-right font-medium text-[#111827]">
@@ -515,11 +548,26 @@ export default function PersonalNewRequestPage() {
             </div>
           </div>
 
-          <div>
+          <div className="space-y-4 rounded-[10px] border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+            <div>
+              <h2 className="text-[14px] font-semibold text-[#111827]">
+                Treating facility
+              </h2>
+              <p className="mt-1 text-[12px] text-[#64748B]">
+                Search by facility name or address from the DMS facilities list.
+                Selecting a match fills both fields. Facility name is optional;
+                address is required. If the facility is not in our list, DMS will
+                search for it. A ${config.researchFee || "5.00"} facility search
+                fee is added to your invoice only if we locate and add the
+                facility, and you are asked to pay when that invoice is sent.
+              </p>
+            </div>
+
             <PersonalFacilitySearchField
+              searchBy="name"
               value={form.treatingFacilityName}
               facilityId={form.facilityId}
-              required
+              required={false}
               error={getError("treatingFacilityName")}
               onInputChange={(nextValue) => {
                 setForm((prev) => ({
@@ -545,24 +593,68 @@ export default function PersonalNewRequestPage() {
                 setTouched((prev) => ({ ...prev, treatingFacilityName: true }))
               }
             />
-          </div>
 
-          <div>
-            <FieldLabel required>Treating Facility Address</FieldLabel>
-            <TextInput
-              name="treatingFacilityAddress"
-              value={form.treatingFacilityAddress}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              placeholder="e.g. 1234 Wilshire Blvd, Los Angeles, CA 90017"
-              error={getError("treatingFacilityAddress")}
-            />
-            <FieldError message={getError("treatingFacilityAddress")} />
-            {form.facilityId && form.treatingFacilityAddress ? (
-              <p className="mt-1 text-[11px] text-[#64748B]">
-                Address loaded from facility profile. You can edit if needed.
-              </p>
-            ) : null}
+            <div>
+              <PersonalFacilitySearchField
+                searchBy="address"
+                value={form.treatingFacilityAddress}
+                facilityId={form.facilityId}
+                required
+                error={getError("treatingFacilityAddress")}
+                onInputChange={(nextValue) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    treatingFacilityAddress: nextValue,
+                    facilityId: "",
+                  }));
+                }}
+                onSelect={(facility) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    facilityId: facility.id ? String(facility.id) : "",
+                    treatingFacilityName: facility.facilityName || "",
+                    treatingFacilityAddress: facility.address || "",
+                  }));
+                  setTouched((prev) => ({
+                    ...prev,
+                    treatingFacilityName: true,
+                    treatingFacilityAddress: true,
+                  }));
+                }}
+                onBlur={() =>
+                  setTouched((prev) => ({
+                    ...prev,
+                    treatingFacilityAddress: true,
+                  }))
+                }
+              />
+              {!form.facilityId && form.treatingFacilityAddress.trim() ? (
+                <div className="mt-2 rounded-[8px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-[12px] text-[#92400E]">
+                  This address is not linked to a known facility. A $
+                  {config.researchFee || "5.00"} facility search fee will be
+                  added to your invoice only if we locate and add this facility.
+                  You will be asked to pay when the invoice is sent.
+                </div>
+              ) : !form.facilityId ? (
+                <p className="mt-1 text-[11px] text-[#64748B]">
+                  Type an address to search DMS facilities. If it matches, the
+                  facility name fills automatically.
+                </p>
+              ) : null}
+            </div>
+
+            <div>
+              <FieldLabel>Treating Doctor Name (optional)</FieldLabel>
+              <TextInput
+                name="treatingDoctor"
+                value={form.treatingDoctor}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                placeholder="e.g. Dr. Jane Smith"
+                error={getError("treatingDoctor")}
+              />
+              <FieldError message={getError("treatingDoctor")} />
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

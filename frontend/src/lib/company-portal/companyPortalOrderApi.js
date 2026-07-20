@@ -140,6 +140,13 @@ export async function trackCompanyPortalOrder(orderNumber) {
   });
 }
 
+export async function validateCompanyPortalOrderNumber(caseNumber) {
+  return companyAuthFetch("/company-portal/orders/validate-order-number", {
+    method: "POST",
+    body: JSON.stringify({ caseNumber }),
+  });
+}
+
 export async function createCompanyPortalCheckout(payload = {}) {
   return companyAuthFetch(`/company-portal/orders/checkout`, {
     method: "POST",
@@ -152,6 +159,30 @@ export async function confirmCompanyPortalPayment(sessionId) {
     method: "POST",
     body: JSON.stringify({ sessionId }),
   });
+}
+
+export async function payCompanyPortalInvoice(orderNumber, { invoiceType, paymentMethod }) {
+  const encoded = encodeURIComponent(String(orderNumber || "").trim());
+  const payload = await companyAuthFetch(
+    `/company-portal/orders/track/${encoded}/invoices/pay`,
+    {
+      method: "POST",
+      body: JSON.stringify({ invoiceType, paymentMethod }),
+    }
+  );
+
+  return payload?.data || null;
+}
+
+export async function confirmCompanyPortalInvoicePayment(orderNumber, sessionId) {
+  const encoded = encodeURIComponent(String(orderNumber || "").trim());
+  return companyAuthFetch(
+    `/company-portal/orders/track/${encoded}/invoices/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    }
+  );
 }
 
 export async function fetchCompanyPortalSubpoenaBlob(orderId) {
@@ -247,4 +278,5 @@ export function clearCompanyOrderWizardState() {
   }
 }
 
-export const COMPANY_PORTAL_ORDER_FEE = 35;
+export const COMPANY_PORTAL_ORDER_FEE = 15;
+export const COMPANY_PORTAL_FACILITY_SEARCH_FEE = 5;

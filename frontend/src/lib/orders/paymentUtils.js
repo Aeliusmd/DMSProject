@@ -1,8 +1,54 @@
 export const PAYMENT_CHARGE_AMOUNTS = {
   prepayment: 15,
-  custodian: 15,
+  // Legacy field — no longer billed separately (was double-counting the $15).
+  custodian: 0,
   xray: 0,
 };
+
+/** Flat records fee billed once records are located (not charged for CNR). */
+export const QUICK_RECORDS_FEE = 20;
+
+/** Full request total when both witness fee + records fee apply. */
+export const REQUEST_TOTAL_WITH_RECORDS_FEE =
+  PAYMENT_CHARGE_AMOUNTS.prepayment + QUICK_RECORDS_FEE;
+
+export function extractFacilitySearchFeeFromNotes(notes = "") {
+  const match = `${notes || ""}`.match(
+    /Includes\s+\$([0-9]+(?:\.[0-9]{1,2})?)\s+facility search fee/i
+  );
+  return match ? parsePaymentAmount(match[1]) : 0;
+}
+
+export function isQuickRecordsFeeInvoice(fees = {}) {
+  const storageFee = parsePaymentAmount(fees.storageFee ?? fees.storage_fee);
+  const facilityFee = extractFacilitySearchFeeFromNotes(fees.notes);
+  const recordsFee = Math.max(
+    0,
+    Number((storageFee - facilityFee).toFixed(2))
+  );
+  const pages = Math.max(0, Math.floor(parsePaymentAmount(fees.pages ?? fees.page_count)));
+  const perPageAmount = parsePaymentAmount(
+    fees.perPageAmount ?? fees.per_page_amount
+  );
+  const clericalHours = parsePaymentAmount(
+    fees.clericalTimeHours ?? fees.clerical_time_hours
+  );
+  const clericalRate = parsePaymentAmount(
+    fees.clericalHourlyRate ?? fees.clerical_hourly_rate
+  );
+  const shipping = parsePaymentAmount(
+    fees.shippingHandling ?? fees.shipping_handling
+  );
+
+  return (
+    recordsFee === QUICK_RECORDS_FEE &&
+    pages === 0 &&
+    perPageAmount === 0 &&
+    clericalHours === 0 &&
+    clericalRate === 0 &&
+    shipping === 0
+  );
+}
 
 export function parsePaymentAmount(value) {
   return Number(String(value ?? "").replace(/[^\d.]/g, "")) || 0;

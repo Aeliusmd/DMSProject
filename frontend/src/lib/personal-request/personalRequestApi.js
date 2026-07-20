@@ -99,6 +99,18 @@ export async function lookupPersonalRequestStatus(payload) {
   return parseResponse(response);
 }
 
+export async function updatePersonalRequestEmail(payload) {
+  const response = await safeFetch(
+    `${API_BASE_URL}/public/personal-request/update-email`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  return parseResponse(response);
+}
+
 export async function searchPersonalRequestFacilities(query) {
   const params = new URLSearchParams();
   params.set("q", query);

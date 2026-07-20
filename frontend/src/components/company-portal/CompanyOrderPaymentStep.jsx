@@ -1,7 +1,8 @@
 "use client";
 
-import { COMPANY_PORTAL_ORDER_FEE } from "@/lib/company-portal/companyPortalOrderApi";
 import {
+  COMPANY_PORTAL_BASE_ORDER_FEE,
+  COMPANY_PORTAL_FACILITY_SEARCH_FEE,
   formatFacilityAddressDisplay,
   getRecordTypesSummary,
 } from "@/lib/company-portal/companyPortalOrderUtils";
@@ -9,16 +10,26 @@ import {
 export default function CompanyOrderPaymentStep({
   form,
   fileName,
-  amount = COMPANY_PORTAL_ORDER_FEE,
+  amount,
+  isEmployee = false,
+  walletBalance = null,
   onBack,
   onPay,
   paying,
   error,
   canceled,
 }) {
-  const amountDisplay = `$${Number(amount).toFixed(2)}`;
+  const total = Number(amount) || COMPANY_PORTAL_BASE_ORDER_FEE;
+  const needsFacilitySearch =
+    Boolean(form.requestNewFacilitySearch) ||
+    `${form.facilitySelectionMode || ""}`.trim().toLowerCase() === "new";
+  const amountDisplay = `$${total.toFixed(2)}`;
   const addressDisplay = formatFacilityAddressDisplay(form);
   const recordsDisplay = getRecordTypesSummary(form);
+  const payLabel = `Pay ${amountDisplay} from wallet`;
+  const facilityLabel = needsFacilitySearch
+    ? form.facilityName || "New facility search"
+    : form.facilityName;
 
   return (
     <div>
@@ -31,8 +42,8 @@ export default function CompanyOrderPaymentStep({
             Payment Required
           </h2>
           <p className="mt-1 text-[13px] leading-relaxed text-[#64748B]">
-            A payment is required to begin processing your subpoena request. You
-            will receive your order number immediately after payment.
+            This order will be paid from your wallet balance. You will receive
+            your order number immediately after payment.
           </p>
         </div>
       </div>
@@ -43,33 +54,61 @@ export default function CompanyOrderPaymentStep({
         </h3>
 
         <div className="mt-4 space-y-3 text-[13px]">
-          <SummaryRow label="Facility" value={form.facilityName} />
+          <SummaryRow label="Facility" value={facilityLabel} />
           <SummaryRow label="Address" value={addressDisplay} />
           <SummaryRow label="Records" value={recordsDisplay} />
           <SummaryRow label="Doctor" value={form.treatingDoctor || "—"} />
           <SummaryRow label="Document" value={fileName || "—"} />
         </div>
 
-        <div className="mt-5 flex items-center justify-between border-t border-[#E2E8F0] pt-4">
-          <span className="text-[14px] font-semibold text-[#0F172A]">Total</span>
-          <span className="text-[18px] font-semibold text-[#0F172A]">
-            {amountDisplay}
-          </span>
+        <div className="mt-5 space-y-2 border-t border-[#E2E8F0] pt-4 text-[13px]">
+          <SummaryRow
+            label="Order processing fee"
+            value={`$${total.toFixed(2)}`}
+          />
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-[14px] font-semibold text-[#0F172A]">
+              Total due now
+            </span>
+            <span className="text-[18px] font-semibold text-[#0F172A]">
+              {amountDisplay}
+            </span>
+          </div>
         </div>
-        <p className="mt-1 text-[11px] text-[#94A3B8]">
-          Fixed processing fee — amount cannot be changed
-        </p>
+
+        {needsFacilitySearch ? (
+          <p className="mt-3 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-700">
+            You are requesting a search for a facility not in our system. An
+            additional ${COMPANY_PORTAL_FACILITY_SEARCH_FEE.toFixed(2)} facility
+            search fee will be added to your invoice only if we locate and add
+            the facility. It is not charged now.
+          </p>
+        ) : null}
       </div>
 
-      {canceled ? (
-        <p className="mt-4 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-medium text-amber-700">
-          Payment was canceled. You can try again when ready.
+      <div className="mt-5 rounded-[12px] border border-[#E2E8F0] bg-white p-4">
+        <p className="text-[13px] font-semibold text-[#0F172A]">
+          {isEmployee ? "Employee wallet payment" : "Company wallet payment"}
         </p>
-      ) : null}
+        <p className="mt-1 text-[12px] text-[#64748B]">
+          Current wallet balance:
+          {" "}
+          {walletBalance != null
+            ? `$${Number(walletBalance).toFixed(2)}`
+            : "Unavailable"}
+          . The order total is {amountDisplay}.
+        </p>
+      </div>
 
       {error ? (
         <p className="mt-4 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-600">
           {error}
+        </p>
+      ) : null}
+
+      {canceled ? (
+        <p className="mt-4 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] font-medium text-amber-700">
+          Payment was canceled. You can try again when ready.
         </p>
       ) : null}
 
@@ -87,12 +126,12 @@ export default function CompanyOrderPaymentStep({
           onClick={onPay}
           className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] bg-[#0097B2] px-5 text-[13px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:bg-[#0097B2]/45"
         >
-          {paying ? "Redirecting..." : `Pay ${amountDisplay}`}
+          {paying ? "Processing..." : payLabel}
         </button>
       </div>
 
       <p className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-[#94A3B8]">
-        <LockIcon /> Secure payment processing
+        <LockIcon /> Wallet balance will be debited automatically
       </p>
     </div>
   );
