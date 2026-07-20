@@ -323,6 +323,16 @@ function buildFindAllWhere(filters = {}) {
     params.portalStatus = filters.portalStatus;
   }
 
+  if (filters.companyPortalStatus) {
+    // Uses unique index on company_portal_orders.internal_order_id (O(1) per row).
+    conditions.push(`EXISTS (
+      SELECT 1 FROM company_portal_orders cpo
+      WHERE cpo.internal_order_id = o.id
+        AND cpo.status = :companyPortalStatus
+    )`);
+    params.companyPortalStatus = filters.companyPortalStatus;
+  }
+
   if (filters.readyFilter) {
     conditions.push(`(
       o.status IN ('Ready', 'Ready to Pickup')

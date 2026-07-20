@@ -1217,6 +1217,7 @@ async function getAllOrders(query = {}) {
   if (creationSource === "company_portal") {
     filters.creationSource = "company_portal";
     // Best-effort: ensure paid portal orders have internal rows for tooling.
+    // Only runs when the company-portal list is explicitly requested.
     try {
       const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
       await companyPortalInternalSyncService.backfillUnlinkedPaidPortalOrders({
@@ -1232,13 +1233,11 @@ async function getAllOrders(query = {}) {
         error.message || error
       );
     }
-  } else {
-    // Keep internal Orders page free of external company portal work.
-    filters.excludeCreationSource = "company_portal";
-  }
-
-  if (`${query.creationSource || ""}`.trim() === "personal_portal") {
+  } else if (creationSource === "personal_portal") {
     filters.creationSource = "personal_portal";
+  } else {
+    // Default / "internal": keep Orders & Reports free of portal work.
+    filters.excludeCreationSource = "company_portal";
   }
 
   if (query.facility) {
@@ -1256,11 +1255,23 @@ async function getAllOrders(query = {}) {
     "released",
     "pending_payment",
   ]);
+  const COMPANY_PORTAL_STATUS_MAP = {
+    in_process: "In Process",
+    invoice: "Invoice",
+    paid: "Paid",
+    released: "Released",
+    no_facility: "No facility",
+  };
   const statusRaw = `${query.portalStatus || query.status || ""}`.trim();
+  const statusKey = statusRaw.toLowerCase();
 
   if (filters.creationSource === "personal_portal") {
-    if (PERSONAL_PORTAL_STATUSES.has(statusRaw)) {
-      filters.portalStatus = statusRaw;
+    if (PERSONAL_PORTAL_STATUSES.has(statusKey)) {
+      filters.portalStatus = statusKey;
+    }
+  } else if (filters.creationSource === "company_portal") {
+    if (COMPANY_PORTAL_STATUS_MAP[statusKey]) {
+      filters.companyPortalStatus = COMPANY_PORTAL_STATUS_MAP[statusKey];
     }
   } else if (query.status === "ready") {
     filters.readyFilter = true;
@@ -1269,7 +1280,11 @@ async function getAllOrders(query = {}) {
   }
 
   if (parseExcludeCompleted(query.excludeCompleted)) {
-    filters.excludeCompleted = true;
+    // Company portal "Released" is mirrored as internal "Completed". When staff
+    // explicitly filters Released, keep those rows visible on Reports.
+    if (filters.companyPortalStatus !== "Released") {
+      filters.excludeCompleted = true;
+    }
   }
 
   const rushRaw = `${query.rushLevel || ""}`.trim();

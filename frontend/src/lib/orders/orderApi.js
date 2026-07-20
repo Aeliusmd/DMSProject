@@ -649,3 +649,11 @@ export async function markCompanyOrderNoFacility(orderId) {
   });
   return data?.data || {};
 }
+
+export async function restoreCompanyOrderInProcess(orderId) {
+  const data = await request(`/company-orders/${orderId}/restore-in-process`, {
+    method: "POST",
+    auth: true,
+  });
+  return data?.data || {};
+}

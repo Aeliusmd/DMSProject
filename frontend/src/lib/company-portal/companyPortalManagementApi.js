@@ -7,9 +7,8 @@ import {
 import {
   clearCompanyAuth,
   getCompanyAccessToken,
-  getCompanyRefreshToken,
-  setCompanyAuth,
 } from "./companyPortalAuthStorage";
+import { tryRefreshCompanyAccessToken } from "./companyPortalAuthApi";
 
 async function parseResponse(response) {
   try {
@@ -30,38 +29,6 @@ async function safeFetch(url, options) {
   }
 }
 
-async function refreshCompanyAccessToken() {
-  const refreshToken = getCompanyRefreshToken();
-  if (!refreshToken) return false;
-
-  try {
-    const response = await safeFetch(
-      `${API_BASE_URL}/company-portal/auth/refresh`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      }
-    );
-    const payload = await parseResponse(response);
-    if (!response.ok) {
-      clearCompanyAuth();
-      return false;
-    }
-
-    const data = payload?.data || {};
-    setCompanyAuth({
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken || refreshToken,
-      user: data.user,
-    });
-    return true;
-  } catch {
-    clearCompanyAuth();
-    return false;
-  }
-}
-
 async function managementRequest(path, options = {}) {
   const accessToken = getCompanyAccessToken();
 
@@ -75,7 +42,7 @@ async function managementRequest(path, options = {}) {
   });
 
   if (response.status === 401) {
-    const refreshed = await refreshCompanyAccessToken();
+    const refreshed = await tryRefreshCompanyAccessToken();
     if (refreshed) {
       const retryToken = getCompanyAccessToken();
       response = await safeFetch(`${API_BASE_URL}${path}`, {
@@ -114,6 +81,21 @@ export async function listCompanyEmployees(search = "") {
   );
 }
 
+export async function listCompanyEmployeesPaginated({
+  search = "",
+  cursor = null,
+  pageSize = 10,
+} = {}) {
+  const params = new URLSearchParams();
+  params.set("pagination", "keyset");
+  params.set("pageSize", String(pageSize));
+  if (search) params.set("search", search);
+  if (cursor) params.set("cursor", String(cursor));
+  return managementRequest(`/company-portal/employees?${params.toString()}`, {
+    method: "GET",
+  });
+}
+
 export async function createCompanyEmployee(payload) {
   return managementRequest("/company-portal/employees", {
     method: "POST",
@@ -123,6 +105,19 @@ export async function createCompanyEmployee(payload) {
 
 export async function getCompanyWalletSummary() {
   return managementRequest("/company-portal/wallet", { method: "GET" });
+}
+
+export async function listCompanyWalletTransactions({
+  cursor = null,
+  pageSize = 10,
+} = {}) {
+  const params = new URLSearchParams();
+  params.set("pageSize", String(pageSize));
+  if (cursor) params.set("cursor", String(cursor));
+  return managementRequest(
+    `/company-portal/wallet/transactions?${params.toString()}`,
+    { method: "GET" }
+  );
 }
 
 export async function createCompanyWalletTopup(amount) {

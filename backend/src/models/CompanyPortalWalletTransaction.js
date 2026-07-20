@@ -1,5 +1,26 @@
 const { getPool } = require("../config/database");
 
+function encodeCreatedCursor(createdAt, id) {
+  if (!createdAt || !id) return null;
+  const dateValue =
+    createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+  return `${dateValue}|${id}`;
+}
+
+function decodeCreatedCursor(rawCursor) {
+  if (rawCursor == null || rawCursor === "") return null;
+
+  const value = String(rawCursor);
+  const separatorIndex = value.lastIndexOf("|");
+  if (separatorIndex <= 0) return null;
+
+  const createdAt = value.slice(0, separatorIndex);
+  const id = Number(value.slice(separatorIndex + 1));
+  if (!createdAt || !Number.isFinite(id) || id <= 0) return null;
+
+  return { createdAt, id };
+}
+
 class CompanyPortalWalletTransaction {
   static async create(data, connection = null) {
     const db = connection || getPool();
@@ -113,6 +134,56 @@ class CompanyPortalWalletTransaction {
       { companyUserId }
     );
     return rows;
+  }
+
+  static async listForCompanyKeyset(
+    companyUserId,
+    { cursor = null, pageSize = 10 } = {},
+    connection = null
+  ) {
+    const db = connection || getPool();
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 50);
+    const queryLimit = safePageSize + 1;
+    const params = { companyUserId };
+    let cursorCondition = "";
+
+    const decoded = decodeCreatedCursor(cursor);
+    if (decoded) {
+      cursorCondition = `AND (
+        t.created_at < :cursorCreatedAt
+        OR (
+          t.created_at = :cursorCreatedAt
+          AND t.id < :cursorId
+        )
+      )`;
+      params.cursorCreatedAt = decoded.createdAt;
+      params.cursorId = decoded.id;
+    }
+
+    const [rows] = await db.execute(
+      `SELECT t.*, e.name AS employee_name
+       FROM company_portal_wallet_transactions t
+       LEFT JOIN company_portal_employees e ON e.id = t.employee_id
+       WHERE t.company_user_id = :companyUserId
+         ${cursorCondition}
+       ORDER BY t.created_at DESC, t.id DESC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > safePageSize;
+    const pageRows = hasMore ? rows.slice(0, safePageSize) : rows;
+    const lastRow = pageRows[pageRows.length - 1] || null;
+
+    return {
+      rows: pageRows,
+      pageSize: safePageSize,
+      hasMore,
+      nextCursor:
+        hasMore && lastRow
+          ? encodeCreatedCursor(lastRow.created_at, lastRow.id)
+          : null,
+    };
   }
 }
 

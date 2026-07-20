@@ -106,17 +106,9 @@ async function refreshTokens({ refreshToken }) {
     sessionId: session.id,
   });
 
-  const nextRefreshToken = tokenService.generateCompanyRefreshToken({
-    companyUserId: session.company_user_id,
-    employeeId: session.employee_id,
-    role: "CompanyEmployee",
-    sessionId: session.id,
-    sessionToken: session.session_token,
-  });
-
   return {
     accessToken,
-    refreshToken: nextRefreshToken,
+    refreshToken,
     expiresIn: tokenService.getAccessTokenExpiresInSeconds(),
     user: formatEmployeeUser(session),
   };
