@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
+  getBlockedRouteRedirect,
   isPortalRouteBlocked,
-  PORTAL_ROUTE_REDIRECT,
 } from "@/lib/portalNavigationVisibility";
 
 export function middleware(request: NextRequest) {
@@ -12,14 +12,24 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  return NextResponse.redirect(new URL(PORTAL_ROUTE_REDIRECT, request.url));
+  return NextResponse.redirect(
+    new URL(getBlockedRouteRedirect(pathname), request.url)
+  );
 }
 
 export const config = {
   matcher: [
+    "/landingpage",
     "/landingpage/:path*",
+    "/company-portal",
     "/company-portal/:path*",
+    "/personalrequest",
     "/personalrequest/:path*",
+    "/Subpoenaupload",
     "/Subpoenaupload/:path*",
+    "/company-orders",
+    "/company-orders/:path*",
+    "/personal-orders",
+    "/personal-orders/:path*",
   ],
 };
