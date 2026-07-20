@@ -52,6 +52,26 @@ async function listEmployees(companyUserId, { search = "" } = {}) {
   return rows.map(formatEmployee);
 }
 
+async function listEmployeesPaginated(
+  companyUserId,
+  { search = "", cursor = null, pageSize = 10 } = {}
+) {
+  const result = await CompanyPortalEmployee.listForCompanyKeyset(
+    companyUserId,
+    { search, cursor, pageSize }
+  );
+
+  return {
+    employees: result.rows.map(formatEmployee),
+    pagination: {
+      type: "keyset",
+      pageSize: result.pageSize,
+      hasMore: result.hasMore,
+      nextCursor: result.nextCursor,
+    },
+  };
+}
+
 async function createEmployee(companyUserId, { name, email, password }) {
   const cleanedName = `${name || ""}`.trim();
   const cleanedEmail = `${email || ""}`.trim().toLowerCase();
@@ -114,6 +134,7 @@ async function createEmployee(companyUserId, { name, email, password }) {
 
 module.exports = {
   listEmployees,
+  listEmployeesPaginated,
   createEmployee,
   formatEmployee,
 };

@@ -1,25 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import OrderStatsGrid from "@/components/orders/OrderStatsGrid";
 import OrderActionButton from "@/components/orders/OrderActionButton";
-import OrderFilterBar from "@/components/orders/OrderFilterBar";
+import OrderFilterBar, {
+  defaultOrderFilters,
+} from "@/components/orders/OrderFilterBar";
 import OrdersTable from "@/components/orders/OrdersTable";
 import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal";
-
-const defaultFilters = {
-  facility: "",
-  company: "",
-  year: "",
-  period: "",
-  status: "",
-  search: "",
-};
+import {
+  isCompanyOrderSource,
+  isPersonalOrderSource,
+  toApiCreationSource,
+} from "@/lib/orders/orderFilterConstants";
 
 export default function OrdersPage() {
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
-  const [filters, setFilters] = useState(defaultFilters);
+  const [filters, setFilters] = useState(defaultOrderFilters);
+
+  const orderSource = filters.creationSource || "internal";
+  const companyPortalMode = isCompanyOrderSource(orderSource);
+  const personalMode = isPersonalOrderSource(orderSource);
+  const apiCreationSource = useMemo(
+    () => toApiCreationSource(orderSource) || null,
+    [orderSource]
+  );
 
   return (
     <DashboardShell>
@@ -62,9 +68,21 @@ export default function OrdersPage() {
           </div>
         </section>
 
-        <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
+        <OrderFilterBar
+          filters={filters}
+          onFiltersChange={setFilters}
+          showOrderSourceFilter
+        />
 
-        <OrdersTable filters={filters} fitToWindow useServerPagination />
+        <OrdersTable
+          filters={filters}
+          fitToWindow
+          useServerPagination
+          creationSource={apiCreationSource}
+          companyPortalMode={companyPortalMode}
+          personalMode={personalMode}
+          listReturnTo="orders"
+        />
       </div>
 
       <ReminderNotesModal

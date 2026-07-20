@@ -10,16 +10,14 @@ import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { RUSH_LEVEL_LEGEND } from "@/lib/orders/rushUtils";
-
-const STATUS_OPTIONS = [
-  { value: "", label: "All (Active)" },
-  { value: "active", label: "Active" },
-  { value: "ready", label: "Ready" },
-  { value: "ready_pickup", label: "Ready to Pickup" },
-  { value: "writeoffs", label: "Write Offs" },
-  { value: "cancelled", label: "Cancelled" },
-  { value: "deleted", label: "Deleted" },
-];
+import {
+  ORDER_SOURCE_INTERNAL,
+  ORDER_SOURCE_OPTIONS,
+  getStatusOptionsForOrderSource,
+  isCompanyOrderSource,
+  isPersonalOrderSource,
+  toApiCreationSource,
+} from "@/lib/orders/orderFilterConstants";
 
 const RUSH_LEVEL_OPTIONS = [
   { value: "", label: "All Rush Levels" },
@@ -33,6 +31,7 @@ const defaultDraftFilters = {
   fromDate: "",
   toDate: "",
   sortDir: "asc",
+  creationSource: ORDER_SOURCE_INTERNAL,
 };
 
 export default function ReportsPage() {
@@ -58,6 +57,10 @@ export default function ReportsPage() {
     loading: true,
   });
 
+  const draftOrderSource =
+    draftFilters.creationSource || ORDER_SOURCE_INTERNAL;
+  const statusOptions = getStatusOptionsForOrderSource(draftOrderSource);
+
   useEffect(() => {
     let active = true;
     setFacilitiesLoading(true);
@@ -68,18 +71,6 @@ export default function ReportsPage() {
         const list = Array.isArray(data) ? data : [];
         setFacilities(list);
         setFacilitiesError("");
-
-        if (list.length > 0) {
-          const defaultFacilityId = String(list[0].id);
-          setDraftFilters((prev) => ({
-            ...prev,
-            facility: prev.facility || defaultFacilityId,
-          }));
-          setAppliedFilters((prev) => ({
-            ...prev,
-            facility: prev.facility || defaultFacilityId,
-          }));
-        }
       })
       .catch((err) => {
         if (!active) return;
@@ -96,10 +87,16 @@ export default function ReportsPage() {
   }, []);
 
   const updateDraftFilter = (name, value) => {
-    setDraftFilters((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setDraftFilters((prev) => {
+      const next = {
+        ...prev,
+        [name]: value,
+      };
+      if (name === "creationSource") {
+        next.status = "";
+      }
+      return next;
+    });
   };
 
   const handleApplyFilters = () => {
@@ -124,11 +121,8 @@ export default function ReportsPage() {
   };
 
   const handleReset = () => {
-    const defaultFacilityId =
-      facilities.length > 0 ? String(facilities[0].id) : "";
     const nextDraft = {
       ...defaultDraftFilters,
-      facility: defaultFacilityId,
     };
 
     setDraftFilters(nextDraft);
@@ -138,6 +132,12 @@ export default function ReportsPage() {
       search: "",
     });
   };
+
+  const appliedOrderSource =
+    appliedFilters.creationSource || ORDER_SOURCE_INTERNAL;
+  const companyPortalMode = isCompanyOrderSource(appliedOrderSource);
+  const personalMode = isPersonalOrderSource(appliedOrderSource);
+  const apiCreationSource = toApiCreationSource(appliedOrderSource) || null;
 
   const tableFilters = useMemo(
     () => ({
@@ -150,8 +150,9 @@ export default function ReportsPage() {
       search: appliedFilters.search,
       createdFrom: appliedFilters.fromDate,
       createdTo: appliedFilters.toDate,
+      creationSource: appliedOrderSource,
     }),
-    [appliedFilters]
+    [appliedFilters, appliedOrderSource]
   );
 
   const handleSummaryChange = useCallback((next) => {
@@ -159,7 +160,10 @@ export default function ReportsPage() {
   }, []);
 
   const facilityLabel = (facility) =>
-    facility.facility || facility.facilityName || facility.name || `#${facility.id}`;
+    facility.facility ||
+    facility.facilityName ||
+    facility.name ||
+    `#${facility.id}`;
 
   const selectedFacilityName = useMemo(() => {
     const match = facilities.find(
@@ -167,6 +171,10 @@ export default function ReportsPage() {
     );
     return match ? facilityLabel(match) : "";
   }, [facilities, appliedFilters.facility]);
+
+  const sourceLabel =
+    ORDER_SOURCE_OPTIONS.find((opt) => opt.value === appliedOrderSource)
+      ?.label || "Internal Orders";
 
   return (
     <DashboardShell>
@@ -185,10 +193,20 @@ export default function ReportsPage() {
                     {summary.loading ? "..." : summary.total}
                   </span>{" "}
                   {summary.total === 1 ? "order" : "orders"}
+                  <span className="ml-1 text-[12px] font-medium text-[#64748B]">
+                    ({sourceLabel})
+                  </span>
                 </p>
               ) : (
-                <p className="mt-[2px] text-[13px] text-[#64748B]">
-                  Facility-based order report (excludes completed orders)
+                <p className="mt-[2px] text-[14px] font-semibold text-[#0F172A]">
+                  All facilities have{" "}
+                  <span className="text-[#0097B2]">
+                    {summary.loading ? "..." : summary.total}
+                  </span>{" "}
+                  {summary.total === 1 ? "order" : "orders"}
+                  <span className="ml-1 text-[12px] font-medium text-[#64748B]">
+                    ({sourceLabel})
+                  </span>
                 </p>
               )}
 
@@ -231,7 +249,26 @@ export default function ReportsPage() {
             Filters
           </h2>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(160px,1fr)_130px_130px_130px_130px_170px_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(150px,1fr)_minmax(160px,1fr)_130px_130px_130px_130px_170px_auto_auto]">
+            <div>
+              <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
+                Order Source
+              </label>
+              <select
+                value={draftOrderSource}
+                onChange={(e) =>
+                  updateDraftFilter("creationSource", e.target.value)
+                }
+                className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              >
+                {ORDER_SOURCE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Facility
@@ -239,21 +276,23 @@ export default function ReportsPage() {
               <select
                 value={draftFilters.facility}
                 onChange={(e) => updateDraftFilter("facility", e.target.value)}
-                disabled={facilitiesLoading || Boolean(facilitiesError) || facilities.length === 0}
+                disabled={facilitiesLoading || Boolean(facilitiesError)}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:opacity-60"
               >
-                {facilitiesLoading && <option value="">Loading...</option>}
-                {!facilitiesLoading && facilitiesError && (
-                  <option value="">Facilities unavailable</option>
-                )}
-                {!facilitiesLoading && !facilitiesError && facilities.length === 0 && (
-                  <option value="">No facilities</option>
-                )}
-                {facilities.map((facility) => (
-                  <option key={facility.id} value={String(facility.id)}>
-                    {facilityLabel(facility)}
-                  </option>
-                ))}
+                <option value="">
+                  {facilitiesLoading
+                    ? "Loading..."
+                    : facilitiesError
+                      ? "Facilities unavailable"
+                      : "All Facility"}
+                </option>
+                {!facilitiesLoading &&
+                  !facilitiesError &&
+                  facilities.map((facility) => (
+                    <option key={facility.id} value={String(facility.id)}>
+                      {facilityLabel(facility)}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -266,7 +305,7 @@ export default function ReportsPage() {
                 onChange={(e) => updateDraftFilter("status", e.target.value)}
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               >
-                {STATUS_OPTIONS.map((option) => (
+                {statusOptions.map((option) => (
                   <option key={option.value || "all"} value={option.value}>
                     {option.label}
                   </option>
@@ -394,29 +433,19 @@ export default function ReportsPage() {
           )}
         </section>
 
-        {facilitiesLoading ? (
-          <div className="flex flex-1 items-center justify-center rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-16 text-[13px] text-[#94A3B8]">
-            Loading facilities...
-          </div>
-        ) : facilities.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-16 text-[13px] text-[#94A3B8]">
-            No facilities available to report on.
-          </div>
-        ) : !appliedFilters.facility ? (
-          <div className="flex flex-1 items-center justify-center rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-16 text-[13px] text-[#94A3B8]">
-            Select a facility and click Apply Filters.
-          </div>
-        ) : (
-          <OrdersTable
-            filters={tableFilters}
-            excludeCompleted
-            createdSortDir={appliedFilters.sortDir}
-            fitToWindow
-            showDoctorColumn
-            useServerPagination
-            onSummaryChange={handleSummaryChange}
-          />
-        )}
+        <OrdersTable
+          filters={tableFilters}
+          excludeCompleted
+          createdSortDir={appliedFilters.sortDir}
+          fitToWindow
+          showDoctorColumn
+          useServerPagination
+          onSummaryChange={handleSummaryChange}
+          creationSource={apiCreationSource}
+          companyPortalMode={companyPortalMode}
+          personalMode={personalMode}
+          listReturnTo="reports"
+        />
       </div>
     </DashboardShell>
   );
@@ -451,15 +480,9 @@ function SearchIcon() {
 
 function SortIcon() {
   return (
-    <svg
-      className="shrink-0 text-[#94A3B8]"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-    >
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
       <path
-        d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"
+        d="M8 9l4-4 4 4M8 15l4 4 4-4"
         stroke="currentColor"
         strokeWidth="1.7"
         strokeLinecap="round"
@@ -472,13 +495,12 @@ function SortIcon() {
 function ReportIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-      <path d="M6 20V4h12v16H6Z" stroke="currentColor" strokeWidth="1.8" />
       <path
-        d="M9 9h6M9 13h6M9 17h4"
+        d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z"
         stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
+        strokeWidth="1.7"
       />
+      <path d="M14 3v6h6" stroke="currentColor" strokeWidth="1.7" />
     </svg>
   );
 }

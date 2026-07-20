@@ -14,6 +14,10 @@ router.get(
 );
 router.post("/:orderId/link-facility", companyOrdersController.linkFacility);
 router.post("/:orderId/no-facility", companyOrdersController.markNoFacility);
+router.post(
+  "/:orderId/restore-in-process",
+  companyOrdersController.restoreInProcess
+);
 router.post("/:portalOrderId/sync", companyOrdersController.syncOrder);
 router.patch("/:orderId/stage", companyOrdersController.updateStage);
 router.post("/:orderId/email-records", companyOrdersController.emailRecords);

@@ -1,16 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import CompanyPortalSidebar from "@/components/company-portal/CompanyPortalSidebar";
 import useIsClient from "@/hooks/useIsClient";
 import { PORTAL_NAVIGATION_HIDDEN } from "@/lib/portalNavigationVisibility";
-import { getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStorage";
+import {
+  clearCompanyAuth,
+  getCompanyAccessToken,
+  getStoredCompanyUser,
+} from "@/lib/company-portal/companyPortalAuthStorage";
+import {
+  getCompanyCurrentUser,
+  startCompanyAuthAutoRefresh,
+  stopCompanyAuthAutoRefresh,
+} from "@/lib/company-portal/companyPortalAuthApi";
 
 export default function CompanyPortalDashboardShell({ children, title }) {
+  const router = useRouter();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
 
   const isClient = useIsClient();
   const user = isClient ? getStoredCompanyUser() : null;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function verifySession() {
+      const accessToken = getCompanyAccessToken();
+
+      if (!accessToken) {
+        router.replace("/company-portal/login");
+        return;
+      }
+
+      try {
+        await getCompanyCurrentUser();
+
+        if (isMounted) {
+          setSessionReady(true);
+          startCompanyAuthAutoRefresh();
+        }
+      } catch {
+        clearCompanyAuth();
+        router.replace("/company-portal/login");
+      }
+    }
+
+    verifySession();
+
+    return () => {
+      isMounted = false;
+      stopCompanyAuthAutoRefresh();
+    };
+  }, [router]);
 
   const isEmployee = user?.isAdmin === false;
   const companyName = user?.companyName || "Company Portal";
@@ -21,6 +65,14 @@ export default function CompanyPortalDashboardShell({ children, title }) {
 
   const subtitle = isEmployee ? companyName : "Company portal";
   const initialsSource = isEmployee ? displayName : companyName;
+
+  if (!sessionReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+        <p className="text-[13px] text-[#64748B]">Checking session...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#111827]">

@@ -206,8 +206,14 @@ function NewOrderPageContent() {
   const resolveListPath = useCallback(
     (creationSource = "") => {
       const normalized = `${returnToParam || ""}`.trim().replace(/^\/+/, "");
-      if (normalized === "personal-orders") return "/personal-orders";
-      if (normalized === "company-orders") return "/company-orders";
+      if (
+        normalized === "personal-orders" ||
+        normalized === "company-orders" ||
+        normalized === "reports" ||
+        normalized === "orders"
+      ) {
+        return `/${normalized}`;
+      }
       if (creationSource === "personal_portal") return "/personal-orders";
       if (creationSource === "company_portal") return "/company-orders";
       return "/orders";

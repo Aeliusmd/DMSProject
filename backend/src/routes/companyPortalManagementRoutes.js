@@ -32,6 +32,11 @@ router.get(
   requireCompanyAdmin,
   companyPortalManagementController.getWalletSummary
 );
+router.get(
+  "/wallet/transactions",
+  requireCompanyAdmin,
+  companyPortalManagementController.listWalletTransactions
+);
 router.post(
   "/wallet/topup",
   requireCompanyAdmin,

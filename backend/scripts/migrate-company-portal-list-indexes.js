@@ -1,6 +1,6 @@
 /**
- * Add indexes that speed up Orders tab filtering.
- * Run: node scripts/migrate-orders-filter-indexes.js
+ * Indexes for company portal / employee list keyset pagination.
+ * Run: node scripts/migrate-company-portal-list-indexes.js
  */
 
 require("dotenv").config();
@@ -9,12 +9,10 @@ const mysql = require("mysql2/promise");
 const config = require("../src/config");
 
 const INDEX_STATEMENTS = [
-  "CREATE INDEX idx_orders_created_at ON orders (created_at)",
-  "CREATE INDEX idx_orders_facility_status_id ON orders (facility_id, status, id)",
-  "CREATE INDEX idx_orders_status_created_id ON orders (status, created_at, id)",
-  "CREATE INDEX idx_orders_facility_created_id ON orders (facility_id, created_at, id)",
-  "CREATE INDEX idx_orders_serve_company ON orders (serve_company_name)",
-  "CREATE INDEX idx_orders_creation_source_created_id ON orders (creation_source, created_at, id)",
+  "CREATE INDEX idx_cpo_user_created_id ON company_portal_orders (company_user_id, created_at, id)",
+  "CREATE INDEX idx_cpo_user_employee_created_id ON company_portal_orders (company_user_id, company_portal_employee_id, created_at, id)",
+  "CREATE INDEX idx_wallet_tx_company_created_id ON company_portal_wallet_transactions (company_user_id, created_at, id)",
+  "CREATE INDEX idx_cpe_company_name_id ON company_portal_employees (company_user_id, name, id)",
 ];
 
 async function main() {
@@ -35,13 +33,12 @@ async function main() {
         console.log(`Already exists: ${statement}`);
         continue;
       }
-
       throw error;
     }
   }
 
   await connection.end();
-  console.log("Orders filter indexes migration complete.");
+  console.log("Company portal list indexes migration complete.");
 }
 
 main().catch((error) => {
