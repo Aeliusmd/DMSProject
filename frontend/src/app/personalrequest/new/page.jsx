@@ -12,7 +12,7 @@ import {
 import { submitAuthenticatedPersonalRequest } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
-  getPersonalAccessToken,
+  isPersonalAuthenticated,
   getStoredPersonalUser,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import {
@@ -134,7 +134,7 @@ export default function PersonalNewRequestPage() {
   const emailVerified = true;
 
   useEffect(() => {
-    if (!getPersonalAccessToken()) {
+    if (!isPersonalAuthenticated()) {
       router.replace("/personalrequest/login");
     }
   }, [router]);

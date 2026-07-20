@@ -229,28 +229,31 @@ function validateCompanyResendTwoFactor(body = {}) {
 
 function validateCompanyRefresh(body = {}) {
   const errors = [];
+  const refreshToken = trimToString(body.refreshToken);
 
-  if (!trimToString(body.refreshToken)) {
+  if (!refreshToken) {
     errors.push({
       field: "refreshToken",
       message: "Refresh token is required",
     });
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, refreshToken };
 }
 
 function validateCompanyLogout(body = {}) {
   const errors = [];
+  const refreshToken = trimToString(body.refreshToken);
+  const sessionToken = trimToString(body.sessionToken);
 
-  if (!trimToString(body.refreshToken) && !trimToString(body.sessionToken)) {
+  if (!refreshToken && !sessionToken) {
     errors.push({
       field: "refreshToken",
       message: "Refresh token or session token is required",
     });
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, refreshToken, sessionToken };
 }
 
 module.exports = {

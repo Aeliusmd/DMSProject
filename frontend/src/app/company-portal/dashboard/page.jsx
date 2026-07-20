@@ -9,7 +9,7 @@ import CompanyPortalStatCard from "@/components/company-portal/CompanyPortalStat
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
   clearCompanyAuth,
-  getCompanyAccessToken,
+  isCompanyAuthenticated,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
   getCompanyPortalDashboard,
@@ -92,8 +92,7 @@ export default function CompanyPortalDashboardPage() {
     let active = true;
 
     async function loadDashboard() {
-      const accessToken = getCompanyAccessToken();
-      if (!accessToken) {
+      if (!isCompanyAuthenticated()) {
         router.replace("/company-portal/login");
         return;
       }

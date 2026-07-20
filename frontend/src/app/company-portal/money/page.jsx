@@ -6,10 +6,7 @@ import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPort
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import AuthInput from "@/components/ui/AuthInput";
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
-import {
-  getCompanyAccessToken,
-  getStoredCompanyUser,
-} from "@/lib/company-portal/companyPortalAuthStorage";
+import { isCompanyAuthenticated, getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
   allocateCompanyWalletFunds,
   confirmCompanyWalletTopup,
@@ -115,7 +112,7 @@ function MoneyManagementClient() {
   }, []);
 
   useEffect(() => {
-    if (!getCompanyAccessToken()) {
+    if (!isCompanyAuthenticated()) {
       router.replace("/company-portal/login");
       return;
     }

@@ -16,7 +16,7 @@ import {
 } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
-  getPersonalAccessToken,
+  isPersonalAuthenticated,
   getStoredPersonalUser,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
@@ -51,7 +51,7 @@ export default function PersonalPortalDashboardPage() {
     let active = true;
 
     async function load() {
-      if (!getPersonalAccessToken()) {
+      if (!isPersonalAuthenticated()) {
         router.replace("/personalrequest/login");
         return;
       }

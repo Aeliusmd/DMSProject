@@ -3,6 +3,12 @@ const ApiResponse = require("../utils/ApiResponse");
 const { throwIfInvalid } = require("../utils/validationUtils");
 const personalPortalAuthService = require("../services/personalPortalAuthService");
 const {
+  buildAuthPayload,
+  clearPortalAuthCookies,
+  getRefreshTokenFromRequest,
+  setPortalAuthCookies,
+} = require("../utils/authCookies");
+const {
   validatePersonalRegister,
   validatePersonalLogin,
   validatePersonalTwoFactor,
@@ -51,7 +57,9 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
     trustDevice: Boolean(req.body.trustDevice),
   });
 
-  return ApiResponse.success(res, result, "Authentication successful");
+  setPortalAuthCookies(res, "personal", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });
 
 exports.resendTwoFactor = asyncHandler(async (req, res) => {
@@ -66,24 +74,33 @@ exports.resendTwoFactor = asyncHandler(async (req, res) => {
 });
 
 exports.refresh = asyncHandler(async (req, res) => {
-  const validation = validatePersonalRefresh(req.body);
+  const validation = validatePersonalRefresh({
+    refreshToken: getRefreshTokenFromRequest(req, "personal"),
+  });
   throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.refreshTokens({
     refreshToken: validation.refreshToken,
   });
 
-  return ApiResponse.success(res, result, "Token refreshed");
+  setPortalAuthCookies(res, "personal", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Token refreshed");
 });
 
 exports.logout = asyncHandler(async (req, res) => {
-  const validation = validatePersonalLogout(req.body);
+  const validation = validatePersonalLogout({
+    refreshToken: getRefreshTokenFromRequest(req, "personal"),
+    sessionToken: req.body.sessionToken,
+  });
   throwIfInvalid(validation);
 
   const result = await personalPortalAuthService.logout({
     refreshToken: validation.refreshToken,
     sessionToken: validation.sessionToken,
   });
+
+  clearPortalAuthCookies(res, "personal");
 
   return ApiResponse.success(res, result, result.message);
 });

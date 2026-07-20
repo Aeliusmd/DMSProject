@@ -7,8 +7,8 @@ import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPort
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
-  getCompanyAccessToken,
   getStoredCompanyUser,
+  isCompanyAuthenticated,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import { getCompanyPortalActivityLogsPaginated } from "@/lib/company-portal/companyPortalActivityLogApi";
 import { listCompanyEmployees } from "@/lib/company-portal/companyPortalManagementApi";
@@ -67,7 +67,7 @@ export default function CompanyPortalActivityLogPage() {
   });
 
   useEffect(() => {
-    if (!getCompanyAccessToken()) {
+    if (!isCompanyAuthenticated()) {
       router.replace("/company-portal/login");
       return;
     }

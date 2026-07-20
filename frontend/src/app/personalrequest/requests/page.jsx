@@ -10,7 +10,7 @@ import PersonalResearchFeeBanner from "@/components/personal-request/PersonalRes
 import { listPersonalRequests } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
-  getPersonalAccessToken,
+  isPersonalAuthenticated,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
@@ -69,7 +69,7 @@ export default function PersonalRequestsListPage() {
 
   const loadRequests = useCallback(
     async (page = 1, activeFilters = filtersRef.current) => {
-      if (!getPersonalAccessToken()) {
+      if (!isPersonalAuthenticated()) {
         router.replace("/personalrequest/login");
         return;
       }

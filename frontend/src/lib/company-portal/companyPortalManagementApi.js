@@ -1,74 +1,7 @@
-import { API_BASE_URL } from "@/config/api";
-import { ApiRequestError } from "@/lib/auth/authApi";
-import {
-  isNetworkError,
-  NETWORK_UNAVAILABLE_MESSAGE,
-} from "@/lib/networkErrors";
-import {
-  clearCompanyAuth,
-  getCompanyAccessToken,
-} from "./companyPortalAuthStorage";
-import { tryRefreshCompanyAccessToken } from "./companyPortalAuthApi";
-
-async function parseResponse(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-async function safeFetch(url, options) {
-  try {
-    return await fetch(url, options);
-  } catch (error) {
-    if (isNetworkError(error)) {
-      throw new ApiRequestError(NETWORK_UNAVAILABLE_MESSAGE, 0);
-    }
-    throw error;
-  }
-}
+import { companyPortalFetch } from "./companyPortalFetch";
 
 async function managementRequest(path, options = {}) {
-  const accessToken = getCompanyAccessToken();
-
-  let response = await safeFetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...(options.headers || {}),
-    },
-  });
-
-  if (response.status === 401) {
-    const refreshed = await tryRefreshCompanyAccessToken();
-    if (refreshed) {
-      const retryToken = getCompanyAccessToken();
-      response = await safeFetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          ...(retryToken ? { Authorization: `Bearer ${retryToken}` } : {}),
-          ...(options.headers || {}),
-        },
-      });
-    } else {
-      clearCompanyAuth();
-      throw new ApiRequestError("Session expired. Please sign in again.", 401);
-    }
-  }
-
-  const payload = await parseResponse(response);
-  if (!response.ok) {
-    throw new ApiRequestError(
-      payload?.message || "Request failed",
-      response.status,
-      payload?.errors || null
-    );
-  }
-
-  return payload;
+  return companyPortalFetch(path, options);
 }
 
 export async function listCompanyEmployees(search = "") {

@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
+const cookieParser = require("cookie-parser");
 
 const config = require("./config");
 const routes = require("./routes");
@@ -21,6 +22,7 @@ app.use((_req, res, next) => {
 app.set("trust proxy", 1);
 
 app.use(cors({ origin: config.clientUrl, credentials: true }));
+app.use(cookieParser());
 
 app.post(
   "/api/webhooks/stripe",

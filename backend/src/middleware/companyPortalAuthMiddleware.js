@@ -2,13 +2,13 @@ const ApiError = require("../utils/ApiError");
 const CompanyPortalEmployeeSession = require("../models/CompanyPortalEmployeeSession");
 const CompanyPortalSession = require("../models/CompanyPortalSession");
 const tokenService = require("../services/tokenService");
+const { getAccessTokenFromRequest } = require("../utils/authCookies");
 
 async function authenticateCompanyPortal(req, _res, next) {
   try {
-    const authHeader = req.headers.authorization || "";
-    const [scheme, token] = authHeader.split(" ");
+    const token = getAccessTokenFromRequest(req, "company");
 
-    if (scheme !== "Bearer" || !token) {
+    if (!token) {
       throw new ApiError(401, "Authentication required");
     }
 

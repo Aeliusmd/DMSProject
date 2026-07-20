@@ -7,8 +7,8 @@ import CompanyCreateEmployeeModal from "@/components/company-portal/CompanyCreat
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
-  getCompanyAccessToken,
   getStoredCompanyUser,
+  isCompanyAuthenticated,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
   createCompanyEmployee,
@@ -92,7 +92,7 @@ export default function CompanyEmployeesPage() {
   );
 
   useEffect(() => {
-    if (!getCompanyAccessToken()) {
+    if (!isCompanyAuthenticated()) {
       router.replace("/company-portal/login");
       return;
     }
