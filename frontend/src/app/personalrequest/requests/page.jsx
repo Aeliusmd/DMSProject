@@ -15,6 +15,7 @@ import {
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
 const REQUESTS_PER_PAGE = 10;
+const MAX_SEARCH_LENGTH = 200;
 
 const STATUS_STYLES = {
   in_process: "bg-[#E6F7FA] text-[#007F96]",
@@ -23,11 +24,31 @@ const STATUS_STYLES = {
   released: "bg-[#DCFCE7] text-[#15803D]",
 };
 
+const STATUS_FILTER_OPTIONS = [
+  { value: "", label: "All statuses" },
+  { value: "in_process", label: "In Process" },
+  { value: "invoice", label: "Invoice" },
+  { value: "paid", label: "Paid" },
+  { value: "released", label: "Released" },
+];
+
+const defaultFilters = {
+  status: "",
+  search: "",
+};
+
+function clampSearch(value) {
+  return `${value || ""}`.trim().slice(0, MAX_SEARCH_LENGTH);
+}
+
 export default function PersonalRequestsListPage() {
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState(defaultFilters);
+  const [draftStatus, setDraftStatus] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [keysetPagination, setKeysetPagination] = useState({
     pageSize: REQUESTS_PER_PAGE,
@@ -36,13 +57,18 @@ export default function PersonalRequestsListPage() {
   });
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
+  const filtersRef = useRef(filters);
 
   useEffect(() => {
     cursorHistoryRef.current = cursorHistory;
   }, [cursorHistory]);
 
+  useEffect(() => {
+    filtersRef.current = filters;
+  }, [filters]);
+
   const loadRequests = useCallback(
-    async (page = 1) => {
+    async (page = 1, activeFilters = filtersRef.current) => {
       if (!getPersonalAccessToken()) {
         router.replace("/personalrequest/login");
         return;
@@ -56,6 +82,8 @@ export default function PersonalRequestsListPage() {
         const response = await listPersonalRequests({
           pageSize: REQUESTS_PER_PAGE,
           cursor,
+          status: activeFilters.status || "",
+          search: activeFilters.search || "",
         });
 
         const paginationMeta = response?.data?.pagination || {};
@@ -93,8 +121,30 @@ export default function PersonalRequestsListPage() {
   );
 
   useEffect(() => {
-    loadRequests(1);
-  }, [loadRequests]);
+    setCursorHistory([null]);
+    cursorHistoryRef.current = [null];
+    loadRequests(1, filters);
+  }, [filters, loadRequests]);
+
+  const applyFilters = () => {
+    setFilters({
+      status: draftStatus,
+      search: clampSearch(searchDraft),
+    });
+  };
+
+  const applySearch = () => {
+    setFilters((prev) => ({
+      ...prev,
+      search: clampSearch(searchDraft),
+    }));
+  };
+
+  const resetFilters = () => {
+    setDraftStatus("");
+    setSearchDraft("");
+    setFilters(defaultFilters);
+  };
 
   const startRecord =
     requests.length === 0 ? 0 : (currentPage - 1) * REQUESTS_PER_PAGE + 1;
@@ -121,6 +171,67 @@ export default function PersonalRequestsListPage() {
           + New request
         </Link>
       </div>
+
+      <section className="mb-4 rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-[160px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
+            Status
+            <select
+              value={draftStatus}
+              onChange={(e) => setDraftStatus(e.target.value)}
+              className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
+            >
+              {STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            onClick={applyFilters}
+            className="h-[36px] rounded-[6px] bg-[#0097B2] px-4 text-[13px] font-semibold text-white hover:bg-[#0086A0]"
+          >
+            Apply
+          </button>
+
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+          >
+            Reset
+          </button>
+
+          <div className="flex min-w-[240px] flex-[2] items-end gap-2">
+            <label className="flex flex-1 flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
+              Search
+              <input
+                value={searchDraft}
+                maxLength={MAX_SEARCH_LENGTH}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applySearch();
+                  }
+                }}
+                placeholder="Confirmation #, facility, name…"
+                className="h-[36px] rounded-[6px] border border-[#E2E8F0] px-3 text-[13px] outline-none focus:border-[#0097B2]"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={applySearch}
+              className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
+            >
+              Search
+            </button>
+          </div>
+        </div>
+      </section>
 
       {error ? (
         <p className="mb-4 rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-600">
@@ -159,7 +270,7 @@ export default function PersonalRequestsListPage() {
                     colSpan={6}
                     className="px-5 py-8 text-center text-[#94A3B8]"
                   >
-                    No paid requests in the current 7-day window.
+                    No paid requests match the current filters.
                   </td>
                 </tr>
               ) : (

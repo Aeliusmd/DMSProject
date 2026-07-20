@@ -156,6 +156,22 @@ function openBlobInNewTab(blob) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
+/** Only open https URLs to avoid javascript: XSS via receipt links. */
+function openSafeExternalUrl(url) {
+  const trimmed = `${url || ""}`.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    window.open(parsed.href, "_blank", "noopener,noreferrer");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function registerPersonal(payload) {
   return request("/personal-portal/auth/register", {
     method: "POST",
@@ -232,12 +248,14 @@ export async function listPersonalRequests({
   pageSize = 10,
   cursor = null,
   status = "",
+  search = "",
 } = {}) {
   const params = new URLSearchParams();
   params.set("pagination", "keyset");
   params.set("pageSize", String(pageSize));
   if (cursor) params.set("cursor", String(cursor));
   if (status) params.set("status", status);
+  if (search) params.set("search", String(search).slice(0, 200));
 
   return authRequest(`/personal-portal/requests?${params.toString()}`, {
     method: "GET",
@@ -283,7 +301,9 @@ export async function createPersonalInvoiceCheckout(requestId) {
 /** Opens Stripe receipt or generated PDF for the $35 prepayment. */
 export async function openPersonalPrepaymentReceipt(requestId, fallbackUrl) {
   if (fallbackUrl) {
-    window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    if (!openSafeExternalUrl(fallbackUrl)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
     return;
   }
 
@@ -299,7 +319,9 @@ export async function openPersonalPrepaymentReceipt(requestId, fallbackUrl) {
 
   const url = result.payload?.data?.url || result.payload?.url;
   if (url) {
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (!openSafeExternalUrl(url)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
     return;
   }
 
@@ -309,7 +331,9 @@ export async function openPersonalPrepaymentReceipt(requestId, fallbackUrl) {
 /** Opens Stripe facility search fee receipt. */
 export async function openPersonalFacilityFeeReceipt(requestId, fallbackUrl) {
   if (fallbackUrl) {
-    window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    if (!openSafeExternalUrl(fallbackUrl)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
     return;
   }
 
@@ -325,7 +349,9 @@ export async function openPersonalFacilityFeeReceipt(requestId, fallbackUrl) {
 
   const url = result.payload?.data?.url || result.payload?.url;
   if (url) {
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (!openSafeExternalUrl(url)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
     return;
   }
 
@@ -335,7 +361,9 @@ export async function openPersonalFacilityFeeReceipt(requestId, fallbackUrl) {
 /** Opens Stripe invoice / facility-fee payment receipt (URL or generated PDF). */
 export async function openPersonalInvoiceReceipt(requestId, fallbackUrl) {
   if (fallbackUrl) {
-    window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    if (!openSafeExternalUrl(fallbackUrl)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
     return;
   }
 
@@ -352,10 +380,15 @@ export async function openPersonalInvoiceReceipt(requestId, fallbackUrl) {
 
     const url = result.payload?.data?.url || result.payload?.url;
     if (url) {
-      window.open(url, "_blank", "noopener,noreferrer");
+      if (!openSafeExternalUrl(url)) {
+        throw new ApiRequestError("Invalid receipt URL", 400);
+      }
       return;
     }
-  } catch {
+  } catch (err) {
+    if (err instanceof ApiRequestError && err.message === "Invalid receipt URL") {
+      throw err;
+    }
     // Fall through to facility-fee receipt (same UI label)
   }
 
@@ -372,7 +405,9 @@ export async function openPersonalInvoiceReceipt(requestId, fallbackUrl) {
   const facilityUrl =
     facilityResult.payload?.data?.url || facilityResult.payload?.url;
   if (facilityUrl) {
-    window.open(facilityUrl, "_blank", "noopener,noreferrer");
+    if (!openSafeExternalUrl(facilityUrl)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
     return;
   }
 

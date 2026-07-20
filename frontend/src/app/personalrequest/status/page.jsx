@@ -258,11 +258,12 @@ export default function PersonalRequestStatusPage() {
               </div>
             </dl>
 
-            {result.payment?.receiptUrl ? (
+            {result.payment?.receiptUrl &&
+            String(result.payment.receiptUrl).startsWith("https://") ? (
               <a
                 href={result.payment.receiptUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="inline-flex text-[13px] font-semibold text-[#0097B2] hover:underline"
               >
                 Download prepayment receipt

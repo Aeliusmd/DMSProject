@@ -1160,13 +1160,16 @@ async function assertOwnedPersonalRequest(requestId, portalUserId) {
   if (!requestOrder) {
     throw new ApiError(404, "Request not found");
   }
-  if (
-    portalUserId &&
-    requestOrder.portal_user_id &&
-    Number(requestOrder.portal_user_id) !== Number(portalUserId)
-  ) {
+
+  const ownerId = Number(requestOrder.portal_user_id);
+  const userId = Number(portalUserId);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new ApiError(401, "Authentication required");
+  }
+  if (!Number.isFinite(ownerId) || ownerId <= 0 || ownerId !== userId) {
     throw new ApiError(403, "You do not have access to this request");
   }
+
   return requestOrder;
 }
 
@@ -1450,7 +1453,7 @@ async function getDashboardForUser(portalUserId) {
 
 async function listRequestsForUser(
   portalUserId,
-  { pageSize = 10, cursor = null, status = null } = {}
+  { pageSize = 10, cursor = null, status = null, search = null } = {}
 ) {
   const lookupDays = config.personalPortal?.lookupDays || 7;
 
@@ -1461,6 +1464,7 @@ async function listRequestsForUser(
       cursor,
       paidOnly: true,
       status: status || null,
+      search: search || null,
       withinLookupWindow: true,
     }
   );
@@ -1773,18 +1777,10 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
 }
 
 async function createResearchFeeCheckout(personalRequestId, portalUserId) {
-  const requestOrder = await PersonalRequestOrder.findById(personalRequestId);
-  if (!requestOrder) {
-    throw new ApiError(404, "Request not found");
-  }
-
-  if (
-    portalUserId &&
-    requestOrder.portal_user_id &&
-    Number(requestOrder.portal_user_id) !== Number(portalUserId)
-  ) {
-    throw new ApiError(403, "You do not have access to this request");
-  }
+  const requestOrder = await assertOwnedPersonalRequest(
+    personalRequestId,
+    portalUserId
+  );
 
   if ((requestOrder.research_fee_status || "none") !== "pending") {
     throw new ApiError(400, "No research fee is currently due for this request");
