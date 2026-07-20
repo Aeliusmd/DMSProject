@@ -1278,19 +1278,26 @@ class Order {
       params.orderLabelTag = likeContains(`order ${orderNumber}`);
     }
 
-    const cursorClause =
-      cursorSortKey && Number(cursorSortKey) > 0
-        ? "AND merged.sort_key < :cursorSortKey"
-        : "";
-    if (cursorSortKey && Number(cursorSortKey) > 0) {
-      params.cursorSortKey = Number(cursorSortKey);
+    const cursorValue = `${cursorSortKey ?? ""}`.trim();
+    const hasCursor = /^\d+$/.test(cursorValue);
+    const cursorClause = hasCursor ? "AND merged.sort_key < :cursorSortKey" : "";
+    if (hasCursor) {
+      // Zero-pad so lexical compare matches numeric order for equal-length keys.
+      params.cursorSortKey = cursorValue.padStart(30, "0");
     }
 
     const [rows] = await pool.execute(
       `SELECT merged.*
        FROM (
          SELECT
-           (UNIX_TIMESTAMP(oal.activity_date) * 1000000000 + oal.id) AS sort_key,
+           LPAD(
+             CAST(
+               (UNIX_TIMESTAMP(oal.activity_date) * 1000000000) + oal.id
+               AS CHAR
+             ),
+             30,
+             '0'
+           ) AS sort_key,
            'order' AS log_source,
            oal.id,
            oal.order_id,
@@ -1317,15 +1324,24 @@ class Order {
          UNION ALL
 
          SELECT
-           (UNIX_TIMESTAMP(
-             COALESCE(
-               al.created_at,
-               STR_TO_DATE(
-                 CONCAT(al.log_date, ' ', COALESCE(al.log_time, '00:00:00')),
-                 '%Y-%m-%d %H:%i:%s'
-               )
-             )
-           ) * 1000000000 + al.id) AS sort_key,
+           LPAD(
+             CAST(
+               (
+                 UNIX_TIMESTAMP(
+                   COALESCE(
+                     al.created_at,
+                     STR_TO_DATE(
+                       CONCAT(al.log_date, ' ', COALESCE(al.log_time, '00:00:00')),
+                       '%Y-%m-%d %H:%i:%s'
+                     )
+                   )
+                 ) * 1000000000
+               ) + al.id
+               AS CHAR
+             ),
+             30,
+             '0'
+           ) AS sort_key,
            'global' AS log_source,
            al.id,
            :orderId AS order_id,
@@ -1364,7 +1380,11 @@ class Order {
 
     const hasMore = rows.length > safeLimit;
     const pageRows = hasMore ? rows.slice(0, safeLimit) : rows;
-    const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.sort_key || null : null;
+    const lastSortKey = pageRows[pageRows.length - 1]?.sort_key;
+    const nextCursor =
+      hasMore && lastSortKey != null && `${lastSortKey}`.trim() !== ""
+        ? `${lastSortKey}`
+        : null;
 
     return {
       rows: pageRows,

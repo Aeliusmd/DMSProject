@@ -1953,9 +1953,8 @@ async function getOrderActivityLogs(orderId, query = {}) {
   const pageSize = Number.isFinite(pageSizeRaw)
     ? Math.min(Math.max(pageSizeRaw, 1), 100)
     : 10;
-  const cursorRaw = Number(query.cursor);
-  const cursorSortKey =
-    Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
+  const cursorRaw = `${query.cursor || ""}`.trim();
+  const cursorSortKey = /^\d+$/.test(cursorRaw) ? cursorRaw : null;
   const search = query.search
     ? sanitizeSearchText(query.search) || null
     : null;
@@ -1989,16 +1988,18 @@ async function getOrderActivityLogs(orderId, query = {}) {
     ? await Order.findNotesByOrderId(order.id, false)
     : [];
 
-  const mappedOrderLogs = keyset.rows
-    .filter((row) => row.log_source === "order")
-    .map((row) => mapMergedActivityLogRow(row, notes));
-  const mappedGlobalLogs = keyset.rows
-    .filter((row) => row.log_source === "global")
-    .map((row) => mapMergedActivityLogRow(row, notes));
-  const mergedLogs = mergeOrderActivityLogs(mappedOrderLogs, mappedGlobalLogs);
+  // Keep SQL keyset order — do not re-merge/re-sort (breaks pagination).
+  const seenIds = new Set();
+  const logs = [];
+  for (const row of keyset.rows) {
+    const mapped = mapMergedActivityLogRow(row, notes);
+    if (!mapped?.id || seenIds.has(mapped.id)) continue;
+    seenIds.add(mapped.id);
+    logs.push(mapped);
+  }
 
   return {
-    logs: mergedLogs,
+    logs,
     pagination: {
       type: "keyset",
       pageSize: keyset.pageSize,
