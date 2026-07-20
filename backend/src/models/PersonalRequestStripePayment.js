@@ -51,6 +51,34 @@ class PersonalRequestStripePayment {
     return rows;
   }
 
+  static async findByPersonalRequestOrderIds(orderIds = [], connection = null) {
+    const normalizedIds = [
+      ...new Set(orderIds.map((id) => Number(id)).filter((id) => id > 0)),
+    ];
+    if (!normalizedIds.length) return {};
+
+    const executor = connection || getPool();
+    const placeholders = normalizedIds.map((_, index) => `:id${index}`).join(", ");
+    const params = normalizedIds.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await executor.execute(
+      `SELECT * FROM personal_request_stripe_payments
+       WHERE personal_request_order_id IN (${placeholders})
+       ORDER BY created_at DESC`,
+      params
+    );
+
+    return rows.reduce((acc, row) => {
+      const key = row.personal_request_order_id;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(row);
+      return acc;
+    }, {});
+  }
+
   static async findSucceededProcessingFeeByOrderId(orderId, connection = null) {
     const executor = connection || getPool();
     const [rows] = await executor.execute(

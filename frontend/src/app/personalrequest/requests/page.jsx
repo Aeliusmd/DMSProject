@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
-import PersonalRecordsDownloadButton from "@/components/personal-request/PersonalRecordsDownloadButton";
+import PersonalRequestActionsCell from "@/components/personal-request/PersonalRequestActionsCell";
+import PersonalRequestReceiptsCell from "@/components/personal-request/PersonalRequestReceiptsCell";
 import PersonalResearchFeeBanner from "@/components/personal-request/PersonalResearchFeeBanner";
 import { listPersonalRequests } from "@/lib/personal-request/personalPortalAuthApi";
 import {
@@ -138,6 +139,7 @@ export default function PersonalRequestsListPage() {
                 <th className="px-5 py-3">Facility</th>
                 <th className="px-5 py-3">Date range</th>
                 <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">Receipts</th>
                 <th className="px-5 py-3">Action</th>
               </tr>
             </thead>
@@ -145,7 +147,7 @@ export default function PersonalRequestsListPage() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-5 py-8 text-center text-[#94A3B8]"
                   >
                     Loading...
@@ -154,7 +156,7 @@ export default function PersonalRequestsListPage() {
               ) : requests.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-5 py-8 text-center text-[#94A3B8]"
                   >
                     No paid requests in the current 7-day window.
@@ -187,36 +189,10 @@ export default function PersonalRequestsListPage() {
                       </span>
                     </td>
                     <td className="px-5 py-3">
-                      <div className="flex flex-wrap items-center gap-3">
-                        {request.receiptUrl ? (
-                          <a
-                            href={request.receiptUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="font-semibold text-[#0097B2] hover:underline"
-                          >
-                            Receipt
-                          </a>
-                        ) : null}
-                        {request.canDownload &&
-                        (request.downloadToken || request.downloadUrl) ? (
-                          <PersonalRecordsDownloadButton
-                            downloadToken={request.downloadToken}
-                            downloadUrl={request.downloadUrl}
-                            label="Download"
-                            className="font-semibold text-[#16A34A] hover:underline"
-                          />
-                        ) : (
-                          <Link
-                            href={`/personalrequest/status?ref=${encodeURIComponent(
-                              request.confirmationReference || ""
-                            )}`}
-                            className="font-semibold text-[#0097B2] hover:underline"
-                          >
-                            View
-                          </Link>
-                        )}
-                      </div>
+                      <PersonalRequestReceiptsCell request={request} />
+                    </td>
+                    <td className="px-5 py-3">
+                      <PersonalRequestActionsCell request={request} />
                     </td>
                   </tr>
                 ))

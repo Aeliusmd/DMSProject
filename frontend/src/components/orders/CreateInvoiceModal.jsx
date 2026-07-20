@@ -10,6 +10,7 @@ import {
 } from "@/lib/invoices/invoiceApi";
 import {
   buildPaymentLinesFromOrder,
+  extractFacilitySearchFeeFromNotes,
   formatMoneyAmount,
   formatPaidBracket,
   getPaymentLineAmount,
@@ -223,12 +224,33 @@ export default function CreateInvoiceModal({
 
   // Company / personal portal: $5 facility-search fee is auto-added into the
   // invoice total (once) when DMS located/added an unmatched facility.
-  const facilitySearchFee = useMemo(() => {
+  // Create: add pending fee on top of storage. Review/Edit: fee is already inside
+  // storageFee — extract from notes for display only (do not add again to total).
+  const billedFacilitySearchFee = useMemo(
+    () => extractFacilitySearchFeeFromNotes(formData.notes),
+    [formData.notes]
+  );
+
+  const pendingFacilityFeeAmount = useMemo(() => {
     if (isEditMode) return 0;
     return toNumber(
       pendingFacilitySearchFee || order?.pendingFacilitySearchFee || 0
     );
   }, [isEditMode, pendingFacilitySearchFee, order?.pendingFacilitySearchFee]);
+
+  const facilitySearchFee = isEditMode
+    ? billedFacilitySearchFee
+    : pendingFacilityFeeAmount;
+
+  const displayStorageFee = useMemo(() => {
+    if (isEditMode && billedFacilitySearchFee > 0) {
+      return Math.max(
+        0,
+        Number((fullFees.storageFee - billedFacilitySearchFee).toFixed(2))
+      );
+    }
+    return fullFees.storageFee;
+  }, [isEditMode, billedFacilitySearchFee, fullFees.storageFee]);
 
   const isPersonalPortalOrder =
     order?.creationSource === "personal_portal" ||
@@ -240,9 +262,16 @@ export default function CreateInvoiceModal({
       clericalAmount +
       toNumber(formData.shippingHandling) +
       fullFees.storageFee +
-      facilitySearchFee
+      // Only add pending fee on create — review already has it inside storageFee
+      pendingFacilityFeeAmount
     );
-  }, [formData, fullFees, pagesAmount, clericalAmount, facilitySearchFee]);
+  }, [
+    formData,
+    fullFees,
+    pagesAmount,
+    clericalAmount,
+    pendingFacilityFeeAmount,
+  ]);
 
   const prepaymentPaid = useMemo(() => {
     return toNumber(prepaymentAmount);
@@ -285,9 +314,9 @@ export default function CreateInvoiceModal({
     return validateInvoiceForm(formData, {
       // CNR invoices may be $0 (only the prior $15 witness fee applies).
       requirePositiveTotal: willCreateInvoice && !isCnrOrder,
-      facilitySearchFee,
+      facilitySearchFee: pendingFacilityFeeAmount,
     });
-  }, [formData, willCreateInvoice, isCnrOrder, facilitySearchFee]);
+  }, [formData, willCreateInvoice, isCnrOrder, pendingFacilityFeeAmount]);
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
@@ -306,12 +335,12 @@ export default function CreateInvoiceModal({
     ? 0
     : Math.max(0, witnessFeeRequired - loadedPrepaymentAmount);
   const quickCollectTotal = isQuickMode
-    ? QUICK_RECORDS_FEE + quickWitnessDue + facilitySearchFee
+    ? QUICK_RECORDS_FEE + quickWitnessDue + pendingFacilityFeeAmount
     : null;
   const requestTotalDisplay = isQuickMode
     ? (skipPrepaymentCredit
-        ? QUICK_RECORDS_FEE + facilitySearchFee
-        : REQUEST_TOTAL_WITH_RECORDS_FEE + facilitySearchFee)
+        ? QUICK_RECORDS_FEE + pendingFacilityFeeAmount
+        : REQUEST_TOTAL_WITH_RECORDS_FEE + pendingFacilityFeeAmount)
     : null;
   const displayDue = isCnrOrder
     ? prepaymentDueForCnr
@@ -442,7 +471,7 @@ export default function CreateInvoiceModal({
 
     const validationErrors = validateInvoiceForm(formData, {
       requirePositiveTotal: willCreate && !isCnrOrder,
-      facilitySearchFee,
+      facilitySearchFee: pendingFacilityFeeAmount,
     });
 
     setErrors(validationErrors);
@@ -741,7 +770,7 @@ export default function CreateInvoiceModal({
                     ? "Records Fee"
                     : "Storage Fee"
                 }
-                value={formatMoney(fullFees.storageFee)}
+                value={formatMoney(displayStorageFee)}
               />
               <SummaryRow label="Pages" value={formatMoney(pagesAmount)} />
               <SummaryRow
@@ -761,12 +790,17 @@ export default function CreateInvoiceModal({
             </div>
             {facilitySearchFee > 0 && (
               <p className="mt-2 rounded-[8px] border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
-                A ${facilitySearchFee.toFixed(2)} facility search fee is added on
-                top of records/storage and any other fees, and is included in the
-                invoice total
-                {isPersonalPortalOrder
-                  ? " for this personal request unmatched facility."
-                  : " for this external company new-facility search."}
+                {isEditMode
+                  ? `This invoice includes a $${facilitySearchFee.toFixed(2)} facility search fee${
+                      isPersonalPortalOrder
+                        ? " for the personal request unmatched facility."
+                        : " for the external company new-facility search."
+                    }`
+                  : `A $${facilitySearchFee.toFixed(2)} facility search fee is added${
+                      isPersonalPortalOrder
+                        ? " for this personal request unmatched facility."
+                        : " for this external company new-facility search."
+                    }`}
               </p>
             )}
 

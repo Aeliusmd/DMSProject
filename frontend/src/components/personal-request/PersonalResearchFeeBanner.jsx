@@ -41,8 +41,8 @@ export default function PersonalResearchFeeBanner({
         Facility search fee due
       </h2>
       <p className="mt-1 text-[12px] text-[#A16207]">
-        Your invoice has been sent. Please pay the facility search fee below to
-        continue processing.
+        Your invoice has been sent. Pay the facility search fee here while signed
+        in — no email link or OTP needed.
       </p>
 
       {error ? (

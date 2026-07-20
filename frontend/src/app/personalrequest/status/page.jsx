@@ -265,7 +265,7 @@ export default function PersonalRequestStatusPage() {
                 rel="noreferrer"
                 className="inline-flex text-[13px] font-semibold text-[#0097B2] hover:underline"
               >
-                Download processing-fee receipt
+                Download prepayment receipt
               </a>
             ) : null}
 

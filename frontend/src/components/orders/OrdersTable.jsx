@@ -140,7 +140,39 @@ function buildPersonalReviewRecordsStage(order) {
 function getPersonalScanRecordsHref(order) {
   if (!order?.dbId || order.certificateNoRecords) return null;
   if (order.hasMedicalRecords) return null;
-  return `/orders/scan-medical-records?orderId=${encodeURIComponent(order.dbId)}`;
+  return `/orders/scan-medical-records?orderId=${encodeURIComponent(
+    order.dbId
+  )}&returnTo=${encodeURIComponent("personal-orders")}`;
+}
+
+function resolveOrderListReturnTo(
+  order = {},
+  { personalMode = false, companyPortalMode = false } = {}
+) {
+  if (personalMode || order.creationSource === "personal_portal") {
+    return "personal-orders";
+  }
+  if (companyPortalMode || order.creationSource === "company_portal") {
+    return "company-orders";
+  }
+  return "orders";
+}
+
+function buildOrderEditHref(
+  orderId,
+  {
+    returnTo = "orders",
+    panel = null,
+  } = {}
+) {
+  const params = new URLSearchParams();
+  params.set("mode", "edit");
+  params.set("orderId", String(orderId));
+  if (returnTo && returnTo !== "orders") {
+    params.set("returnTo", returnTo);
+  }
+  if (panel) params.set("panel", panel);
+  return `/orders/new?${params.toString()}`;
 }
 
 const defaultOrderFilters = {
@@ -1625,9 +1657,12 @@ export default function OrdersTable({
                             />
                           )}
                           <Link
-                            href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                              order.dbId
-                            )}`}
+                            href={buildOrderEditHref(order.dbId, {
+                              returnTo: resolveOrderListReturnTo(order, {
+                                personalMode,
+                                companyPortalMode,
+                              }),
+                            })}
                             className="font-semibold text-[#007F96] hover:underline"
                           >
                             {order.id}
@@ -1968,6 +2003,9 @@ export default function OrdersTable({
                       <InvoiceBlock
                         invoice={order.invoice}
                         orderDbId={order.dbId}
+                        pendingFacilitySearchFee={
+                          order.pendingFacilitySearchFee || 0
+                        }
                         isCnr={order.certificateNoRecords}
                         cnrDelivery={order.cnrDelivery}
                         cnrDateSent={order.cnrDateSent}
@@ -2019,15 +2057,6 @@ export default function OrdersTable({
 
                     <td className="px-4 py-5 align-top">
                       <div className="space-y-1">
-                        {personalMode && getPersonalScanRecordsHref(order) ? (
-                          <Link
-                            href={getPersonalScanRecordsHref(order)}
-                            className="block text-[10px] font-semibold text-[#007F96] underline"
-                          >
-                            Scan Records
-                          </Link>
-                        ) : null}
-
                         <RecordsBlock
                           records={order.records}
                           dateRequested={order.dateRequested}
@@ -2103,9 +2132,12 @@ export default function OrdersTable({
                             <p>{order.doiDisplay}</p>
                           ) : (
                             <Link
-                              href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
-                                order.dbId
-                              )}`}
+                              href={buildOrderEditHref(order.dbId, {
+                                returnTo: resolveOrderListReturnTo(order, {
+                                  personalMode,
+                                  companyPortalMode,
+                                }),
+                              })}
                               className="font-semibold text-red-500 hover:underline"
                             >
                               No DOI
@@ -2661,9 +2693,10 @@ function getWorkflowStageHref(stage, order) {
       isWorkflowStageComplete(stage.status) || allUploaded;
 
     if (!isComplete) {
+      const returnTo = resolveOrderListReturnTo(order);
       return `/orders/scan-medical-records?orderId=${encodeURIComponent(
         order.dbId
-      )}`;
+      )}&returnTo=${encodeURIComponent(returnTo)}`;
     }
   }
 
@@ -2671,9 +2704,10 @@ function getWorkflowStageHref(stage, order) {
     stage.key === "Serve" &&
     !isWorkflowStageComplete(stage.status)
   ) {
-    return `/orders/new?mode=edit&orderId=${encodeURIComponent(
-      order.dbId
-    )}&panel=payment`;
+    return buildOrderEditHref(order.dbId, {
+      returnTo: resolveOrderListReturnTo(order),
+      panel: "payment",
+    });
   }
 
   return null;
@@ -2900,9 +2934,20 @@ function WorkflowStageIcon({ status }) {
   );
 }
 
+function resolveInvoiceDueWithFacilityFee(invoice = {}, pendingFacilitySearchFee = 0) {
+  const baseDue = parsePaymentAmount(invoice.due);
+  const facilityFee = Number(pendingFacilitySearchFee) || 0;
+  // Pending facility fee is rolled into the next/full invoice total
+  if (facilityFee > 0) {
+    return formatMoneyAmount(baseDue + facilityFee);
+  }
+  return invoice.due || null;
+}
+
 function InvoiceBlock({
   invoice,
   orderDbId,
+  pendingFacilitySearchFee = 0,
   isCnr = false,
   cnrDelivery = "",
   cnrDateSent = "",
@@ -2932,6 +2977,11 @@ function InvoiceBlock({
   const xraySentDate =
     invoice.xraySentDateCompact || invoice.xraySentDate || null;
   const showCnrEmailSent = isCnr && cnrDelivery === "email" && cnrDateSent;
+  const facilityFee = Number(pendingFacilitySearchFee) || 0;
+  const invoiceDueDisplay = resolveInvoiceDueWithFacilityFee(
+    invoice,
+    facilityFee
+  );
 
   const sendInvoiceButton = !invoice.sentDate ? (
     <button
@@ -3185,7 +3235,7 @@ function InvoiceBlock({
             </button>
           }
           dateCompact={invoice.invoiceDateCompact || invoice.reviewDate}
-          dueAmount={invoice.due}
+          dueAmount={invoiceDueDisplay}
         />
 
         <button
@@ -3230,6 +3280,12 @@ function InvoiceBlock({
               Create Invoice
         </button>
 
+            {facilityFee > 0 ? (
+              <p className="text-[#B45309]">
+                Facility fee {formatMoneyAmount(facilityFee)} (included in invoice)
+              </p>
+            ) : null}
+
             <button
               type="button"
               onClick={onCoverSheet}
@@ -3264,8 +3320,14 @@ function InvoiceBlock({
           </button>
         }
         dateCompact={invoice.invoiceDateCompact || invoice.reviewDate}
-        dueAmount={invoice.due}
+        dueAmount={invoiceDueDisplay}
       />
+
+      {facilityFee > 0 ? (
+        <p className="text-[#B45309]">
+          Includes facility fee {formatMoneyAmount(facilityFee)}
+        </p>
+      ) : null}
 
       <button
         type="button"

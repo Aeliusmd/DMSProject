@@ -143,6 +143,101 @@ exports.createResearchFeeCheckout = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, data, "Research fee checkout created");
 });
 
+exports.getPrepaymentReceipt = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const result = await personalPortalService.getPrepaymentReceiptPdf(
+    requestId,
+    req.personalUser.id
+  );
+
+  if (result.kind === "redirect") {
+    return ApiResponse.success(
+      res,
+      { url: result.url, label: result.label || "Prepayment receipt" },
+      "Prepayment receipt ready"
+    );
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(result.fileName || "prepayment-receipt.pdf")}"`
+  );
+  return res.send(result.buffer);
+});
+
+exports.getInvoiceReceipt = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const result = await personalPortalService.getInvoiceReceiptPdf(
+    requestId,
+    req.personalUser.id
+  );
+
+  if (result.kind === "redirect") {
+    return ApiResponse.success(
+      res,
+      { url: result.url, label: result.label || "Invoice receipt" },
+      "Invoice receipt ready"
+    );
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(result.fileName || "invoice-receipt.pdf")}"`
+  );
+  return res.send(result.buffer);
+});
+
+exports.getFacilityFeeReceipt = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const result = await personalPortalService.getFacilityFeeReceiptPdf(
+    requestId,
+    req.personalUser.id
+  );
+
+  if (result.kind === "redirect") {
+    return ApiResponse.success(
+      res,
+      { url: result.url, label: result.label || "Facility fee receipt" },
+      "Facility fee receipt ready"
+    );
+  }
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename="${encodeURIComponent(result.fileName || "facility-fee-receipt.pdf")}"`
+  );
+  return res.send(result.buffer);
+});
+
+exports.createInvoiceCheckout = asyncHandler(async (req, res) => {
+  const requestId = Number(req.params.id);
+  if (!Number.isFinite(requestId) || requestId <= 0) {
+    throw new ApiError(400, "Invalid request id");
+  }
+
+  const data = await personalPortalService.createInvoiceCheckoutForPortalUser(
+    requestId,
+    req.personalUser.id
+  );
+
+  return ApiResponse.success(res, data, "Invoice checkout created");
+});
+
 exports.fulfillResearchFeeCheckout = asyncHandler(async (req, res) => {
   const sessionId = `${req.body?.sessionId || req.query?.session_id || ""}`.trim();
   if (!sessionId) {
@@ -163,9 +258,12 @@ exports.fulfillResearchFeeCheckout = asyncHandler(async (req, res) => {
     res,
     {
       paid: session.payment_status === "paid",
-      requestId: Number(session.metadata?.personal_request_id) || null,
+      requestId:
+        Number(session.metadata?.personal_request_id) ||
+        Number(session.metadata?.order_id) ||
+        null,
     },
-    "Research fee payment processed"
+    "Payment processed"
   );
 });
 

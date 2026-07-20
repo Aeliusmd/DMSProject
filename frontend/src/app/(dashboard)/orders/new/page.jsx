@@ -199,8 +199,22 @@ function NewOrderPageContent() {
   const panel = searchParams.get("panel");
   const facilityRefresh = searchParams.get("facilityRefresh");
   const applyFacilityId = searchParams.get("applyFacilityId");
+  const returnToParam = searchParams.get("returnTo");
 
   const isEditMode = Boolean(orderId);
+
+  const resolveListPath = useCallback(
+    (creationSource = "") => {
+      const normalized = `${returnToParam || ""}`.trim().replace(/^\/+/, "");
+      if (normalized === "personal-orders") return "/personal-orders";
+      if (normalized === "company-orders") return "/company-orders";
+      if (creationSource === "personal_portal") return "/personal-orders";
+      if (creationSource === "company_portal") return "/company-orders";
+      return "/orders";
+    },
+    [returnToParam]
+  );
+
   const returnToOrderPath = useMemo(() => {
     const params = new URLSearchParams();
     if (orderId) {
@@ -209,9 +223,10 @@ function NewOrderPageContent() {
     }
     if (subpoenaId) params.set("subpoenaId", subpoenaId);
     if (panel) params.set("panel", panel);
+    if (returnToParam) params.set("returnTo", returnToParam);
     const query = params.toString();
     return `/orders/new${query ? `?${query}` : ""}`;
-  }, [orderId, subpoenaId, panel]);
+  }, [orderId, subpoenaId, panel, returnToParam]);
 
   const draftScope = useMemo(
     () => getDraftOrderScope({ orderId, subpoenaId }),
@@ -1747,7 +1762,7 @@ function NewOrderPageContent() {
         await updateOrder(activeOrderId, syncedFormData);
         clearDraftOrderSession(draftScope);
         draftRestoredRef.current = false;
-        router.push("/orders");
+        router.push(resolveListPath(syncedFormData.creationSource));
         return;
       }
 
@@ -1755,7 +1770,7 @@ function NewOrderPageContent() {
       if (order?.id) {
         clearDraftOrderSession(draftScope);
         draftRestoredRef.current = false;
-        router.push("/orders");
+        router.push(resolveListPath(syncedFormData.creationSource));
         return;
       }
 
@@ -1790,10 +1805,14 @@ function NewOrderPageContent() {
           <p className="text-[13px] font-semibold text-red-500">{loadError}</p>
           <button
             type="button"
-            onClick={() => router.push("/orders")}
+            onClick={() => router.push(resolveListPath(formData.creationSource))}
             className="rounded-[6px] bg-[#0097B2] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
           >
-            Back to Orders
+            {resolveListPath(formData.creationSource) === "/personal-orders"
+              ? "Back to Personal Orders"
+              : resolveListPath(formData.creationSource) === "/company-orders"
+                ? "Back to Company Orders"
+                : "Back to Orders"}
           </button>
         </div>
       </DashboardShell>

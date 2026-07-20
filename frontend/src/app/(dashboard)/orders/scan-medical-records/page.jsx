@@ -19,6 +19,7 @@ import {
 function resolveReturnPath(returnTo) {
   const normalized = `${returnTo || ""}`.trim().replace(/^\/+/, "");
   if (normalized === "company-orders") return "/company-orders";
+  if (normalized === "personal-orders") return "/personal-orders";
   return "/orders";
 }
 
@@ -47,7 +48,11 @@ export default function ScanMedicalRecordsPage() {
   const savedRecordTypeLabel = order ? getSavedOrderRecordTypeLabel(order) : "";
   const canUpload = recordSlots.length > 0;
   const backLabel =
-    returnPath === "/company-orders" ? "Back to Company Orders" : "Back to Orders";
+    returnPath === "/company-orders"
+      ? "Back to Company Orders"
+      : returnPath === "/personal-orders"
+        ? "Back to Personal Orders"
+        : "Back to Orders";
 
   useEffect(() => {
     let cancelled = false;

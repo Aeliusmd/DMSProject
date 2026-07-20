@@ -117,21 +117,74 @@ class PersonalRequestOrder {
     };
   }
 
-  static async countByPortalUserId(portalUserId) {
+  static async countByPortalUserId(portalUserId, { withinLookupWindow = false } = {}) {
     const pool = getPool();
+    const lookupClause = withinLookupWindow
+      ? "AND (lookup_expires_at IS NULL OR lookup_expires_at > NOW())"
+      : "";
     const [rows] = await pool.execute(
       `SELECT
          COUNT(*) AS total,
-         SUM(CASE WHEN portal_status = 'in_process' THEN 1 ELSE 0 END) AS in_process,
-         SUM(CASE WHEN portal_status = 'invoice' THEN 1 ELSE 0 END) AS invoice,
+         SUM(
+           CASE
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') <> 'pending'
+             THEN 1 ELSE 0
+           END
+         ) AS in_process,
+         SUM(
+           CASE
+             WHEN portal_status = 'invoice' THEN 1
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') = 'pending'
+             THEN 1
+             ELSE 0
+           END
+         ) AS invoice,
          SUM(CASE WHEN portal_status = 'paid' THEN 1 ELSE 0 END) AS paid,
          SUM(CASE WHEN portal_status = 'released' THEN 1 ELSE 0 END) AS released
        FROM personal_request_orders
        WHERE portal_user_id = :portalUserId
-         AND processing_fee_paid = 1`,
+         AND processing_fee_paid = 1
+         ${lookupClause}`,
       { portalUserId }
     );
     return rows[0] || {};
+  }
+
+  static async findByIds(ids = []) {
+    const normalizedIds = [...new Set(ids.map((id) => Number(id)).filter((id) => id > 0))];
+    if (!normalizedIds.length) return [];
+
+    const pool = getPool();
+    const placeholders = normalizedIds.map((_, index) => `:id${index}`).join(", ");
+    const params = normalizedIds.reduce((acc, id, index) => {
+      acc[`id${index}`] = id;
+      return acc;
+    }, {});
+
+    const [rows] = await pool.execute(
+      `SELECT * FROM personal_request_orders
+       WHERE id IN (${placeholders})
+       ORDER BY created_at DESC, id DESC`,
+      params
+    );
+    return rows;
+  }
+
+  static async findLinkedForStatusSync(portalUserId) {
+    const pool = getPool();
+    const [rows] = await pool.execute(
+      `SELECT *
+       FROM personal_request_orders
+       WHERE portal_user_id = :portalUserId
+         AND processing_fee_paid = 1
+         AND order_id IS NOT NULL
+         AND order_id > 0
+         AND (lookup_expires_at IS NULL OR lookup_expires_at > NOW())`,
+      { portalUserId }
+    );
+    return rows;
   }
 
   static async findStaffList(filters = {}) {
@@ -257,8 +310,23 @@ class PersonalRequestOrder {
     const [rows] = await pool.execute(
       `SELECT
          COUNT(*) AS total,
-         SUM(CASE WHEN portal_status = 'in_process' THEN 1 ELSE 0 END) AS in_process,
-         SUM(CASE WHEN portal_status = 'invoice' THEN 1 ELSE 0 END) AS invoice,
+         SUM(
+           CASE
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') <> 'pending'
+             THEN 1 ELSE 0
+           END
+         ) AS in_process,
+         SUM(
+           CASE
+             WHEN portal_status = 'invoice' THEN 1
+             -- Facility search fee travels with the invoice stage
+             WHEN portal_status = 'in_process'
+              AND COALESCE(research_fee_status, 'none') = 'pending'
+             THEN 1
+             ELSE 0
+           END
+         ) AS invoice,
          SUM(CASE WHEN portal_status = 'paid' THEN 1 ELSE 0 END) AS paid,
          SUM(CASE WHEN portal_status = 'released' THEN 1 ELSE 0 END) AS released
        FROM personal_request_orders
