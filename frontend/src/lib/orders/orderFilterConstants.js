@@ -8,6 +8,71 @@ export const ORDER_PERIOD_OPTIONS = [
   { value: "3m", label: "Past 3 Months" },
 ];
 
+/** Order list source filter. Default is internal (normal system orders). */
+export const ORDER_SOURCE_OPTIONS = [
+  { value: "internal", label: "Internal Orders" },
+  { value: "company_portal", label: "External Company Orders" },
+  { value: "personal_portal", label: "Personal Orders" },
+];
+
+export const ORDER_SOURCE_INTERNAL = "internal";
+export const ORDER_SOURCE_COMPANY = "company_portal";
+export const ORDER_SOURCE_PERSONAL = "personal_portal";
+
+export const INTERNAL_ORDER_STATUS_OPTIONS = [
+  { value: "", label: "All Status" },
+  { value: "active", label: "Active" },
+  { value: "ready", label: "Ready" },
+  { value: "ready_pickup", label: "Ready to Pickup" },
+  { value: "completed", label: "Completed" },
+  { value: "writeoffs", label: "Write Offs" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "deleted", label: "Deleted" },
+];
+
+export const COMPANY_ORDER_STATUS_OPTIONS = [
+  { value: "", label: "All Statuses" },
+  { value: "in_process", label: "In Process" },
+  { value: "invoice", label: "Invoice" },
+  { value: "paid", label: "Paid" },
+  { value: "released", label: "Released" },
+  { value: "no_facility", label: "No Facility" },
+];
+
+export const PERSONAL_ORDER_STATUS_OPTIONS = [
+  { value: "", label: "All Statuses" },
+  { value: "in_process", label: "In Process" },
+  { value: "invoice", label: "Invoice" },
+  { value: "paid", label: "Paid" },
+  { value: "released", label: "Released" },
+];
+
+export function getStatusOptionsForOrderSource(orderSource) {
+  if (isCompanyOrderSource(orderSource)) return COMPANY_ORDER_STATUS_OPTIONS;
+  if (isPersonalOrderSource(orderSource)) return PERSONAL_ORDER_STATUS_OPTIONS;
+  return INTERNAL_ORDER_STATUS_OPTIONS;
+}
+
+/**
+ * Normalize UI order-source values for the /orders API.
+ * Internal (default) must send nothing so the backend excludes portal rows.
+ */
+export function toApiCreationSource(orderSource) {
+  const value = `${orderSource || ""}`.trim().toLowerCase();
+  if (value === ORDER_SOURCE_COMPANY || value === ORDER_SOURCE_PERSONAL) {
+    return value;
+  }
+  return "";
+}
+
+export function isCompanyOrderSource(orderSource) {
+  return toApiCreationSource(orderSource) === ORDER_SOURCE_COMPANY;
+}
+
+export function isPersonalOrderSource(orderSource) {
+  return toApiCreationSource(orderSource) === ORDER_SOURCE_PERSONAL;
+}
+
 export function formatLocalDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");

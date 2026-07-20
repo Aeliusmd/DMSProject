@@ -7,9 +7,8 @@ import {
 import {
   clearCompanyAuth,
   getCompanyAccessToken,
-  getCompanyRefreshToken,
-  setCompanyAuth,
 } from "./companyPortalAuthStorage";
+import { tryRefreshCompanyAccessToken } from "./companyPortalAuthApi";
 
 async function parseResponse(response) {
   try {
@@ -30,38 +29,6 @@ async function safeFetch(url, options) {
   }
 }
 
-async function refreshCompanyAccessToken() {
-  const refreshToken = getCompanyRefreshToken();
-  if (!refreshToken) return false;
-
-  try {
-    const response = await safeFetch(
-      `${API_BASE_URL}/company-portal/auth/refresh`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      }
-    );
-    const payload = await parseResponse(response);
-    if (!response.ok) {
-      clearCompanyAuth();
-      return false;
-    }
-
-    const data = payload?.data || {};
-    setCompanyAuth({
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken || refreshToken,
-      user: data.user,
-    });
-    return true;
-  } catch {
-    clearCompanyAuth();
-    return false;
-  }
-}
-
 async function companyAuthFetch(path, options = {}) {
   const accessToken = getCompanyAccessToken();
   const headers = {
@@ -78,7 +45,7 @@ async function companyAuthFetch(path, options = {}) {
   });
 
   if (response.status === 401) {
-    const refreshed = await refreshCompanyAccessToken();
+    const refreshed = await tryRefreshCompanyAccessToken();
     if (refreshed) {
       const retryToken = getCompanyAccessToken();
       response = await safeFetch(`${API_BASE_URL}${path}`, {

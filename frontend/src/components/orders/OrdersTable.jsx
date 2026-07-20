@@ -42,6 +42,7 @@ import {
   removeMedicalRecords,
   updateCompanyOrderStage,
   emailCompanyOrderRecords,
+  restoreCompanyOrderInProcess,
 } from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
@@ -147,8 +148,17 @@ function getPersonalScanRecordsHref(order) {
 
 function resolveOrderListReturnTo(
   order = {},
-  { personalMode = false, companyPortalMode = false } = {}
+  { personalMode = false, companyPortalMode = false, listReturnTo = "" } = {}
 ) {
+  const preferred = `${listReturnTo || ""}`.trim().replace(/^\/+/, "");
+  if (
+    preferred === "orders" ||
+    preferred === "company-orders" ||
+    preferred === "personal-orders" ||
+    preferred === "reports"
+  ) {
+    return preferred;
+  }
   if (personalMode || order.creationSource === "personal_portal") {
     return "personal-orders";
   }
@@ -715,6 +725,7 @@ export default function OrdersTable({
   creationSource = null,
   companyPortalMode = false,
   personalMode = false,
+  listReturnTo = "",
 }) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
@@ -730,6 +741,8 @@ export default function OrdersTable({
   const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [facilityModalState, setFacilityModalState] = useState(null);
+  const [restoreInProcessOrder, setRestoreInProcessOrder] = useState(null);
+  const [restoringInProcess, setRestoringInProcess] = useState(false);
   const [selectedNoteListOrder, setSelectedNoteListOrder] = useState(null);
   const [selectedAddNoteOrder, setSelectedAddNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
@@ -795,7 +808,15 @@ export default function OrdersTable({
     createdTo: filters.createdTo || "",
     creationSource: personalMode
       ? "personal_portal"
-      : creationSource || filters.creationSource || "",
+      : (() => {
+          const raw = `${creationSource || filters.creationSource || ""}`
+            .trim()
+            .toLowerCase();
+          // "internal" is UI-only; API expects empty to exclude portal rows.
+          if (!raw || raw === "internal") return "";
+          if (raw === "company_portal" || raw === "personal_portal") return raw;
+          return "";
+        })(),
   };
 
   const sortDir =
@@ -1661,6 +1682,7 @@ export default function OrdersTable({
                               returnTo: resolveOrderListReturnTo(order, {
                                 personalMode,
                                 companyPortalMode,
+                                listReturnTo,
                               }),
                             })}
                             className="font-semibold text-[#007F96] hover:underline"
@@ -1724,9 +1746,18 @@ export default function OrdersTable({
                         )}
                         {companyPortalMode &&
                           order.companyPortalStatus === "No facility" && (
-                            <p className="mt-1.5 w-full rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1 text-[10px] font-medium leading-snug text-red-600">
-                              No facility — order ended
-                            </p>
+                            <div className="mt-1.5 w-full space-y-1">
+                              <p className="w-full rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1 text-[10px] font-medium leading-snug text-red-600">
+                                No facility — order ended
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setRestoreInProcessOrder(order)}
+                                className="text-left text-[10px] font-semibold text-[#007F96] hover:underline"
+                              >
+                                Back to In Process
+                              </button>
+                            </div>
                           )}
 
                         {order.year && (
@@ -1895,7 +1926,11 @@ export default function OrdersTable({
                             <WorkflowStageItem
                               key={stage.key || stage.label}
                               stage={stage}
-                              href={getWorkflowStageHref(stage, order)}
+                              href={getWorkflowStageHref(stage, order, {
+                                listReturnTo,
+                                personalMode,
+                                companyPortalMode,
+                              })}
                               onAdvance={
                                 stage.canAdvance
                                   ? () =>
@@ -2013,6 +2048,10 @@ export default function OrdersTable({
                           openCnrTextModal(setCnrTextModal, order, "Reason")
                         }
                         allowStandardInvoice={true}
+                        blockInvoiceCreate={
+                          companyPortalMode &&
+                          order.companyPortalStatus === "No facility"
+                        }
                         providerEmail={
                           order.providerEmail ||
                           order.invoice?.providerEmail ||
@@ -2136,6 +2175,7 @@ export default function OrdersTable({
                                 returnTo: resolveOrderListReturnTo(order, {
                                   personalMode,
                                   companyPortalMode,
+                                  listReturnTo,
                                 }),
                               })}
                               className="font-semibold text-red-500 hover:underline"
@@ -2476,6 +2516,35 @@ export default function OrdersTable({
       />
 
       <ConfirmModal
+        open={Boolean(restoreInProcessOrder)}
+        title="Restore to In Process?"
+        message="Do you really want to change this order status back to In Process? Invoice and facility tooling will be available again."
+        variant="warning"
+        confirmLabel={restoringInProcess ? "Restoring..." : "Yes, restore"}
+        cancelLabel="Cancel"
+        confirmDisabled={restoringInProcess}
+        onCancel={() => {
+          if (restoringInProcess) return;
+          setRestoreInProcessOrder(null);
+        }}
+        onConfirm={async () => {
+          if (!restoreInProcessOrder?.dbId || restoringInProcess) return;
+          setRestoringInProcess(true);
+          try {
+            await restoreCompanyOrderInProcess(restoreInProcessOrder.dbId);
+            setRestoreInProcessOrder(null);
+            await fetchOrders({ silent: true, force: true });
+          } catch (err) {
+            setError(
+              getApiErrorMessage(err, "Failed to restore order to In Process")
+            );
+          } finally {
+            setRestoringInProcess(false);
+          }
+        }}
+      />
+
+      <ConfirmModal
         open={deleteModal.open}
         title="Delete Order"
         message="Are you sure you want to delete this order?"
@@ -2675,7 +2744,7 @@ function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
   );
 }
 
-function getWorkflowStageHref(stage, order) {
+function getWorkflowStageHref(stage, order, options = {}) {
   if (stage?.isCompanyPortalStage) {
     if (stage.showScanRecordsLink) {
       return getCompanyPortalRecordsUploadHref(order);
@@ -2693,7 +2762,7 @@ function getWorkflowStageHref(stage, order) {
       isWorkflowStageComplete(stage.status) || allUploaded;
 
     if (!isComplete) {
-      const returnTo = resolveOrderListReturnTo(order);
+      const returnTo = resolveOrderListReturnTo(order, options);
       return `/orders/scan-medical-records?orderId=${encodeURIComponent(
         order.dbId
       )}&returnTo=${encodeURIComponent(returnTo)}`;
@@ -2705,7 +2774,7 @@ function getWorkflowStageHref(stage, order) {
     !isWorkflowStageComplete(stage.status)
   ) {
     return buildOrderEditHref(order.dbId, {
-      returnTo: resolveOrderListReturnTo(order),
+      returnTo: resolveOrderListReturnTo(order, options),
       panel: "payment",
     });
   }
@@ -2955,6 +3024,7 @@ function InvoiceBlock({
   onSendCnrRecord,
   onResendCnrRecord,
   allowStandardInvoice = true,
+  blockInvoiceCreate = false,
   providerEmail = "",
   onCreateInvoice,
   onReviewInvoice,
@@ -3187,13 +3257,17 @@ function InvoiceBlock({
       ) : null}
     </>
   ) : !isCnr ? (
-        <button
-          type="button"
-          onClick={onCreateXrayInvoice}
-      className="block text-left text-[#007F96] underline"
-        >
-          Create Xray Invoice
-        </button>
+    blockInvoiceCreate ? (
+      <p className="text-[#94A3B8]">X-ray invoice unavailable (No facility)</p>
+    ) : (
+      <button
+        type="button"
+        onClick={onCreateXrayInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Create Xray Invoice
+      </button>
+    )
   ) : null;
 
   if (isCnr) {
@@ -3201,13 +3275,19 @@ function InvoiceBlock({
       <>
         {allowStandardInvoice ? (
           <>
-            <button
-              type="button"
-              onClick={onCreateInvoice}
-              className="block text-left text-[#007F96] underline"
-            >
-              Create Invoice
-            </button>
+            {blockInvoiceCreate ? (
+              <p className="text-[#94A3B8]">
+                Invoice unavailable (No facility)
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={onCreateInvoice}
+                className="block text-left text-[#007F96] underline"
+              >
+                Create Invoice
+              </button>
+            )}
 
             <button
               type="button"
@@ -3217,8 +3297,8 @@ function InvoiceBlock({
               Cover Sheet
             </button>
 
-            {sendInvoiceButton}
-            {resendInvoiceButton}
+            {!blockInvoiceCreate ? sendInvoiceButton : null}
+            {!blockInvoiceCreate ? resendInvoiceButton : null}
           </>
         ) : null}
       </>
@@ -3272,15 +3352,21 @@ function InvoiceBlock({
       <div className="space-y-1 text-[10px]">
         {allowStandardInvoice ? (
           <>
-            <button
-              type="button"
-              onClick={onCreateInvoice}
-              className="block text-left text-[#007F96] underline"
-            >
-              Create Invoice
-        </button>
+            {blockInvoiceCreate ? (
+              <p className="text-[#94A3B8]">
+                Invoice unavailable (No facility)
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={onCreateInvoice}
+                className="block text-left text-[#007F96] underline"
+              >
+                Create Invoice
+              </button>
+            )}
 
-            {facilityFee > 0 ? (
+            {!blockInvoiceCreate && facilityFee > 0 ? (
               <p className="text-[#B45309]">
                 Facility fee {formatMoneyAmount(facilityFee)} (included in invoice)
               </p>
@@ -3294,14 +3380,14 @@ function InvoiceBlock({
               Cover Sheet
             </button>
 
-            {sendInvoiceButton}
-            {resendInvoiceButton}
+            {!blockInvoiceCreate ? sendInvoiceButton : null}
+            {!blockInvoiceCreate ? resendInvoiceButton : null}
           </>
         ) : null}
         {!isCnr ? xraySection : null}
-    </div>
-  );
-}
+      </div>
+    );
+  }
 
   if (!allowStandardInvoice) {
     return <div className="space-y-1 text-[10px]">{xraySection}</div>;

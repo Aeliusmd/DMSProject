@@ -20,6 +20,7 @@ function resolveReturnPath(returnTo) {
   const normalized = `${returnTo || ""}`.trim().replace(/^\/+/, "");
   if (normalized === "company-orders") return "/company-orders";
   if (normalized === "personal-orders") return "/personal-orders";
+  if (normalized === "reports") return "/reports";
   return "/orders";
 }
 

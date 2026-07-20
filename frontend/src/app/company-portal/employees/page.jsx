@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPortalDashboardShell";
 import CompanyCreateEmployeeModal from "@/components/company-portal/CompanyCreateEmployeeModal";
@@ -13,33 +13,82 @@ import {
 import {
   createCompanyEmployee,
   formatMoney,
-  listCompanyEmployees,
+  listCompanyEmployeesPaginated,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+
+const EMPLOYEES_PAGE_SIZE = 10;
 
 export default function CompanyEmployeesPage() {
   const router = useRouter();
   const [employees, setEmployees] = useState([]);
-  const [search, setSearch] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [cursorHistory, setCursorHistory] = useState([null]);
+  const cursorHistoryRef = useRef([null]);
+  const [pagination, setPagination] = useState({
+    pageSize: EMPLOYEES_PAGE_SIZE,
+    hasMore: false,
+    nextCursor: null,
+  });
+  const requestIdRef = useRef(0);
 
-  const loadEmployees = useCallback(async (term = search) => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await listCompanyEmployees(term);
-      setEmployees(response?.data?.employees || []);
-    } catch (err) {
-      setError(getApiErrorMessage(err, "Unable to load employees"));
-      setEmployees([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [search]);
+  useEffect(() => {
+    cursorHistoryRef.current = cursorHistory;
+  }, [cursorHistory]);
+
+  const loadEmployeesPage = useCallback(
+    async ({ page = 1, cursor = null, search = "" } = {}) => {
+      const requestId = (requestIdRef.current += 1);
+      setLoading(true);
+      setError("");
+
+      try {
+        const response = await listCompanyEmployeesPaginated({
+          search,
+          cursor,
+          pageSize: EMPLOYEES_PAGE_SIZE,
+        });
+        if (requestId !== requestIdRef.current) return;
+
+        const data = response?.data || {};
+        const pageMeta = data.pagination || {};
+        setEmployees(data.employees || []);
+        setPagination({
+          pageSize: Number(pageMeta.pageSize) || EMPLOYEES_PAGE_SIZE,
+          hasMore: Boolean(pageMeta.hasMore),
+          nextCursor: pageMeta.nextCursor || null,
+        });
+        setCurrentPage(page);
+        setCursorHistory((prev) => {
+          const next = prev.slice(0, page - 1);
+          next[page - 1] = cursor;
+          if (pageMeta.hasMore && pageMeta.nextCursor) {
+            next[page] = pageMeta.nextCursor;
+          }
+          return next;
+        });
+      } catch (err) {
+        if (requestId !== requestIdRef.current) return;
+        setError(getApiErrorMessage(err, "Unable to load employees"));
+        setEmployees([]);
+        setPagination({
+          pageSize: EMPLOYEES_PAGE_SIZE,
+          hasMore: false,
+          nextCursor: null,
+        });
+      } finally {
+        if (requestId === requestIdRef.current) setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!getCompanyAccessToken()) {
@@ -54,12 +103,17 @@ export default function CompanyEmployeesPage() {
     }
 
     getCompanyCurrentUser().catch(() => router.replace("/company-portal/login"));
-    loadEmployees("");
-  }, [router, loadEmployees]);
+    loadEmployeesPage({ page: 1, cursor: null, search: "" });
+  }, [router, loadEmployeesPage]);
 
   const handleSearch = (event) => {
     event.preventDefault();
-    loadEmployees(search);
+    const nextSearch = searchDraft.trim();
+    setAppliedSearch(nextSearch);
+    const nextHistory = [null];
+    cursorHistoryRef.current = nextHistory;
+    setCursorHistory(nextHistory);
+    loadEmployeesPage({ page: 1, cursor: null, search: nextSearch });
   };
 
   const handleCreate = async (payload) => {
@@ -68,10 +122,33 @@ export default function CompanyEmployeesPage() {
       await createCompanyEmployee(payload);
       setModalOpen(false);
       setSuccessMessage("Employee created and credentials emailed successfully.");
-      await loadEmployees(search);
+      const nextHistory = [null];
+      cursorHistoryRef.current = nextHistory;
+      setCursorHistory(nextHistory);
+      await loadEmployeesPage({
+        page: 1,
+        cursor: null,
+        search: appliedSearch,
+      });
     } finally {
       setCreating(false);
     }
+  };
+
+  const goPrev = () => {
+    if (currentPage <= 1 || loading) return;
+    const prevPage = currentPage - 1;
+    const cursor = cursorHistoryRef.current[prevPage - 1] ?? null;
+    loadEmployeesPage({ page: prevPage, cursor, search: appliedSearch });
+  };
+
+  const goNext = () => {
+    if (!pagination.hasMore || loading) return;
+    const nextPage = currentPage + 1;
+    const cursor =
+      pagination.nextCursor || cursorHistoryRef.current[currentPage] || null;
+    if (!cursor) return;
+    loadEmployeesPage({ page: nextPage, cursor, search: appliedSearch });
   };
 
   return (
@@ -98,8 +175,8 @@ export default function CompanyEmployeesPage() {
         >
           <input
             type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)}
             placeholder="Search by name or email"
             className="h-11 flex-1 rounded-[8px] border border-[#E2E8F0] px-3 text-[13px] outline-none focus:border-[#0097B2]"
           />
@@ -138,13 +215,19 @@ export default function CompanyEmployeesPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-8 text-center text-[#94A3B8]">
+                    <td
+                      colSpan={5}
+                      className="px-5 py-8 text-center text-[#94A3B8]"
+                    >
                       Loading employees...
                     </td>
                   </tr>
                 ) : employees.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-5 py-8 text-center text-[#94A3B8]">
+                    <td
+                      colSpan={5}
+                      className="px-5 py-8 text-center text-[#94A3B8]"
+                    >
                       No employees found.
                     </td>
                   </tr>
@@ -180,6 +263,31 @@ export default function CompanyEmployeesPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-[#F1F5F9] px-5 py-3">
+            <p className="text-[11px] text-[#64748B]">
+              Page {currentPage}
+              {pagination.hasMore ? " · more available" : ""}
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={goPrev}
+                disabled={currentPage <= 1 || loading}
+                className="inline-flex h-8 items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={!pagination.hasMore || loading}
+                className="inline-flex h-8 items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </section>
       </div>

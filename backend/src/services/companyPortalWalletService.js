@@ -121,9 +121,10 @@ async function getWalletSummary(companyUserId) {
   const allocatedBalance = toMoney(allocatedTotal);
   const totalBalance = toMoney(unallocatedBalance + allocatedBalance);
 
-  const transactions = await CompanyPortalWalletTransaction.listForCompany(
+  // First page only — use listWalletTransactions for full keyset browsing.
+  const txPage = await CompanyPortalWalletTransaction.listForCompanyKeyset(
     companyUserId,
-    { limit: 25 }
+    { pageSize: 10 }
   );
 
   return {
@@ -131,7 +132,34 @@ async function getWalletSummary(companyUserId) {
     allocatedBalance,
     totalBalance,
     currency: (config.stripe.currency || "usd").toUpperCase(),
-    transactions: transactions.map(formatTransaction),
+    transactions: txPage.rows.map(formatTransaction),
+    transactionPagination: {
+      type: "keyset",
+      pageSize: txPage.pageSize,
+      hasMore: txPage.hasMore,
+      nextCursor: txPage.nextCursor,
+    },
+  };
+}
+
+async function listWalletTransactions(
+  companyUserId,
+  { cursor = null, pageSize = 10 } = {}
+) {
+  await CompanyPortalWallet.ensureForCompany(companyUserId);
+  const txPage = await CompanyPortalWalletTransaction.listForCompanyKeyset(
+    companyUserId,
+    { cursor, pageSize }
+  );
+
+  return {
+    transactions: txPage.rows.map(formatTransaction),
+    pagination: {
+      type: "keyset",
+      pageSize: txPage.pageSize,
+      hasMore: txPage.hasMore,
+      nextCursor: txPage.nextCursor,
+    },
   };
 }
 
@@ -489,6 +517,7 @@ async function debitForOrder(
 
 module.exports = {
   getWalletSummary,
+  listWalletTransactions,
   getAvailableOrderBalance,
   assertSufficientBalance,
   assertSufficientOrderBalance,

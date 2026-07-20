@@ -1,5 +1,32 @@
 const { getPool } = require("../config/database");
 
+function encodeNameCursor(name, id) {
+  if (!name || !id) return null;
+  try {
+    return Buffer.from(
+      JSON.stringify({ name: String(name), id: Number(id) }),
+      "utf8"
+    ).toString("base64url");
+  } catch {
+    return null;
+  }
+}
+
+function decodeNameCursor(rawCursor) {
+  if (rawCursor == null || rawCursor === "") return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(String(rawCursor), "base64url").toString("utf8")
+    );
+    const name = `${parsed?.name || ""}`;
+    const id = Number(parsed?.id);
+    if (!name || !Number.isFinite(id) || id <= 0) return null;
+    return { name, id };
+  } catch {
+    return null;
+  }
+}
+
 class CompanyPortalEmployee {
   static async findByEmail(email, connection = null) {
     const db = connection || getPool();
@@ -61,6 +88,66 @@ class CompanyPortalEmployee {
       params
     );
     return rows;
+  }
+
+  static async listForCompanyKeyset(
+    companyUserId,
+    { search = "", cursor = null, pageSize = 10 } = {},
+    connection = null
+  ) {
+    const db = connection || getPool();
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 10, 1), 50);
+    const queryLimit = safePageSize + 1;
+    const term = `${search || ""}`.trim().toLowerCase();
+    const params = { companyUserId };
+    let searchClause = "";
+    let cursorCondition = "";
+
+    if (term) {
+      searchClause = `AND (
+        LOWER(name) LIKE :search
+        OR LOWER(email) LIKE :search
+      )`;
+      params.search = `%${term}%`;
+    }
+
+    const decoded = decodeNameCursor(cursor);
+    if (decoded) {
+      cursorCondition = `AND (
+        name > :cursorName
+        OR (
+          name = :cursorName
+          AND id > :cursorId
+        )
+      )`;
+      params.cursorName = decoded.name;
+      params.cursorId = decoded.id;
+    }
+
+    const [rows] = await db.execute(
+      `SELECT id, company_user_id, name, email, wallet_balance, is_active,
+              last_login_at, created_at, updated_at
+       FROM company_portal_employees
+       WHERE company_user_id = :companyUserId
+         AND deleted_at IS NULL
+         ${searchClause}
+         ${cursorCondition}
+       ORDER BY name ASC, id ASC
+       LIMIT ${queryLimit}`,
+      params
+    );
+
+    const hasMore = rows.length > safePageSize;
+    const pageRows = hasMore ? rows.slice(0, safePageSize) : rows;
+    const lastRow = pageRows[pageRows.length - 1] || null;
+
+    return {
+      rows: pageRows,
+      pageSize: safePageSize,
+      hasMore,
+      nextCursor:
+        hasMore && lastRow ? encodeNameCursor(lastRow.name, lastRow.id) : null,
+    };
   }
 
   static async create(data, connection = null) {

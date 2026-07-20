@@ -2758,6 +2758,13 @@ async function createOrUpdateXrayInvoice(body, userId) {
     throw new ApiError(404, "Order not found");
   }
 
+  {
+    const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+    await companyPortalInternalSyncService.assertCompanyPortalOrderAllowsInvoicing(
+      orderId
+    );
+  }
+
   const pool = getPool();
   const connection = await pool.getConnection();
 
@@ -2862,6 +2869,13 @@ async function createInvoice(body, userId) {
 
   if (!order) {
     throw new ApiError(404, "Order not found");
+  }
+
+  {
+    const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
+    await companyPortalInternalSyncService.assertCompanyPortalOrderAllowsInvoicing(
+      orderId
+    );
   }
 
   if (Number(order.certificate_no_records)) {

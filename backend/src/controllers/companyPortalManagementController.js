@@ -5,6 +5,25 @@ const companyPortalEmployeeService = require("../services/companyPortalEmployeeS
 const companyPortalWalletService = require("../services/companyPortalWalletService");
 
 exports.listEmployees = asyncHandler(async (req, res) => {
+  const useKeyset =
+    String(req.query.pagination || "").trim().toLowerCase() === "keyset";
+
+  if (useKeyset) {
+    const pageSize = Math.min(
+      Math.max(Number(req.query.pageSize) || 10, 1),
+      50
+    );
+    const result = await companyPortalEmployeeService.listEmployeesPaginated(
+      req.companyUser.id,
+      {
+        search: req.query.search || "",
+        cursor: req.query.cursor || null,
+        pageSize,
+      }
+    );
+    return ApiResponse.success(res, result);
+  }
+
   const employees = await companyPortalEmployeeService.listEmployees(
     req.companyUser.id,
     { search: req.query.search || "" }
@@ -37,6 +56,18 @@ exports.getWalletSummary = asyncHandler(async (req, res) => {
     req.companyUser.id
   );
   return ApiResponse.success(res, summary);
+});
+
+exports.listWalletTransactions = asyncHandler(async (req, res) => {
+  const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 10, 1), 50);
+  const result = await companyPortalWalletService.listWalletTransactions(
+    req.companyUser.id,
+    {
+      cursor: req.query.cursor || null,
+      pageSize,
+    }
+  );
+  return ApiResponse.success(res, result);
 });
 
 exports.createTopupCheckout = asyncHandler(async (req, res) => {

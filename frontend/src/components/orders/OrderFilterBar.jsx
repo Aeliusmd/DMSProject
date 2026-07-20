@@ -4,7 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getOrderFilterCompanies } from "@/lib/orders/orderApi";
-import { ORDER_PERIOD_OPTIONS } from "@/lib/orders/orderFilterConstants";
+import {
+  ORDER_PERIOD_OPTIONS,
+  ORDER_SOURCE_COMPANY,
+  ORDER_SOURCE_INTERNAL,
+  ORDER_SOURCE_OPTIONS,
+  ORDER_SOURCE_PERSONAL,
+  getStatusOptionsForOrderSource,
+  isPersonalOrderSource,
+} from "@/lib/orders/orderFilterConstants";
 
 export const defaultOrderFilters = {
   facility: "",
@@ -13,9 +21,16 @@ export const defaultOrderFilters = {
   period: "",
   status: "",
   search: "",
+  creationSource: ORDER_SOURCE_INTERNAL,
 };
 
-export default function OrderFilterBar({ filters, onFiltersChange }) {
+export default function OrderFilterBar({
+  filters,
+  onFiltersChange,
+  showOrderSourceFilter = false,
+  /** When source filter is hidden (e.g. Company Orders page), lock status options. */
+  statusOptionsVariant = "internal",
+}) {
   const [draftFilters, setDraftFilters] = useState(defaultOrderFilters);
   const [searchDraft, setSearchDraft] = useState("");
   const [facilities, setFacilities] = useState([]);
@@ -24,6 +39,15 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
   const [companiesLoadError, setCompaniesLoadError] = useState("");
 
   const appliedFilters = filters || defaultOrderFilters;
+  const draftOrderSource = showOrderSourceFilter
+    ? draftFilters.creationSource || ORDER_SOURCE_INTERNAL
+    : statusOptionsVariant === "company"
+      ? ORDER_SOURCE_COMPANY
+      : statusOptionsVariant === "personal"
+        ? ORDER_SOURCE_PERSONAL
+        : ORDER_SOURCE_INTERNAL;
+  const isPersonalDraft = isPersonalOrderSource(draftOrderSource);
+  const statusOptions = getStatusOptionsForOrderSource(draftOrderSource);
 
   const yearOptions = useMemo(() => {
     const currentYear = new Date().getFullYear();
@@ -38,6 +62,8 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
       year: appliedFilters.year || "",
       period: appliedFilters.period || "",
       status: appliedFilters.status || "",
+      creationSource:
+        appliedFilters.creationSource || ORDER_SOURCE_INTERNAL,
     });
     setSearchDraft(appliedFilters.search || "");
   }, [
@@ -47,6 +73,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
     appliedFilters.period,
     appliedFilters.status,
     appliedFilters.search,
+    appliedFilters.creationSource,
   ]);
 
   useEffect(() => {
@@ -86,15 +113,30 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
   }, []);
 
   const updateDraftFilter = (name, value) => {
-    setDraftFilters((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setDraftFilters((prev) => {
+      const next = {
+        ...prev,
+        [name]: value,
+      };
+
+      // Switching source clears status so incompatible values are not applied.
+      if (name === "creationSource") {
+        next.status = "";
+        if (value === ORDER_SOURCE_PERSONAL) {
+          next.company = "";
+        }
+      }
+
+      return next;
+    });
   };
 
   const handleApplyFilters = () => {
     onFiltersChange?.({
       ...draftFilters,
+      company: isPersonalOrderSource(draftFilters.creationSource)
+        ? ""
+        : draftFilters.company,
       search: appliedFilters.search || "",
     });
   };
@@ -119,13 +161,32 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
     onFiltersChange?.(defaultOrderFilters);
   };
 
+  const filterGridClass = showOrderSourceFilter
+    ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[170px_160px_180px_140px_170px_140px_auto_auto]"
+    : "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_auto_auto]";
+
   return (
     <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
       <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
         Filters
       </h2>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_auto_auto]">
+      <div className={filterGridClass}>
+        {showOrderSourceFilter ? (
+          <select
+            value={draftOrderSource}
+            onChange={(e) => updateDraftFilter("creationSource", e.target.value)}
+            className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+            aria-label="Order source"
+          >
+            {ORDER_SOURCE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        ) : null}
+
         <div>
           <select
             value={draftFilters.facility}
@@ -149,28 +210,30 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           )}
         </div>
 
-        <div>
-          <select
-            value={draftFilters.company}
-            onChange={(e) => updateDraftFilter("company", e.target.value)}
-            disabled={Boolean(companiesLoadError)}
-            className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option value="">
-              {companiesLoadError ? "Companies unavailable" : "All Company"}
-            </option>
-            {companies.map((company) => (
-              <option key={company} value={company}>
-                {company}
+        {!isPersonalDraft ? (
+          <div>
+            <select
+              value={draftFilters.company}
+              onChange={(e) => updateDraftFilter("company", e.target.value)}
+              disabled={Boolean(companiesLoadError)}
+              className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="">
+                {companiesLoadError ? "Companies unavailable" : "All Company"}
               </option>
-            ))}
-          </select>
-          {companiesLoadError && (
-            <p className="mt-1 text-[10px] font-medium text-red-600">
-              {companiesLoadError}
-            </p>
-          )}
-        </div>
+              {companies.map((company) => (
+                <option key={company} value={company}>
+                  {company}
+                </option>
+              ))}
+            </select>
+            {companiesLoadError && (
+              <p className="mt-1 text-[10px] font-medium text-red-600">
+                {companiesLoadError}
+              </p>
+            )}
+          </div>
+        ) : null}
 
         <select
           value={draftFilters.year}
@@ -202,14 +265,11 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           onChange={(e) => updateDraftFilter("status", e.target.value)}
           className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
-          <option value="">All Status</option>
-          <option value="active">Active</option>
-          <option value="ready">Ready</option>
-          <option value="ready_pickup">Ready to Pickup</option>
-          <option value="completed">Completed</option>
-          <option value="writeoffs">Write Offs</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="deleted">Deleted</option>
+          {statusOptions.map((option) => (
+            <option key={option.value || "all"} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
 
         <button
