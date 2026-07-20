@@ -7,7 +7,7 @@ const {
   addMaxLengthError,
   isValidPositiveIntId,
 } = require("./validationHelpers");
-const { sanitizeText } = require("../utils/sanitize");
+const { sanitizeText, sanitizeSearchText } = require("../utils/sanitize");
 const {
   addPersonNameFormatError,
   addNoHtmlMarkupError,
@@ -438,12 +438,18 @@ function validatePersonalRequestsListQuery(query = {}) {
     errors.push({ field: "status", message: "Invalid status filter" });
   }
 
+  const search = sanitizeSearchText(query.search, { maxLength: 200 });
+  if (search && hasHtmlMarkup(search)) {
+    errors.push({ field: "search", message: htmlMarkupMessage("search") });
+  }
+
   return {
     valid: errors.length === 0,
     errors,
     pageSize,
     cursor: cursor || null,
     status: status || null,
+    search: search || null,
   };
 }
 

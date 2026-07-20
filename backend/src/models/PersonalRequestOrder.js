@@ -4,6 +4,8 @@
  */
 
 const { getPool } = require("../config/database");
+const { sanitizeSearchText } = require("../utils/sanitize");
+const { likeContains } = require("../utils/sqlSafety");
 
 function encodeCreatedCursor(createdAt, id) {
   if (!createdAt || !id) return null;
@@ -53,6 +55,7 @@ class PersonalRequestOrder {
       cursor = null,
       paidOnly = false,
       status = null,
+      search = null,
       withinLookupWindow = false,
     } = {}
   ) {
@@ -76,6 +79,21 @@ class PersonalRequestOrder {
     if (status) {
       conditions.push("o.portal_status = :status");
       params.status = status;
+    }
+
+    const searchTerm = sanitizeSearchText(search, { maxLength: 200 });
+    if (searchTerm) {
+      conditions.push(`(
+        o.confirmation_reference LIKE :search
+        OR o.first_name LIKE :search
+        OR o.last_name LIKE :search
+        OR EXISTS (
+          SELECT 1 FROM personal_request_facilities prf
+          WHERE prf.personal_request_order_id = o.id
+            AND prf.facility_name LIKE :search
+        )
+      )`);
+      params.search = likeContains(searchTerm);
     }
 
     const decodedCursor = decodeCreatedCursor(cursor);
@@ -196,7 +214,7 @@ class PersonalRequestOrder {
     const conditions = ["o.processing_fee_paid = 1"];
     const params = {};
 
-    const search = `${filters.search || ""}`.trim();
+    const search = sanitizeSearchText(filters.search, { maxLength: 200 });
     if (search) {
       conditions.push(`(
         o.confirmation_reference LIKE :search
@@ -210,7 +228,7 @@ class PersonalRequestOrder {
             AND prf.facility_name LIKE :search
         )
       )`);
-      params.search = `%${search}%`;
+      params.search = likeContains(search);
     }
 
     if (filters.status) {

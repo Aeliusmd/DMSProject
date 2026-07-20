@@ -123,6 +123,7 @@ exports.listRequests = asyncHandler(async (req, res) => {
       pageSize: validation.pageSize,
       cursor: validation.cursor,
       status: validation.status,
+      search: validation.search,
     }
   );
 

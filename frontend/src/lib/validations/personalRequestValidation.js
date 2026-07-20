@@ -111,11 +111,39 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
     errors.recordsDateEnd = "End date must be on or after start date";
   }
 
+  if (data.treatingDoctor?.trim()) {
+    const err = validateNoHtmlMarkup(data.treatingDoctor, {
+      fieldLabel: "Treating doctor",
+    });
+    if (err) errors.treatingDoctor = err;
+  }
+
   const selectedTypes = RECORD_TYPE_OPTIONS.filter(
     (opt) => data.recordTypes?.[opt.id]
   );
   if (!selectedTypes.length) {
     errors.recordTypes = "Select at least one record type";
+  }
+
+  const delivery = `${data.deliveryPreference || "download"}`.toLowerCase();
+  if (delivery !== "download" && delivery !== "mail") {
+    errors.deliveryPreference = "Select download or mail delivery";
+  }
+
+  if (delivery === "mail") {
+    if (!data.mailAddress?.trim()) {
+      errors.mailAddress = "Mailing address is required for mail delivery";
+    } else {
+      const err = validateNoHtmlMarkup(data.mailAddress, {
+        fieldLabel: "Mailing address",
+      });
+      if (err) errors.mailAddress = err;
+    }
+  } else if (data.mailAddress?.trim()) {
+    const err = validateNoHtmlMarkup(data.mailAddress, {
+      fieldLabel: "Mailing address",
+    });
+    if (err) errors.mailAddress = err;
   }
 
   if (!data.driverLicenseNumber?.trim()) {
@@ -134,11 +162,16 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
 
 export function validateStatusLookupForm(data) {
   const errors = {};
-  const hasRef = Boolean(data.confirmationReference?.trim());
+  const ref = `${data.confirmationReference || ""}`.trim();
   const dob = String(data.dob || "").trim();
 
-  if (!hasRef) {
+  if (!ref) {
     errors.confirmationReference = "Enter your order / confirmation number";
+  } else {
+    const err = validateNoHtmlMarkup(ref, {
+      fieldLabel: "Confirmation number",
+    });
+    if (err) errors.confirmationReference = err;
   }
 
   if (!dob) {

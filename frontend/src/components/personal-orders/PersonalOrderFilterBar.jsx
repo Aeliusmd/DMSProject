@@ -3,10 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getFacilities } from "@/lib/facilities/facilityApi";
+import { ORDER_PERIOD_OPTIONS } from "@/lib/orders/orderFilterConstants";
+
+const MAX_SEARCH_LENGTH = 200;
 
 export const defaultPersonalOrderFilters = {
   facility: "",
   status: "",
+  year: "",
+  period: "",
   search: "",
 };
 
@@ -18,6 +23,10 @@ const STATUS_OPTIONS = [
   { value: "released", label: "Released" },
 ];
 
+function clampSearch(value) {
+  return `${value || ""}`.trim().slice(0, MAX_SEARCH_LENGTH);
+}
+
 export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
   const [draftFilters, setDraftFilters] = useState(defaultPersonalOrderFilters);
   const [searchDraft, setSearchDraft] = useState("");
@@ -26,13 +35,26 @@ export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
 
   const appliedFilters = filters || defaultPersonalOrderFilters;
 
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 8 }, (_, index) => String(currentYear - index));
+  }, []);
+
   useEffect(() => {
     setDraftFilters({
       facility: appliedFilters.facility || "",
       status: appliedFilters.status || "",
+      year: appliedFilters.year || "",
+      period: appliedFilters.period || "",
     });
     setSearchDraft(appliedFilters.search || "");
-  }, [appliedFilters.facility, appliedFilters.status, appliedFilters.search]);
+  }, [
+    appliedFilters.facility,
+    appliedFilters.status,
+    appliedFilters.year,
+    appliedFilters.period,
+    appliedFilters.search,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -88,6 +110,41 @@ export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
           </select>
         </label>
 
+        <label className="flex min-w-[120px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
+          Year
+          <select
+            value={draftFilters.year}
+            onChange={(e) =>
+              setDraftFilters((prev) => ({ ...prev, year: e.target.value }))
+            }
+            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
+          >
+            <option value="">All years</option>
+            {yearOptions.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex min-w-[150px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
+          Period
+          <select
+            value={draftFilters.period}
+            onChange={(e) =>
+              setDraftFilters((prev) => ({ ...prev, period: e.target.value }))
+            }
+            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
+          >
+            {ORDER_PERIOD_OPTIONS.map((option) => (
+              <option key={option.value || "all"} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <label className="flex min-w-[160px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
           Status
           <select
@@ -135,13 +192,14 @@ export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
             Search
             <input
               value={searchDraft}
+              maxLength={MAX_SEARCH_LENGTH}
               onChange={(e) => setSearchDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
                   onFiltersChange?.({
                     ...appliedFilters,
-                    search: searchDraft.trim(),
+                    search: clampSearch(searchDraft),
                   });
                 }
               }}
@@ -154,7 +212,7 @@ export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
             onClick={() =>
               onFiltersChange?.({
                 ...appliedFilters,
-                search: searchDraft.trim(),
+                search: clampSearch(searchDraft),
               })
             }
             className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[13px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
