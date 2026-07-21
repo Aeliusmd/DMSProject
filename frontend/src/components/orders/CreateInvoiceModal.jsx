@@ -21,6 +21,7 @@ import {
   QUICK_RECORDS_FEE,
   REQUEST_TOTAL_WITH_RECORDS_FEE,
   resolveFullFeeAmounts,
+  resolvePersonalPortalInvoiceAmounts,
   resolvePersistedInvoiceAmounts,
 } from "@/lib/orders/paymentUtils";
 import {
@@ -277,29 +278,88 @@ export default function CreateInvoiceModal({
     return toNumber(prepaymentAmount);
   }, [prepaymentAmount]);
 
+  const personalPortalLineItemsTotal = useMemo(() => {
+    const storageOnly =
+      isEditMode && billedFacilitySearchFee > 0
+        ? displayStorageFee
+        : fullFees.storageFee;
+
+    return (
+      pagesAmount +
+      clericalAmount +
+      toNumber(formData.shippingHandling) +
+      storageOnly
+    );
+  }, [
+    isEditMode,
+    billedFacilitySearchFee,
+    displayStorageFee,
+    fullFees.storageFee,
+    pagesAmount,
+    clericalAmount,
+    formData.shippingHandling,
+  ]);
+
+  const personalPortalFinancials = useMemo(() => {
+    if (!isPersonalPortalOrder) return null;
+
+    return resolvePersonalPortalInvoiceAmounts({
+      lineItemsTotal: personalPortalLineItemsTotal,
+      facilityFee: facilitySearchFee,
+      prepaymentPaid,
+      writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+    });
+  }, [
+    isPersonalPortalOrder,
+    personalPortalLineItemsTotal,
+    facilitySearchFee,
+    prepaymentPaid,
+    persistedInvoiceMeta?.writeoffAmount,
+  ]);
+
   // Flat $20 records fee is separate from the $15 witness prepayment — do not
-  // credit prepayment against the records-fee invoice due. Personal portal
-  // processing fee stays paid/kept — do not deduct it from the invoice due.
-  const skipPrepaymentCredit = isPersonalPortalOrder;
+  // credit prepayment against the records-fee invoice due.
   const amountPaid = useMemo(() => {
-    if (
-      skipPrepaymentCredit ||
-      quickRecordsFee ||
-      isQuickRecordsFeeInvoice(formData)
-    ) {
+    if (isPersonalPortalOrder) {
+      return personalPortalFinancials?.amountPaid ?? 0;
+    }
+
+    if (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) {
       return 0;
     }
-    return prepaymentPaid;
-  }, [skipPrepaymentCredit, quickRecordsFee, formData, prepaymentPaid]);
 
-  const invoiceTotals = useMemo(
-    () =>
-      resolvePersistedInvoiceAmounts(totalAmount, amountPaid, {
-        writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
-        persistedStatus: persistedInvoiceMeta?.status || null,
-      }),
-    [totalAmount, amountPaid, persistedInvoiceMeta]
-  );
+    return prepaymentPaid;
+  }, [
+    isPersonalPortalOrder,
+    personalPortalFinancials,
+    quickRecordsFee,
+    formData,
+    prepaymentPaid,
+  ]);
+
+  const invoiceTotals = useMemo(() => {
+    if (isPersonalPortalOrder && personalPortalFinancials) {
+      return resolvePersistedInvoiceAmounts(
+        personalPortalFinancials.totalAmount,
+        personalPortalFinancials.amountPaid,
+        {
+          writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+          persistedStatus: persistedInvoiceMeta?.status || null,
+        }
+      );
+    }
+
+    return resolvePersistedInvoiceAmounts(totalAmount, amountPaid, {
+      writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+      persistedStatus: persistedInvoiceMeta?.status || null,
+    });
+  }, [
+    isPersonalPortalOrder,
+    personalPortalFinancials,
+    totalAmount,
+    amountPaid,
+    persistedInvoiceMeta,
+  ]);
 
   const invoiceIdForValidation =
     order?.invoiceId || order?.invoice?.invoiceId;
@@ -331,22 +391,24 @@ export default function CreateInvoiceModal({
   const prepaymentDueForCnr = isCnrOrder ? witnessFeeShortfall : 0;
   // $20 quick records fee (+ unpaid witness when applicable) + any pending
   // facility search fee — facility fee always stacks onto records/other fees.
-  const quickWitnessDue = skipPrepaymentCredit
+  const quickWitnessDue = isPersonalPortalOrder
     ? 0
     : Math.max(0, witnessFeeRequired - loadedPrepaymentAmount);
   const quickCollectTotal = isQuickMode
     ? QUICK_RECORDS_FEE + quickWitnessDue + pendingFacilityFeeAmount
     : null;
   const requestTotalDisplay = isQuickMode
-    ? (skipPrepaymentCredit
-        ? QUICK_RECORDS_FEE + pendingFacilityFeeAmount
-        : REQUEST_TOTAL_WITH_RECORDS_FEE + pendingFacilityFeeAmount)
+    ? isPersonalPortalOrder
+      ? QUICK_RECORDS_FEE + pendingFacilityFeeAmount
+      : REQUEST_TOTAL_WITH_RECORDS_FEE + pendingFacilityFeeAmount
     : null;
-  const displayDue = isCnrOrder
-    ? prepaymentDueForCnr
-    : isQuickMode
-      ? quickCollectTotal
-      : amountDue;
+  const displayDue = isPersonalPortalOrder
+    ? (personalPortalFinancials?.amountDue ?? 0)
+    : isCnrOrder
+      ? prepaymentDueForCnr
+      : isQuickMode
+        ? quickCollectTotal
+        : amountDue;
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -556,17 +618,19 @@ export default function CreateInvoiceModal({
             <MetaItem
               label="Invoiced"
               value={formatMoney(
-                isCnrOrder
-                  ? PAYMENT_CHARGE_AMOUNTS.prepayment
-                  : isQuickMode
-                    ? requestTotalDisplay
-                    : totalAmount
+                isPersonalPortalOrder
+                  ? (personalPortalFinancials?.totalAmount ?? totalAmount)
+                  : isCnrOrder
+                    ? PAYMENT_CHARGE_AMOUNTS.prepayment
+                    : isQuickMode
+                      ? requestTotalDisplay
+                      : totalAmount
               )}
             />
             <MetaItem
               label="Paid"
               value={formatMoney(
-                isCnrOrder || (isQuickMode && !skipPrepaymentCredit)
+                isCnrOrder || (isQuickMode && !isPersonalPortalOrder)
                   ? prepaymentPaid
                   : amountPaid
               )}
@@ -754,7 +818,7 @@ export default function CreateInvoiceModal({
             </h3>
 
             <div className="space-y-3">
-              {requestTotalDisplay != null && !skipPrepaymentCredit ? (
+              {requestTotalDisplay != null && !isPersonalPortalOrder ? (
                 <SummaryRow
                   label={
                     facilitySearchFee > 0
@@ -808,7 +872,11 @@ export default function CreateInvoiceModal({
               <SummaryRow
                 label="Invoice total"
                 value={formatMoney(
-                  isQuickMode ? quickCollectTotal : totalAmount
+                  isPersonalPortalOrder
+                    ? (personalPortalFinancials?.totalAmount ?? totalAmount)
+                    : isQuickMode
+                      ? quickCollectTotal
+                      : totalAmount
                 )}
               />
               {isCnrOrder ? (
@@ -833,11 +901,17 @@ export default function CreateInvoiceModal({
                 </>
               ) : isQuickMode ? (
                 <>
-                  {!skipPrepaymentCredit ? (
+                  {!isPersonalPortalOrder ? (
                     <SummaryRow
                       label={`Prepayment ${formatPaidBracket(witnessFeeRequired)}`}
                       value={formatMoney(loadedPrepaymentAmount)}
                       muted={loadedPrepaymentAmount >= witnessFeeRequired}
+                    />
+                  ) : personalPortalFinancials?.prepaymentCredit > 0 ? (
+                    <SummaryRow
+                      label="Prepayment"
+                      value={`-${formatMoney(personalPortalFinancials.prepaymentCredit)}`}
+                      muted
                     />
                   ) : null}
                   <SummaryRow
@@ -852,11 +926,16 @@ export default function CreateInvoiceModal({
                   ) : null}
                 </>
               ) : (
-                !skipPrepaymentCredit &&
-                prepaymentPaid > 0 && (
+                (isPersonalPortalOrder
+                  ? (personalPortalFinancials?.prepaymentCredit ?? 0) > 0
+                  : prepaymentPaid > 0) && (
                   <SummaryRow
                     label="Prepayment"
-                    value={`-${formatMoney(prepaymentPaid)}`}
+                    value={`-${formatMoney(
+                      isPersonalPortalOrder
+                        ? personalPortalFinancials.prepaymentCredit
+                        : prepaymentPaid
+                    )}`}
                     muted
                   />
                 )

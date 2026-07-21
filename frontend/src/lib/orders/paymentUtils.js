@@ -291,6 +291,42 @@ export function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 
   };
 }
 
+/** Prepayment credits line items only — not the facility search fee. */
+export function resolvePersonalPortalPrepaymentCredit(
+  prepaymentPaid,
+  lineItemsTotal
+) {
+  const prepayment = Math.max(0, parsePaymentAmount(prepaymentPaid));
+  const lineItems = Math.max(0, parsePaymentAmount(lineItemsTotal));
+  return Math.min(prepayment, lineItems);
+}
+
+export function resolvePersonalPortalInvoiceAmounts({
+  lineItemsTotal = 0,
+  facilityFee = 0,
+  prepaymentPaid = 0,
+  writeoffAmount = 0,
+} = {}) {
+  const lineItems = Math.max(0, parsePaymentAmount(lineItemsTotal));
+  const facility = Math.max(0, parsePaymentAmount(facilityFee));
+  const writeoff = Math.max(0, parsePaymentAmount(writeoffAmount));
+  const prepaymentCredit = resolvePersonalPortalPrepaymentCredit(
+    prepaymentPaid,
+    lineItems
+  );
+  const totalAmount = lineItems + facility;
+
+  return {
+    lineItemsTotal: lineItems,
+    facilityFee: facility,
+    totalAmount,
+    prepaymentCredit,
+    amountPaid: prepaymentCredit,
+    amountDue: Math.max(0, totalAmount - prepaymentCredit - writeoff),
+    overpayment: Math.max(0, prepaymentCredit - lineItems),
+  };
+}
+
 export function resolvePersistedInvoiceAmounts(
   totalAmount,
   amountPaid,

@@ -244,6 +244,34 @@ function sumStandardInvoicePayments(payments = []) {
   );
 }
 
+function splitLineItemsAndFacility(rowOrPayload = {}) {
+  const facilityFee = extractFacilitySearchFeeFromNotes(rowOrPayload.notes);
+  const storageFee = getStorageFee(rowOrPayload);
+  const storageOnly = Math.max(0, Number((storageFee - facilityFee).toFixed(2)));
+  const lineItemsTotal = calculateTotals({
+    pages: rowOrPayload.pages ?? rowOrPayload.page_count,
+    perPageAmount: rowOrPayload.perPageAmount ?? rowOrPayload.per_page_amount,
+    clericalTimeHours:
+      rowOrPayload.clericalTimeHours ?? rowOrPayload.clerical_time_hours,
+    clericalHourlyRate:
+      rowOrPayload.clericalHourlyRate ?? rowOrPayload.clerical_hourly_rate,
+    shippingHandling:
+      rowOrPayload.shippingHandling ?? rowOrPayload.shipping_handling,
+    storageFee: storageOnly,
+  }).totalAmount;
+
+  return {
+    lineItemsTotal,
+    facilityFee,
+    totalAmount: lineItemsTotal + facilityFee,
+  };
+}
+
+function resolvePersonalPortalPrepaymentCredit(orderPayments, lineItemsTotal) {
+  const prepaymentPaid = getOrderPaymentAmount(orderPayments, "prepayment");
+  return Math.min(prepaymentPaid, Math.max(0, toNumber(lineItemsTotal)));
+}
+
 function resolveAmountPaid(orderPayments, existing = null, invoiceShape = null, options = {}) {
   const fromOrderPayments =
     orderPayments !== undefined
@@ -251,27 +279,35 @@ function resolveAmountPaid(orderPayments, existing = null, invoiceShape = null, 
       : null;
   const fromExisting = existing ? toNumber(existing.amount_paid) : 0;
   const shape = invoiceShape || existing;
-  const skipPrepaymentCredit = Boolean(options.skipPrepaymentCredit);
+  const personalPortal = Boolean(options.personalPortalOrder);
 
-  // Flat $20 records-fee invoices do not credit the separate $15 prepayment.
-  // Personal portal: $35 processing fee is kept separate — do not deduct it
-  // from the records invoice (same idea as quick records fee).
-  if ((shape && isQuickRecordsFeeInvoice(shape)) || skipPrepaymentCredit) {
+  if (
+    existing &&
+    (existing.payment_method === "manual" || existing.payment_method === "online") &&
+    existing.status === "Paid"
+  ) {
+    return fromExisting;
+  }
+
+  // Personal portal: credit prepayment against line items only — facility fee
+  // is always due in full (not offset by the $35 processing fee).
+  if (personalPortal && shape) {
     if (
       existing &&
-      (existing.payment_method === "manual" || existing.payment_method === "online") &&
-      existing.status === "Paid"
+      (existing.payment_method === "manual" || existing.payment_method === "online")
     ) {
       return fromExisting;
     }
-    // Never credit order prepayment against personal-portal / quick invoices.
-    if (skipPrepaymentCredit) {
-      return existing &&
-        (existing.payment_method === "manual" ||
-          existing.payment_method === "online")
-        ? fromExisting
-        : 0;
-    }
+
+    const { lineItemsTotal } = splitLineItemsAndFacility(shape);
+    return resolvePersonalPortalPrepaymentCredit(
+      orderPayments || [],
+      lineItemsTotal
+    );
+  }
+
+  // Flat $20 records-fee invoices do not credit the separate $15 prepayment.
+  if (shape && isQuickRecordsFeeInvoice(shape)) {
     return existing ? fromExisting : 0;
   }
 
@@ -345,7 +381,7 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   const orderPayments = await Order.findPaymentsByOrderId(orderId, connection);
   const order = await Order.findById(orderId, connection);
   const financials = resolveRowFinancials(invoice, orderPayments, {
-    skipPrepaymentCredit: isPersonalPortalOrder(order),
+    personalPortalOrder: isPersonalPortalOrder(order),
   });
   const status = resolveInvoiceStatusForSave(
     invoice,
@@ -864,42 +900,42 @@ function calculateTotalsWithPayments(payload = {}, orderPayments = [], options =
 }
 
 function resolveRowFinancials(row, orderPayments = [], options = {}) {
-  const totals = calculateTotalsWithPayments(
-    {
-      pages: row.page_count,
-      perPageAmount: row.per_page_amount,
-      clericalTimeHours: row.clerical_time_hours,
-      clericalHourlyRate: row.clerical_hourly_rate,
-      shippingHandling: row.shipping_handling,
-      storageFee: getStorageFee(row),
-    },
-    orderPayments
-  );
+  const { lineItemsTotal, facilityFee, totalAmount } = splitLineItemsAndFacility(row);
   const fromOrderPayments = sumStandardInvoicePayments(orderPayments);
   const fromInvoice = toNumber(row.amount_paid);
-  const skipPrepaymentCredit = Boolean(options.skipPrepaymentCredit);
-  // Flat records-fee invoices ($20) are a separate charge from the $15 witness
-  // prepayment — do not credit prepayment against the records fee due.
-  // Personal portal processing fee is also kept separate (not deducted).
-  const amountPaid =
-    isQuickRecordsFeeInvoice(row) || skipPrepaymentCredit
-      ? row.payment_method === "manual" || row.payment_method === "online"
+  const personalPortal = Boolean(options.personalPortalOrder);
+  let amountPaid;
+
+  if (personalPortal) {
+    amountPaid =
+      row.payment_method === "manual" || row.payment_method === "online"
         ? fromInvoice
-        : 0
-      : row.payment_method === "manual" || row.payment_method === "online"
+        : resolvePersonalPortalPrepaymentCredit(orderPayments, lineItemsTotal);
+  } else if (isQuickRecordsFeeInvoice(row)) {
+    amountPaid =
+      row.payment_method === "manual" || row.payment_method === "online"
+        ? fromInvoice
+        : 0;
+  } else {
+    amountPaid =
+      row.payment_method === "manual" || row.payment_method === "online"
         ? Math.max(fromInvoice, fromOrderPayments)
         : orderPayments.length
           ? fromOrderPayments
           : fromInvoice;
+  }
+
   const writeoffAmount = toNumber(row.writeoff_amount);
   const { amountDue } = resolveInvoiceAmounts(
-    totals.totalAmount,
+    totalAmount,
     amountPaid,
     writeoffAmount
   );
 
   return {
-    totalAmount: totals.totalAmount,
+    totalAmount,
+    lineItemsTotal,
+    facilityFee,
     amountPaid,
     amountDue,
     writeoffAmount,
@@ -1168,6 +1204,16 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
         total: -Math.min(prepaymentPaid, DEFAULT_PREPAYMENT_CHARGE),
         italic: true,
       });
+    } else if (skipWitnessCredit && prepaymentPaid > 0) {
+      const prepaymentCredit = Math.min(prepaymentPaid, QUICK_RECORDS_FEE);
+      if (prepaymentCredit > 0) {
+        feeLines.push({
+          description: "Prepayment",
+          quantity: "",
+          total: -prepaymentCredit,
+          italic: true,
+        });
+      }
     }
 
     appendPrintInvoiceDeductions(feeLines, invoiceRow);
@@ -1176,7 +1222,7 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
       (skipWitnessCredit ? QUICK_RECORDS_FEE : REQUEST_TOTAL_WITH_RECORDS_FEE) +
       facilityFee;
     const amountPaid = skipWitnessCredit
-      ? 0
+      ? Math.min(prepaymentPaid, QUICK_RECORDS_FEE)
       : Math.min(prepaymentPaid, DEFAULT_PREPAYMENT_CHARGE);
     const writeoffAmount = toNumber(invoiceRow.writeoff_amount);
 
@@ -1243,24 +1289,37 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
     }
   }
 
-  if (prepaymentPaid > 0 && !isPersonalPortalOrder(orderRow)) {
+  if (prepaymentPaid > 0) {
     const prepayment = orderPayments.find((row) => row.payment_type === "prepayment");
     const checkLabel = trimOrNull(prepayment?.check_number)
       ? `CK# ${prepayment.check_number}`
       : "";
 
-    feeLines.push({
-      description: "Prepayment",
-      quantity: checkLabel,
-      total: -prepaymentPaid,
-      italic: true,
-    });
+    if (isPersonalPortalOrder(orderRow)) {
+      const { lineItemsTotal } = splitLineItemsAndFacility(invoiceRow);
+      const prepaymentCredit = Math.min(prepaymentPaid, lineItemsTotal);
+      if (prepaymentCredit > 0) {
+        feeLines.push({
+          description: "Prepayment",
+          quantity: checkLabel,
+          total: -prepaymentCredit,
+          italic: true,
+        });
+      }
+    } else {
+      feeLines.push({
+        description: "Prepayment",
+        quantity: checkLabel,
+        total: -prepaymentPaid,
+        italic: true,
+      });
+    }
   }
 
   appendPrintInvoiceDeductions(feeLines, invoiceRow);
 
   const financials = resolveRowFinancials(invoiceRow, orderPayments, {
-    skipPrepaymentCredit: isPersonalPortalOrder(orderRow),
+    personalPortalOrder: isPersonalPortalOrder(orderRow),
   });
 
   return {
@@ -1921,7 +1980,7 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     existing,
     invoiceShape,
     {
-      skipPrepaymentCredit: Boolean(options.skipPrepaymentCredit),
+      personalPortalOrder: Boolean(options.personalPortalOrder),
     }
   );
   const writeoffAmount = existing ? toNumber(existing.writeoff_amount) : 0;
@@ -2930,7 +2989,7 @@ async function createInvoice(body, userId) {
 
     const invoicePayload = buildInvoicePayload(invoiceBody, null, {
       orderPayments,
-      skipPrepaymentCredit: isPersonalPortalOrder(order),
+      personalPortalOrder: isPersonalPortalOrder(order),
     });
     const recipientEmails = await resolveInvoiceRecipientFromOrder(order, connection);
 
@@ -3048,7 +3107,7 @@ async function updateInvoice(id, body) {
 
     const invoicePayload = buildInvoicePayload(invoiceBody, existing, {
       orderPayments,
-      skipPrepaymentCredit: isPersonalPortalOrder(order),
+      personalPortalOrder: isPersonalPortalOrder(order),
     });
     const recipientEmails = order
       ? await resolveInvoiceRecipientFromOrder(order, connection)
