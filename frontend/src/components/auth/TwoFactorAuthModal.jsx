@@ -89,7 +89,9 @@ export default function TwoFactorAuthModal({
         accessExpiresAt: payload.accessExpiresAt,
       });
 
-      onSuccess?.();
+      // Allow personal portal login to await a "session verified" call
+      // before routing.
+      await Promise.resolve(onSuccess?.());
     } catch (requestError) {
       const { fieldErrors, message } = applyApiFieldErrors(requestError, {
         code: "otp",
