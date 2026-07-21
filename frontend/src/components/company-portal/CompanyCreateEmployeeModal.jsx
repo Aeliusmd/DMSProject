@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AuthInput from "@/components/ui/AuthInput";
-import PrimaryButton from "@/components/ui/PrimaryButton";
 import {
   applyApiFieldErrors,
   getApiErrorMessage,
@@ -118,17 +117,22 @@ export default function CompanyCreateEmployeeModal({
             </p>
           ) : null}
 
-          <div className="flex gap-3 pt-2">
+          <div className="grid grid-cols-2 gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-11 flex-1 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white text-[13px] font-medium text-[#334155]"
+              disabled={submitting}
+              className="inline-flex h-11 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white text-[13px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Cancel
             </button>
-            <PrimaryButton type="submit" disabled={submitting}>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex h-11 items-center justify-center rounded-[8px] bg-[#0097B2] text-[13px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:bg-[#0097B2]/45"
+            >
               {submitting ? "Creating..." : "Create employee"}
-            </PrimaryButton>
+            </button>
           </div>
         </form>
       </div>

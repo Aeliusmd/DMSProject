@@ -16,6 +16,21 @@ app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  // API responses are JSON/files, not app HTML. Restrict who may embed API
+  // content in iframes to the configured frontend origin only.
+  const clientOrigin = (() => {
+    try {
+      return new URL(config.clientUrl).origin;
+    } catch {
+      return null;
+    }
+  })();
+  res.setHeader(
+    "Content-Security-Policy",
+    clientOrigin
+      ? `frame-ancestors 'self' ${clientOrigin}`
+      : "frame-ancestors 'self'"
+  );
   next();
 });
 

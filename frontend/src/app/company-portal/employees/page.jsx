@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPortalDashboardShell";
 import CompanyCreateEmployeeModal from "@/components/company-portal/CompanyCreateEmployeeModal";
-import PrimaryButton from "@/components/ui/PrimaryButton";
+import CompanyEmployeeActivityLogModal from "@/components/company-portal/CompanyEmployeeActivityLogModal";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
   getStoredCompanyUser,
@@ -14,6 +15,7 @@ import {
   createCompanyEmployee,
   formatMoney,
   listCompanyEmployeesPaginated,
+  setCompanyEmployeeStatus,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { sanitizeSearchText } from "@/lib/company-portal/companyPortalValidation";
@@ -30,6 +32,13 @@ export default function CompanyEmployeesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [statusUpdatingId, setStatusUpdatingId] = useState(null);
+  const [confirmModal, setConfirmModal] = useState({
+    open: false,
+    employee: null,
+    nextActive: false,
+  });
+  const [activityEmployee, setActivityEmployee] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
@@ -137,6 +146,58 @@ export default function CompanyEmployeesPage() {
     }
   };
 
+  const requestStatusChange = (employee, nextActive) => {
+    setConfirmModal({
+      open: true,
+      employee,
+      nextActive,
+    });
+  };
+
+  const closeConfirmModal = () => {
+    if (statusUpdatingId) return;
+    setConfirmModal({ open: false, employee: null, nextActive: false });
+  };
+
+  const confirmStatusChange = async () => {
+    const employee = confirmModal.employee;
+    const nextActive = confirmModal.nextActive;
+    if (!employee?.id || statusUpdatingId) return;
+
+    setStatusUpdatingId(employee.id);
+    setError("");
+    setSuccessMessage("");
+
+    try {
+      const response = await setCompanyEmployeeStatus(employee.id, nextActive);
+      const updated = response?.data?.employee;
+      const message =
+        response?.data?.message ||
+        response?.message ||
+        (nextActive
+          ? "Employee account enabled successfully."
+          : "Employee account disabled successfully.");
+
+      if (updated) {
+        setEmployees((prev) =>
+          prev.map((row) =>
+            Number(row.id) === Number(updated.id)
+              ? { ...row, isActive: Boolean(updated.isActive) }
+              : row
+          )
+        );
+      }
+
+      setSuccessMessage(message);
+      setConfirmModal({ open: false, employee: null, nextActive: false });
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Unable to update employee status"));
+      setConfirmModal({ open: false, employee: null, nextActive: false });
+    } finally {
+      setStatusUpdatingId(null);
+    }
+  };
+
   const goPrev = () => {
     if (currentPage <= 1 || loading) return;
     const prevPage = currentPage - 1;
@@ -153,6 +214,9 @@ export default function CompanyEmployeesPage() {
     loadEmployeesPage({ page: nextPage, cursor, search: appliedSearch });
   };
 
+  const confirmEmployee = confirmModal.employee;
+  const isDisabling = confirmModal.open && !confirmModal.nextActive;
+
   return (
     <CompanyPortalDashboardShell title="Employee Management">
       <div className="space-y-5">
@@ -163,12 +227,16 @@ export default function CompanyEmployeesPage() {
             </h2>
             <p className="mt-1 text-[13px] text-[#64748B]">
               Create accounts for employees who will place orders using allocated
-              wallet funds.
+              wallet funds. Disable an account to block login access.
             </p>
           </div>
-          <PrimaryButton type="button" onClick={() => setModalOpen(true)}>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="inline-flex h-10 shrink-0 items-center justify-center self-start rounded-[8px] bg-[#0097B2] px-5 text-[13px] font-semibold text-white hover:bg-[#0086A0] sm:self-auto"
+          >
             Create employee
-          </PrimaryButton>
+          </button>
         </div>
 
         <form
@@ -214,13 +282,14 @@ export default function CompanyEmployeesPage() {
                   <th className="px-5 py-3">Wallet balance</th>
                   <th className="px-5 py-3">Status</th>
                   <th className="px-5 py-3">Last login</th>
+                  <th className="px-5 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-5 py-8 text-center text-[#94A3B8]"
                     >
                       Loading employees...
@@ -229,41 +298,80 @@ export default function CompanyEmployeesPage() {
                 ) : employees.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-5 py-8 text-center text-[#94A3B8]"
                     >
                       No employees found.
                     </td>
                   </tr>
                 ) : (
-                  employees.map((employee) => (
-                    <tr
-                      key={employee.id}
-                      className="border-t border-[#F1F5F9] text-[#334155]"
-                    >
-                      <td className="px-5 py-3 font-medium">{employee.name}</td>
-                      <td className="px-5 py-3">{employee.email}</td>
-                      <td className="px-5 py-3">
-                        {formatMoney(employee.walletBalance)}
-                      </td>
-                      <td className="px-5 py-3">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                            employee.isActive
-                              ? "bg-[#ECFDF5] text-[#059669]"
-                              : "bg-[#FEE2E2] text-[#DC2626]"
-                          }`}
-                        >
-                          {employee.isActive ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3">
-                        {employee.lastLoginAt
-                          ? new Date(employee.lastLoginAt).toLocaleString()
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))
+                  employees.map((employee) => {
+                    const updating =
+                      Number(statusUpdatingId) === Number(employee.id);
+
+                    return (
+                      <tr
+                        key={employee.id}
+                        className="border-t border-[#F1F5F9] text-[#334155]"
+                      >
+                        <td className="px-5 py-3 font-medium">
+                          <button
+                            type="button"
+                            onClick={() => setActivityEmployee(employee)}
+                            className="text-left text-[#0097B2] hover:underline"
+                            title="View employee activity"
+                          >
+                            {employee.name}
+                          </button>
+                        </td>
+                        <td className="px-5 py-3">{employee.email}</td>
+                        <td className="px-5 py-3">
+                          {formatMoney(employee.walletBalance)}
+                        </td>
+                        <td className="px-5 py-3">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                              employee.isActive
+                                ? "bg-[#ECFDF5] text-[#059669]"
+                                : "bg-[#FEE2E2] text-[#DC2626]"
+                            }`}
+                          >
+                            {employee.isActive ? "Active" : "Blocked"}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3">
+                          {employee.lastLoginAt
+                            ? new Date(employee.lastLoginAt).toLocaleString()
+                            : "—"}
+                        </td>
+                        <td className="px-5 py-3">
+                          {employee.isActive ? (
+                            <button
+                              type="button"
+                              disabled={updating || Boolean(statusUpdatingId)}
+                              onClick={() =>
+                                requestStatusChange(employee, false)
+                              }
+                              className="inline-flex h-8 items-center justify-center rounded-[6px] border border-red-200 bg-white px-3 text-[12px] font-medium text-[#DC2626] hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updating ? "Updating..." : "Disable"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={updating || Boolean(statusUpdatingId)}
+                              onClick={() =>
+                                requestStatusChange(employee, true)
+                              }
+                              className="inline-flex h-8 items-center justify-center rounded-[6px] border border-emerald-200 bg-white px-3 text-[12px] font-medium text-[#059669] hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {updating ? "Updating..." : "Enable"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -301,6 +409,34 @@ export default function CompanyEmployeesPage() {
         onClose={() => setModalOpen(false)}
         onSubmit={handleCreate}
         submitting={creating}
+      />
+
+      <CompanyEmployeeActivityLogModal
+        open={Boolean(activityEmployee)}
+        employee={activityEmployee}
+        onClose={() => setActivityEmployee(null)}
+      />
+
+      <ConfirmModal
+        open={confirmModal.open}
+        title={isDisabling ? "Disable employee?" : "Enable employee?"}
+        message={
+          isDisabling
+            ? `${confirmEmployee?.name || "This employee"} will be blocked from signing in until you enable the account again.`
+            : `${confirmEmployee?.name || "This employee"} will be able to sign in to the company portal again.`
+        }
+        variant={isDisabling ? "danger" : "warning"}
+        confirmLabel={
+          statusUpdatingId
+            ? "Updating..."
+            : isDisabling
+              ? "Yes, disable"
+              : "Yes, enable"
+        }
+        cancelLabel="Cancel"
+        confirmDisabled={Boolean(statusUpdatingId)}
+        onCancel={closeConfirmModal}
+        onConfirm={confirmStatusChange}
       />
     </CompanyPortalDashboardShell>
   );

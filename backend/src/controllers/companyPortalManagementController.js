@@ -6,6 +6,7 @@ const companyPortalWalletService = require("../services/companyPortalWalletServi
 const {
   validateCreateEmployee,
   validateEmployeeListQuery,
+  validateEmployeeStatus,
   validateWalletTopup,
   validateWalletAllocate,
 } = require("../validators/companyPortalManagementValidator");
@@ -51,6 +52,37 @@ exports.createEmployee = asyncHandler(async (req, res) => {
   });
 
   return ApiResponse.created(res, result, result.message);
+});
+
+exports.setEmployeeStatus = asyncHandler(async (req, res) => {
+  const employeeId = Number(req.params.id);
+  if (!Number.isFinite(employeeId) || employeeId <= 0) {
+    throw new ApiError(400, "Invalid employee id");
+  }
+
+  const validation = validateEmployeeStatus(req.body);
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
+  }
+
+  const result = await companyPortalEmployeeService.setEmployeeActive(
+    req.companyUser.id,
+    employeeId,
+    validation.data.isActive
+  );
+
+  if (result.changed) {
+    const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
+    await companyPortalActivityLogService.recordFromRequest(req, {
+      context: "employees",
+      action: validation.data.isActive ? "enable" : "disable",
+      details: validation.data.isActive
+        ? `Enabled employee ${result.employee?.name || ""} (${result.employee?.email || ""})`
+        : `Disabled employee ${result.employee?.name || ""} (${result.employee?.email || ""})`,
+    });
+  }
+
+  return ApiResponse.success(res, result, result.message);
 });
 
 exports.getWalletSummary = asyncHandler(async (req, res) => {

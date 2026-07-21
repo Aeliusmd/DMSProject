@@ -331,7 +331,9 @@ function MoneyManagementClient() {
                   required
                 >
                   <option value="">Select employee</option>
-                  {employees.map((employee) => (
+                  {employees
+                    .filter((employee) => employee.isActive !== false)
+                    .map((employee) => (
                     <option key={employee.id} value={employee.id}>
                       {employee.name} ({formatMoney(employee.walletBalance)})
                     </option>

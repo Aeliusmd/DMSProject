@@ -26,7 +26,10 @@ async function authenticateCompanyPortal(req, _res, next) {
 
       // MySQL may return TINYINT as 0/1; treat only explicit inactive as blocked.
       if (Number(session.employee_is_active) === 0) {
-        throw new ApiError(403, "Your employee account is inactive");
+        throw new ApiError(
+          403,
+          "Your account is currently blocked. Please contact your company administrator."
+        );
       }
 
       req.companyUser = {

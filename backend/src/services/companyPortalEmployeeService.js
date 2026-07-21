@@ -148,9 +148,57 @@ async function createEmployee(companyUserId, { name, email, password }) {
   };
 }
 
+async function setEmployeeActive(companyUserId, employeeId, isActive) {
+  const employee = await CompanyPortalEmployee.findByIdForCompany(
+    employeeId,
+    companyUserId
+  );
+
+  if (!employee) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  const nextActive = Boolean(isActive);
+  const currentlyActive = Boolean(employee.is_active);
+
+  if (currentlyActive === nextActive) {
+    return {
+      employee: formatEmployee(employee),
+      message: nextActive
+        ? "Employee account is already enabled"
+        : "Employee account is already disabled",
+      changed: false,
+    };
+  }
+
+  const updated = await CompanyPortalEmployee.setActive(
+    employeeId,
+    companyUserId,
+    nextActive
+  );
+
+  if (!updated) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  if (!nextActive) {
+    const CompanyPortalEmployeeSession = require("../models/CompanyPortalEmployeeSession");
+    await CompanyPortalEmployeeSession.deleteByEmployeeId(employeeId);
+  }
+
+  return {
+    employee: formatEmployee(updated),
+    message: nextActive
+      ? "Employee account enabled successfully"
+      : "Employee account disabled successfully",
+    changed: true,
+  };
+}
+
 module.exports = {
   listEmployees,
   listEmployeesPaginated,
   createEmployee,
+  setEmployeeActive,
   formatEmployee,
 };

@@ -138,9 +138,41 @@ function validateWalletAllocate(body = {}) {
   };
 }
 
+function validateEmployeeStatus(body = {}) {
+  const errors = [];
+  const hasIsActive =
+    typeof body.isActive === "boolean" ||
+    body.isActive === 0 ||
+    body.isActive === 1 ||
+    body.isActive === "0" ||
+    body.isActive === "1" ||
+    body.isActive === "true" ||
+    body.isActive === "false";
+
+  if (!hasIsActive) {
+    errors.push({
+      field: "isActive",
+      message: "isActive must be true or false",
+    });
+  }
+
+  const isActive =
+    body.isActive === true ||
+    body.isActive === 1 ||
+    body.isActive === "1" ||
+    body.isActive === "true";
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    data: { isActive },
+  };
+}
+
 module.exports = {
   validateCreateEmployee,
   validateEmployeeListQuery,
+  validateEmployeeStatus,
   validateWalletTopup,
   validateWalletAllocate,
 };

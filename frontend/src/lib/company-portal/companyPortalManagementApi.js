@@ -36,6 +36,13 @@ export async function createCompanyEmployee(payload) {
   });
 }
 
+export async function setCompanyEmployeeStatus(employeeId, isActive) {
+  return managementRequest(`/company-portal/employees/${employeeId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ isActive: Boolean(isActive) }),
+  });
+}
+
 export async function getCompanyWalletSummary() {
   return managementRequest("/company-portal/wallet", { method: "GET" });
 }

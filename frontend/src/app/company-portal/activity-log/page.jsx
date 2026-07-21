@@ -262,7 +262,9 @@ export default function CompanyPortalActivityLogPage() {
               Activity Log
             </h1>
             <p className="mt-1 text-[12px] text-[#64748B]">
-              Monitor company admin and employee actions across your portal
+              Monitor company admin and employee actions across your portal.
+              Showing today&apos;s activity by default — use the date filters to
+              view other days.
             </p>
           </div>
 

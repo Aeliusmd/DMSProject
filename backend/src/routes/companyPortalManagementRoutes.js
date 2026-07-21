@@ -26,6 +26,11 @@ router.post(
   requireCompanyAdmin,
   companyPortalManagementController.createEmployee
 );
+router.patch(
+  "/employees/:id/status",
+  requireCompanyAdmin,
+  companyPortalManagementController.setEmployeeStatus
+);
 
 router.get(
   "/wallet",

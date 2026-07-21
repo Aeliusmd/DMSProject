@@ -167,6 +167,29 @@ class CompanyPortalEmployee {
     return this.findByIdForCompany(result.insertId, data.companyUserId, connection);
   }
 
+  static async setActive(id, companyUserId, isActive, connection = null) {
+    const db = connection || getPool();
+    const [result] = await db.execute(
+      `UPDATE company_portal_employees
+       SET is_active = :isActive,
+           updated_at = NOW()
+       WHERE id = :id
+         AND company_user_id = :companyUserId
+         AND deleted_at IS NULL`,
+      {
+        id,
+        companyUserId,
+        isActive: isActive ? 1 : 0,
+      }
+    );
+
+    if (!result.affectedRows) {
+      return null;
+    }
+
+    return this.findByIdForCompany(id, companyUserId, connection);
+  }
+
   static async updateLastLogin(id, connection = null) {
     const db = connection || getPool();
     await db.execute(
