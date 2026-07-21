@@ -1,20 +1,74 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import PersonalPortalSidebar from "@/components/personal-request/PersonalPortalSidebar";
 import useIsClient from "@/hooks/useIsClient";
 import { PORTAL_NAVIGATION_HIDDEN } from "@/lib/portalNavigationVisibility";
-import { getStoredPersonalUser } from "@/lib/personal-request/personalPortalAuthStorage";
+import {
+  clearPersonalAuth,
+  getStoredPersonalUser,
+  isPersonalAuthenticated,
+} from "@/lib/personal-request/personalPortalAuthStorage";
+import {
+  getPersonalCurrentUser,
+  startPersonalAuthAutoRefresh,
+  stopPersonalAuthAutoRefresh,
+} from "@/lib/personal-request/personalPortalAuthApi";
 
 /** Same layout structure as CompanyPortalDashboardShell */
 export default function PersonalPortalDashboardShell({ children, title }) {
+  const router = useRouter();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const isClient = useIsClient();
   const user = isClient ? getStoredPersonalUser() : null;
+  const [sessionReady, setSessionReady] = useState(false);
   const displayName =
     user?.displayName ||
     `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||
     "Personal Portal";
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function verifySession() {
+      if (!isClient) return;
+
+      if (!isPersonalAuthenticated()) {
+        router.replace("/personalrequest/login");
+        return;
+      }
+
+      try {
+        await getPersonalCurrentUser();
+        if (!mounted) return;
+        startPersonalAuthAutoRefresh();
+        setSessionReady(true);
+      } catch {
+        clearPersonalAuth();
+        router.replace("/personalrequest/login");
+      }
+    }
+
+    verifySession();
+
+    return () => {
+      mounted = false;
+      stopPersonalAuthAutoRefresh();
+    };
+  }, [router, isClient]);
+
+  if (!sessionReady && isClient) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] text-[#111827]">
+        <main className="flex min-h-screen items-center justify-center px-4">
+          <p className="text-[13px] text-[#64748B]">
+            Loading personal portal...
+          </p>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#111827]">

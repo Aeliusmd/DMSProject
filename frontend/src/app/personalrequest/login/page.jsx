@@ -11,6 +11,7 @@ import {
   resendPersonalTwoFactor,
   savePersonalAuthSession,
   verifyPersonalTwoFactor,
+  getPersonalCurrentUser,
 } from "@/lib/personal-request/personalPortalAuthApi";
 import { isPersonalAuthenticated } from "@/lib/personal-request/personalPortalAuthStorage";
 import {
@@ -137,10 +138,12 @@ export default function PersonalPortalLoginClient() {
           setSessionToken("");
           setMaskedEmail("");
         }}
-        onSuccess={() => {
+        onSuccess={async () => {
+          setLoginError("");
+          await getPersonalCurrentUser();
           setIsTwoFactorOpen(false);
           setSessionToken("");
-          router.push("/personalrequest/dashboard");
+          router.replace("/personalrequest/dashboard");
         }}
       />
     </>

@@ -50,6 +50,100 @@ async function refreshPersonalAccessToken() {
   }
 }
 
+let refreshPromise = null;
+
+function refreshPersonalOnce() {
+  if (!refreshPromise) {
+    refreshPromise = refreshPersonalAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
+  return refreshPromise;
+}
+
+const REFRESH_SKEW_MS = 60 * 1000;
+const ACTIVITY_WINDOW_MS = 15 * 60 * 1000;
+const INACTIVE_RECHECK_MS = 60 * 1000;
+const ACTIVITY_EVENTS = [
+  "mousedown",
+  "keydown",
+  "scroll",
+  "touchstart",
+  "click",
+];
+
+let refreshTimer = null;
+let activityListenersBound = false;
+let lastActivityAt = Date.now();
+
+function markActivity() {
+  lastActivityAt = Date.now();
+}
+
+async function autoRefreshTick() {
+  if (typeof window === "undefined") return;
+  if (!getStoredPersonalUser()) return;
+
+  const isActive = Date.now() - lastActivityAt <= ACTIVITY_WINDOW_MS;
+
+  if (isActive) {
+    try {
+      await refreshPersonalOnce();
+    } catch {
+      return;
+    }
+
+    return;
+  }
+
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(autoRefreshTick, INACTIVE_RECHECK_MS);
+}
+
+export function schedulePersonalTokenRefresh() {
+  if (typeof window === "undefined") return;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+
+  if (!getStoredPersonalUser()) return;
+
+  const expiryMs = getPersonalAccessExpiresAt();
+  if (!expiryMs) return;
+
+  const delay = Math.max(0, expiryMs - Date.now() - REFRESH_SKEW_MS);
+  refreshTimer = setTimeout(autoRefreshTick, delay);
+}
+
+export function startPersonalAuthAutoRefresh() {
+  if (typeof window === "undefined") return;
+
+  if (!activityListenersBound) {
+    ACTIVITY_EVENTS.forEach((event) =>
+      window.addEventListener(event, markActivity, { passive: true })
+    );
+    activityListenersBound = true;
+  }
+
+  markActivity();
+  schedulePersonalTokenRefresh();
+}
+
+export function stopPersonalAuthAutoRefresh() {
+  if (typeof window === "undefined") return;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+
+  if (activityListenersBound) {
+    ACTIVITY_EVENTS.forEach((event) =>
+      window.removeEventListener(event, markActivity)
+    );
+    activityListenersBound = false;
+  }
+}
+
 async function request(path, options = {}) {
   const response = await safeFetch(`${API_BASE_URL}${path}`, {
     ...options,
@@ -86,7 +180,7 @@ async function authFetch(path, options = {}, retried = false) {
   });
 
   if (response.status === 401 && !retried) {
-    const refreshed = await refreshPersonalAccessToken();
+    const refreshed = await refreshPersonalOnce();
     if (refreshed) {
       return authFetch(path, options, true);
     }
@@ -315,9 +409,12 @@ export function savePersonalAuthSession(payload) {
     user: payload.user,
     accessExpiresAt: payload.accessExpiresAt,
   });
+
+  startPersonalAuthAutoRefresh();
 }
 
 export async function logoutPersonal() {
+  stopPersonalAuthAutoRefresh();
   try {
     await request("/personal-portal/auth/logout", {
       method: "POST",
