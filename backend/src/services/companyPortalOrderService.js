@@ -259,7 +259,8 @@ async function validateFacilitySelection(details = {}) {
 
 async function searchPortalFacilities(query = "") {
   const facilityService = require("./facilityService");
-  const cleaned = `${query || ""}`.trim();
+  const { sanitizeSearchText } = require("../utils/sanitize");
+  const cleaned = sanitizeSearchText(query, { maxLength: 200 });
   if (cleaned.length < 2) {
     return [];
   }
@@ -771,7 +772,15 @@ async function getOrder(orderId, companyUserId) {
 }
 
 async function trackOrderByNumber(orderNumber, companyUserId, { employeeId = null } = {}) {
-  const cleaned = String(orderNumber || "").trim().toUpperCase();
+  const { sanitizeText } = require("../utils/sanitize");
+  const { hasHtmlMarkup } = require("../utils/nameValidation");
+  const raw = `${orderNumber || ""}`;
+
+  if (hasHtmlMarkup(raw)) {
+    throw new ApiError(400, "Order number cannot contain angle brackets or HTML tags");
+  }
+
+  const cleaned = sanitizeText(raw, { maxLength: 100 }).toUpperCase();
   if (!cleaned) {
     throw new ApiError(400, "Order number is required");
   }

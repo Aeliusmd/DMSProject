@@ -3,6 +3,12 @@ const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
 const companyPortalAuthService = require("../services/companyPortalAuthService");
 const {
+  buildAuthPayload,
+  clearPortalAuthCookies,
+  getRefreshTokenFromRequest,
+  setPortalAuthCookies,
+} = require("../utils/authCookies");
+const {
   validateCompanyRegister,
   validateCompanyLogin,
   validateCompanyTwoFactor,
@@ -55,7 +61,9 @@ exports.login = asyncHandler(async (req, res) => {
     details: "Company admin logged in successfully",
   });
 
-  return ApiResponse.success(res, result, "Authentication successful");
+  setPortalAuthCookies(res, "company", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });
 
 exports.verifyTwoFactor = asyncHandler(async (req, res) => {
@@ -71,7 +79,9 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
     trustDevice: Boolean(req.body.trustDevice),
   });
 
-  return ApiResponse.success(res, result, "Authentication successful");
+  setPortalAuthCookies(res, "company", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });
 
 exports.resendTwoFactor = asyncHandler(async (req, res) => {
@@ -89,29 +99,36 @@ exports.resendTwoFactor = asyncHandler(async (req, res) => {
 });
 
 exports.refresh = asyncHandler(async (req, res) => {
-  const validation = validateCompanyRefresh(req.body);
+  const validation = validateCompanyRefresh({
+    refreshToken: getRefreshTokenFromRequest(req, "company"),
+  });
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
   const result = await companyPortalAuthService.refreshTokens({
-    refreshToken: req.body.refreshToken,
+    refreshToken: validation.refreshToken,
   });
 
-  return ApiResponse.success(res, result, "Token refreshed");
+  setPortalAuthCookies(res, "company", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Token refreshed");
 });
 
 exports.logout = asyncHandler(async (req, res) => {
-  const validation = validateCompanyLogout(req.body);
+  const validation = validateCompanyLogout({
+    refreshToken: getRefreshTokenFromRequest(req, "company"),
+    sessionToken: req.body.sessionToken,
+  });
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
   const result = await companyPortalAuthService.logout({
-    refreshToken: req.body.refreshToken,
-    sessionToken: req.body.sessionToken,
+    refreshToken: validation.refreshToken,
+    sessionToken: validation.sessionToken,
   });
 
   if (result.companyUserId) {
@@ -131,6 +148,8 @@ exports.logout = asyncHandler(async (req, res) => {
     });
   }
 
+  clearPortalAuthCookies(res, "company");
+
   return ApiResponse.success(res, result, result.message);
 });
 
@@ -148,25 +167,16 @@ exports.me = asyncHandler(async (req, res) => {
 });
 
 exports.employeeLogin = asyncHandler(async (req, res) => {
-  const email = `${req.body.email || ""}`.trim().toLowerCase();
-  const password = typeof req.body.password === "string" ? req.body.password : "";
+  const validation = validateCompanyLogin(req.body);
 
-  if (!email) {
-    throw new ApiError(400, "Email is required", [
-      { field: "email", message: "Email is required" },
-    ]);
-  }
-
-  if (!password) {
-    throw new ApiError(400, "Password is required", [
-      { field: "password", message: "Password is required" },
-    ]);
+  if (!validation.valid) {
+    throw new ApiError(400, "Validation failed", validation.errors);
   }
 
   const companyPortalEmployeeAuthService = require("../services/companyPortalEmployeeAuthService");
   const result = await companyPortalEmployeeAuthService.login({
-    email,
-    password,
+    email: validation.data.email,
+    password: validation.data.password,
     ...getRequestMeta(req),
     trustDevice: Boolean(req.body.trustDevice),
   });
@@ -180,8 +190,10 @@ exports.employeeLogin = asyncHandler(async (req, res) => {
     companyName: result.user?.companyName || null,
     context: "auth",
     action: "login",
-    details: `Employee ${result.user?.name || email} logged in successfully`,
+    details: `Employee ${result.user?.name || validation.data.email} logged in successfully`,
   });
 
-  return ApiResponse.success(res, result, "Authentication successful");
+  setPortalAuthCookies(res, "company", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });

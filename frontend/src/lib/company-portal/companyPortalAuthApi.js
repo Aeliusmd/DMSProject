@@ -3,11 +3,12 @@ import {
   isNetworkError,
   NETWORK_UNAVAILABLE_MESSAGE,
 } from "@/lib/networkErrors";
+import { withCredentials } from "@/lib/auth/fetchCredentials";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   clearCompanyAuth,
-  getCompanyAccessToken,
-  getCompanyRefreshToken,
+  getCompanyAccessExpiresAt,
+  getStoredCompanyUser,
   setCompanyAuth,
 } from "./companyPortalAuthStorage";
 
@@ -21,7 +22,7 @@ async function parseResponse(response) {
 
 async function safeFetch(url, options) {
   try {
-    return await fetch(url, options);
+    return await fetch(url, withCredentials(options));
   } catch (error) {
     if (isNetworkError(error)) {
       throw new ApiRequestError(NETWORK_UNAVAILABLE_MESSAGE, 0);
@@ -61,27 +62,9 @@ function markActivity() {
   lastActivityAt = Date.now();
 }
 
-function decodeJwtExpiryMs(token) {
-  try {
-    const payloadSegment = token.split(".")[1];
-    if (!payloadSegment) return null;
-
-    const normalized = payloadSegment.replace(/-/g, "+").replace(/_/g, "/");
-    const decoded = JSON.parse(atob(normalized));
-
-    return typeof decoded?.exp === "number" ? decoded.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
 async function autoRefreshTick() {
   if (typeof window === "undefined") return;
-
-  const accessToken = getCompanyAccessToken();
-  const refreshToken = getCompanyRefreshToken();
-
-  if (!accessToken || !refreshToken) return;
+  if (!getStoredCompanyUser()) return;
 
   const isActive = Date.now() - lastActivityAt <= ACTIVITY_WINDOW_MS;
 
@@ -105,10 +88,9 @@ export function scheduleCompanyTokenRefresh() {
   clearTimeout(refreshTimer);
   refreshTimer = null;
 
-  const accessToken = getCompanyAccessToken();
-  if (!accessToken || !getCompanyRefreshToken()) return;
+  if (!getStoredCompanyUser()) return;
 
-  const expiryMs = decodeJwtExpiryMs(accessToken);
+  const expiryMs = getCompanyAccessExpiresAt();
   if (!expiryMs) return;
 
   const delay = Math.max(0, expiryMs - Date.now() - REFRESH_SKEW_MS);
@@ -176,13 +158,10 @@ async function request(path, options = {}) {
 }
 
 async function authRequest(path, options = {}) {
-  const accessToken = getCompanyAccessToken();
-
   const response = await safeFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...(options.headers || {}),
     },
   });
@@ -195,12 +174,10 @@ async function authRequest(path, options = {}) {
       throw new ApiRequestError("Session expired. Please sign in again.", 401);
     }
 
-    const retryToken = getCompanyAccessToken();
     const retry = await safeFetch(`${API_BASE_URL}${path}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(retryToken ? { Authorization: `Bearer ${retryToken}` } : {}),
         ...(options.headers || {}),
       },
     });
@@ -269,22 +246,15 @@ export async function resendCompanyTwoFactor(sessionToken) {
 }
 
 export async function refreshCompanyAccessToken() {
-  const refreshToken = getCompanyRefreshToken();
-
-  if (!refreshToken) {
-    throw new ApiRequestError("No refresh token available", 401);
-  }
-
   const response = await request("/company-portal/auth/refresh", {
     method: "POST",
-    body: JSON.stringify({ refreshToken }),
+    body: JSON.stringify({}),
   });
 
   const payload = response?.data || {};
   setCompanyAuth({
-    accessToken: payload.accessToken,
-    refreshToken: payload.refreshToken,
     user: payload.user,
+    accessExpiresAt: payload.accessExpiresAt,
   });
 
   scheduleCompanyTokenRefresh();
@@ -293,17 +263,13 @@ export async function refreshCompanyAccessToken() {
 }
 
 export async function logoutCompany() {
-  const refreshToken = getCompanyRefreshToken();
-
   stopCompanyAuthAutoRefresh();
 
   try {
-    if (refreshToken) {
-      await request("/company-portal/auth/logout", {
-        method: "POST",
-        body: JSON.stringify({ refreshToken }),
-      });
-    }
+    await request("/company-portal/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   } catch {
     // Always clear local session.
   } finally {
@@ -321,6 +287,9 @@ export async function getCompanyCurrentUser() {
 }
 
 export function saveCompanyAuthSession(payload) {
-  setCompanyAuth(payload);
+  setCompanyAuth({
+    user: payload.user,
+    accessExpiresAt: payload.accessExpiresAt,
+  });
   startCompanyAuthAutoRefresh();
 }

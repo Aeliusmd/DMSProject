@@ -7,7 +7,6 @@ import useIsClient from "@/hooks/useIsClient";
 import { PORTAL_NAVIGATION_HIDDEN } from "@/lib/portalNavigationVisibility";
 import {
   clearCompanyAuth,
-  getCompanyAccessToken,
   getStoredCompanyUser,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
@@ -28,13 +27,6 @@ export default function CompanyPortalDashboardShell({ children, title }) {
     let isMounted = true;
 
     async function verifySession() {
-      const accessToken = getCompanyAccessToken();
-
-      if (!accessToken) {
-        router.replace("/company-portal/login");
-        return;
-      }
-
       try {
         await getCompanyCurrentUser();
 

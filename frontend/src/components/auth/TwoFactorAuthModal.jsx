@@ -85,9 +85,8 @@ export default function TwoFactorAuthModal({
       const payload = response?.data || {};
 
       saveSessionFn({
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken,
         user: payload.user,
+        accessExpiresAt: payload.accessExpiresAt,
       });
 
       onSuccess?.();

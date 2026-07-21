@@ -7,12 +7,13 @@ import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPort
 import ActivityLogTable from "@/components/activity-log/ActivityLogTable";
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
-  getCompanyAccessToken,
   getStoredCompanyUser,
+  isCompanyAuthenticated,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import { getCompanyPortalActivityLogsPaginated } from "@/lib/company-portal/companyPortalActivityLogApi";
 import { listCompanyEmployees } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { sanitizeSearchText } from "@/lib/company-portal/companyPortalValidation";
 
 const ACTIVITY_LOGS_PER_PAGE = 10;
 
@@ -66,7 +67,7 @@ export default function CompanyPortalActivityLogPage() {
   });
 
   useEffect(() => {
-    if (!getCompanyAccessToken()) {
+    if (!isCompanyAuthenticated()) {
       router.replace("/company-portal/login");
       return;
     }
@@ -209,7 +210,9 @@ export default function CompanyPortalActivityLogPage() {
   };
 
   const handleSearch = () => {
-    setAppliedPerformerSearch(performerSearchDraft.trim());
+    const sanitized = sanitizeSearchText(performerSearchDraft);
+    setPerformerSearchDraft(sanitized);
+    setAppliedPerformerSearch(sanitized);
     resetPagination();
   };
 
@@ -259,7 +262,9 @@ export default function CompanyPortalActivityLogPage() {
               Activity Log
             </h1>
             <p className="mt-1 text-[12px] text-[#64748B]">
-              Monitor company admin and employee actions across your portal
+              Monitor company admin and employee actions across your portal.
+              Showing today&apos;s activity by default — use the date filters to
+              view other days.
             </p>
           </div>
 
@@ -462,7 +467,7 @@ function PerformerSearch({ value, onChange, onSearch, className = "" }) {
         <input
           type="text"
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => onChange(sanitizeSearchText(event.target.value))}
           onKeyDown={handleKeyDown}
           placeholder="Search by name"
           className="h-[34px] min-w-0 flex-1 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"

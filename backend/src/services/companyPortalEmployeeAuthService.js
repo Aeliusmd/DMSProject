@@ -35,7 +35,10 @@ async function login({ email, password, ipAddress, userAgent, trustDevice = fals
   }
 
   if (!employee.is_active) {
-    throw new ApiError(403, "Your employee account is inactive");
+    throw new ApiError(
+      403,
+      "Your account is currently blocked. Please contact your company administrator."
+    );
   }
 
   const sessionToken = tokenService.generateSessionToken();
@@ -97,6 +100,14 @@ async function refreshTokens({ refreshToken }) {
 
   if (!session || session.session_token !== decoded.sessionToken) {
     throw new ApiError(401, "Session expired or invalid");
+  }
+
+  if (Number(session.employee_is_active) === 0) {
+    await CompanyPortalEmployeeSession.deleteById(session.id);
+    throw new ApiError(
+      403,
+      "Your account is currently blocked. Please contact your company administrator."
+    );
   }
 
   const accessToken = tokenService.generateCompanyAccessToken({
@@ -179,7 +190,10 @@ async function getCurrentUser(employeeId) {
 
   const employee = rows[0];
   if (!employee || !employee.is_active) {
-    throw new ApiError(401, "Employee account not found or inactive");
+    throw new ApiError(
+      401,
+      "Your account is currently blocked. Please contact your company administrator."
+    );
   }
 
   return {

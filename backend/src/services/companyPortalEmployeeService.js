@@ -2,6 +2,8 @@ const bcrypt = require("bcryptjs");
 const ApiError = require("../utils/ApiError");
 const CompanyPortalEmployee = require("../models/CompanyPortalEmployee");
 const { sendCompanyEmployeeCredentials } = require("./emailService");
+const { sanitizeText, sanitizeSearchText } = require("../utils/sanitize");
+const { isValidPersonName } = require("../utils/nameValidation");
 
 const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_LENGTH = 128;
@@ -47,7 +49,7 @@ function validatePassword(password) {
 
 async function listEmployees(companyUserId, { search = "" } = {}) {
   const rows = await CompanyPortalEmployee.listForCompany(companyUserId, {
-    search,
+    search: sanitizeSearchText(search, { maxLength: 200 }),
   });
   return rows.map(formatEmployee);
 }
@@ -58,7 +60,11 @@ async function listEmployeesPaginated(
 ) {
   const result = await CompanyPortalEmployee.listForCompanyKeyset(
     companyUserId,
-    { search, cursor, pageSize }
+    {
+      search: sanitizeSearchText(search, { maxLength: 200 }),
+      cursor,
+      pageSize,
+    }
   );
 
   return {
@@ -73,12 +79,22 @@ async function listEmployeesPaginated(
 }
 
 async function createEmployee(companyUserId, { name, email, password }) {
-  const cleanedName = `${name || ""}`.trim();
-  const cleanedEmail = `${email || ""}`.trim().toLowerCase();
+  const cleanedName = sanitizeText(name, { maxLength: 255 });
+  const cleanedEmail = sanitizeText(email, { maxLength: 255 }).toLowerCase();
 
   if (!cleanedName) {
     throw new ApiError(400, "Employee name is required", [
       { field: "name", message: "Employee name is required" },
+    ]);
+  }
+
+  if (!isValidPersonName(cleanedName)) {
+    throw new ApiError(400, "Enter a valid employee name", [
+      {
+        field: "name",
+        message:
+          "Name can only contain letters, spaces, hyphens, apostrophes, and periods",
+      },
     ]);
   }
 
@@ -132,9 +148,57 @@ async function createEmployee(companyUserId, { name, email, password }) {
   };
 }
 
+async function setEmployeeActive(companyUserId, employeeId, isActive) {
+  const employee = await CompanyPortalEmployee.findByIdForCompany(
+    employeeId,
+    companyUserId
+  );
+
+  if (!employee) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  const nextActive = Boolean(isActive);
+  const currentlyActive = Boolean(employee.is_active);
+
+  if (currentlyActive === nextActive) {
+    return {
+      employee: formatEmployee(employee),
+      message: nextActive
+        ? "Employee account is already enabled"
+        : "Employee account is already disabled",
+      changed: false,
+    };
+  }
+
+  const updated = await CompanyPortalEmployee.setActive(
+    employeeId,
+    companyUserId,
+    nextActive
+  );
+
+  if (!updated) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  if (!nextActive) {
+    const CompanyPortalEmployeeSession = require("../models/CompanyPortalEmployeeSession");
+    await CompanyPortalEmployeeSession.deleteByEmployeeId(employeeId);
+  }
+
+  return {
+    employee: formatEmployee(updated),
+    message: nextActive
+      ? "Employee account enabled successfully"
+      : "Employee account disabled successfully",
+    changed: true,
+  };
+}
+
 module.exports = {
   listEmployees,
   listEmployeesPaginated,
   createEmployee,
+  setEmployeeActive,
   formatEmployee,
 };

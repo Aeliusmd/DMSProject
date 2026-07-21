@@ -2,11 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AuthInput from "@/components/ui/AuthInput";
-import PrimaryButton from "@/components/ui/PrimaryButton";
 import {
   applyApiFieldErrors,
   getApiErrorMessage,
 } from "@/lib/apiErrorUtils";
+import {
+  buildCreateEmployeePayload,
+  hasValidationErrors,
+  sanitizeEmail,
+  sanitizePersonName,
+  validateCreateEmployeeForm,
+} from "@/lib/company-portal/companyPortalValidation";
 
 export default function CompanyCreateEmployeeModal({
   isOpen,
@@ -25,31 +31,18 @@ export default function CompanyCreateEmployeeModal({
     setSubmitError("");
   }, [isOpen]);
 
-  const localErrors = useMemo(() => {
-    const next = {};
-    if (!form.name.trim()) next.name = "Employee name is required";
-    if (!form.email.trim()) next.email = "Email is required";
-    if (!form.password) next.password = "Password is required";
-    else if (form.password.length < 8) {
-      next.password = "Password must be at least 8 characters";
-    }
-    return next;
-  }, [form]);
+  const localErrors = useMemo(() => validateCreateEmployeeForm(form), [form]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setErrors(localErrors);
-    if (Object.keys(localErrors).length > 0 || submitting) return;
+    if (hasValidationErrors(localErrors) || submitting) return;
 
     setSubmitError("");
     try {
-      await onSubmit({
-        name: form.name.trim(),
-        email: form.email.trim().toLowerCase(),
-        password: form.password,
-      });
+      await onSubmit(buildCreateEmployeePayload(form));
     } catch (error) {
       const { fieldErrors, message } = applyApiFieldErrors(error);
       setErrors((prev) => ({ ...prev, ...fieldErrors }));
@@ -85,7 +78,12 @@ export default function CompanyCreateEmployeeModal({
           <AuthInput
             label="Full name"
             value={form.name}
-            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                name: sanitizePersonName(event.target.value),
+              }))
+            }
             error={errors.name}
             placeholder="Employee name"
           />
@@ -93,7 +91,12 @@ export default function CompanyCreateEmployeeModal({
             label="Email"
             type="email"
             value={form.email}
-            onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+            onChange={(event) =>
+              setForm((prev) => ({
+                ...prev,
+                email: sanitizeEmail(event.target.value),
+              }))
+            }
             error={errors.email}
             placeholder="employee@company.com"
           />
@@ -114,17 +117,22 @@ export default function CompanyCreateEmployeeModal({
             </p>
           ) : null}
 
-          <div className="flex gap-3 pt-2">
+          <div className="grid grid-cols-2 gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-11 flex-1 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white text-[13px] font-medium text-[#334155]"
+              disabled={submitting}
+              className="inline-flex h-11 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white text-[13px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
             >
               Cancel
             </button>
-            <PrimaryButton type="submit" disabled={submitting}>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex h-11 items-center justify-center rounded-[8px] bg-[#0097B2] text-[13px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:bg-[#0097B2]/45"
+            >
               {submitting ? "Creating..." : "Create employee"}
-            </PrimaryButton>
+            </button>
           </div>
         </form>
       </div>

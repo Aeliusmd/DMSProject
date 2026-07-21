@@ -141,7 +141,20 @@ exports.getOrder = asyncHandler(async (req, res) => {
 });
 
 exports.validateOrderNumber = asyncHandler(async (req, res) => {
-  const caseNumber = `${req.body?.caseNumber || req.body?.orderNumber || ""}`.trim();
+  const { sanitizeText } = require("../utils/sanitize");
+  const { hasHtmlMarkup } = require("../utils/nameValidation");
+
+  const rawCaseNumber = `${req.body?.caseNumber || req.body?.orderNumber || ""}`;
+  if (hasHtmlMarkup(rawCaseNumber)) {
+    throw new ApiError(400, "Validation failed", [
+      {
+        field: "caseNumber",
+        message: "Order number cannot contain angle brackets or HTML tags",
+      },
+    ]);
+  }
+
+  const caseNumber = sanitizeText(rawCaseNumber, { maxLength: 100 });
 
   if (!caseNumber) {
     throw new ApiError(400, "Order number is required", [

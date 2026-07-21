@@ -1,8 +1,11 @@
 const Stripe = require("stripe");
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
+const logger = require("../utils/logger");
+const { runNonCritical } = require("../utils/serviceErrorUtils");
 const { getPool } = require("../config/database");
 const CompanyPortalEmployee = require("../models/CompanyPortalEmployee");
+const CompanyPortalUser = require("../models/CompanyPortalUser");
 const CompanyPortalWallet = require("../models/CompanyPortalWallet");
 const CompanyPortalWalletTopup = require("../models/CompanyPortalWalletTopup");
 const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
@@ -26,6 +29,57 @@ function getStripe() {
 
 function toMoney(value) {
   return Number(Number(value || 0).toFixed(2));
+}
+
+function formatMoney(value) {
+  return `$${toMoney(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+async function sendWalletTopupReceiptNotification(session, { companyUserId, amount }) {
+  await runNonCritical(
+    "Failed to send company wallet top-up receipt email",
+    async () => {
+      const companyUser = await CompanyPortalUser.findById(companyUserId);
+      const recipientEmail = String(companyUser?.email || "").trim();
+      if (!recipientEmail) {
+        return;
+      }
+
+      const stripePaymentService = require("./stripePaymentService");
+      const stripeDetails = await stripePaymentService.extractStripePaymentDetails(
+        session
+      );
+
+      if (stripeDetails.stripeChargeId) {
+        try {
+          const stripe = getStripe();
+          await stripe.charges.update(stripeDetails.stripeChargeId, {
+            receipt_email: recipientEmail,
+          });
+        } catch (error) {
+          logger.warn("Unable to trigger Stripe receipt for wallet top-up", {
+            chargeId: stripeDetails.stripeChargeId,
+            message: error.message,
+          });
+        }
+      }
+
+      const { sendPaymentResultEmail } = require("./emailService");
+      await sendPaymentResultEmail({
+        to: recipientEmail,
+        outcome: "success",
+        companyName: companyUser?.company_name || "Customer",
+        orderNumber: "Wallet Top-up",
+        invoiceNumber: "Company Portal",
+        amount: formatMoney(amount),
+        receiptUrl: stripeDetails.receiptUrl || "",
+      });
+    },
+    logger
+  );
 }
 
 async function getAvailableOrderBalance(companyUserId, employeeId = null) {
@@ -196,12 +250,21 @@ async function createTopupCheckout(companyUserId, { amount }) {
     amount: numericAmount,
   });
 
+  const companyUser = await CompanyPortalUser.findById(companyUserId);
+  const customerEmail = String(companyUser?.email || "").trim() || undefined;
+
   const successUrl = `${baseClient}/company-portal/money?topup=success&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${baseClient}/company-portal/money?topup=canceled`;
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     payment_method_types: ["card"],
+    ...(customerEmail
+      ? {
+          customer_email: customerEmail,
+          payment_intent_data: { receipt_email: customerEmail },
+        }
+      : {}),
     line_items: [
       {
         price_data: {
@@ -285,6 +348,11 @@ async function fulfillWalletTopupSession(session) {
     await CompanyPortalWalletTopup.markPaid(topupId, connection);
     await connection.commit();
 
+    await sendWalletTopupReceiptNotification(session, {
+      companyUserId,
+      amount,
+    });
+
     return {
       companyUserId,
       amount,
@@ -355,6 +423,15 @@ async function allocateToEmployee(companyUserId, { employeeId, amount }) {
 
   if (!employee) {
     throw new ApiError(404, "Employee not found");
+  }
+
+  if (!employee.is_active) {
+    throw new ApiError(400, "Cannot allocate funds to a blocked employee", [
+      {
+        field: "employeeId",
+        message: "Enable this employee before allocating funds",
+      },
+    ]);
   }
 
   const pool = getPool();

@@ -6,10 +6,7 @@ import CompanyPortalDashboardShell from "@/components/company-portal/CompanyPort
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import AuthInput from "@/components/ui/AuthInput";
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
-import {
-  getCompanyAccessToken,
-  getStoredCompanyUser,
-} from "@/lib/company-portal/companyPortalAuthStorage";
+import { isCompanyAuthenticated, getStoredCompanyUser } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
   allocateCompanyWalletFunds,
   confirmCompanyWalletTopup,
@@ -20,6 +17,7 @@ import {
   listCompanyWalletTransactions,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { sanitizeMoneyInput } from "@/lib/company-portal/companyPortalValidation";
 
 const TRANSACTIONS_PAGE_SIZE = 10;
 
@@ -114,7 +112,7 @@ function MoneyManagementClient() {
   }, []);
 
   useEffect(() => {
-    if (!getCompanyAccessToken()) {
+    if (!isCompanyAuthenticated()) {
       router.replace("/company-portal/login");
       return;
     }
@@ -179,7 +177,11 @@ function MoneyManagementClient() {
     setTopupLoading(true);
     setError("");
     try {
-      const response = await createCompanyWalletTopup(Number(topupAmount));
+      const amount = Number(sanitizeMoneyInput(topupAmount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Enter a valid top-up amount");
+      }
+      const response = await createCompanyWalletTopup(amount);
       const checkoutUrl = response?.data?.checkoutUrl;
       if (!checkoutUrl) throw new Error("Unable to start Stripe checkout");
       window.location.href = checkoutUrl;
@@ -195,9 +197,13 @@ function MoneyManagementClient() {
     setError("");
     setSuccessMessage("");
     try {
+      const amount = Number(sanitizeMoneyInput(allocateForm.amount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Enter a valid amount");
+      }
       const response = await allocateCompanyWalletFunds({
         employeeId: Number(allocateForm.employeeId),
-        amount: Number(allocateForm.amount),
+        amount,
       });
       setSummary(response?.data || null);
       setAllocateForm({ employeeId: "", amount: "" });
@@ -288,7 +294,9 @@ function MoneyManagementClient() {
                 min="10"
                 step="0.01"
                 value={topupAmount}
-                onChange={(event) => setTopupAmount(event.target.value)}
+                onChange={(event) =>
+                  setTopupAmount(sanitizeMoneyInput(event.target.value))
+                }
                 placeholder="100.00"
               />
               <PrimaryButton
@@ -323,7 +331,9 @@ function MoneyManagementClient() {
                   required
                 >
                   <option value="">Select employee</option>
-                  {employees.map((employee) => (
+                  {employees
+                    .filter((employee) => employee.isActive !== false)
+                    .map((employee) => (
                     <option key={employee.id} value={employee.id}>
                       {employee.name} ({formatMoney(employee.walletBalance)})
                     </option>
@@ -339,7 +349,7 @@ function MoneyManagementClient() {
                 onChange={(event) =>
                   setAllocateForm((prev) => ({
                     ...prev,
-                    amount: event.target.value,
+                    amount: sanitizeMoneyInput(event.target.value),
                   }))
                 }
                 placeholder="50.00"

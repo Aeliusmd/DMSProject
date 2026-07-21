@@ -2,13 +2,13 @@ const ApiError = require("../utils/ApiError");
 const CompanyPortalEmployeeSession = require("../models/CompanyPortalEmployeeSession");
 const CompanyPortalSession = require("../models/CompanyPortalSession");
 const tokenService = require("../services/tokenService");
+const { getAccessTokenFromRequest } = require("../utils/authCookies");
 
 async function authenticateCompanyPortal(req, _res, next) {
   try {
-    const authHeader = req.headers.authorization || "";
-    const [scheme, token] = authHeader.split(" ");
+    const token = getAccessTokenFromRequest(req, "company");
 
-    if (scheme !== "Bearer" || !token) {
+    if (!token) {
       throw new ApiError(401, "Authentication required");
     }
 
@@ -26,7 +26,10 @@ async function authenticateCompanyPortal(req, _res, next) {
 
       // MySQL may return TINYINT as 0/1; treat only explicit inactive as blocked.
       if (Number(session.employee_is_active) === 0) {
-        throw new ApiError(403, "Your employee account is inactive");
+        throw new ApiError(
+          403,
+          "Your account is currently blocked. Please contact your company administrator."
+        );
       }
 
       req.companyUser = {

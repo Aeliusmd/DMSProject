@@ -1,19 +1,35 @@
-const ACCESS_TOKEN_KEY = "dms_access_token";
-const REFRESH_TOKEN_KEY = "dms_refresh_token";
+const LEGACY_ACCESS_TOKEN_KEY = "dms_access_token";
+const LEGACY_REFRESH_TOKEN_KEY = "dms_refresh_token";
 const USER_KEY = "dms_user";
+const ACCESS_EXPIRES_KEY = "dms_access_expires_at";
 
 function isBrowser() {
   return typeof window !== "undefined";
 }
 
+function clearLegacyTokenStorage() {
+  if (!isBrowser()) return;
+  localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
+  localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
+}
+
+if (isBrowser()) {
+  clearLegacyTokenStorage();
+}
+
 export function getAccessToken() {
-  if (!isBrowser()) return null;
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return null;
 }
 
 export function getRefreshToken() {
+  return null;
+}
+
+export function getAccessExpiresAt() {
   if (!isBrowser()) return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  const raw = sessionStorage.getItem(ACCESS_EXPIRES_KEY);
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 export function getStoredUser() {
@@ -29,30 +45,28 @@ export function getStoredUser() {
   }
 }
 
-export function setAuth({ accessToken, refreshToken, user }) {
+export function setAuth({ user, accessExpiresAt } = {}) {
   if (!isBrowser()) return;
 
-  if (accessToken) {
-    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  }
-
-  if (refreshToken) {
-    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-  }
+  clearLegacyTokenStorage();
 
   if (user) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
+  }
+
+  if (accessExpiresAt) {
+    sessionStorage.setItem(ACCESS_EXPIRES_KEY, String(accessExpiresAt));
   }
 }
 
 export function clearAuth() {
   if (!isBrowser()) return;
 
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  clearLegacyTokenStorage();
   localStorage.removeItem(USER_KEY);
+  sessionStorage.removeItem(ACCESS_EXPIRES_KEY);
 }
 
 export function isAuthenticated() {
-  return Boolean(getAccessToken());
+  return Boolean(getStoredUser());
 }

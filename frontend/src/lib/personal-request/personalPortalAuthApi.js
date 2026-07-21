@@ -3,12 +3,12 @@ import {
   isNetworkError,
   NETWORK_UNAVAILABLE_MESSAGE,
 } from "@/lib/networkErrors";
+import { withCredentials } from "@/lib/auth/fetchCredentials";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   clearPersonalAuth,
-  getPersonalAccessToken,
-  getPersonalRefreshToken,
-  getPersonalSessionToken,
+  getPersonalAccessExpiresAt,
+  getStoredPersonalUser,
   setPersonalAuth,
 } from "./personalPortalAuthStorage";
 
@@ -22,12 +22,31 @@ async function parseResponse(response) {
 
 async function safeFetch(url, options) {
   try {
-    return await fetch(url, options);
+    return await fetch(url, withCredentials(options));
   } catch (error) {
     if (isNetworkError(error)) {
       throw new ApiRequestError(NETWORK_UNAVAILABLE_MESSAGE, 0);
     }
     throw error;
+  }
+}
+
+async function refreshPersonalAccessToken() {
+  try {
+    const payload = await request("/personal-portal/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+
+    const data = payload?.data || {};
+    setPersonalAuth({
+      user: data.user,
+      accessExpiresAt: data.accessExpiresAt,
+    });
+    return true;
+  } catch {
+    clearPersonalAuth();
+    return false;
   }
 }
 
@@ -53,36 +72,11 @@ async function request(path, options = {}) {
   return payload;
 }
 
-async function refreshPersonalAccessToken() {
-  const refreshToken = getPersonalRefreshToken();
-  if (!refreshToken) return false;
-
-  try {
-    const payload = await request("/personal-portal/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refreshToken }),
-    });
-
-    const data = payload?.data || {};
-    setPersonalAuth({
-      accessToken: data.accessToken,
-      refreshToken: data.refreshToken,
-      user: data.user,
-    });
-    return true;
-  } catch {
-    clearPersonalAuth();
-    return false;
-  }
-}
-
-async function authFetch(path, options = {}) {
-  const accessToken = getPersonalAccessToken();
+async function authFetch(path, options = {}, retried = false) {
   const headers = {
     ...(options.body instanceof FormData
       ? {}
       : { "Content-Type": "application/json" }),
-    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...(options.headers || {}),
   };
 
@@ -91,24 +85,14 @@ async function authFetch(path, options = {}) {
     headers,
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && !retried) {
     const refreshed = await refreshPersonalAccessToken();
     if (refreshed) {
-      const retryToken = getPersonalAccessToken();
-      response = await safeFetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          ...(options.body instanceof FormData
-            ? {}
-            : { "Content-Type": "application/json" }),
-          ...(retryToken ? { Authorization: `Bearer ${retryToken}` } : {}),
-          ...(options.headers || {}),
-        },
-      });
-    } else {
-      clearPersonalAuth();
-      throw new ApiRequestError("Session expired. Please sign in again.", 401);
+      return authFetch(path, options, true);
     }
+
+    clearPersonalAuth();
+    throw new ApiRequestError("Session expired. Please sign in again.", 401);
   }
 
   return response;
@@ -328,10 +312,8 @@ export async function resendPersonalTwoFactor(sessionToken) {
 
 export function savePersonalAuthSession(payload) {
   setPersonalAuth({
-    accessToken: payload.accessToken,
-    refreshToken: payload.refreshToken,
     user: payload.user,
-    sessionToken: payload.sessionToken,
+    accessExpiresAt: payload.accessExpiresAt,
   });
 }
 
@@ -339,10 +321,7 @@ export async function logoutPersonal() {
   try {
     await request("/personal-portal/auth/logout", {
       method: "POST",
-      body: JSON.stringify({
-        refreshToken: getPersonalRefreshToken(),
-        sessionToken: getPersonalSessionToken(),
-      }),
+      body: JSON.stringify({}),
     });
   } catch {
     // Always clear local session
@@ -352,7 +331,12 @@ export async function logoutPersonal() {
 }
 
 export async function getPersonalCurrentUser() {
-  return authRequest("/personal-portal/auth/me", { method: "GET" });
+  const payload = await authRequest("/personal-portal/auth/me", { method: "GET" });
+  const user = payload?.data?.user;
+  if (user) {
+    setPersonalAuth({ user });
+  }
+  return payload;
 }
 
 export async function updatePersonalAccountEmail(email) {
@@ -473,3 +457,5 @@ export async function openPersonalInvoiceReceipt(
     }
   );
 }
+
+export { getPersonalAccessExpiresAt, getStoredPersonalUser };

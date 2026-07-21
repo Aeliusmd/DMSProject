@@ -11,6 +11,7 @@ export default function CompanyOrderUploadStep({
   onFileSelected,
   onRemoveFile,
   onProcess,
+  onCancel,
 }) {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
@@ -118,18 +119,28 @@ export default function CompanyOrderUploadStep({
         </p>
       ) : null}
 
-      <button
-        type="button"
-        disabled={!fileMeta || extracting}
-        onClick={onProcess}
-        className={`mt-6 flex h-11 w-full items-center justify-center rounded-[8px] text-[14px] font-semibold text-white transition ${
-          !fileMeta || extracting
-            ? "cursor-not-allowed bg-[#0097B2]/45"
-            : "bg-[#0097B2] hover:bg-[#0086A0]"
-        }`}
-      >
-        {extracting ? "Processing Document..." : "Process Document"}
-      </button>
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          disabled={extracting}
+          onClick={onCancel}
+          className="inline-flex h-11 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white px-5 text-[13px] font-medium text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!fileMeta || extracting}
+          onClick={onProcess}
+          className={`inline-flex h-11 flex-1 items-center justify-center rounded-[8px] text-[14px] font-semibold text-white transition ${
+            !fileMeta || extracting
+              ? "cursor-not-allowed bg-[#0097B2]/45"
+              : "bg-[#0097B2] hover:bg-[#0086A0]"
+          }`}
+        >
+          {extracting ? "Processing Document..." : "Process Document"}
+        </button>
+      </div>
     </div>
   );
 }

@@ -7,7 +7,7 @@ import CompanyPortalProfileCard from "@/components/company-portal/CompanyPortalP
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
   clearCompanyAuth,
-  getCompanyAccessToken,
+  isCompanyAuthenticated,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
@@ -22,8 +22,7 @@ export default function CompanyPortalProfilePage() {
     let active = true;
 
     async function loadProfile() {
-      const accessToken = getCompanyAccessToken();
-      if (!accessToken) {
+      if (!isCompanyAuthenticated()) {
         router.replace("/company-portal/login");
         return;
       }

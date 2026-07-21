@@ -4,6 +4,12 @@ const ApiError = require("../utils/ApiError");
 const authService = require("../services/authService");
 const activityLogService = require("../services/activityLogService");
 const {
+  buildAuthPayload,
+  clearPortalAuthCookies,
+  getRefreshTokenFromRequest,
+  setPortalAuthCookies,
+} = require("../utils/authCookies");
+const {
   validateLogin,
   validateTwoFactor,
   validateResendTwoFactor,
@@ -59,7 +65,9 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
     companyName: "System",
   });
 
-  return ApiResponse.success(res, result, "Authentication successful");
+  setPortalAuthCookies(res, "internal", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });
 
 exports.resendTwoFactor = asyncHandler(async (req, res) => {
@@ -77,21 +85,28 @@ exports.resendTwoFactor = asyncHandler(async (req, res) => {
 });
 
 exports.refresh = asyncHandler(async (req, res) => {
-  const validation = validateRefresh(req.body);
+  const validation = validateRefresh({
+    refreshToken: getRefreshTokenFromRequest(req, "internal"),
+  });
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
   }
 
   const result = await authService.refreshTokens({
-    refreshToken: req.body.refreshToken,
+    refreshToken: validation.refreshToken,
   });
 
-  return ApiResponse.success(res, result, "Token refreshed");
+  setPortalAuthCookies(res, "internal", result);
+
+  return ApiResponse.success(res, buildAuthPayload(result), "Token refreshed");
 });
 
 exports.logout = asyncHandler(async (req, res) => {
-  const validation = validateLogout(req.body);
+  const validation = validateLogout({
+    refreshToken: getRefreshTokenFromRequest(req, "internal"),
+    sessionToken: req.body.sessionToken,
+  });
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
@@ -99,8 +114,8 @@ exports.logout = asyncHandler(async (req, res) => {
 
   const meta = getRequestMeta(req);
   const result = await authService.logout({
-    refreshToken: req.body.refreshToken,
-    sessionToken: req.body.sessionToken,
+    refreshToken: validation.refreshToken,
+    sessionToken: validation.sessionToken,
   });
 
   if (result.employeeId) {
@@ -113,6 +128,8 @@ exports.logout = asyncHandler(async (req, res) => {
       companyName: "System",
     });
   }
+
+  clearPortalAuthCookies(res, "internal");
 
   return ApiResponse.success(res, result, result.message);
 });

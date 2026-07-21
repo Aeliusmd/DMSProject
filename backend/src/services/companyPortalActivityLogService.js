@@ -13,6 +13,7 @@ const {
 } = require("../utils/sanitize");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const { assertReportDateRange } = require("../lib/reportQueryParser");
+const { getTodayInputDate } = require("../utils/dateUtils");
 
 const MODULES = {
   SECURITY: "Security",
@@ -202,7 +203,7 @@ async function recordActivity({
   );
 
   const now = new Date();
-  const logDate = now.toISOString().slice(0, 10);
+  const logDate = getTodayInputDate(now);
   const logTime = now.toTimeString().slice(0, 8);
   const resolvedModule = resolveModule(context, module);
   const resolvedAction = formatActionLabel(action, context);
@@ -303,17 +304,22 @@ async function queryLogs(companyUserId, query = {}) {
     filters.module = module;
   }
 
-  const fromDate = parseOptionalIsoDate(query.fromDate, "fromDate");
-  if (fromDate) {
-    filters.fromDate = fromDate;
-  }
+  let fromDate = parseOptionalIsoDate(query.fromDate, "fromDate");
+  let toDate = parseOptionalIsoDate(query.toDate, "toDate");
 
-  const toDate = parseOptionalIsoDate(query.toDate, "toDate");
-  if (toDate) {
-    filters.toDate = toDate;
+  const today = getTodayInputDate();
+  if (!fromDate && !toDate) {
+    fromDate = today;
+    toDate = today;
+  } else if (!fromDate) {
+    fromDate = toDate;
+  } else if (!toDate) {
+    toDate = fromDate;
   }
 
   assertReportDateRange(fromDate, toDate);
+  filters.fromDate = fromDate;
+  filters.toDate = toDate;
 
   const employeeId = Number(query.employeeId);
   if (Number.isFinite(employeeId) && employeeId > 0) {

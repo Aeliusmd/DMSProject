@@ -9,7 +9,7 @@ import CompanyPortalStatCard from "@/components/company-portal/CompanyPortalStat
 import { getCompanyCurrentUser } from "@/lib/company-portal/companyPortalAuthApi";
 import {
   clearCompanyAuth,
-  getCompanyAccessToken,
+  isCompanyAuthenticated,
 } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
   getCompanyPortalDashboard,
@@ -17,6 +17,11 @@ import {
 } from "@/lib/company-portal/companyPortalOrderApi";
 import { mapDashboardOrderRow } from "@/lib/company-portal/companyPortalOrderStatus";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import {
+  hasHtmlMarkup,
+  htmlMarkupError,
+  sanitizeTrackOrderInput,
+} from "@/lib/company-portal/companyPortalValidation";
 
 const EMPTY_STATS = {
   totalOrders: 0,
@@ -87,8 +92,7 @@ export default function CompanyPortalDashboardPage() {
     let active = true;
 
     async function loadDashboard() {
-      const accessToken = getCompanyAccessToken();
-      if (!accessToken) {
+      if (!isCompanyAuthenticated()) {
         router.replace("/company-portal/login");
         return;
       }
@@ -186,7 +190,11 @@ export default function CompanyPortalDashboardPage() {
 
   const handleTrack = (event) => {
     event.preventDefault();
-    const value = trackInput.trim().toUpperCase();
+    if (hasHtmlMarkup(trackInput)) {
+      setTrackError(htmlMarkupError("orderNumber"));
+      return;
+    }
+    const value = sanitizeTrackOrderInput(trackInput);
     if (!value) {
       setTrackError("Enter the order number from your confirmation.");
       return;
@@ -279,7 +287,7 @@ export default function CompanyPortalDashboardPage() {
               type="text"
               value={trackInput}
               onChange={(event) => {
-                setTrackInput(event.target.value);
+                setTrackInput(sanitizeTrackOrderInput(event.target.value));
                 if (trackError) setTrackError("");
               }}
               placeholder="ORD-123456"

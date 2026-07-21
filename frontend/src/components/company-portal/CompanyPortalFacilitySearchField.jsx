@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { searchCompanyPortalFacilities } from "@/lib/company-portal/companyPortalFacilityApi";
+import { sanitizeSearchText } from "@/lib/company-portal/companyPortalValidation";
 
 export default function CompanyPortalFacilitySearchField({
   label = "Facility",
@@ -113,7 +114,9 @@ export default function CompanyPortalFacilitySearchField({
         value={value}
         disabled={disabled}
         placeholder="Type to search facilities..."
-        onChange={(event) => onInputChange?.(event.target.value)}
+        onChange={(event) =>
+          onInputChange?.(sanitizeSearchText(event.target.value))
+        }
         onFocus={() => !disabled && setOpen(true)}
         onBlur={() => {
           if (skipBlurRef.current) {

@@ -70,13 +70,13 @@ class CompanyPortalEmployeeSession {
     return result.affectedRows > 0;
   }
 
-  static async deleteBySessionToken(sessionToken, connection = null) {
+  static async deleteByEmployeeId(employeeId, connection = null) {
     const db = connection || getPool();
     const [result] = await db.execute(
-      `DELETE FROM company_portal_employee_sessions WHERE session_token = :sessionToken`,
-      { sessionToken }
+      `DELETE FROM company_portal_employee_sessions WHERE employee_id = :employeeId`,
+      { employeeId }
     );
-    return result.affectedRows > 0;
+    return result.affectedRows;
   }
 }
 
