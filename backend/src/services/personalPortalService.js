@@ -1177,7 +1177,11 @@ async function assertOwnedPersonalRequest(requestId, portalUserId) {
  * Stripe / portal receipt display for logged-in users — no email OTP or
  * emailed magic link required.
  */
-async function getPrepaymentReceiptPdf(requestId, portalUserId) {
+async function getPrepaymentReceiptPdf(
+  requestId,
+  portalUserId,
+  { forcePdf = false } = {}
+) {
   const requestOrder = await assertOwnedPersonalRequest(requestId, portalUserId);
   const payments =
     await PersonalRequestStripePayment.findByPersonalRequestOrderId(
@@ -1194,7 +1198,7 @@ async function getPrepaymentReceiptPdf(requestId, portalUserId) {
     throw new ApiError(404, "Prepayment receipt not found");
   }
 
-  if (prepayment.receipt_url) {
+  if (prepayment.receipt_url && !forcePdf) {
     return {
       kind: "redirect",
       url: prepayment.receipt_url,
@@ -1214,12 +1218,16 @@ async function getPrepaymentReceiptPdf(requestId, portalUserId) {
   return {
     kind: "pdf",
     buffer: pdfBuffer,
-    fileName: `prepayment-receipt-${requestOrder.confirmation_reference || requestOrder.id}.pdf`,
+    fileName: `${requestOrder.confirmation_reference || `PR-${requestOrder.id}`}-Prepayment.pdf`,
     label: "Prepayment receipt",
   };
 }
 
-async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
+async function getFacilityFeeReceiptPdf(
+  requestId,
+  portalUserId,
+  { forcePdf = false } = {}
+) {
   const requestOrder = await assertOwnedPersonalRequest(requestId, portalUserId);
   const payments =
     await PersonalRequestStripePayment.findByPersonalRequestOrderId(
@@ -1271,7 +1279,7 @@ async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
     }
   }
 
-  if (facilityFee.receipt_url) {
+  if (facilityFee.receipt_url && !forcePdf) {
     return {
       kind: "redirect",
       url: facilityFee.receipt_url,
@@ -1291,12 +1299,16 @@ async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
   return {
     kind: "pdf",
     buffer: pdfBuffer,
-    fileName: `facility-fee-receipt-${requestOrder.confirmation_reference || requestOrder.id}.pdf`,
+    fileName: `${requestOrder.confirmation_reference || `PR-${requestOrder.id}`}-Invoice.pdf`,
     label: "Facility fee receipt",
   };
 }
 
-async function getInvoiceReceiptPdf(requestId, portalUserId) {
+async function getInvoiceReceiptPdf(
+  requestId,
+  portalUserId,
+  { forcePdf = false } = {}
+) {
   const requestOrder = await assertOwnedPersonalRequest(requestId, portalUserId);
   const dmsOrderId = Number(requestOrder.order_id);
   if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
@@ -1340,7 +1352,7 @@ async function getInvoiceReceiptPdf(requestId, portalUserId) {
     throw new ApiError(404, "Stripe payment receipt not found for this invoice");
   }
 
-  if (payment.receipt_url) {
+  if (payment.receipt_url && !forcePdf) {
     return {
       kind: "redirect",
       url: payment.receipt_url,
@@ -1359,10 +1371,15 @@ async function getInvoiceReceiptPdf(requestId, portalUserId) {
       `INV-${dmsOrderId}`,
   });
 
+  const orderNo =
+    payment.order_number ||
+    requestOrder.confirmation_reference ||
+    `PR-${requestOrder.id}`;
+
   return {
     kind: "pdf",
     buffer: pdfBuffer,
-    fileName: `invoice-receipt-${payment.order_number || requestOrder.id}.pdf`,
+    fileName: `${orderNo}-Invoice.pdf`,
     label: "Invoice receipt",
   };
 }

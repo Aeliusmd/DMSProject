@@ -8,14 +8,14 @@ import {
 } from "@/lib/personal-request/personalPortalAuthApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
-const downloadBtnClass =
-  "inline-flex h-[30px] items-center justify-center rounded-[6px] bg-[#16A34A] px-3 text-[11px] font-semibold text-white hover:bg-[#15803D] disabled:opacity-60";
+const actionBtnBase =
+  "inline-flex h-[32px] min-w-[132px] items-center justify-center rounded-[6px] px-3 text-[11px] font-semibold text-white disabled:opacity-60";
 
-const payBtnClass =
-  "inline-flex h-[30px] items-center justify-center rounded-[6px] bg-[#D97706] px-3 text-[11px] font-semibold text-white hover:bg-[#B45309] disabled:opacity-60";
+const downloadBtnClass = `${actionBtnBase} bg-[#16A34A] hover:bg-[#15803D]`;
 
-const facilityFeeBtnClass =
-  "inline-flex h-[30px] items-center justify-center rounded-[6px] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:opacity-60";
+const payBtnClass = `${actionBtnBase} bg-[#D97706] hover:bg-[#B45309]`;
+
+const facilityFeeBtnClass = `${actionBtnBase} bg-[#0097B2] hover:bg-[#0086A0]`;
 
 /**
  * Action column pay buttons use logged-in Stripe Checkout
@@ -62,7 +62,7 @@ export default function PersonalRequestActionsCell({ request }) {
   }
 
   if (!canDownload && !canPayInvoice && !canPayFacilityFee) {
-    return <span className="text-[#94A3B8]">—</span>;
+    return null;
   }
 
   return (
@@ -72,7 +72,7 @@ export default function PersonalRequestActionsCell({ request }) {
           <PersonalRecordsDownloadButton
             downloadToken={request.downloadToken}
             downloadUrl={request.downloadUrl}
-            label="Download records"
+            label="Download Records"
             className={downloadBtnClass}
           />
         ) : null}
@@ -97,7 +97,7 @@ export default function PersonalRequestActionsCell({ request }) {
             disabled={Boolean(busy)}
             className={payBtnClass}
           >
-            {busy === "invoice" ? "Redirecting…" : "Pay invoice"}
+            {busy === "invoice" ? "Redirecting…" : "Pay Invoice"}
           </button>
         ) : null}
       </div>

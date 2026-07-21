@@ -143,16 +143,75 @@ async function authBlobOrJson(path, options = {}) {
   }
 
   if (contentType.includes("application/pdf") || contentType.includes("octet-stream")) {
-    return { kind: "blob", blob: await response.blob() };
+    return {
+      kind: "blob",
+      blob: await response.blob(),
+      fileName: parseContentDispositionFileName(
+        response.headers.get("content-disposition")
+      ),
+    };
   }
 
   const payload = await parseResponse(response);
   return { kind: "json", payload };
 }
 
+function parseContentDispositionFileName(headerValue) {
+  const header = `${headerValue || ""}`;
+  if (!header) return null;
+
+  const utfMatch = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1].trim().replace(/"/g, ""));
+    } catch {
+      return utfMatch[1].trim().replace(/"/g, "");
+    }
+  }
+
+  const plainMatch = header.match(/filename="?([^";]+)"?/i);
+  if (plainMatch?.[1]) {
+    try {
+      return decodeURIComponent(plainMatch[1].trim());
+    } catch {
+      return plainMatch[1].trim();
+    }
+  }
+
+  return null;
+}
+
+function sanitizeReceiptFileNamePart(value, fallback = "Order") {
+  const cleaned = `${value || ""}`
+    .trim()
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+|\.+$/g, "");
+  return cleaned || fallback;
+}
+
+function buildReceiptDownloadFileName(orderNo, kind) {
+  const safeOrder = sanitizeReceiptFileNamePart(orderNo, "Order");
+  const safeKind = kind === "invoice" ? "Invoice" : "Prepayment";
+  return `${safeOrder}-${safeKind}.pdf`;
+}
+
 function openBlobInNewTab(blob) {
   const objectUrl = URL.createObjectURL(blob);
   window.open(objectUrl, "_blank", "noopener,noreferrer");
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+function downloadBlob(blob, filename) {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename || "receipt.pdf";
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
@@ -170,6 +229,69 @@ function openSafeExternalUrl(url) {
   } catch {
     return false;
   }
+}
+
+async function deliverReceiptResult(result, { mode = "view", filename } = {}) {
+  if (result.kind === "blob") {
+    if (mode === "download") {
+      downloadBlob(result.blob, result.fileName || filename);
+    } else {
+      openBlobInNewTab(result.blob);
+    }
+    return true;
+  }
+
+  const url = result.payload?.data?.url || result.payload?.url;
+  if (!url) return false;
+
+  // Stripe hosted pages cannot be force-downloaded cross-origin.
+  // View mode may open them; download mode should use PDF endpoints instead.
+  if (mode === "download") {
+    return false;
+  }
+
+  if (!openSafeExternalUrl(url)) {
+    throw new ApiRequestError("Invalid receipt URL", 400);
+  }
+  return true;
+}
+
+function withDownloadQuery(path, mode) {
+  if (mode !== "download") return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}download=1`;
+}
+
+async function deliverReceiptFromEndpoints(
+  endpoints,
+  { mode = "view", filename, fallbackUrl, notFoundMessage } = {}
+) {
+  // Download must always go through authenticated PDF endpoints.
+  if (mode === "view" && fallbackUrl) {
+    if (!openSafeExternalUrl(fallbackUrl)) {
+      throw new ApiRequestError("Invalid receipt URL", 400);
+    }
+    return;
+  }
+
+  let lastError = null;
+  for (const path of endpoints) {
+    try {
+      const result = await authBlobOrJson(withDownloadQuery(path, mode), {
+        method: "GET",
+      });
+      const delivered = await deliverReceiptResult(result, { mode, filename });
+      if (delivered) return;
+    } catch (err) {
+      if (err instanceof ApiRequestError && err.message === "Invalid receipt URL") {
+        throw err;
+      }
+      lastError = err;
+    }
+  }
+
+  if (lastError) throw lastError;
+  throw new ApiRequestError(notFoundMessage || "Receipt not available", 404);
 }
 
 export async function registerPersonal(payload) {
@@ -298,118 +420,56 @@ export async function createPersonalInvoiceCheckout(requestId) {
   });
 }
 
-/** Opens Stripe receipt or generated PDF for the $35 prepayment. */
-export async function openPersonalPrepaymentReceipt(requestId, fallbackUrl) {
-  if (fallbackUrl) {
-    if (!openSafeExternalUrl(fallbackUrl)) {
-      throw new ApiRequestError("Invalid receipt URL", 400);
+/** View or download Stripe receipt / PDF for the $35 prepayment. */
+export async function openPersonalPrepaymentReceipt(
+  requestId,
+  fallbackUrl,
+  { mode = "view", orderNo = "" } = {}
+) {
+  return deliverReceiptFromEndpoints(
+    [`/personal-portal/requests/${requestId}/prepayment-receipt`],
+    {
+      mode,
+      filename: buildReceiptDownloadFileName(orderNo || requestId, "prepayment"),
+      fallbackUrl,
+      notFoundMessage: "Prepayment receipt not available",
     }
-    return;
-  }
-
-  const result = await authBlobOrJson(
-    `/personal-portal/requests/${requestId}/prepayment-receipt`,
-    { method: "GET" }
   );
-
-  if (result.kind === "blob") {
-    openBlobInNewTab(result.blob);
-    return;
-  }
-
-  const url = result.payload?.data?.url || result.payload?.url;
-  if (url) {
-    if (!openSafeExternalUrl(url)) {
-      throw new ApiRequestError("Invalid receipt URL", 400);
-    }
-    return;
-  }
-
-  throw new ApiRequestError("Prepayment receipt not available", 404);
 }
 
-/** Opens Stripe facility search fee receipt. */
-export async function openPersonalFacilityFeeReceipt(requestId, fallbackUrl) {
-  if (fallbackUrl) {
-    if (!openSafeExternalUrl(fallbackUrl)) {
-      throw new ApiRequestError("Invalid receipt URL", 400);
+/** View or download Stripe facility search fee receipt. */
+export async function openPersonalFacilityFeeReceipt(
+  requestId,
+  fallbackUrl,
+  { mode = "view", orderNo = "" } = {}
+) {
+  return deliverReceiptFromEndpoints(
+    [`/personal-portal/requests/${requestId}/facility-fee-receipt`],
+    {
+      mode,
+      filename: buildReceiptDownloadFileName(orderNo || requestId, "invoice"),
+      fallbackUrl,
+      notFoundMessage: "Facility fee receipt not available",
     }
-    return;
-  }
-
-  const result = await authBlobOrJson(
-    `/personal-portal/requests/${requestId}/facility-fee-receipt`,
-    { method: "GET" }
   );
-
-  if (result.kind === "blob") {
-    openBlobInNewTab(result.blob);
-    return;
-  }
-
-  const url = result.payload?.data?.url || result.payload?.url;
-  if (url) {
-    if (!openSafeExternalUrl(url)) {
-      throw new ApiRequestError("Invalid receipt URL", 400);
-    }
-    return;
-  }
-
-  throw new ApiRequestError("Facility fee receipt not available", 404);
 }
 
-/** Opens Stripe invoice / facility-fee payment receipt (URL or generated PDF). */
-export async function openPersonalInvoiceReceipt(requestId, fallbackUrl) {
-  if (fallbackUrl) {
-    if (!openSafeExternalUrl(fallbackUrl)) {
-      throw new ApiRequestError("Invalid receipt URL", 400);
-    }
-    return;
-  }
-
-  try {
-    const result = await authBlobOrJson(
+/** View or download Stripe invoice / facility-fee payment receipt. */
+export async function openPersonalInvoiceReceipt(
+  requestId,
+  fallbackUrl,
+  { mode = "view", orderNo = "" } = {}
+) {
+  return deliverReceiptFromEndpoints(
+    [
       `/personal-portal/requests/${requestId}/invoice-receipt`,
-      { method: "GET" }
-    );
-
-    if (result.kind === "blob") {
-      openBlobInNewTab(result.blob);
-      return;
+      `/personal-portal/requests/${requestId}/facility-fee-receipt`,
+    ],
+    {
+      mode,
+      filename: buildReceiptDownloadFileName(orderNo || requestId, "invoice"),
+      fallbackUrl,
+      notFoundMessage: "Invoice receipt not available",
     }
-
-    const url = result.payload?.data?.url || result.payload?.url;
-    if (url) {
-      if (!openSafeExternalUrl(url)) {
-        throw new ApiRequestError("Invalid receipt URL", 400);
-      }
-      return;
-    }
-  } catch (err) {
-    if (err instanceof ApiRequestError && err.message === "Invalid receipt URL") {
-      throw err;
-    }
-    // Fall through to facility-fee receipt (same UI label)
-  }
-
-  const facilityResult = await authBlobOrJson(
-    `/personal-portal/requests/${requestId}/facility-fee-receipt`,
-    { method: "GET" }
   );
-
-  if (facilityResult.kind === "blob") {
-    openBlobInNewTab(facilityResult.blob);
-    return;
-  }
-
-  const facilityUrl =
-    facilityResult.payload?.data?.url || facilityResult.payload?.url;
-  if (facilityUrl) {
-    if (!openSafeExternalUrl(facilityUrl)) {
-      throw new ApiRequestError("Invalid receipt URL", 400);
-    }
-    return;
-  }
-
-  throw new ApiRequestError("Invoice receipt not available", 404);
 }
