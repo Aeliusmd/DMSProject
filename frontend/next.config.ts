@@ -1,37 +1,70 @@
 import type { NextConfig } from "next";
 
-function getApiOrigin() {
-  const apiBase =
-    process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api";
+function getBackendOrigin() {
+  const backendUrl =
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    "http://localhost:5000";
 
   try {
-    return new URL(apiBase).origin;
+    return new URL(backendUrl).origin;
   } catch {
     return "http://localhost:5000";
   }
 }
 
+function getPublicApiBaseUrl() {
+  return process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
+}
+
+function getApiOrigin() {
+  const apiBase = getPublicApiBaseUrl();
+
+  if (apiBase.startsWith("/")) {
+    return getBackendOrigin();
+  }
+
+  try {
+    return new URL(apiBase).origin;
+  } catch {
+    return getBackendOrigin();
+  }
+}
+
+const STRIPE_ORIGINS = [
+  "https://checkout.stripe.com",
+  "https://js.stripe.com",
+  "https://hooks.stripe.com",
+  "https://pay.stripe.com",
+  "https://api.stripe.com",
+];
+
 function buildContentSecurityPolicy(isDev: boolean) {
   const apiOrigin = getApiOrigin();
+  const publicApiBase = getPublicApiBaseUrl();
+  const usesSameOriginApi = publicApiBase.startsWith("/");
 
-  // Next.js injects inline bootstrap scripts/styles. Dev also needs unsafe-eval for HMR.
   const scriptSrc = ["'self'", "'unsafe-inline'"];
   if (isDev) {
     scriptSrc.push("'unsafe-eval'");
   }
+
+  const connectSrc = usesSameOriginApi
+    ? ["'self'", ...STRIPE_ORIGINS]
+    : ["'self'", apiOrigin, ...STRIPE_ORIGINS];
 
   const directives = [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'self'",
-    "form-action 'self' https://checkout.stripe.com https://hooks.stripe.com",
+    `form-action 'self' ${STRIPE_ORIGINS.join(" ")}`,
     `script-src ${scriptSrc.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' blob: data: ${apiOrigin}`,
     "font-src 'self' data:",
-    `connect-src 'self' ${apiOrigin}`,
-    `frame-src 'self' blob: ${apiOrigin}`,
+    `connect-src ${connectSrc.join(" ")}`,
+    `frame-src 'self' blob: ${apiOrigin} ${STRIPE_ORIGINS.join(" ")}`,
     "worker-src 'self' blob:",
     `media-src 'self' blob: ${apiOrigin}`,
   ];
@@ -51,6 +84,16 @@ const cspHeaderName =
 const cspValue = buildContentSecurityPolicy(isDev);
 
 const nextConfig: NextConfig = {
+  async rewrites() {
+    const backendOrigin = getBackendOrigin();
+
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${backendOrigin}/api/:path*`,
+      },
+    ];
+  },
   async headers() {
     return [
       {

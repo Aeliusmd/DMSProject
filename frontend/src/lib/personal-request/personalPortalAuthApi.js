@@ -31,23 +31,125 @@ async function safeFetch(url, options) {
   }
 }
 
-async function refreshPersonalAccessToken() {
-  try {
-    const payload = await request("/personal-portal/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+let refreshPromise = null;
 
-    const data = payload?.data || {};
-    setPersonalAuth({
-      user: data.user,
-      accessExpiresAt: data.accessExpiresAt,
+function refreshPersonalOnce() {
+  if (!refreshPromise) {
+    refreshPromise = refreshPersonalAccessToken().finally(() => {
+      refreshPromise = null;
     });
+  }
+
+  return refreshPromise;
+}
+
+const REFRESH_SKEW_MS = 60 * 1000;
+const ACTIVITY_WINDOW_MS = 15 * 60 * 1000;
+const INACTIVE_RECHECK_MS = 60 * 1000;
+const ACTIVITY_EVENTS = [
+  "mousedown",
+  "keydown",
+  "scroll",
+  "touchstart",
+  "click",
+];
+
+let refreshTimer = null;
+let activityListenersBound = false;
+let lastActivityAt = Date.now();
+
+function markActivity() {
+  lastActivityAt = Date.now();
+}
+
+async function autoRefreshTick() {
+  if (typeof window === "undefined") return;
+  if (!getStoredPersonalUser()) return;
+
+  const isActive = Date.now() - lastActivityAt <= ACTIVITY_WINDOW_MS;
+
+  if (isActive) {
+    try {
+      await refreshPersonalOnce();
+    } catch {
+      return;
+    }
+
+    return;
+  }
+
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(autoRefreshTick, INACTIVE_RECHECK_MS);
+}
+
+export function schedulePersonalTokenRefresh() {
+  if (typeof window === "undefined") return;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+
+  if (!getStoredPersonalUser()) return;
+
+  const expiryMs = getPersonalAccessExpiresAt();
+  if (!expiryMs) return;
+
+  const delay = Math.max(0, expiryMs - Date.now() - REFRESH_SKEW_MS);
+  refreshTimer = setTimeout(autoRefreshTick, delay);
+}
+
+export function startPersonalAuthAutoRefresh() {
+  if (typeof window === "undefined") return;
+
+  if (!activityListenersBound) {
+    ACTIVITY_EVENTS.forEach((event) =>
+      window.addEventListener(event, markActivity, { passive: true })
+    );
+    activityListenersBound = true;
+  }
+
+  markActivity();
+  schedulePersonalTokenRefresh();
+}
+
+export function stopPersonalAuthAutoRefresh() {
+  if (typeof window === "undefined") return;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+
+  if (activityListenersBound) {
+    ACTIVITY_EVENTS.forEach((event) =>
+      window.removeEventListener(event, markActivity)
+    );
+    activityListenersBound = false;
+  }
+}
+
+export async function tryRefreshPersonalAccessToken() {
+  try {
+    await refreshPersonalOnce();
     return true;
   } catch {
     clearPersonalAuth();
     return false;
   }
+}
+
+async function refreshPersonalAccessToken() {
+  const payload = await request("/personal-portal/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+
+  const data = payload?.data || {};
+  setPersonalAuth({
+    user: data.user,
+    accessExpiresAt: data.accessExpiresAt,
+  });
+
+  schedulePersonalTokenRefresh();
+
+  return data;
 }
 
 async function request(path, options = {}) {
@@ -86,13 +188,14 @@ async function authFetch(path, options = {}, retried = false) {
   });
 
   if (response.status === 401 && !retried) {
-    const refreshed = await refreshPersonalAccessToken();
-    if (refreshed) {
-      return authFetch(path, options, true);
+    try {
+      await refreshPersonalOnce();
+    } catch {
+      clearPersonalAuth();
+      throw new ApiRequestError("Session expired. Please sign in again.", 401);
     }
 
-    clearPersonalAuth();
-    throw new ApiRequestError("Session expired. Please sign in again.", 401);
+    return authFetch(path, options, true);
   }
 
   return response;
@@ -315,9 +418,12 @@ export function savePersonalAuthSession(payload) {
     user: payload.user,
     accessExpiresAt: payload.accessExpiresAt,
   });
+  startPersonalAuthAutoRefresh();
 }
 
 export async function logoutPersonal() {
+  stopPersonalAuthAutoRefresh();
+
   try {
     await request("/personal-portal/auth/logout", {
       method: "POST",

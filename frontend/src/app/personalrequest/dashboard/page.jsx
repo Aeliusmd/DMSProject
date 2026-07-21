@@ -16,7 +16,6 @@ import {
 } from "@/lib/personal-request/personalPortalAuthApi";
 import {
   clearPersonalAuth,
-  isPersonalAuthenticated,
   getStoredPersonalUser,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
@@ -51,11 +50,6 @@ export default function PersonalPortalDashboardPage() {
     let active = true;
 
     async function load() {
-      if (!isPersonalAuthenticated()) {
-        router.replace("/personalrequest/login");
-        return;
-      }
-
       setUser(getStoredPersonalUser());
 
       const sessionId = searchParams.get("session_id");
