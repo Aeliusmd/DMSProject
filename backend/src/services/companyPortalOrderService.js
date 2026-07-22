@@ -763,8 +763,10 @@ async function uploadAndExtract({ companyUserId, file }) {
   };
 }
 
-async function getOrder(orderId, companyUserId) {
-  const order = await CompanyPortalOrder.findByIdForUser(orderId, companyUserId);
+async function getOrder(orderId, companyUserId, { employeeId = null } = {}) {
+  const order = await CompanyPortalOrder.findByIdForUser(orderId, companyUserId, {
+    employeeId,
+  });
   if (!order || order.status === "Draft") {
     throw new ApiError(404, "Order not found");
   }
@@ -787,7 +789,8 @@ async function trackOrderByNumber(orderNumber, companyUserId, { employeeId = nul
 
   const order = await CompanyPortalOrder.findByOrderNumberForUser(
     cleaned,
-    companyUserId
+    companyUserId,
+    { employeeId }
   );
   if (!order) {
     throw new ApiError(404, "No order found with that order number");
@@ -1280,8 +1283,10 @@ async function getDashboard(companyUserId, { employeeId = null } = {}) {
   return { stats };
 }
 
-function getSubpoenaFile(orderId, companyUserId) {
-  return CompanyPortalOrder.findByIdForUser(orderId, companyUserId).then(
+function getSubpoenaFile(orderId, companyUserId, { employeeId = null } = {}) {
+  return CompanyPortalOrder.findByIdForUser(orderId, companyUserId, {
+    employeeId,
+  }).then(
     (order) => {
       if (!order?.subpoena_storage_path || order.status === "Draft") {
         throw new ApiError(404, "Subpoena file not found");
@@ -1303,8 +1308,14 @@ function getSubpoenaFile(orderId, companyUserId) {
   );
 }
 
-async function getReleasedDocuments(orderId, companyUserId) {
-  const order = await CompanyPortalOrder.findByIdForUser(orderId, companyUserId);
+async function getReleasedDocuments(
+  orderId,
+  companyUserId,
+  { employeeId = null } = {}
+) {
+  const order = await CompanyPortalOrder.findByIdForUser(orderId, companyUserId, {
+    employeeId,
+  });
   if (!order || order.status === "Draft") {
     throw new ApiError(404, "Order not found");
   }
@@ -1344,7 +1355,7 @@ async function getReleasedDocuments(orderId, companyUserId) {
     }
   }
 
-  const subpoena = await getSubpoenaFile(orderId, companyUserId);
+  const subpoena = await getSubpoenaFile(orderId, companyUserId, { employeeId });
   return {
     kind: "subpoena",
     absolutePath: subpoena.absolutePath,
@@ -1352,8 +1363,14 @@ async function getReleasedDocuments(orderId, companyUserId) {
   };
 }
 
-async function generatePaymentReceiptPdf(orderId, companyUserId) {
-  const order = await CompanyPortalOrder.findByIdForUser(orderId, companyUserId);
+async function generatePaymentReceiptPdf(
+  orderId,
+  companyUserId,
+  { employeeId = null } = {}
+) {
+  const order = await CompanyPortalOrder.findByIdForUser(orderId, companyUserId, {
+    employeeId,
+  });
   if (!order || order.status === "Draft") {
     throw new ApiError(404, "Order not found");
   }

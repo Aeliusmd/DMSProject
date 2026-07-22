@@ -135,7 +135,8 @@ exports.confirmInvoicePayment = asyncHandler(async (req, res) => {
 exports.getOrder = asyncHandler(async (req, res) => {
   const order = await companyPortalOrderService.getOrder(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
   return ApiResponse.success(res, { order });
 });
@@ -230,7 +231,8 @@ exports.confirmPayment = asyncHandler(async (req, res) => {
 exports.getSubpoenaFile = asyncHandler(async (req, res) => {
   const file = await companyPortalOrderService.getSubpoenaFile(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
 
   res.setHeader("Content-Type", "application/pdf");
@@ -246,7 +248,8 @@ exports.getSubpoenaFile = asyncHandler(async (req, res) => {
 exports.downloadReleasedDocuments = asyncHandler(async (req, res) => {
   const payload = await companyPortalOrderService.getReleasedDocuments(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
 
   const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
@@ -311,7 +314,8 @@ exports.downloadReleasedDocuments = asyncHandler(async (req, res) => {
 exports.downloadPaymentReceipt = asyncHandler(async (req, res) => {
   const pdfBuffer = await companyPortalOrderService.generatePaymentReceiptPdf(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
 
   const orderId = Number(req.params.orderId);

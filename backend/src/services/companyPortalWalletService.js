@@ -309,29 +309,81 @@ async function fulfillWalletTopupSession(session) {
 
   const topupId = Number(session.metadata?.topup_id);
   const companyUserId = Number(session.metadata?.company_user_id);
-  const amount = toMoney(session.metadata?.amount);
 
-  if (!topupId || !companyUserId || !amount) {
+  if (!topupId || !companyUserId) {
     return null;
   }
 
   const pool = getPool();
   const connection = await pool.getConnection();
+  let resultPayload = null;
+  let didCredit = false;
 
   try {
     await connection.beginTransaction();
 
-    const topup = await CompanyPortalWalletTopup.findById(topupId, connection);
-    if (!topup || topup.status === "paid") {
+    const topup = await CompanyPortalWalletTopup.findByIdForUpdate(
+      topupId,
+      connection
+    );
+
+    if (!topup) {
+      await connection.commit();
+      return null;
+    }
+
+    if (topup.status === "paid") {
       await connection.commit();
       return topup;
     }
 
-    const companyBalanceAfter = await CompanyPortalWallet.adjustUnallocatedBalance(
-      companyUserId,
-      amount,
+    if (Number(topup.company_user_id) !== Number(companyUserId)) {
+      await connection.rollback();
+      return null;
+    }
+
+    // Prefer Stripe amount_total (what was actually paid); fall back to DB row.
+    const stripePaidAmount =
+      session.amount_total != null
+        ? toMoney(Number(session.amount_total) / 100)
+        : null;
+    const recordedAmount = toMoney(topup.amount);
+    const amount = stripePaidAmount || recordedAmount;
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      await connection.rollback();
+      return null;
+    }
+
+    if (
+      stripePaidAmount != null &&
+      Math.abs(stripePaidAmount - recordedAmount) > 0.009
+    ) {
+      logger.warn("Wallet top-up Stripe amount differs from recorded amount", {
+        topupId,
+        stripePaidAmount,
+        recordedAmount,
+        sessionId: session.id,
+      });
+    }
+
+    // Claim pending → paid first so only one worker can credit.
+    const claimed = await CompanyPortalWalletTopup.markPaidIfPending(
+      topupId,
       connection
     );
+
+    if (!claimed) {
+      await connection.commit();
+      return CompanyPortalWalletTopup.findById(topupId, connection);
+    }
+
+    const companyBalanceAfter =
+      await CompanyPortalWallet.adjustUnallocatedBalance(
+        companyUserId,
+        amount,
+        connection
+      );
 
     await CompanyPortalWalletTransaction.create(
       {
@@ -345,15 +397,9 @@ async function fulfillWalletTopupSession(session) {
       connection
     );
 
-    await CompanyPortalWalletTopup.markPaid(topupId, connection);
     await connection.commit();
-
-    await sendWalletTopupReceiptNotification(session, {
-      companyUserId,
-      amount,
-    });
-
-    return {
+    didCredit = true;
+    resultPayload = {
       companyUserId,
       amount,
       companyBalanceAfter,
@@ -364,6 +410,15 @@ async function fulfillWalletTopupSession(session) {
   } finally {
     connection.release();
   }
+
+  if (didCredit && resultPayload) {
+    await sendWalletTopupReceiptNotification(session, {
+      companyUserId,
+      amount: resultPayload.amount,
+    });
+  }
+
+  return resultPayload;
 }
 
 async function confirmTopup(companyUserId, sessionId) {
@@ -440,21 +495,9 @@ async function allocateToEmployee(companyUserId, { employeeId, amount }) {
   try {
     await connection.beginTransaction();
 
-    const wallet = await CompanyPortalWallet.ensureForCompany(
-      companyUserId,
-      connection
-    );
-    const unallocated = toMoney(wallet.unallocated_balance);
+    await CompanyPortalWallet.ensureForCompany(companyUserId, connection);
 
-    if (unallocated < numericAmount) {
-      throw new ApiError(400, "Insufficient unallocated balance", [
-        {
-          field: "amount",
-          message: `Only $${unallocated.toFixed(2)} is available to allocate`,
-        },
-      ]);
-    }
-
+    // Atomic debit of company wallet; fails if concurrent allocate/spend wins.
     const companyBalanceAfter = await CompanyPortalWallet.adjustUnallocatedBalance(
       companyUserId,
       -numericAmount,
@@ -484,6 +527,17 @@ async function allocateToEmployee(companyUserId, { employeeId, amount }) {
     return getWalletSummary(companyUserId);
   } catch (error) {
     await connection.rollback();
+    if (
+      error instanceof ApiError &&
+      error.message === "Insufficient company wallet balance"
+    ) {
+      throw new ApiError(400, "Insufficient unallocated balance", [
+        {
+          field: "amount",
+          message: `Only the current unallocated balance is available to allocate`,
+        },
+      ]);
+    }
     throw error;
   } finally {
     connection.release();
@@ -501,6 +555,11 @@ async function debitForOrder(
   connection = null
 ) {
   const numericAmount = toMoney(amount);
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new ApiError(400, "Payment amount must be greater than zero");
+  }
+
   const pool = connection || getPool();
   const ownsConnection = !connection;
   const conn = ownsConnection ? await pool.getConnection() : connection;
@@ -524,36 +583,16 @@ async function debitForOrder(
         throw new ApiError(404, "Employee not found");
       }
 
-      if (toMoney(employee.wallet_balance) < numericAmount) {
-        throw new ApiError(400, "Insufficient employee wallet balance", [
-          {
-            field: "paymentMethod",
-            message: "Employee wallet balance is too low for this order",
-          },
-        ]);
-      }
-
+      // Atomic debit: UPDATE ... WHERE wallet_balance >= amount
       employeeBalanceAfter = await CompanyPortalEmployee.adjustWalletBalance(
         employeeId,
         -numericAmount,
         conn
       );
     } else {
-      const wallet = await CompanyPortalWallet.ensureForCompany(
-        companyUserId,
-        conn
-      );
+      await CompanyPortalWallet.ensureForCompany(companyUserId, conn);
 
-      if (toMoney(wallet.unallocated_balance) < numericAmount) {
-        throw new ApiError(400, "Insufficient company wallet balance", [
-          {
-            field: "paymentMethod",
-            message:
-              "Company wallet balance is too low. Top up or use card payment.",
-          },
-        ]);
-      }
-
+      // Atomic debit: UPDATE ... WHERE unallocated_balance >= amount
       companyBalanceAfter = await CompanyPortalWallet.adjustUnallocatedBalance(
         companyUserId,
         -numericAmount,
