@@ -43,6 +43,7 @@ import {
   updateCompanyOrderStage,
   emailCompanyOrderRecords,
   restoreCompanyOrderInProcess,
+  restorePersonalOrderInProcess,
 } from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
@@ -661,6 +662,7 @@ function toRenderOrder(order, companyPortalMode = false) {
     creationSource: order.creationSource || "manual",
     companyPortalStatus: order.companyPortalStatus || null,
     companyPortalOrderId: order.companyPortalOrderId || null,
+    personalPortalStatus: order.personalPortalStatus || null,
     facilityNotInSystem: Boolean(order.facilityNotInSystem),
     newFacilityRequest: order.newFacilityRequest || null,
     pendingFacilitySearchFee: Number(order.pendingFacilitySearchFee) || 0,
@@ -1702,7 +1704,8 @@ export default function OrdersTable({
                           </p>
                         )}
 
-                        {companyPortalMode && order.facilityNotInSystem && (
+                        {(companyPortalMode || personalMode) &&
+                          order.facilityNotInSystem && (
                           <div className="mt-1.5 w-full space-y-1">
                             <div className="flex w-full items-start gap-1 rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1">
                               <span
@@ -1744,8 +1747,10 @@ export default function OrdersTable({
                             </div>
                           </div>
                         )}
-                        {companyPortalMode &&
-                          order.companyPortalStatus === "No facility" && (
+                        {((companyPortalMode &&
+                          order.companyPortalStatus === "No facility") ||
+                          (personalMode &&
+                            order.personalPortalStatus === "no_facility")) && (
                             <div className="mt-1.5 w-full space-y-1">
                               <p className="w-full rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1 text-[10px] font-medium leading-snug text-red-600">
                                 No facility — order ended
@@ -2049,8 +2054,10 @@ export default function OrdersTable({
                         }
                         allowStandardInvoice={true}
                         blockInvoiceCreate={
-                          companyPortalMode &&
-                          order.companyPortalStatus === "No facility"
+                          (companyPortalMode &&
+                            order.companyPortalStatus === "No facility") ||
+                          (personalMode &&
+                            order.personalPortalStatus === "no_facility")
                         }
                         providerEmail={
                           order.providerEmail ||
@@ -2411,6 +2418,7 @@ export default function OrdersTable({
         open={Boolean(facilityModalState?.order)}
         order={facilityModalState?.order}
         startAtConfirm={Boolean(facilityModalState?.startAtConfirm)}
+        portalType={personalMode ? "personal" : "company"}
         onClose={() => setFacilityModalState(null)}
         onNoFacility={() => fetchOrders({ silent: true, force: true })}
       />
@@ -2531,7 +2539,11 @@ export default function OrdersTable({
           if (!restoreInProcessOrder?.dbId || restoringInProcess) return;
           setRestoringInProcess(true);
           try {
-            await restoreCompanyOrderInProcess(restoreInProcessOrder.dbId);
+            if (personalMode) {
+              await restorePersonalOrderInProcess(restoreInProcessOrder.dbId);
+            } else {
+              await restoreCompanyOrderInProcess(restoreInProcessOrder.dbId);
+            }
             setRestoreInProcessOrder(null);
             await fetchOrders({ silent: true, force: true });
           } catch (err) {

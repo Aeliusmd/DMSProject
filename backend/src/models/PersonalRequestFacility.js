@@ -71,6 +71,44 @@ class PersonalRequestFacility {
     );
     return rows[0] || null;
   }
+
+  static async markLinked(id, { facilityId, facilityName, facilityAddress }) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE personal_request_facilities
+       SET facility_id = :facilityId,
+           facility_name = COALESCE(:facilityName, facility_name),
+           facility_address = COALESCE(:facilityAddress, facility_address),
+           is_manual_lookup = 0
+       WHERE id = :id`,
+      {
+        id,
+        facilityId,
+        facilityName: facilityName || null,
+        facilityAddress: facilityAddress || null,
+      }
+    );
+  }
+
+  static async markCancelledManualLookup(id) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE personal_request_facilities
+       SET is_manual_lookup = 0
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async markPendingManualLookup(id) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE personal_request_facilities
+       SET is_manual_lookup = 1
+       WHERE id = :id`,
+      { id }
+    );
+  }
 }
 
 module.exports = PersonalRequestFacility;

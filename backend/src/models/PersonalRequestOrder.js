@@ -484,7 +484,7 @@ class PersonalRequestOrder {
            research_fee_checkout_session_id = COALESCE(:sessionId, research_fee_checkout_session_id),
            updated_at = NOW()
        WHERE id = :id
-         AND research_fee_status IN ('none', 'pending')`,
+         AND research_fee_status IN ('none', 'pending', 'waived')`,
       { id, sessionId }
     );
   }
@@ -495,6 +495,17 @@ class PersonalRequestOrder {
       `UPDATE personal_request_orders
        SET research_fee_status = 'paid',
            research_fee_paid_at = NOW(),
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async markResearchFeeWaived(id, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_status = 'waived',
            updated_at = NOW()
        WHERE id = :id`,
       { id }

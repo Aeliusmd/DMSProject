@@ -2,13 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { markCompanyOrderNoFacility } from "@/lib/orders/orderApi";
+import {
+  markCompanyOrderNoFacility,
+  markPersonalOrderNoFacility,
+} from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
-function buildAddFacilityHref(order) {
+function buildAddFacilityHref(order, portalType = "company") {
   const req = order?.newFacilityRequest || {};
   const params = new URLSearchParams();
   if (order?.dbId) params.set("linkOrderId", String(order.dbId));
+  params.set("linkSource", portalType === "personal" ? "personal" : "company");
   if (req.facilityName) params.set("facilityName", req.facilityName);
   if (req.facilityAddress) params.set("address", req.facilityAddress);
   if (req.facilityCity) params.set("city", req.facilityCity);
@@ -33,18 +37,20 @@ export default function CompanyOrderFacilityModal({
   onClose,
   onNoFacility,
   startAtConfirm = false,
+  portalType = "company",
 }) {
   const router = useRouter();
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const isPersonal = portalType === "personal";
 
   useEffect(() => {
     if (!open) return;
     setConfirmEnd(startAtConfirm);
     setSubmitting(false);
     setError("");
-  }, [open, startAtConfirm, order?.dbId]);
+  }, [open, startAtConfirm, order?.dbId, portalType]);
 
   if (!open || !order) return null;
 
@@ -52,14 +58,18 @@ export default function CompanyOrderFacilityModal({
   const feeAmount = Number(req.searchFeeAmount) || 5;
 
   const handleAddFacility = () => {
-    router.push(buildAddFacilityHref(order));
+    router.push(buildAddFacilityHref(order, portalType));
   };
 
   const handleConfirmNoFacility = async () => {
     setSubmitting(true);
     setError("");
     try {
-      await markCompanyOrderNoFacility(order.dbId);
+      if (isPersonal) {
+        await markPersonalOrderNoFacility(order.dbId);
+      } else {
+        await markCompanyOrderNoFacility(order.dbId);
+      }
       onNoFacility?.();
       onClose?.();
     } catch (err) {
@@ -78,8 +88,9 @@ export default function CompanyOrderFacilityModal({
               Facility not in our system
             </h2>
             <p className="mt-1 text-[12px] text-[#64748B]">
-              Order {order.id} — the external company entered a facility that is
-              not in our internal system.
+              Order {order.id} — the{" "}
+              {isPersonal ? "personal requester" : "external company"} entered a
+              facility that is not in our internal system.
             </p>
           </div>
           <button

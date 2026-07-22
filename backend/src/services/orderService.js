@@ -1689,21 +1689,9 @@ async function getOrderById(id) {
 
     try {
       const personalPortalService = require("./personalPortalService");
-      const pending =
-        await personalPortalService.getPendingPersonalFacilitySearchFee(
-          order.id
-        );
-      if (pending?.amount > 0) {
-        mapped.pendingFacilitySearchFee = pending.amount;
-        mapped.newFacilityRequest = {
-          id: pending.personalRequestId,
-          status: "linked",
-          searchFeeAmount: pending.amount,
-          feePending: true,
-          feeBilled: false,
-          source: "personal_portal",
-        };
-      }
+      await personalPortalService.enrichOrdersWithPersonalFacilitySearchFees([
+        mapped,
+      ]);
     } catch (_feeError) {
       // Non-blocking
     }
