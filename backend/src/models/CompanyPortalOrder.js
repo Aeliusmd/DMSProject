@@ -51,15 +51,28 @@ class CompanyPortalOrder {
     return rows[0] || null;
   }
 
-  static async findByIdForUser(id, companyUserId, connection = null) {
+  static async findByIdForUser(
+    id,
+    companyUserId,
+    { employeeId = null, connection = null } = {}
+  ) {
     const db = connection || getPool();
+    const params = { id, companyUserId };
+    let employeeClause = "";
+
+    if (employeeId) {
+      employeeClause = "AND company_portal_employee_id = :employeeId";
+      params.employeeId = employeeId;
+    }
+
     const [rows] = await db.execute(
       `SELECT ${SELECT_COLUMNS}
        FROM company_portal_orders
        WHERE id = :id
          AND company_user_id = :companyUserId
+         ${employeeClause}
        LIMIT 1`,
-      { id, companyUserId }
+      params
     );
     return rows[0] || null;
   }
@@ -91,17 +104,26 @@ class CompanyPortalOrder {
   static async findByOrderNumberForUser(
     orderNumber,
     companyUserId,
-    connection = null
+    { employeeId = null, connection = null } = {}
   ) {
     const db = connection || getPool();
+    const params = { orderNumber, companyUserId };
+    let employeeClause = "";
+
+    if (employeeId) {
+      employeeClause = "AND company_portal_employee_id = :employeeId";
+      params.employeeId = employeeId;
+    }
+
     const [rows] = await db.execute(
       `SELECT ${SELECT_COLUMNS}
        FROM company_portal_orders
        WHERE order_number = :orderNumber
          AND company_user_id = :companyUserId
          AND status <> 'Draft'
+         ${employeeClause}
        LIMIT 1`,
-      { orderNumber, companyUserId }
+      params
     );
     return rows[0] || null;
   }
@@ -182,7 +204,7 @@ class CompanyPortalOrder {
       { ...data, id, companyUserId }
     );
 
-    return this.findByIdForUser(id, companyUserId, connection);
+    return this.findByIdForUser(id, companyUserId, { connection });
   }
 
   static async markAwaitingPayment(id, sessionId, connection = null) {
