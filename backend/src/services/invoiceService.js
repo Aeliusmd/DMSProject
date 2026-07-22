@@ -2822,6 +2822,10 @@ async function createOrUpdateXrayInvoice(body, userId) {
     await companyPortalInternalSyncService.assertCompanyPortalOrderAllowsInvoicing(
       orderId
     );
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.assertPersonalPortalOrderAllowsInvoicing(
+      orderId
+    );
   }
 
   const pool = getPool();
@@ -2933,6 +2937,10 @@ async function createInvoice(body, userId) {
   {
     const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
     await companyPortalInternalSyncService.assertCompanyPortalOrderAllowsInvoicing(
+      orderId
+    );
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.assertPersonalPortalOrderAllowsInvoicing(
       orderId
     );
   }
