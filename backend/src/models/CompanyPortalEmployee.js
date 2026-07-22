@@ -202,14 +202,39 @@ class CompanyPortalEmployee {
 
   static async adjustWalletBalance(id, delta, connection = null) {
     const db = connection || getPool();
-    await db.execute(
-      `UPDATE company_portal_employees
-       SET wallet_balance = wallet_balance + :delta,
-           updated_at = NOW()
-       WHERE id = :id
-         AND deleted_at IS NULL`,
-      { id, delta }
-    );
+    const numericDelta = Number(Number(delta || 0).toFixed(2));
+
+    if (numericDelta < 0) {
+      const amount = Math.abs(numericDelta);
+      const [result] = await db.execute(
+        `UPDATE company_portal_employees
+         SET wallet_balance = wallet_balance - :amount,
+             updated_at = NOW()
+         WHERE id = :id
+           AND deleted_at IS NULL
+           AND wallet_balance >= :amount`,
+        { id, amount }
+      );
+
+      if (!result.affectedRows) {
+        const ApiError = require("../utils/ApiError");
+        throw new ApiError(400, "Insufficient employee wallet balance", [
+          {
+            field: "paymentMethod",
+            message: "Employee wallet balance is too low for this order",
+          },
+        ]);
+      }
+    } else if (numericDelta > 0) {
+      await db.execute(
+        `UPDATE company_portal_employees
+         SET wallet_balance = wallet_balance + :delta,
+             updated_at = NOW()
+         WHERE id = :id
+           AND deleted_at IS NULL`,
+        { id, delta: numericDelta }
+      );
+    }
 
     const [rows] = await db.execute(
       `SELECT wallet_balance

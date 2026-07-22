@@ -26,6 +26,20 @@ class CompanyPortalWalletTopup {
     return rows[0] || null;
   }
 
+  static async findByIdForUpdate(id, connection) {
+    if (!connection) {
+      throw new Error("findByIdForUpdate requires a transaction connection");
+    }
+    const [rows] = await connection.execute(
+      `SELECT * FROM company_portal_wallet_topups
+       WHERE id = :id
+       LIMIT 1
+       FOR UPDATE`,
+      { id }
+    );
+    return rows[0] || null;
+  }
+
   static async findBySessionId(sessionId, connection = null) {
     const db = connection || getPool();
     const [rows] = await db.execute(
@@ -57,6 +71,19 @@ class CompanyPortalWalletTopup {
       { id }
     );
     return this.findById(id, connection);
+  }
+
+  /** Atomically claim a pending top-up. Returns true only for the first claimer. */
+  static async markPaidIfPending(id, connection = null) {
+    const db = connection || getPool();
+    const [result] = await db.execute(
+      `UPDATE company_portal_wallet_topups
+       SET status = 'paid', updated_at = NOW()
+       WHERE id = :id
+         AND status = 'pending'`,
+      { id }
+    );
+    return Number(result.affectedRows || 0) > 0;
   }
 }
 
