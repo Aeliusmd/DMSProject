@@ -168,9 +168,13 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     const paidField = `${prefix}Paid`;
     const isPersonalPortalPrepayment =
       data.creationSource === "personal_portal" && prefix === "prepayment";
+    const isCompanyPortalPrepayment =
+      data.creationSource === "company_portal" && prefix === "prepayment";
 
+    // Company portal prepayment check may include letters / symbols.
     if (
       data[checkField] &&
+      !isCompanyPortalPrepayment &&
       !isPersonalPortalPrepayment &&
       !/^\d+$/.test(data[checkField])
     ) {

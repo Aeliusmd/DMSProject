@@ -96,6 +96,7 @@ export default function PaymentChargeCard({
   checkPlaceholder = "Check number",
   checkDisplayValue = null,
   checkReadOnly = false,
+  checkAllowAnyChars = false,
 }) {
   const colors = paymentThemes[theme];
   const [paidCapError, setPaidCapError] = useState("");
@@ -223,8 +224,8 @@ export default function PaymentChargeCard({
           onBlur={onBlur}
           placeholder={checkPlaceholder}
           disabled={lockCheck}
-          inputMode={checkReadOnly ? "text" : "numeric"}
-          maxLength={checkReadOnly ? 50 : 12}
+          inputMode={checkReadOnly || checkAllowAnyChars ? "text" : "numeric"}
+          maxLength={checkReadOnly || checkAllowAnyChars ? 50 : 12}
           error={getError(`${prefix}Check`)}
         />
 

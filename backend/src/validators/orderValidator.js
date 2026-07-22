@@ -215,11 +215,20 @@ function validateOrderPayload(body = {}, options = {}) {
     const checkField = `${prefix}Check`;
     const paidField = `${prefix}Paid`;
     const checkValue = trimToString(body[checkField]);
+    const isCompanyPortalPrepayment =
+      trimToString(body.creationSource) === "company_portal" &&
+      prefix === "prepayment";
     const isPrepaymentReceipt =
       prefix === "prepayment" &&
       (checkValue === "STRIPE-PORTAL" || /^[\d-]+$/.test(checkValue));
 
-    if (!isBlank(body[checkField]) && !isPrepaymentReceipt && !/^\d+$/.test(checkValue)) {
+    // Company portal prepayment check may include letters / symbols.
+    if (
+      !isBlank(body[checkField]) &&
+      !isCompanyPortalPrepayment &&
+      !isPrepaymentReceipt &&
+      !/^\d+$/.test(checkValue)
+    ) {
       errors.push({
         field: checkField,
         message: "Check number must contain only numbers",

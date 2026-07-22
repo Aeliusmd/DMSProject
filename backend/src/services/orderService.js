@@ -1601,6 +1601,15 @@ async function getOrderStats() {
 async function resolvePersonalPortalPrepaymentReceipt(orderId, payments = []) {
   const prepayment = payments.find((row) => row.payment_type === "prepayment");
   const currentCheck = `${prepayment?.check_number || ""}`.trim();
+  const paidAmount = Number(prepayment?.amount);
+  const isPaid =
+    Number(prepayment?.is_paid) === 1 ||
+    (Number.isFinite(paidAmount) && paidAmount > 0);
+
+  // Unpaid personal orders should leave Receipt Number empty.
+  if (!prepayment || !isPaid) {
+    return "";
+  }
 
   if (currentCheck && currentCheck !== "STRIPE-PORTAL") {
     return currentCheck;

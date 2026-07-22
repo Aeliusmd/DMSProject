@@ -2705,6 +2705,7 @@ function PaymentForm({
   const invoiceFees = formData.invoiceFees;
   const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
   const isPersonalPortalOrder = formData.creationSource === "personal_portal";
+  const isCompanyPortalOrder = formData.creationSource === "company_portal";
 
   return (
     <div className="space-y-5">
@@ -2730,9 +2731,14 @@ function PaymentForm({
           isPersonalPortalOrder ? "Receipt number" : "Check number"
         }
         checkDisplayValue={
-          isPersonalPortalOrder ? formData.prepaymentCheck || "" : null
+          isPersonalPortalOrder
+            ? Number(formData.prepaymentPaid) > 0
+              ? formData.prepaymentCheck || ""
+              : ""
+            : null
         }
         checkReadOnly={isPersonalPortalOrder}
+        checkAllowAnyChars={isCompanyPortalOrder}
       />
 
       <PaymentChargeCard
