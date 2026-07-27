@@ -364,7 +364,39 @@ exports.create = asyncHandler(async (req, res) => {
 });
 
 exports.update = asyncHandler(async (req, res) => {
-  const validation = validateUpdateOrder(req.body);
+  const existing = await orderService.getOrderById(req.params.id);
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const payload = {
+    ...req.body,
+    creationSource:
+      req.body.creationSource ||
+      existing.creationSource ||
+      "manual",
+    hasDriverLicenseDocument:
+      req.body.hasDriverLicenseDocument ?? existing.hasDriverLicenseDocument,
+    hasPersonalDocument:
+      req.body.hasPersonalDocument ?? existing.hasPersonalDocument,
+    documents: existing.documents || [],
+    facilityName: req.body.facilityName || existing.facilityName || "",
+    facilityAddress:
+      req.body.facilityAddress ||
+      req.body.fullAddress ||
+      existing.facilityAddress ||
+      existing.fullAddress ||
+      "",
+    driverLicenseNumber:
+      req.body.driverLicenseNumber || existing.driverLicenseNumber || "",
+    additionalDocumentFile:
+      req.files?.additionalDocumentFile?.[0] ||
+      req.files?.additionalDocumentFile ||
+      req.body.additionalDocumentFile ||
+      null,
+  };
+
+  const validation = validateUpdateOrder(payload);
 
   if (!validation.valid) {
     throw new ApiError(400, "Validation failed", validation.errors);
@@ -372,7 +404,7 @@ exports.update = asyncHandler(async (req, res) => {
 
   const order = await orderService.updateOrder(
     req.params.id,
-    req.body,
+    payload,
     req.user.id,
     req.files
   );

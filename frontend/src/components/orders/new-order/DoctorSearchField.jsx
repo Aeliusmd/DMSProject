@@ -77,6 +77,7 @@ export default function DoctorSearchField({
   onChange,
   onBlur,
   placeholder = "Doctor name",
+  required = false,
   error = "",
   missingDefaultDoctor = false,
   doctorCreated = false,
@@ -368,6 +369,7 @@ export default function DoctorSearchField({
     <div ref={rootRef} className="relative min-w-0">
       <label className="mb-[6px] block text-[11px] font-semibold text-[#475569]">
         {label}
+        {required ? <span className="text-red-500"> *</span> : null}
       </label>
 
       <input

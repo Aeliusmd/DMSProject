@@ -23,7 +23,7 @@ import {
   formatMoneyInput,
   formatPhone,
   formatSSN,
-  immediateRequiredFields,
+  getImmediateRequiredFields,
   moneyFields,
   numericOnlyFields,
   phoneFields,
@@ -50,6 +50,7 @@ import {
   rememberDraftOrderSession,
   resolvePendingFacility,
   serializeFormForDraft,
+  mergePersonalPortalFieldsFromOrder,
 } from "@/lib/orders/facilityOrderUtils";
 import {
   applyResolvedDoctorToForm,
@@ -87,11 +88,15 @@ const PROVIDER_SYNC_FIELDS = new Set([
 const initialFormData = {
   facility: "",
   facilityName: "",
+  facilityAddress: "",
   providerId: "",
   type: "",
   caseNumber: "",
   ssn: "",
   dob: "",
+  driverLicenseNumber: "",
+  hasDriverLicenseDocument: false,
+  hasPersonalDocument: false,
 
   firstName: "",
   middleName: "",
@@ -714,6 +719,8 @@ function NewOrderPageContent() {
           setMissingDefaultDoctor(false);
         }
 
+        nextForm = mergePersonalPortalFieldsFromOrder(nextForm, order);
+
         setFormDataAndRef(nextForm);
         markCommittedFacility(nextForm.facility, nextForm.facilityName);
         setFacilityProfileIncomplete(profileIncomplete);
@@ -1191,8 +1198,16 @@ function NewOrderPageContent() {
     [formData, fileErrors, apiFieldErrors]
   );
 
-  const hasImmediateRequiredErrors = immediateRequiredFields.some(
-    (field) => errors[field]
+  const hasImmediateRequiredErrors = getImmediateRequiredFields(formData).some(
+    (field) => {
+      if (field === "facilityName") {
+        return Boolean(errors.facilityName || errors.facility);
+      }
+      if (field === "facilityAddress") {
+        return Boolean(errors.facilityAddress);
+      }
+      return Boolean(errors[field]);
+    }
   );
 
   const hasValidationErrors = Object.values(errors).some(Boolean);
@@ -1202,16 +1217,9 @@ function NewOrderPageContent() {
     formData.newFacilityRequest?.treatingDoctor ||
     ""
   }`.trim();
-  const personalDoctorBlocksUpdate =
-    formData.creationSource === "personal_portal" &&
-    formData.personalPortalStatus !== "no_facility" &&
-    (Boolean(formData.facilityNotInSystem) ||
-      (!`${formData.facility || ""}`.trim() &&
-        Boolean(`${formData.facilityName || ""}`.trim())) ||
-      (Boolean(formData.doctorNotInSystem) &&
-        !formData.specificDoctorIsDefault &&
-        !`${formData.specificDoctorId || ""}`.trim()) ||
-      (!personalRequestedDoctor && Boolean(missingDefaultDoctor)));
+  // Personal required fields are listed separately; facility/doctor link helpers
+  // no longer hard-block Update Order.
+  const personalDoctorBlocksUpdate = false;
 
   const personalNeedsFacilityAdd =
     formData.creationSource === "personal_portal" &&
@@ -1662,7 +1670,12 @@ function NewOrderPageContent() {
 
   const getError = (name) => {
     const shouldShowImmediately =
-      immediateRequiredFields.includes(name) || isEditMode;
+      getImmediateRequiredFields(formData).includes(name) ||
+      (formData.creationSource === "personal_portal" &&
+        ["facilityName", "facilityAddress", "dob", "driverLicenseNumber"].includes(
+          name
+        )) ||
+      isEditMode;
 
     if (shouldShowImmediately || touched[name] || submitAttempted) {
       return errors[name] || "";
@@ -1842,50 +1855,22 @@ function NewOrderPageContent() {
     setSaveError("");
     setApiFieldErrors({});
 
-    if (
-      formDataRef.current.creationSource === "personal_portal" &&
-      formDataRef.current.personalPortalStatus !== "no_facility"
-    ) {
-      const requested = `${
-        formDataRef.current.requestedTreatingDoctor ||
-        formDataRef.current.newFacilityRequest?.treatingDoctor ||
-        ""
-      }`.trim();
-      const typedFacilityOnly =
-        !`${formDataRef.current.facility || ""}`.trim() &&
-        Boolean(`${formDataRef.current.facilityName || ""}`.trim());
-
-      if (formDataRef.current.facilityNotInSystem || typedFacilityOnly) {
-        setSaveError(
-          "Add this facility to the system (use the link under Facility), or select an existing facility, before updating this order."
-        );
-        return;
-      }
-
-      if (
-        formDataRef.current.doctorNotInSystem &&
-        !formDataRef.current.specificDoctorIsDefault &&
-        !`${formDataRef.current.specificDoctorId || ""}`.trim()
-      ) {
-        setSaveError(
-          requested
-            ? `Requested treating doctor "${requested}" is not on this facility. Use “Add this doctor to facility”, or select/create a default doctor, before updating.`
-            : "The specific doctor is not on this facility. Use “Add this doctor to facility”, or select/create a default doctor, before updating."
-        );
-        return;
-      }
-    }
-
     const resolvedFacility = await syncFacilityFromForm(formDataRef.current);
 
-    if (resolvedFacility?.needsFacilityAdd) {
+    if (
+      formDataRef.current.creationSource !== "personal_portal" &&
+      resolvedFacility?.needsFacilityAdd
+    ) {
       setSaveError(
         "Add this facility to the system (use the link under Facility), or select an existing facility, before updating this order."
       );
       return;
     }
 
-    if (resolvedFacility?.facilityProfileIncomplete) {
+    if (
+      formDataRef.current.creationSource !== "personal_portal" &&
+      resolvedFacility?.facilityProfileIncomplete
+    ) {
       setSaveError(
         "Complete the facility profile before saving this order."
       );
@@ -1893,9 +1878,9 @@ function NewOrderPageContent() {
     }
 
     if (
+      formDataRef.current.creationSource !== "personal_portal" &&
       resolvedFacility?.doctorResolved?.missingDefaultDoctor &&
       !(
-        formDataRef.current.creationSource === "personal_portal" &&
         Boolean(
           `${
             formDataRef.current.requestedTreatingDoctor ||
@@ -1908,17 +1893,31 @@ function NewOrderPageContent() {
       )
     ) {
       setSaveError(
-        formDataRef.current.creationSource === "personal_portal"
-          ? "This facility has no default doctor. Add a default doctor on the facility profile, then return here to update the order."
-          : "Add a default doctor for this facility before saving this order."
+        "Add a default doctor for this facility before saving this order."
       );
       return;
     }
 
     const syncedFormData = {
       ...formDataRef.current,
-      facility: resolvedFacility?.facilityId || "",
-      facilityName: resolvedFacility?.facilityName || "",
+      facility:
+        resolvedFacility?.facilityId || formDataRef.current.facility || "",
+      facilityName:
+        resolvedFacility?.facilityName ||
+        formDataRef.current.facilityName ||
+        "",
+      facilityAddress:
+        formDataRef.current.facilityAddress ||
+        formDataRef.current.fullAddress ||
+        "",
+      fullAddress:
+        formDataRef.current.fullAddress ||
+        formDataRef.current.facilityAddress ||
+        "",
+      injuryType:
+        formDataRef.current.creationSource === "personal_portal"
+          ? formDataRef.current.injuryType || "cumulative"
+          : formDataRef.current.injuryType,
       specificDoctor:
         resolvedFacility?.doctorResolved?.specificDoctor ??
         formDataRef.current.specificDoctor ??
@@ -1927,6 +1926,22 @@ function NewOrderPageContent() {
         resolvedFacility?.doctorResolved?.specificDoctorIsDefault ??
         formDataRef.current.specificDoctorIsDefault ??
         false,
+      hasPersonalDocument: Boolean(
+        formDataRef.current.hasPersonalDocument ||
+          formDataRef.current.hasDriverLicenseDocument ||
+          (Array.isArray(formDataRef.current.documents) &&
+            formDataRef.current.documents.length > 0) ||
+          formDataRef.current.additionalDocumentFile
+      ),
+      hasDriverLicenseDocument: Boolean(
+        formDataRef.current.hasDriverLicenseDocument ||
+          (Array.isArray(formDataRef.current.documents) &&
+            formDataRef.current.documents.some((doc) =>
+              /driver.?s?\s*licen/i.test(
+                `${doc.documentName || ""} ${doc.originalFileName || ""}`
+              )
+            ))
+      ),
     };
 
     const currentErrors = {
@@ -2168,8 +2183,10 @@ function NewOrderPageContent() {
           disabled={
             (isEditMode ? hasValidationErrors : hasImmediateRequiredErrors) ||
             saving ||
-            facilityProfileIncomplete ||
-            missingDefaultDoctor ||
+            (formData.creationSource !== "personal_portal" &&
+              facilityProfileIncomplete) ||
+            (formData.creationSource !== "personal_portal" &&
+              missingDefaultDoctor) ||
             personalDoctorBlocksUpdate ||
             resolvingFacility ||
             resolvingDoctor
@@ -2225,11 +2242,24 @@ function OrderDetailsForm({
   orderEndedNoFacility = false,
   showPersonalAddFacilityLink = false,
 }) {
+  const isPersonalPortalOrder = formData.creationSource === "personal_portal";
+  const injuryDatesRequired =
+    isPersonalPortalOrder ||
+    formData.injuryType === "cumulative" ||
+    formData.injuryType === "specific";
+
   const hasRequiredErrors =
     getError("facility") ||
+    getError("facilityName") ||
     getError("type") ||
     getError("firstName") ||
-    getError("lastName");
+    getError("lastName") ||
+    (isPersonalPortalOrder &&
+      (getError("dob") ||
+        getError("driverLicenseNumber") ||
+        getError("additionalDocumentFile") ||
+        getError("injuryDateBegin") ||
+        getError("injuryDateEnd")));
 
   const facilityHint =
     allowCreateFacility &&
@@ -2245,8 +2275,21 @@ function OrderDetailsForm({
     <div className="space-y-5">
       <div className="rounded-[6px] bg-[#F8FAFC] px-3 py-2 text-[11px] font-medium text-[#64748B]">
         <span className="mr-2 text-red-500">*</span>
-        <span>* Required field</span>
+        <span>Required field</span>
       </div>
+
+      {isPersonalPortalOrder ? (
+        <div className="rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 py-2 text-[11px] text-[#0C4A6E]">
+          <p className="font-semibold text-[#0369A1]">
+            Personal order — required fields
+          </p>
+          <p className="mt-1 leading-snug">
+            Order #, First &amp; Last name, Date of birth, Treating facility,
+            Specific doctor, Specific dates needed, Type of records, Driver&apos;s licence number,
+            and Document. Marked with <span className="text-red-500">*</span>.
+          </p>
+        </div>
+      ) : null}
 
       {orderEndedNoFacility ? (
         <div className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
@@ -2260,7 +2303,9 @@ function OrderDetailsForm({
       <div className="space-y-4">
         <div className="space-y-1">
           <FacilitySearchField
-            label="Facility"
+            label={
+              isPersonalPortalOrder ? "Treating facility name" : "Facility"
+            }
             value={formData.facilityName || ""}
             facilityId={formData.facility || ""}
             onInputChange={onFacilityInput}
@@ -2279,6 +2324,7 @@ function OrderDetailsForm({
             required
             error={
               getError("facility") ||
+              getError("facilityName") ||
               (allowCreateFacility && facilityProfileIncomplete
                 ? "Complete the facility profile to continue"
                 : "")
@@ -2352,8 +2398,24 @@ function OrderDetailsForm({
           onChange={onChange}
           onBlur={onBlur}
           type="date"
+          required={isPersonalPortalOrder}
           error={getError("dob")}
         />
+
+        {isPersonalPortalOrder ? (
+          <NewOrderField
+            label="Driver's licence number"
+            name="driverLicenseNumber"
+            value={formData.driverLicenseNumber || ""}
+            onChange={onChange}
+            onBlur={onBlur}
+            placeholder="Driver's licence number"
+            required
+            maxLength={50}
+            error={getError("driverLicenseNumber")}
+            hint="From the personal portal request; edits are saved back to that request."
+          />
+        ) : null}
       </div>
 
       <Divider />
@@ -2420,9 +2482,42 @@ function OrderDetailsForm({
 
       <div>
         <h3 className="text-[13px] font-semibold text-[#111827]">
-          Date of Injury (Complete all relevant information):
+          {isPersonalPortalOrder
+            ? "Specific dates needed"
+            : "Date of Injury (Complete all relevant information):"}
+          {injuryDatesRequired ? <span className="text-red-500"> *</span> : null}
         </h3>
 
+        {isPersonalPortalOrder ? (
+          <p className="mt-1 text-[11px] text-[#64748B]">
+            Date range for records (e.g. 01/01/2013 through 02/02/2024)
+          </p>
+        ) : null}
+
+        {isPersonalPortalOrder ? (
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <NewOrderField
+              label="From"
+              name="injuryDateBegin"
+              value={formData.injuryDateBegin}
+              onChange={onChange}
+              onBlur={onBlur}
+              type="date"
+              required
+              error={getError("injuryDateBegin")}
+            />
+            <NewOrderField
+              label="Through"
+              name="injuryDateEnd"
+              value={formData.injuryDateEnd}
+              onChange={onChange}
+              onBlur={onBlur}
+              type="date"
+              required
+              error={getError("injuryDateEnd")}
+            />
+          </div>
+        ) : (
         <div className="mt-3 space-y-3">
           <div>
             <label className="flex flex-wrap items-center gap-2 text-[12px] text-[#475569]">
@@ -2502,6 +2597,7 @@ function OrderDetailsForm({
             ) : null}
           </div>
         </div>
+        )}
       </div>
 
       <Divider />
@@ -2532,13 +2628,21 @@ function OrderDetailsForm({
 
       <div>
         <h3 className="mb-3 text-[13px] font-semibold text-[#111827]">
-          Upload Additional Document
+          {isPersonalPortalOrder
+            ? "Upload document (Driver's licence)"
+            : "Upload Additional Document"}
+          {isPersonalPortalOrder ? (
+            <span className="text-red-500"> *</span>
+          ) : null}
         </h3>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
           <NewOrderField
             name="documentName"
-            value={formData.documentName}
+            value={
+              formData.documentName ||
+              (isPersonalPortalOrder ? "Driver's License" : "")
+            }
             onChange={onChange}
             onBlur={onBlur}
             placeholder="Document Name"
@@ -2658,7 +2762,7 @@ function ServeInfoForm({
         onInputChange={onProviderInput}
         onSelect={onProviderSelect}
         onBlur={onProviderBlur}
-        required
+        required={!isPersonalPortal}
         error={getError("serveCompanyName")}
         hint="Search existing providers or type a new company name"
       />
@@ -2746,7 +2850,7 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         placeholder="company@email.com"
-        required
+        required={!isPersonalPortal}
         error={getError("email")}
       />
 
@@ -2883,6 +2987,7 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         onDoctorBlur={onDoctorBlur}
+        required
         placeholder="Doctor name"
         error={
           getError("specificDoctor") ||

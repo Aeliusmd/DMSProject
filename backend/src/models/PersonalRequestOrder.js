@@ -305,7 +305,7 @@ class PersonalRequestOrder {
     });
     try {
       const [rows] = await pool.execute(
-        `SELECT order_id, portal_status
+        `SELECT order_id, portal_status, driver_license_number, driver_license_storage_path
          FROM personal_request_orders
          WHERE order_id IN (${placeholders})`,
         params
@@ -420,6 +420,20 @@ class PersonalRequestOrder {
        SET email = :email, updated_at = NOW()
        WHERE id = :id`,
       { id, email }
+    );
+    return this.findById(id, connection);
+  }
+
+  static async updateDriverLicenseNumber(id, driverLicenseNumber, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_orders
+       SET driver_license_number = :driverLicenseNumber, updated_at = NOW()
+       WHERE id = :id`,
+      {
+        id,
+        driverLicenseNumber: `${driverLicenseNumber || ""}`.trim(),
+      }
     );
     return this.findById(id, connection);
   }

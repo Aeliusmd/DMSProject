@@ -2070,6 +2070,116 @@ async function getPendingPersonalFacilitySearchFee(dmsOrderId) {
 }
 
 /**
+ * True when the portal/user named a doctor who is not linked on the facility yet.
+ */
+async function resolvePersonalPortalDoctorNotInSystem({
+  requestOrder = null,
+  primaryFacility = null,
+  dmsOrder = null,
+  mappedOrder = null,
+} = {}) {
+  const requestedDoctor = `${primaryFacility?.treating_doctor || ""}`.trim() ||
+    `${dmsOrder?.specific_doctor || ""}`.trim() ||
+    `${mappedOrder?.specificDoctor || mappedOrder?.doctor || mappedOrder?.requestedTreatingDoctor || ""}`.trim();
+
+  if (!requestedDoctor) return false;
+  if (requestOrder?.portal_status === "no_facility") return false;
+
+  const isManualLookup = Boolean(Number(primaryFacility?.is_manual_lookup));
+  if (isManualLookup) {
+    return true;
+  }
+
+  const facilityId = Number(primaryFacility?.facility_id);
+  if (!Number.isFinite(facilityId) || facilityId <= 0) {
+    return false;
+  }
+
+  try {
+    const facilityService = require("./facilityService");
+    const doctorResult = await facilityService.resolveFacilityDoctor(facilityId, {
+      doctorName: requestedDoctor,
+      useDefaultWhenMissing: false,
+      allowCreate: false,
+    });
+    return Boolean(doctorResult.doctorMissing);
+  } catch (_doctorError) {
+    return true;
+  }
+}
+
+/**
+ * Staff list: personal-portal required-field completeness (always from dbId).
+ */
+async function applyPersonalOrderCompletenessFields(order) {
+  let dmsOrderId = Number(order.dbId);
+  if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
+    const rawId = `${order.id || ""}`.trim();
+    if (/^\d+$/.test(rawId)) {
+      dmsOrderId = Number(rawId);
+    }
+  }
+  if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
+    return;
+  }
+
+  const {
+    buildPersonalPortalRequiredFieldData,
+    computeMissingRequiredFields,
+  } = require("../utils/orderRequiredFields");
+  const OrderRecord = require("../models/OrderRecord");
+
+  let requestOrder = null;
+  let primaryFacility = null;
+  try {
+    requestOrder = await PersonalRequestOrder.findByOrderId(dmsOrderId);
+    if (requestOrder) {
+      primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+        requestOrder.id
+      );
+      order.driverLicenseNumber =
+        requestOrder.driver_license_number || order.driverLicenseNumber || "";
+      order.hasDriverLicenseDocument = Boolean(
+        requestOrder.driver_license_storage_path
+      );
+    }
+  } catch (_requestLoadError) {
+    // Continue with DMS row only
+  }
+
+  const dmsOrder = await Order.findById(dmsOrderId);
+  const orderRecords = await OrderRecord.findByOrderId(dmsOrderId);
+
+  try {
+    order.doctorNotInSystem = await resolvePersonalPortalDoctorNotInSystem({
+      requestOrder,
+      primaryFacility,
+      dmsOrder,
+      mappedOrder: order,
+    });
+  } catch (_doctorFlagError) {
+    order.doctorNotInSystem = Boolean(order.doctorNotInSystem);
+  }
+
+  const requiredData = buildPersonalPortalRequiredFieldData({
+    orderRow: dmsOrder || {},
+    mappedOrder: order,
+    requestOrder,
+    primaryFacility,
+    orderRecords,
+    documents: Array.isArray(order.documents) ? order.documents : [],
+  });
+
+  order.driverLicenseNumber = requiredData.driverLicenseNumber;
+  order.hasDriverLicenseDocument = requiredData.hasDriverLicenseDocument;
+  order.missingRequiredFields = computeMissingRequiredFields(
+    requiredData,
+    orderRecords
+  );
+  order.hasIncompleteRequiredFields = order.missingRequiredFields.length > 0;
+}
+
+/**
  * Company-portal parity enrichment for staff Personal Orders list:
  * - facilityNotInSystem while manual lookup is still pending
  * - newFacilityRequest details for Add Facility / End Order modal
@@ -2083,12 +2193,16 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
 
   await Promise.all(
     personalOrders.map(async (order) => {
-      try {
-        const dmsOrderId = Number(order.dbId || order.id);
-        if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) return;
+      const dmsOrderId = Number(order.dbId);
+      if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
+        return;
+      }
 
+      try {
         const requestOrder = await PersonalRequestOrder.findByOrderId(dmsOrderId);
-        if (!requestOrder) return;
+        if (!requestOrder) {
+          return;
+        }
 
         order.personalPortalStatus = requestOrder.portal_status || null;
         order.personalPortalRequestId = requestOrder.id;
@@ -2196,32 +2310,38 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
           source: "personal_portal",
         };
 
-        const requestedDoctor = `${primaryFacility?.treating_doctor || ""}`.trim();
+        const requestedDoctor =
+          `${primaryFacility?.treating_doctor || ""}`.trim() ||
+          `${order.doctor || ""}`.trim();
         order.requestedTreatingDoctor = requestedDoctor;
 
-        let doctorNotInSystem = false;
+        order.doctorNotInSystem = await resolvePersonalPortalDoctorNotInSystem({
+          requestOrder,
+          primaryFacility,
+          dmsOrder: await Order.findById(dmsOrderId),
+          mappedOrder: order,
+        });
+
+        order.driverLicenseNumber =
+          requestOrder.driver_license_number || order.driverLicenseNumber || "";
+        order.facilityAddress =
+          primaryFacility?.facility_address ||
+          order.facilityAddress ||
+          order.fullAddress ||
+          "";
         if (
-          requestedDoctor &&
-          !isManualLookup &&
-          Number(primaryFacility?.facility_id) > 0 &&
-          requestOrder.portal_status !== "no_facility"
+          !`${order.fullAddress || ""}`.trim() &&
+          `${order.facilityAddress || ""}`.trim()
         ) {
-          try {
-            const facilityService = require("./facilityService");
-            const doctorResult = await facilityService.resolveFacilityDoctor(
-              primaryFacility.facility_id,
-              {
-                doctorName: requestedDoctor,
-                useDefaultWhenMissing: false,
-                allowCreate: false,
-              }
-            );
-            doctorNotInSystem = Boolean(doctorResult.doctorMissing);
-          } catch (_doctorError) {
-            doctorNotInSystem = true;
-          }
+          order.fullAddress = order.facilityAddress;
         }
-        order.doctorNotInSystem = doctorNotInSystem;
+        order.hasDriverLicenseDocument = Boolean(
+          requestOrder.driver_license_storage_path
+        );
+        order.hasPersonalDocument = Boolean(
+          order.hasDriverLicenseDocument ||
+            (Array.isArray(order.documents) && order.documents.length > 0)
+        );
 
         const pending = await getPendingPersonalFacilitySearchFee(dmsOrderId);
         if (!(Number(order.pendingFacilitySearchFee) > 0)) {
@@ -2229,6 +2349,12 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
         }
       } catch (_error) {
         // Non-blocking enrichment
+      } finally {
+        try {
+          await applyPersonalOrderCompletenessFields(order);
+        } catch (_completenessError) {
+          // Keep list row usable
+        }
       }
     })
   );
@@ -2632,6 +2758,44 @@ async function fulfillPersonalPortalResearchFeePayment(session) {
   }
 }
 
+/**
+ * Persist staff edits for personal-portal-only fields (DL #, facility name/address,
+ * records date range) onto personal_request_* tables.
+ */
+async function syncPersonalOrderDetailsFromStaffUpdate(internalOrderId, data = {}) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+
+  const license = `${data.driverLicenseNumber || ""}`.trim();
+  if (license) {
+    await PersonalRequestOrder.updateDriverLicenseNumber(requestOrder.id, license);
+  }
+
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+  if (!primaryFacility?.id) return;
+
+  const facilityName = `${data.facilityName || ""}`.trim();
+  const facilityAddress = `${
+    data.facilityAddress || data.fullAddress || ""
+  }`.trim();
+  const recordsDateBegin = data.injuryDateBegin || null;
+  const recordsDateEnd = data.injuryDateEnd || null;
+  const treatingDoctor = `${data.specificDoctor || ""}`.trim() || null;
+
+  await PersonalRequestFacility.updateStaffDetails(primaryFacility.id, {
+    facilityName: facilityName || null,
+    facilityAddress: facilityAddress || null,
+    recordsDateBegin,
+    recordsDateEnd,
+    treatingDoctor,
+  });
+}
+
 module.exports = {
   sendEmailOtp,
   confirmEmailOtp,
@@ -2650,6 +2814,7 @@ module.exports = {
   assertPersonalPortalOrderAllowsInvoicing,
   assertPersonalPortalOrderAllowsFacilityCreate,
   assertPersonalPortalDoctorAllowsOrderUpdate,
+  syncPersonalOrderDetailsFromStaffUpdate,
   createResearchFeeCheckout,
   getCheckoutResult,
   lookupRequestStatus,

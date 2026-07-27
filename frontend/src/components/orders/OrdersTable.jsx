@@ -251,6 +251,41 @@ function IncompleteOrderIndicator({ missingFields = [] }) {
   );
 }
 
+function orderHasIncompleteRequiredFields(order = {}) {
+  const missing = Array.isArray(order.missingRequiredFields)
+    ? order.missingRequiredFields
+    : Array.isArray(order.missing_required_fields)
+      ? order.missing_required_fields
+      : [];
+
+  const hasDoctorName = Boolean(
+    `${order.doctor || order.specificDoctor || order.requestedTreatingDoctor || ""}`.trim()
+  );
+  const doctorUnresolved =
+    order.creationSource === "personal_portal" &&
+    Boolean(order.doctorNotInSystem) &&
+    hasDoctorName;
+
+  return (
+    Boolean(
+      order.hasIncompleteRequiredFields ?? order.has_incomplete_required_fields
+    ) ||
+    missing.length > 0 ||
+    doctorUnresolved
+  );
+}
+
+function buildIncompleteOrderTooltip(missingFields = []) {
+  const fields = missingFields.filter(Boolean);
+  return fields.length > 0
+    ? `Required fields are not completed: ${fields.join(", ")}`
+    : "Required fields are not completed";
+}
+
+function isPersonalOrderIncompleteDisplay(order, personalMode) {
+  return personalMode || order.creationSource === "personal_portal";
+}
+
 function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "") {
   setModal({ title, note });
 }
@@ -664,6 +699,8 @@ function toRenderOrder(order, companyPortalMode = false) {
     companyPortalOrderId: order.companyPortalOrderId || null,
     personalPortalStatus: order.personalPortalStatus || null,
     facilityNotInSystem: Boolean(order.facilityNotInSystem),
+    doctorNotInSystem: Boolean(order.doctorNotInSystem),
+    requestedTreatingDoctor: order.requestedTreatingDoctor || "",
     newFacilityRequest: order.newFacilityRequest || null,
     pendingFacilitySearchFee: Number(order.pendingFacilitySearchFee) || 0,
     companyPortalInvoiceSent: Boolean(order.companyPortalInvoiceSent),
@@ -707,10 +744,12 @@ function toRenderOrder(order, companyPortalMode = false) {
     dateRequested: order.dateRequested || "",
     dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
-    hasIncompleteRequiredFields: Boolean(order.hasIncompleteRequiredFields),
+    hasIncompleteRequiredFields: orderHasIncompleteRequiredFields(order),
     missingRequiredFields: Array.isArray(order.missingRequiredFields)
       ? order.missingRequiredFields
-      : [],
+      : Array.isArray(order.missing_required_fields)
+        ? order.missing_required_fields
+        : [],
     portalStatus: order.portalStatus || null,
     portalStatusLabel: order.portalStatusLabel || null,
   };
@@ -1606,7 +1645,7 @@ export default function OrdersTable({
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th
                   className={`${
-                    companyPortalMode ? "w-[132px]" : "w-[90px]"
+                    companyPortalMode ? "w-[132px]" : personalMode ? "w-[118px]" : "w-[90px]"
                   } px-4 py-3`}
                 >
                   ID
@@ -1666,15 +1705,25 @@ export default function OrdersTable({
                   </td>
                 </tr>
               ) : (
-                currentOrders.map((order) => (
+                currentOrders.map((order) => {
+                  const incompleteRequired = orderHasIncompleteRequiredFields(order);
+                  const personalIncompletePrefix = isPersonalOrderIncompleteDisplay(
+                    order,
+                    personalMode
+                  );
+                  const incompleteTooltip = buildIncompleteOrderTooltip(
+                    order.missingRequiredFields
+                  );
+
+                  return (
                   <tr
                     key={order.dbId}
                     className={getOrderRowClassName(order.orderStatus)}
                   >
                     <td className="px-4 py-5 align-top">
                       <div className="w-full min-w-0">
-                        <div className="inline-flex items-start gap-1">
-                          {order.hasIncompleteRequiredFields && (
+                        <div className="inline-flex min-w-0 items-start gap-1">
+                          {incompleteRequired && !personalIncompletePrefix && (
                             <IncompleteOrderIndicator
                               missingFields={order.missingRequiredFields}
                             />
@@ -1687,9 +1736,24 @@ export default function OrdersTable({
                                 listReturnTo,
                               }),
                             })}
-                            className="font-semibold text-[#007F96] hover:underline"
+                            className="min-w-0 font-semibold text-[#007F96] hover:underline"
+                            title={
+                              incompleteRequired ? incompleteTooltip : undefined
+                            }
                           >
-                            {order.id}
+                            {incompleteRequired && personalIncompletePrefix ? (
+                              <>
+                                <span
+                                  className="font-bold text-red-600"
+                                  aria-hidden="true"
+                                >
+                                  !{" "}
+                                </span>
+                                <span className="break-all">{order.id}</span>
+                              </>
+                            ) : (
+                              order.id
+                            )}
                           </Link>
                         </div>
 
@@ -2271,7 +2335,8 @@ export default function OrdersTable({
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>

@@ -925,7 +925,21 @@ function mapOrderListRow(
     portalStatusLabel: extras.portalStatusLabel || null,
   };
 
-  return appendOrderCompletenessFields(mapped, row, orderRecords);
+  if (extras.personalRequest) {
+    const personalRequest = extras.personalRequest;
+    mapped.driverLicenseNumber = personalRequest.driver_license_number || "";
+    mapped.hasDriverLicenseDocument = Boolean(
+      personalRequest.driver_license_storage_path
+    );
+    mapped.hasPersonalDocument = mapped.hasDriverLicenseDocument;
+  }
+
+  return appendOrderCompletenessFields(
+    mapped,
+    row,
+    orderRecords,
+    extras.personalRequest || null
+  );
 }
 
 function mapDocument(doc) {
@@ -1075,7 +1089,8 @@ function mapOrderDetail(
   notes = [],
   invoiceRow = null,
   xrayRow = null,
-  orderRecords = []
+  orderRecords = [],
+  personalRequest = null
 ) {
   const paymentSummary = invoiceService.mapOrderPaymentsSummary(payments);
   const paymentForm = enrichPaymentDueFields(
@@ -1091,6 +1106,7 @@ function mapOrderDetail(
 
   const mapped = {
     id: row.id,
+    dbId: row.id,
     orderNumber: row.order_number || "",
     status: writeOffState.status,
     isSubpoena: readHasSubpoena(row),
@@ -1186,6 +1202,12 @@ function mapOrderDetail(
     specificDoctor: row.specific_doctor || "",
     specificDoctorIsDefault: Boolean(Number(row.specific_doctor_is_default)),
     fullAddress: row.full_address || "",
+    driverLicenseNumber: personalRequest?.driver_license_number || "",
+    hasDriverLicenseDocument: Boolean(personalRequest?.driver_license_storage_path),
+    hasPersonalDocument: Boolean(
+      personalRequest?.driver_license_storage_path ||
+        (Array.isArray(documents) && documents.length > 0)
+    ),
 
     certificateNoRecords: Boolean(row.certificate_no_records),
     cnrReason: row.cnr_reason || "",
@@ -1199,7 +1221,12 @@ function mapOrderDetail(
     invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow, payments),
   };
 
-  return appendOrderCompletenessFields(mapped, row, orderRecords);
+  return appendOrderCompletenessFields(
+    mapped,
+    row,
+    orderRecords,
+    personalRequest
+  );
 }
 
 function parseExcludeCompleted(value) {
@@ -1435,6 +1462,7 @@ async function getAllOrders(query = {}) {
         hasActiveReminder: Boolean(activeReminderByOrderId[row.id]),
         portalStatus,
         portalStatusLabel,
+        personalRequest: portal,
       }
     );
   });
@@ -1670,6 +1698,11 @@ async function getOrderById(id) {
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
   const orderRecords = await OrderRecord.findByOrderId(order.id);
 
+  let personalRequest = null;
+  if (order.creation_source === "personal_portal") {
+    personalRequest = await PersonalRequestOrder.findByOrderId(order.id);
+  }
+
   const mapped = mapOrderDetail(
     order,
     payments,
@@ -1678,7 +1711,8 @@ async function getOrderById(id) {
     notes,
     invoiceRow,
     xrayRow,
-    orderRecords
+    orderRecords,
+    personalRequest
   );
 
   if (mapped.creationSource === "personal_portal") {
@@ -1694,6 +1728,17 @@ async function getOrderById(id) {
       ]);
     } catch (_feeError) {
       // Non-blocking
+    }
+
+    if (personalRequest) {
+      const license = `${personalRequest.driver_license_number || ""}`.trim();
+      if (license) {
+        mapped.driverLicenseNumber = license;
+      }
+      if (personalRequest.driver_license_storage_path) {
+        mapped.hasDriverLicenseDocument = true;
+        mapped.hasPersonalDocument = true;
+      }
     }
   }
 
@@ -2244,8 +2289,27 @@ function assertFacilityProfileComplete(facility) {
   }
 }
 
-function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
+function appendOrderCompletenessFields(
+  mappedOrder,
+  row,
+  orderRecords = [],
+  personalRequest = null
+) {
+  const creationSource = row.creation_source || "manual";
   const requiredFieldData = mapOrderRowToRequiredFieldData(row, orderRecords);
+  requiredFieldData.creationSource = creationSource;
+
+  if (creationSource === "personal_portal" && personalRequest) {
+    const license = `${personalRequest.driver_license_number || ""}`.trim();
+    if (license) {
+      requiredFieldData.driverLicenseNumber = license;
+    }
+    if (personalRequest.driver_license_storage_path) {
+      requiredFieldData.hasDriverLicenseDocument = true;
+      requiredFieldData.hasPersonalDocument = true;
+    }
+  }
+
   const missingRequiredFields = computeMissingRequiredFields(
     requiredFieldData,
     orderRecords
@@ -2253,7 +2317,7 @@ function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
 
   return {
     ...mappedOrder,
-    creationSource: row.creation_source || "manual",
+    creationSource,
     missingRequiredFields,
     hasIncompleteRequiredFields: missingRequiredFields.length > 0,
   };
@@ -2579,11 +2643,8 @@ async function updateOrder(id, data, actorId, files) {
   }
 
   if (existing.creation_source === "personal_portal") {
-    const personalPortalService = require("./personalPortalService");
-    await personalPortalService.assertPersonalPortalDoctorAllowsOrderUpdate(
-      existing.id,
-      data
-    );
+    // Personal required fields are validated in orderValidator (portal-specific).
+    // Facility/doctor link helpers remain available in the UI but do not block update.
   }
 
   const blockCreate = await shouldBlockFacilityCreateForOrder(existing);
@@ -2694,6 +2755,26 @@ async function updateOrder(id, data, actorId, files) {
     });
 
     await connection.commit();
+
+    if (existing.creation_source === "personal_portal") {
+      try {
+        const personalPortalService = require("./personalPortalService");
+        await personalPortalService.syncPersonalOrderDetailsFromStaffUpdate(
+          existing.id,
+          {
+            ...data,
+            facilityName: data.facilityName || facility?.facility_name,
+            facilityAddress:
+              data.facilityAddress || data.fullAddress || facility?.address,
+          }
+        );
+      } catch (syncError) {
+        console.warn(
+          "[personal-portal] Failed to sync staff personal fields:",
+          syncError.message || syncError
+        );
+      }
+    }
 
     await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 
