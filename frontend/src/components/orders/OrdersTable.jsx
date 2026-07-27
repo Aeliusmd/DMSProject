@@ -1693,11 +1693,18 @@ export default function OrdersTable({
                           </Link>
                         </div>
 
-                        {order.creationSource === "auto" && (
-                          <p className="mt-1 text-[10px] italic text-[#64748B]">
-                            Unprocessed
-                          </p>
-                        )}
+                        {order.creationSource === "auto" &&
+                          order.hasIncompleteRequiredFields && (
+                            <p className="mt-1 text-[10px] italic text-[#64748B]">
+                              Unprocessed
+                            </p>
+                          )}
+                        {order.creationSource === "auto" &&
+                          !order.hasIncompleteRequiredFields && (
+                            <p className="mt-1 text-[10px] italic text-[#0F766E]">
+                              Processed
+                            </p>
+                          )}
                         {order.creationSource === "personal_portal" && (
                           <p className="mt-1 text-[10px] font-medium text-[#0097B2]">
                             Personal Portal

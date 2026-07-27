@@ -2167,7 +2167,8 @@ async function resolveProviderId(connection, data) {
   return provider.id;
 }
 
-async function resolveFacilityId(connection, data) {
+async function resolveFacilityId(connection, data, options = {}) {
+  const { allowCreate = true } = options;
   const facilityId = Number(data.facility);
   const facilityName = trimOrNull(data.facilityName);
 
@@ -2189,6 +2190,24 @@ async function resolveFacilityId(connection, data) {
     return Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null;
   }
 
+  if (!allowCreate) {
+    const existing = await Facility.findBestMatch(
+      {
+        facilityName,
+        address: data.facilityAddress || "",
+        city: data.facilityCity || "",
+        state: data.facilityState || "",
+        zipCode: data.facilityZip || "",
+      },
+      connection
+    );
+    if (existing?.id) return existing.id;
+    throw new ApiError(
+      400,
+      "Cannot create a new facility for this ended personal order. Restore it to In Process first, or select an existing facility."
+    );
+  }
+
   const { facility } = await findOrCreateFacility(
     {
       facilityName,
@@ -2201,6 +2220,19 @@ async function resolveFacilityId(connection, data) {
   );
 
   return facility.id;
+}
+
+async function shouldBlockFacilityCreateForOrder(orderRow) {
+  // Personal portal orders never auto-create facilities from typed names.
+  // Staff must select an existing facility or use Add Facility.
+  return orderRow?.creation_source === "personal_portal";
+}
+
+function isPersonalPortalPlaceholderFacility(facility) {
+  return (
+    `${facility?.facility_name || ""}`.trim() ===
+    "Personal Portal - Pending Facility"
+  );
 }
 
 function assertFacilityProfileComplete(facility) {
@@ -2244,7 +2276,9 @@ async function createOrder(data, actorId, files, options = {}) {
   try {
     await connection.beginTransaction();
 
-    const resolvedFacilityId = await resolveFacilityId(connection, orderInput);
+    const resolvedFacilityId = await resolveFacilityId(connection, orderInput, {
+      allowCreate: creationSource !== "personal_portal",
+    });
 
     if (!resolvedFacilityId) {
       throw new ApiError(400, "Selected facility does not exist");
@@ -2485,13 +2519,17 @@ async function updateOrderFacility(id, data, actorId) {
     throw new ApiError(404, "Order not found");
   }
 
+  const blockCreate = await shouldBlockFacilityCreateForOrder(existing);
+
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const resolvedFacilityId = await resolveFacilityId(connection, data);
+    const resolvedFacilityId = await resolveFacilityId(connection, data, {
+      allowCreate: !blockCreate,
+    });
 
     if (!resolvedFacilityId) {
       throw new ApiError(400, "Selected facility does not exist");
@@ -2503,7 +2541,14 @@ async function updateOrderFacility(id, data, actorId) {
       throw new ApiError(400, "Selected facility does not exist");
     }
 
-    assertFacilityProfileComplete(facility);
+    if (
+      !(
+        existing.creation_source === "personal_portal" &&
+        isPersonalPortalPlaceholderFacility(facility)
+      )
+    ) {
+      assertFacilityProfileComplete(facility);
+    }
 
     await connection.execute(
       `UPDATE orders
@@ -2533,13 +2578,25 @@ async function updateOrder(id, data, actorId, files) {
     throw new ApiError(404, "Order not found");
   }
 
+  if (existing.creation_source === "personal_portal") {
+    const personalPortalService = require("./personalPortalService");
+    await personalPortalService.assertPersonalPortalDoctorAllowsOrderUpdate(
+      existing.id,
+      data
+    );
+  }
+
+  const blockCreate = await shouldBlockFacilityCreateForOrder(existing);
+
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const resolvedFacilityId = await resolveFacilityId(connection, data);
+    const resolvedFacilityId = await resolveFacilityId(connection, data, {
+      allowCreate: !blockCreate,
+    });
 
     if (!resolvedFacilityId) {
       throw new ApiError(400, "Selected facility does not exist");
@@ -2553,7 +2610,14 @@ async function updateOrder(id, data, actorId, files) {
       throw new ApiError(400, "Selected facility does not exist");
     }
 
-    assertFacilityProfileComplete(facility);
+    if (
+      !(
+        existing.creation_source === "personal_portal" &&
+        isPersonalPortalPlaceholderFacility(facility)
+      )
+    ) {
+      assertFacilityProfileComplete(facility);
+    }
 
     const rawOrderNumber = trimOrNull(data.orderNumber);
     if (!rawOrderNumber) {

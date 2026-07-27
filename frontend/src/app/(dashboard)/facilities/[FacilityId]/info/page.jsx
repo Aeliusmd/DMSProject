@@ -198,6 +198,23 @@ export default function FacilityDetailsPage() {
   useEffect(() => {
     if (focusSection !== "doctors" || loading) return undefined;
 
+    const doctorNamePrefill = `${searchParams.get("doctorName") || ""}`.trim();
+    if (doctorNamePrefill) {
+      const parts = doctorNamePrefill.split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || "";
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
+      const middleName =
+        parts.length > 2 ? parts.slice(1, -1).join(" ") : "";
+      setDoctorInputs([
+        {
+          ...createEmptyDoctorInput(`doctor-input-${Date.now()}`),
+          firstName,
+          middleName,
+          lastName,
+        },
+      ]);
+    }
+
     const timer = setTimeout(() => {
       document
         .getElementById("facility-doctors")
@@ -205,7 +222,7 @@ export default function FacilityDetailsPage() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [focusSection, loading]);
+  }, [focusSection, loading, searchParams]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -731,11 +748,7 @@ export default function FacilityDetailsPage() {
       setDoctorSubmitAttempted(false);
       setDoctorErrors({});
 
-      const hasDefaultDoctor = (refreshed.doctors || []).some(
-        (doctor) => doctor.defaultDoctor
-      );
-
-      if (returnToOrderPath && hasDefaultDoctor) {
+      if (returnToOrderPath) {
         setReturnToOrderModal({ open: true });
       }
     } catch (err) {

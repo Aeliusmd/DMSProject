@@ -186,25 +186,208 @@ async function linkPersonalFacilityIfAlreadyInSystem(primaryFacility) {
   };
 }
 
-function buildOrderPayloadFromBundle(bundle, confirmationReference) {
+/**
+ * After a personal DMS order has a real facility: match requested treating
+ * doctor if present, otherwise use the facility default. Never auto-create.
+ */
+async function applyPersonalPortalDoctorForOrder(
+  dmsOrderId,
+  facilityId,
+  treatingDoctor = ""
+) {
+  const orderId = Number(dmsOrderId);
+  const facilityIdNum = Number(facilityId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return null;
+  if (!Number.isFinite(facilityIdNum) || facilityIdNum <= 0) return null;
+
+  const facilityService = require("./facilityService");
+  const requested = `${treatingDoctor || ""}`.trim();
+  const result = await facilityService.resolveFacilityDoctor(facilityIdNum, {
+    doctorName: requested || undefined,
+    useDefaultWhenMissing: !requested,
+    allowCreate: false,
+  });
+
+  const nextDoctorName = `${result.doctorName || ""}`.trim();
+  const pool = getPool();
+  await pool.execute(
+    `UPDATE orders
+     SET specific_doctor = :specificDoctor,
+         specific_doctor_is_default = :isDefault,
+         updated_at = NOW()
+     WHERE id = :orderId`,
+    {
+      orderId,
+      specificDoctor: nextDoctorName || null,
+      isDefault: result.usedDefault ? 1 : 0,
+    }
+  );
+
+  return {
+    specificDoctor: nextDoctorName,
+    usedDefault: Boolean(result.usedDefault),
+    doctorMissing: Boolean(result.doctorMissing),
+    missingDefault: Boolean(result.missingDefault),
+  };
+}
+
+/**
+ * Block staff order update while a personal-request treating doctor is still
+ * missing from the facility, unless staff selects/creates a real facility
+ * doctor (including the facility default).
+ */
+async function assertPersonalPortalDoctorAllowsOrderUpdate(
+  internalOrderId,
+  data = {}
+) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+  if (requestOrder.portal_status === "no_facility") return;
+
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+  const requestedDoctor = `${primaryFacility?.treating_doctor || ""}`.trim();
+
+  const facilityId = Number(
+    data.facility || data.facilityId || primaryFacility?.facility_id
+  );
+  if (!Number.isFinite(facilityId) || facilityId <= 0) {
+    throw new ApiError(
+      400,
+      "Add the facility to the system (or select an existing facility) before updating this personal order."
+    );
+  }
+
+  const facility = await Facility.findById(facilityId);
+  if (
+    facility &&
+    `${facility.facility_name || ""}`.trim() === PERSONAL_PLACEHOLDER_FACILITY_NAME
+  ) {
+    throw new ApiError(
+      400,
+      "Add the facility to the system before updating this personal order."
+    );
+  }
+
+  const facilityService = require("./facilityService");
+  const submittedDoctor = `${data.specificDoctor || ""}`.trim();
+  const markedDefault = Boolean(data.specificDoctorIsDefault);
+
+  async function submittedIsExistingFacilityDoctor() {
+    if (!submittedDoctor) return false;
+    const submittedResult = await facilityService.resolveFacilityDoctor(
+      facilityId,
+      {
+        doctorName: submittedDoctor,
+        useDefaultWhenMissing: false,
+        allowCreate: false,
+      }
+    );
+    return Boolean(
+      !submittedResult.doctorMissing && submittedResult.doctor
+    );
+  }
+
+  // No treating doctor on the personal request → must use facility default
+  // (or another existing facility doctor). Empty default blocks update.
+  if (!requestedDoctor) {
+    if (await submittedIsExistingFacilityDoctor()) {
+      return;
+    }
+
+    const defaultResult = await facilityService.resolveFacilityDoctor(
+      facilityId,
+      {
+        useDefaultWhenMissing: true,
+        allowCreate: false,
+      }
+    );
+
+    if (defaultResult.doctor && !defaultResult.missingDefault) {
+      return;
+    }
+
+    throw new ApiError(
+      400,
+      "This facility has no default doctor. Add a default doctor on the facility profile before updating this personal order."
+    );
+  }
+
+  const requestedResult = await facilityService.resolveFacilityDoctor(
+    facilityId,
+    {
+      doctorName: requestedDoctor,
+      useDefaultWhenMissing: false,
+      allowCreate: false,
+    }
+  );
+
+  if (!requestedResult.doctorMissing) {
+    return;
+  }
+
+  if (await submittedIsExistingFacilityDoctor()) {
+    return;
+  }
+
+  if (markedDefault) {
+    const defaultResult = await facilityService.resolveFacilityDoctor(
+      facilityId,
+      {
+        useDefaultWhenMissing: true,
+        allowCreate: false,
+      }
+    );
+    if (defaultResult.doctor && !defaultResult.missingDefault) {
+      return;
+    }
+  }
+
+  throw new ApiError(
+    400,
+    `Requested treating doctor "${requestedDoctor}" is not on this facility. Add that doctor, or select/create a default doctor, before updating this order.`
+  );
+}
+
+function buildOrderPayloadFromBundle(bundle, confirmationReference, options = {}) {
   const { order, primaryFacility, recordTypes } = bundle;
   const flags = mapRecordTypeFlags(recordTypes);
+  const { placeholderFacilityId = null } = options;
+
+  const linkedFacilityId = Number(primaryFacility?.facility_id);
+  const hasLinkedFacility =
+    Number.isFinite(linkedFacilityId) && linkedFacilityId > 0;
+  const usePlaceholder =
+    !hasLinkedFacility &&
+    Number.isFinite(Number(placeholderFacilityId)) &&
+    Number(placeholderFacilityId) > 0;
 
   return {
     orderNumber: confirmationReference,
     firstName: order.first_name,
     lastName: order.last_name,
     dob: order.dob,
-    facility: primaryFacility?.facility_id
-      ? String(primaryFacility.facility_id)
-      : undefined,
-    facilityName: primaryFacility?.facility_name || "Personal Request Facility",
+    // Never invent a real DMS facility from a typed personal-portal name.
+    // Matched facilities keep their id; unmatched use the reserved placeholder.
+    ...(usePlaceholder
+      ? { facility: String(placeholderFacilityId), facilityName: "" }
+      : {
+          facility: hasLinkedFacility ? String(linkedFacilityId) : undefined,
+          facilityName:
+            primaryFacility?.facility_name || "Personal Request Facility",
+        }),
     facilityAddress: primaryFacility?.facility_address,
     fullAddress: primaryFacility?.facility_address,
     address: primaryFacility?.facility_address,
     email: order.email,
     serveCompanyName: "Personal Request Portal",
-    specificDoctor: "Records Department",
+    // Keep requester's treating doctor when provided. Empty means staff/default
+    // resolution later — never invent a placeholder doctor name.
+    specificDoctor: `${primaryFacility?.treating_doctor || ""}`.trim(),
     specificRecord: `Records ${formatIsoToDisplay(primaryFacility?.records_date_begin)} to ${formatIsoToDisplay(primaryFacility?.records_date_end)}`,
     injuryType: "cumulative",
     injuryDateBegin: primaryFacility?.records_date_begin,
@@ -215,6 +398,25 @@ function buildOrderPayloadFromBundle(bundle, confirmationReference) {
     mailAddress: order.mail_address,
     ...flags,
   };
+}
+
+const PERSONAL_PLACEHOLDER_FACILITY_NAME =
+  "Personal Portal - Pending Facility";
+
+/**
+ * Reserved facility for personal portal orders whose treating facility is not
+ * in DMS yet. Staff later create/link a real facility via Add Facility.
+ */
+async function resolvePersonalPlaceholderFacilityId() {
+  const facilityService = require("./facilityService");
+  const { facility } = await facilityService.findOrCreateFacility({
+    facilityName: PERSONAL_PLACEHOLDER_FACILITY_NAME,
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+  });
+  return facility?.id || null;
 }
 
 async function loadRequestBundle(orderId) {
@@ -519,7 +721,20 @@ async function fulfillPersonalPortalPayment(session) {
       );
     }
 
-    const orderPayload = buildOrderPayloadFromBundle(bundle, confirmationReference);
+    const stillUnmatched =
+      Boolean(Number(bundle.primaryFacility?.is_manual_lookup)) ||
+      !Number(bundle.primaryFacility?.facility_id);
+
+    let placeholderFacilityId = null;
+    if (stillUnmatched) {
+      placeholderFacilityId = await resolvePersonalPlaceholderFacilityId();
+    }
+
+    const orderPayload = buildOrderPayloadFromBundle(
+      bundle,
+      confirmationReference,
+      { placeholderFacilityId }
+    );
     const dmsOrder = await orderService.createOrder(
       {
         ...orderPayload,
@@ -537,6 +752,21 @@ async function fulfillPersonalPortalPayment(session) {
       }
     );
     dmsOrderId = dmsOrder.id;
+
+    if (!stillUnmatched && Number(bundle.primaryFacility?.facility_id) > 0) {
+      try {
+        await applyPersonalPortalDoctorForOrder(
+          dmsOrderId,
+          bundle.primaryFacility.facility_id,
+          bundle.primaryFacility.treating_doctor
+        );
+      } catch (doctorError) {
+        logger.warn("Personal portal doctor resolve skipped after create", {
+          dmsOrderId,
+          message: doctorError.message,
+        });
+      }
+    }
   }
 
   const pool = getPool();
@@ -1600,9 +1830,19 @@ async function backfillMissingDmsOrderLinks() {
         );
       }
 
+      const stillUnmatched =
+        Boolean(Number(bundle.primaryFacility?.is_manual_lookup)) ||
+        !Number(bundle.primaryFacility?.facility_id);
+
+      let placeholderFacilityId = null;
+      if (stillUnmatched) {
+        placeholderFacilityId = await resolvePersonalPlaceholderFacilityId();
+      }
+
       const orderPayload = buildOrderPayloadFromBundle(
         bundle,
-        confirmationReference
+        confirmationReference,
+        { placeholderFacilityId }
       );
       const dmsOrder = await orderService.createOrder(
         {
@@ -1620,6 +1860,18 @@ async function backfillMissingDmsOrderLinks() {
           creationSource: "personal_portal",
         }
       );
+
+      if (!stillUnmatched && Number(bundle.primaryFacility?.facility_id) > 0) {
+        try {
+          await applyPersonalPortalDoctorForOrder(
+            dmsOrder.id,
+            bundle.primaryFacility.facility_id,
+            bundle.primaryFacility.treating_doctor
+          );
+        } catch (_doctorError) {
+          // Non-blocking
+        }
+      }
 
       const pool = getPool();
       const connection = await pool.getConnection();
@@ -1858,15 +2110,17 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
           isManualLookup = false;
         }
 
-        // Heal when DMS already points at a facility that existed before this
-        // order (including older auto-created rows). Skip when the facility was
-        // created as part of payment fulfill for this unmatched name.
+        // Heal when DMS already points at a real (non-placeholder) facility.
+        // Never treat the reserved pending placeholder as a linked facility.
         if (isManualLookup && primaryFacility?.id) {
           const dmsOrder = await Order.findById(dmsOrderId);
           const dmsFacilityId = Number(dmsOrder?.facility_id);
           if (Number.isFinite(dmsFacilityId) && dmsFacilityId > 0) {
             const dmsFacility = await Facility.findById(dmsFacilityId);
-            if (dmsFacility) {
+            const facilityName = `${dmsFacility?.facility_name || ""}`.trim();
+            const isPlaceholder =
+              facilityName === PERSONAL_PLACEHOLDER_FACILITY_NAME;
+            if (dmsFacility && !isPlaceholder) {
               const isAutoCreated = Boolean(Number(dmsFacility.is_auto_created));
               const facilityCreatedMs = dmsFacility.created_at
                 ? new Date(dmsFacility.created_at).getTime()
@@ -1901,6 +2155,21 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
           isManualLookup && requestOrder.portal_status !== "no_facility";
 
         order.facilityNotInSystem = facilityNotInSystem;
+        if (
+          facilityNotInSystem &&
+          primaryFacility?.facility_name &&
+          (`${order.facilityName || ""}`.trim() ===
+            PERSONAL_PLACEHOLDER_FACILITY_NAME ||
+            !order.facilityName)
+        ) {
+          order.facilityName = primaryFacility.facility_name;
+          if (order.facilityInfo) {
+            order.facilityInfo = {
+              ...order.facilityInfo,
+              name: primaryFacility.facility_name,
+            };
+          }
+        }
         order.newFacilityRequest = {
           id: requestOrder.id,
           status: facilityNotInSystem
@@ -1926,6 +2195,33 @@ async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
               researchStatus !== "waived"),
           source: "personal_portal",
         };
+
+        const requestedDoctor = `${primaryFacility?.treating_doctor || ""}`.trim();
+        order.requestedTreatingDoctor = requestedDoctor;
+
+        let doctorNotInSystem = false;
+        if (
+          requestedDoctor &&
+          !isManualLookup &&
+          Number(primaryFacility?.facility_id) > 0 &&
+          requestOrder.portal_status !== "no_facility"
+        ) {
+          try {
+            const facilityService = require("./facilityService");
+            const doctorResult = await facilityService.resolveFacilityDoctor(
+              primaryFacility.facility_id,
+              {
+                doctorName: requestedDoctor,
+                useDefaultWhenMissing: false,
+                allowCreate: false,
+              }
+            );
+            doctorNotInSystem = Boolean(doctorResult.doctorMissing);
+          } catch (_doctorError) {
+            doctorNotInSystem = true;
+          }
+        }
+        order.doctorNotInSystem = doctorNotInSystem;
 
         const pending = await getPendingPersonalFacilitySearchFee(dmsOrderId);
         if (!(Number(order.pendingFacilitySearchFee) > 0)) {
@@ -1996,6 +2292,21 @@ async function linkFacilityToPersonalPortalOrder(internalOrderId, facilityId) {
     });
   }
 
+  let doctorResolve = null;
+  try {
+    doctorResolve = await applyPersonalPortalDoctorForOrder(
+      Number(internalOrderId),
+      facilityIdNum,
+      primaryFacility?.treating_doctor
+    );
+  } catch (doctorError) {
+    logger.warn("Personal portal doctor resolve skipped after facility link", {
+      internalOrderId,
+      facilityId: facilityIdNum,
+      message: doctorError.message,
+    });
+  }
+
   const researchStatus = requestOrder.research_fee_status || "none";
   if (researchStatus !== "paid" && researchStatus !== "waived") {
     await PersonalRequestOrder.markResearchFeeRequested(requestOrder.id);
@@ -2006,6 +2317,7 @@ async function linkFacilityToPersonalPortalOrder(internalOrderId, facilityId) {
     personalRequestId: requestOrder.id,
     facilityId: facilityIdNum,
     facilitySearchFee: getResearchFeeAmount(),
+    doctor: doctorResolve,
   };
 }
 
@@ -2072,6 +2384,26 @@ async function assertPersonalPortalOrderAllowsInvoicing(internalOrderId) {
     throw new ApiError(
       400,
       "Invoice is unavailable because this personal portal order was ended with No facility"
+    );
+  }
+}
+
+/**
+ * Block creating / linking a new facility while the personal order is ended.
+ * Selecting an already-saved facility id is still allowed for read/update paths
+ * that do not invent a new facility row. Restore to In Process to re-enable.
+ */
+async function assertPersonalPortalOrderAllowsFacilityCreate(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+
+  if (requestOrder.portal_status === "no_facility") {
+    throw new ApiError(
+      400,
+      "Cannot create or add a facility while this personal order is ended (No facility). Restore it to In Process first."
     );
   }
 }
@@ -2316,6 +2648,8 @@ module.exports = {
   markPersonalPortalOrderNoFacility,
   restorePersonalPortalOrderInProcess,
   assertPersonalPortalOrderAllowsInvoicing,
+  assertPersonalPortalOrderAllowsFacilityCreate,
+  assertPersonalPortalDoctorAllowsOrderUpdate,
   createResearchFeeCheckout,
   getCheckoutResult,
   lookupRequestStatus,

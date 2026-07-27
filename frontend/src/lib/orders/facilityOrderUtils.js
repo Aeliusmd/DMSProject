@@ -162,6 +162,7 @@ export async function resolvePendingFacility({
   state = "",
   zip = "",
   zipCode = "",
+  allowCreate = true,
 } = {}) {
   const trimmedName = `${facilityName || ""}`.trim();
   const existingId = `${facilityId || ""}`.trim();
@@ -196,6 +197,15 @@ export async function resolvePendingFacility({
     return {
       facilityId: "",
       facilityName: "",
+      facilityCreated: false,
+      facilityProfileIncomplete: false,
+    };
+  }
+
+  if (!allowCreate) {
+    return {
+      facilityId: "",
+      facilityName: trimmedName,
       facilityCreated: false,
       facilityProfileIncomplete: false,
     };

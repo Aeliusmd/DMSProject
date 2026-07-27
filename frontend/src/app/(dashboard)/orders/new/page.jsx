@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import CollapsibleOrderPanel from "@/components/orders/new-order/CollapsibleOrderPanel";
@@ -51,6 +52,8 @@ import {
   serializeFormForDraft,
 } from "@/lib/orders/facilityOrderUtils";
 import {
+  applyResolvedDoctorToForm,
+  buildDoctorResolveAfterFacilityReturn,
   resolvePendingDoctorForOrder,
 } from "@/lib/orders/doctorOrderUtils";
 import { getProviders, updateProvider } from "@/lib/providers/providerApi";
@@ -399,24 +402,18 @@ function NewOrderPageContent() {
     };
 
     let doctorResolved = null;
-    const extractedDoctorName = `${draft.extractionMeta?.extractedDoctorName || ""}`.trim();
 
     if (resolved.facilityId || nextForm.facility) {
       try {
+        const resolveDoctorInput = buildDoctorResolveAfterFacilityReturn({
+          formSnapshot: nextForm,
+          extractionMeta: draft.extractionMeta || {},
+        });
         doctorResolved = await resolvePendingDoctorForOrder({
           facilityId: resolved.facilityId || nextForm.facility,
-          doctorId:
-            nextForm.specificDoctorId || draft.formSnapshot?.specificDoctorId || "",
-          doctorName: nextForm.specificDoctor || extractedDoctorName,
-          extractedDoctorName,
-          priorDoctorCreated: Boolean(draft.extractionMeta?.doctorCreated),
+          ...resolveDoctorInput,
         });
-        nextForm = {
-          ...nextForm,
-          specificDoctor: doctorResolved.specificDoctor,
-          specificDoctorId: doctorResolved.specificDoctorId,
-          specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
-        };
+        nextForm = applyResolvedDoctorToForm(nextForm, doctorResolved);
         setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
         setDoctorCreated(doctorResolved.doctorCreated);
       } catch {
@@ -551,6 +548,7 @@ function NewOrderPageContent() {
           draftFacility?.facilityId || draftFacility?.formSnapshot?.facility || ""
         }`.trim();
         const orderFacilityId = `${order.facility || ""}`.trim();
+        let restoredDoctorAfterFacilityReturn = false;
         // Restore draft when returning from facility profile, or when an unsaved
         // facility change is still pending for this order.
         const shouldRestoreDraft = Boolean(
@@ -590,6 +588,7 @@ function NewOrderPageContent() {
               ...nextForm,
               facility: resolved.facilityId || nextForm.facility,
               facilityName: resolved.facilityName || nextForm.facilityName,
+              facilityNotInSystem: false,
             };
             profileIncomplete = resolved.facilityProfileIncomplete;
             facilityWasCreated = resolved.facilityCreated;
@@ -603,23 +602,16 @@ function NewOrderPageContent() {
             });
 
             try {
-              const extractedDoctorName = `${draftFacility.extractionMeta?.extractedDoctorName || ""}`.trim();
+              const resolveDoctorInput = buildDoctorResolveAfterFacilityReturn({
+                formSnapshot: nextForm,
+                extractionMeta: draftFacility.extractionMeta || {},
+              });
               const doctorResolved = await resolvePendingDoctorForOrder({
                 facilityId: resolved.facilityId || nextForm.facility,
-                doctorId:
-                  nextForm.specificDoctorId ||
-                  draftFacility.formSnapshot?.specificDoctorId ||
-                  "",
-                doctorName: nextForm.specificDoctor || extractedDoctorName,
-                extractedDoctorName,
-                priorDoctorCreated: Boolean(draftFacility.extractionMeta?.doctorCreated),
+                ...resolveDoctorInput,
               });
-              nextForm = {
-                ...nextForm,
-                specificDoctor: doctorResolved.specificDoctor,
-                specificDoctorId: doctorResolved.specificDoctorId,
-                specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
-              };
+              nextForm = applyResolvedDoctorToForm(nextForm, doctorResolved);
+              restoredDoctorAfterFacilityReturn = true;
               if (active) {
                 setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
                 setDoctorCreated(doctorResolved.doctorCreated);
@@ -637,14 +629,21 @@ function NewOrderPageContent() {
             });
             nextForm = {
               ...nextForm,
-              facility: resolved.facilityId || nextForm.facility,
-              facilityName: resolved.facilityName || nextForm.facilityName,
+              facility: resolved.facilityId || order.facility || nextForm.facility,
+              facilityName:
+                resolved.facilityName || order.facilityName || nextForm.facilityName,
+              facilityNotInSystem: false,
             };
             profileIncomplete = resolved.facilityProfileIncomplete;
             facilityWasCreated = resolved.facilityCreated;
             facilityLabel = resolved.facilityName || nextForm.facilityName;
           } catch {
-            // Keep order facility.
+            nextForm = {
+              ...nextForm,
+              facility: order.facility || nextForm.facility,
+              facilityName: order.facilityName || nextForm.facilityName,
+              facilityNotInSystem: false,
+            };
           }
         } else if (!isReturnFromFacilityEdit) {
           // No pending facility change — drop stale draft for a clean load.
@@ -658,24 +657,58 @@ function NewOrderPageContent() {
           clearFacilityRefreshParam();
         }
 
-        if (nextForm.facility && !`${nextForm.specificDoctor || ""}`.trim()) {
-          try {
-            const doctorResolved = await resolvePendingDoctorForOrder({
-              facilityId: nextForm.facility,
-              doctorId: nextForm.specificDoctorId || "",
-            });
-            nextForm = {
-              ...nextForm,
-              specificDoctor: doctorResolved.specificDoctor,
-              specificDoctorId: doctorResolved.specificDoctorId,
-              specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
-            };
-            if (active) {
-              setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
-              setDoctorCreated(doctorResolved.doctorCreated);
+        if (nextForm.facility) {
+          const isPersonalPortal = nextForm.creationSource === "personal_portal";
+          const requestedDoctor = `${
+            nextForm.requestedTreatingDoctor ||
+            nextForm.newFacilityRequest?.treatingDoctor ||
+            ""
+          }`.trim();
+          const shouldResolveDoctor =
+            isPersonalPortal || !`${nextForm.specificDoctor || ""}`.trim();
+          const skipPostLoadDoctorResolve =
+            restoredDoctorAfterFacilityReturn &&
+            isReturnFromFacilityEdit &&
+            shouldRestoreDraft;
+
+          if (shouldResolveDoctor && !skipPostLoadDoctorResolve) {
+            try {
+              const resolveDoctorInput =
+                isReturnFromFacilityEdit || applyFacilityId
+                  ? buildDoctorResolveAfterFacilityReturn({
+                      formSnapshot: nextForm,
+                      extractionMeta: draftFacility?.extractionMeta || {},
+                    })
+                  : {
+                      doctorId: nextForm.specificDoctorId || "",
+                      doctorName: isPersonalPortal
+                        ? requestedDoctor || nextForm.specificDoctor || ""
+                        : "",
+                      extractedDoctorName: isPersonalPortal ? requestedDoctor : "",
+                      allowCreate: !isPersonalPortal,
+                      useDefaultWhenMissing: isPersonalPortal ? !requestedDoctor : true,
+                    };
+              const doctorResolved = await resolvePendingDoctorForOrder({
+                facilityId: nextForm.facility,
+                ...resolveDoctorInput,
+              });
+              nextForm = applyResolvedDoctorToForm(nextForm, doctorResolved);
+              nextForm = {
+                ...nextForm,
+                requestedTreatingDoctor:
+                  nextForm.requestedTreatingDoctor || requestedDoctor || "",
+              };
+              if (active) {
+                setMissingDefaultDoctor(
+                  Boolean(doctorResolved.missingDefaultDoctor)
+                );
+                setDoctorCreated(doctorResolved.doctorCreated);
+              }
+            } catch {
+              if (active) setMissingDefaultDoctor(false);
             }
-          } catch {
-            if (active) setMissingDefaultDoctor(false);
+          } else if (active) {
+            setMissingDefaultDoctor(false);
           }
         } else if (active) {
           setMissingDefaultDoctor(false);
@@ -1164,6 +1197,30 @@ function NewOrderPageContent() {
 
   const hasValidationErrors = Object.values(errors).some(Boolean);
 
+  const personalRequestedDoctor = `${
+    formData.requestedTreatingDoctor ||
+    formData.newFacilityRequest?.treatingDoctor ||
+    ""
+  }`.trim();
+  const personalDoctorBlocksUpdate =
+    formData.creationSource === "personal_portal" &&
+    formData.personalPortalStatus !== "no_facility" &&
+    (Boolean(formData.facilityNotInSystem) ||
+      (!`${formData.facility || ""}`.trim() &&
+        Boolean(`${formData.facilityName || ""}`.trim())) ||
+      (Boolean(formData.doctorNotInSystem) &&
+        !formData.specificDoctorIsDefault &&
+        !`${formData.specificDoctorId || ""}`.trim()) ||
+      (!personalRequestedDoctor && Boolean(missingDefaultDoctor)));
+
+  const personalNeedsFacilityAdd =
+    formData.creationSource === "personal_portal" &&
+    formData.personalPortalStatus !== "no_facility" &&
+    (Boolean(formData.facilityNotInSystem) ||
+      formData.newFacilityRequest?.status === "pending" ||
+      (!`${formData.facility || ""}`.trim() &&
+        Boolean(`${formData.facilityName || ""}`.trim())));
+
   const syncDoctorFromForm = async (data, options = {}) => {
     const facilityId = `${data.facility || ""}`.trim();
 
@@ -1173,11 +1230,30 @@ function NewOrderPageContent() {
       return null;
     }
 
+    const isPersonalPortal = data.creationSource === "personal_portal";
+    const requestedDoctor = `${
+      data.requestedTreatingDoctor ||
+      data.newFacilityRequest?.treatingDoctor ||
+      ""
+    }`.trim();
     const doctorName = `${options.doctorName ?? data.specificDoctor ?? ""}`.trim();
     const extractedDoctorName = `${options.extractedDoctorName ?? ""}`.trim();
     const nameToResolve = options.resetForFacilityChange
       ? ""
-      : doctorName || extractedDoctorName;
+      : options.useTypedDoctorOnly
+        ? doctorName
+        : isPersonalPortal
+          ? requestedDoctor || doctorName
+          : doctorName || extractedDoctorName;
+
+    // Personal + requested/typed doctor: never fall through to a fake "present"
+    // match; resolve with allowCreate false and surface doctorMissing.
+    const personalHasDoctorHint = Boolean(
+      isPersonalPortal &&
+        (options.useTypedDoctorOnly
+          ? doctorName
+          : requestedDoctor || doctorName)
+    );
 
     setResolvingDoctor(true);
 
@@ -1188,10 +1264,17 @@ function NewOrderPageContent() {
         doctorName: nameToResolve,
         extractedDoctorName: options.resetForFacilityChange
           ? ""
-          : extractedDoctorName || extractionMetaRef.current?.extractedDoctorName,
+          : isPersonalPortal
+            ? requestedDoctor || doctorName
+            : extractedDoctorName ||
+              extractionMetaRef.current?.extractedDoctorName,
         priorDoctorCreated: options.resetForFacilityChange
           ? false
           : Boolean(extractionMetaRef.current?.doctorCreated),
+        allowCreate: !isPersonalPortal,
+        useDefaultWhenMissing: isPersonalPortal
+          ? !personalHasDoctorHint
+          : undefined,
       });
 
       setFormData((prev) => ({
@@ -1199,8 +1282,11 @@ function NewOrderPageContent() {
         specificDoctor: resolved.specificDoctor,
         specificDoctorId: resolved.specificDoctorId,
         specificDoctorIsDefault: resolved.specificDoctorIsDefault,
+        doctorNotInSystem: Boolean(resolved.doctorMissing),
+        requestedTreatingDoctor:
+          prev.requestedTreatingDoctor || requestedDoctor || "",
       }));
-      setMissingDefaultDoctor(resolved.missingDefaultDoctor);
+      setMissingDefaultDoctor(Boolean(resolved.missingDefaultDoctor));
       setDoctorCreated(
         options.resetForFacilityChange ? false : resolved.doctorCreated
       );
@@ -1215,6 +1301,9 @@ function NewOrderPageContent() {
     const facilityName = `${data.facilityName || ""}`.trim();
     const facilityId = `${data.facility || ""}`.trim();
     const previousFacilityId = `${formDataRef.current.facility || ""}`.trim();
+    const blockCreate = data.creationSource === "personal_portal";
+    const endedNoFacility =
+      blockCreate && data.personalPortalStatus === "no_facility";
 
     if (!facilityName && !facilityId) {
       setFacilityProfileIncomplete(false);
@@ -1224,13 +1313,33 @@ function NewOrderPageContent() {
       return null;
     }
 
+    if (blockCreate && !facilityId) {
+      // Typed name only — do not auto-create; staff uses Add facility link.
+      setFacilityProfileIncomplete(false);
+      setFacilityCreated(false);
+      return {
+        facilityId: "",
+        facilityName,
+        facilityCreated: false,
+        facilityProfileIncomplete: false,
+        needsFacilityAdd: true,
+      };
+    }
+
     setResolvingFacility(true);
 
     try {
       const resolved = await resolvePendingFacility({
         facilityName,
         facilityId,
+        allowCreate: !blockCreate,
       });
+      if (blockCreate && resolved.facilityCreated) {
+        setSaveError(
+          "Personal orders do not auto-create facilities. Use “Add this facility to system” under Facility, or select an existing facility."
+        );
+        return null;
+      }
       const newFacilityId = `${resolved.facilityId || ""}`.trim();
       const subpoenaFacilityName = `${extractionMetaRef.current.facilityName || ""}`.trim();
       const subpoenaDoctorMismatch =
@@ -1418,6 +1527,16 @@ function NewOrderPageContent() {
       return;
     }
 
+    if (formDataRef.current.creationSource === "personal_portal") {
+      // Keep typed name; Add facility link handles create (no auto-create).
+      setFormDataAndRef((prev) => ({
+        ...prev,
+        facilityName: trimmedName,
+        facility: "",
+      }));
+      return;
+    }
+
     const committed = committedFacilityRef.current;
     if (
       committed.id &&
@@ -1523,6 +1642,21 @@ function NewOrderPageContent() {
     setFormData((prev) => {
       syncProviderFromForm(prev);
       return prev;
+    });
+  };
+
+  const handleDoctorBlur = (e) => {
+    handleBlur(e);
+    const data = formDataRef.current;
+    if (data.creationSource !== "personal_portal") return;
+
+    const typedDoctor = `${data.specificDoctor || ""}`.trim();
+    const facilityId = `${data.facility || ""}`.trim();
+    if (!typedDoctor || !facilityId) return;
+
+    syncDoctorFromForm(data, {
+      doctorName: typedDoctor,
+      useTypedDoctorOnly: true,
     });
   };
 
@@ -1708,7 +1842,48 @@ function NewOrderPageContent() {
     setSaveError("");
     setApiFieldErrors({});
 
+    if (
+      formDataRef.current.creationSource === "personal_portal" &&
+      formDataRef.current.personalPortalStatus !== "no_facility"
+    ) {
+      const requested = `${
+        formDataRef.current.requestedTreatingDoctor ||
+        formDataRef.current.newFacilityRequest?.treatingDoctor ||
+        ""
+      }`.trim();
+      const typedFacilityOnly =
+        !`${formDataRef.current.facility || ""}`.trim() &&
+        Boolean(`${formDataRef.current.facilityName || ""}`.trim());
+
+      if (formDataRef.current.facilityNotInSystem || typedFacilityOnly) {
+        setSaveError(
+          "Add this facility to the system (use the link under Facility), or select an existing facility, before updating this order."
+        );
+        return;
+      }
+
+      if (
+        formDataRef.current.doctorNotInSystem &&
+        !formDataRef.current.specificDoctorIsDefault &&
+        !`${formDataRef.current.specificDoctorId || ""}`.trim()
+      ) {
+        setSaveError(
+          requested
+            ? `Requested treating doctor "${requested}" is not on this facility. Use “Add this doctor to facility”, or select/create a default doctor, before updating.`
+            : "The specific doctor is not on this facility. Use “Add this doctor to facility”, or select/create a default doctor, before updating."
+        );
+        return;
+      }
+    }
+
     const resolvedFacility = await syncFacilityFromForm(formDataRef.current);
+
+    if (resolvedFacility?.needsFacilityAdd) {
+      setSaveError(
+        "Add this facility to the system (use the link under Facility), or select an existing facility, before updating this order."
+      );
+      return;
+    }
 
     if (resolvedFacility?.facilityProfileIncomplete) {
       setSaveError(
@@ -1717,9 +1892,25 @@ function NewOrderPageContent() {
       return;
     }
 
-    if (resolvedFacility?.doctorResolved?.missingDefaultDoctor) {
+    if (
+      resolvedFacility?.doctorResolved?.missingDefaultDoctor &&
+      !(
+        formDataRef.current.creationSource === "personal_portal" &&
+        Boolean(
+          `${
+            formDataRef.current.requestedTreatingDoctor ||
+            formDataRef.current.newFacilityRequest?.treatingDoctor ||
+            ""
+          }`.trim()
+        ) &&
+        (formDataRef.current.specificDoctorIsDefault ||
+          `${formDataRef.current.specificDoctorId || ""}`.trim())
+      )
+    ) {
       setSaveError(
-        "Add a default doctor for this facility before saving this order."
+        formDataRef.current.creationSource === "personal_portal"
+          ? "This facility has no default doctor. Add a default doctor on the facility profile, then return here to update the order."
+          : "Add a default doctor for this facility before saving this order."
       );
       return;
     }
@@ -1920,6 +2111,12 @@ function NewOrderPageContent() {
               onFacilityCommit={handleFacilityCommit}
               returnToOrderPath={returnToOrderPath}
               onBeforeFacilityProfileNavigate={persistOrderDraft}
+              allowCreateFacility={formData.creationSource !== "personal_portal"}
+              orderEndedNoFacility={
+                formData.creationSource === "personal_portal" &&
+                formData.personalPortalStatus === "no_facility"
+              }
+              showPersonalAddFacilityLink={personalNeedsFacilityAdd}
             />
           </CollapsibleOrderPanel>
 
@@ -1944,6 +2141,8 @@ function NewOrderPageContent() {
               resolvingDoctor={resolvingDoctor}
               returnToOrderPath={returnToOrderPath}
               onBeforeFacilityProfileNavigate={persistOrderDraft}
+              isPersonalPortal={formData.creationSource === "personal_portal"}
+              onDoctorBlur={handleDoctorBlur}
             />
           </CollapsibleOrderPanel>
 
@@ -1971,6 +2170,7 @@ function NewOrderPageContent() {
             saving ||
             facilityProfileIncomplete ||
             missingDefaultDoctor ||
+            personalDoctorBlocksUpdate ||
             resolvingFacility ||
             resolvingDoctor
           }
@@ -1981,7 +2181,19 @@ function NewOrderPageContent() {
               ? "Update Order"
               : "Save Order"
           }
-          saveError={saveError}
+          saveError={
+            saveError ||
+            (personalDoctorBlocksUpdate
+              ? !`${formData.facility || ""}`.trim() ||
+                formData.facilityNotInSystem
+                ? "Add this facility to the system (link under Facility), or select an existing facility, before updating."
+                : formData.doctorNotInSystem
+                  ? personalRequestedDoctor
+                    ? `Add requested doctor “${personalRequestedDoctor}” to the facility, or select/create a default doctor, before updating.`
+                    : "Add this doctor to the facility, or select/create a default doctor, before updating."
+                  : "This facility has no default doctor. Add a default doctor on the facility profile before updating."
+              : "")
+          }
         />
       </div>
 
@@ -2009,6 +2221,9 @@ function OrderDetailsForm({
   onFacilityCommit,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  allowCreateFacility = true,
+  orderEndedNoFacility = false,
+  showPersonalAddFacilityLink = false,
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -2017,8 +2232,10 @@ function OrderDetailsForm({
     getError("lastName");
 
   const facilityHint =
+    allowCreateFacility &&
     extractionMeta.facilityName &&
     formData.facility &&
+    formData.creationSource !== "personal_portal" &&
     !facilityProfileIncomplete &&
     !facilityCreated
       ? `Matched from subpoena: ${extractionMeta.facilityName}`
@@ -2031,29 +2248,72 @@ function OrderDetailsForm({
         <span>* Required field</span>
       </div>
 
+      {orderEndedNoFacility ? (
+        <div className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+          This personal order is ended (<span className="font-semibold">No facility</span>).
+          Facility create/add is locked here. Use{" "}
+          <span className="font-semibold">Back to In Process</span> on Personal
+          Orders to unlock it again.
+        </div>
+      ) : null}
+
       <div className="space-y-4">
-        <FacilitySearchField
-          label="Facility"
-          value={formData.facilityName || ""}
-          facilityId={formData.facility || ""}
-          onInputChange={onFacilityInput}
-          onSelect={onFacilitySelect}
-          onBlur={onFacilityBlur}
-          onCommit={onFacilityCommit}
-          resolving={resolvingFacility}
-          facilityProfileIncomplete={facilityProfileIncomplete}
-          facilityCreated={facilityCreated}
-          returnToOrderPath={returnToOrderPath}
-          onBeforeFacilityProfileNavigate={onBeforeFacilityProfileNavigate}
-          hint={facilityHint}
-          required
-          error={
-            getError("facility") ||
-            (facilityProfileIncomplete
-              ? "Complete the facility profile to continue"
-              : "")
-          }
-        />
+        <div className="space-y-1">
+          <FacilitySearchField
+            label="Facility"
+            value={formData.facilityName || ""}
+            facilityId={formData.facility || ""}
+            onInputChange={onFacilityInput}
+            onSelect={onFacilitySelect}
+            onBlur={onFacilityBlur}
+            onCommit={onFacilityCommit}
+            resolving={resolvingFacility}
+            facilityProfileIncomplete={
+              allowCreateFacility && facilityProfileIncomplete
+            }
+            facilityCreated={facilityCreated}
+            returnToOrderPath={returnToOrderPath}
+            onBeforeFacilityProfileNavigate={onBeforeFacilityProfileNavigate}
+            allowCreateFacility={allowCreateFacility}
+            hint={facilityHint}
+            required
+            error={
+              getError("facility") ||
+              (allowCreateFacility && facilityProfileIncomplete
+                ? "Complete the facility profile to continue"
+                : "")
+            }
+          />
+
+          {showPersonalAddFacilityLink && (
+              <Link
+                href={(() => {
+                  const req = formData.newFacilityRequest || {};
+                  const params = new URLSearchParams();
+                  const orderId = formData.id || formData.dbId;
+                  if (orderId) params.set("linkOrderId", String(orderId));
+                  params.set("linkSource", "personal");
+                  if (returnToOrderPath) {
+                    params.set("returnTo", returnToOrderPath);
+                  }
+                  const name =
+                    formData.facilityName || req.facilityName || "";
+                  const address =
+                    req.facilityAddress || formData.facilityAddress || "";
+                  if (name) params.set("facilityName", name);
+                  if (address) params.set("address", address);
+                  if (req.facilityCity) params.set("city", req.facilityCity);
+                  if (req.facilityState) params.set("state", req.facilityState);
+                  if (req.facilityZip) params.set("zip", req.facilityZip);
+                  return `/facilities/new?${params.toString()}`;
+                })()}
+                onClick={() => onBeforeFacilityProfileNavigate?.()}
+                className="inline-flex text-[12px] font-semibold text-[#007F96] hover:underline"
+              >
+                Add this facility to system
+              </Link>
+            )}
+        </div>
 
         <RecordTypeMultiSelect
           formData={formData}
@@ -2348,6 +2608,8 @@ function ServeInfoForm({
   resolvingDoctor = false,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  isPersonalPortal = false,
+  onDoctorBlur,
 }) {
   return (
     <div className="space-y-5">
@@ -2610,19 +2872,37 @@ function ServeInfoForm({
         facilityId={formData.facility}
         facilityName={formData.facilityName}
         specificDoctorIsDefault={formData.specificDoctorIsDefault}
-        extractedDoctorName={extractionMeta.extractedDoctorName}
+        specificDoctorId={formData.specificDoctorId}
+        extractedDoctorName={
+          isPersonalPortal
+            ? formData.requestedTreatingDoctor ||
+              formData.newFacilityRequest?.treatingDoctor ||
+              ""
+            : extractionMeta.extractedDoctorName
+        }
         onChange={onChange}
         onBlur={onBlur}
+        onDoctorBlur={onDoctorBlur}
         placeholder="Doctor name"
         error={
           getError("specificDoctor") ||
-          (missingDefaultDoctor ? "Add a default doctor to continue" : "")
+          (missingDefaultDoctor
+            ? isPersonalPortal
+              ? "Add a default doctor to continue"
+              : "Add a default doctor to continue"
+            : "")
         }
         missingDefaultDoctor={missingDefaultDoctor}
         doctorCreated={doctorCreated}
         resolvingDoctor={resolvingDoctor}
         returnToOrderPath={returnToOrderPath}
         onBeforeFacilityProfileNavigate={onBeforeFacilityProfileNavigate}
+        isPersonalPortal={isPersonalPortal}
+        doctorNotInSystem={Boolean(formData.doctorNotInSystem)}
+        facilityNotInSystem={Boolean(formData.facilityNotInSystem)}
+        orderEndedNoFacility={
+          isPersonalPortal && formData.personalPortalStatus === "no_facility"
+        }
       />
 
       <DoctorAddressSearchField

@@ -58,6 +58,15 @@ export default function CompanyOrderFacilityModal({
   const feeAmount = Number(req.searchFeeAmount) || 5;
 
   const handleAddFacility = () => {
+    if (
+      isPersonal &&
+      order?.personalPortalStatus === "no_facility"
+    ) {
+      setError(
+        "This personal order was ended (No facility). Restore it to In Process before adding a facility."
+      );
+      return;
+    }
     router.push(buildAddFacilityHref(order, portalType));
   };
 

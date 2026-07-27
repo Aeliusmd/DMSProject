@@ -72,6 +72,7 @@ export default function DoctorSearchField({
   facilityId = "",
   facilityName = "",
   specificDoctorIsDefault = false,
+  specificDoctorId = "",
   extractedDoctorName = "",
   onChange,
   onBlur,
@@ -82,6 +83,11 @@ export default function DoctorSearchField({
   resolvingDoctor = false,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  isPersonalPortal = false,
+  doctorNotInSystem = false,
+  facilityNotInSystem = false,
+  orderEndedNoFacility = false,
+  onDoctorBlur,
 }) {
   const listboxId = useId();
   const rootRef = useRef(null);
@@ -89,11 +95,19 @@ export default function DoctorSearchField({
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [searchError, setSearchError] = useState("");
+  const [searchSettled, setSearchSettled] = useState(false);
+  const [queryMatchesFacility, setQueryMatchesFacility] = useState(false);
 
+  const requestedDoctor = `${extractedDoctorName || ""}`.trim();
+  const doctorNameForAdd = requestedDoctor || `${value || ""}`.trim();
   const facilityDoctorsHref = facilityId
-    ? returnToOrderPath
-      ? `/facilities/${facilityId}/info?returnTo=${encodeURIComponent(returnToOrderPath)}&focus=doctors`
-      : `/facilities/${facilityId}/info?focus=doctors`
+    ? (() => {
+        const params = new URLSearchParams();
+        if (returnToOrderPath) params.set("returnTo", returnToOrderPath);
+        params.set("focus", "doctors");
+        if (doctorNameForAdd) params.set("doctorName", doctorNameForAdd);
+        return `/facilities/${facilityId}/info?${params.toString()}`;
+      })()
     : "";
 
   const statusNote = useMemo(() => {
@@ -101,29 +115,74 @@ export default function DoctorSearchField({
       return {
         tone: "info",
         title: "Updating doctor for this facility",
-        message: "Checking the selected facility and applying its default doctor when available.",
+        message: isPersonalPortal
+          ? "Matching the requested treating doctor, or applying the facility default when none was requested."
+          : "Checking the selected facility and applying its default doctor when available.",
       };
     }
 
-    if (!facilityId) {
+    if (!facilityId || orderEndedNoFacility) {
       return null;
     }
 
     const trimmedValue = `${value || ""}`.trim();
-    const trimmedExtracted = `${extractedDoctorName || ""}`.trim();
+    const trimmedExtracted = requestedDoctor;
     const facilityLabel = `${facilityName || "this facility"}`.trim();
+
+    const typedNameMissingOnFacility =
+      isPersonalPortal &&
+      !facilityNotInSystem &&
+      trimmedValue.length >= 1 &&
+      !specificDoctorIsDefault &&
+      !resolvingDoctor &&
+      searchSettled &&
+      !queryMatchesFacility;
+
+    const doctorMissing =
+      doctorNotInSystem || typedNameMissingOnFacility;
+
+    if (isPersonalPortal && facilityNotInSystem) {
+      return {
+        tone: "warning",
+        title: "Add facility before doctor",
+        message: trimmedExtracted
+          ? `Requested treating doctor: ${trimmedExtracted}. Add the facility to the system first, then add this doctor on the facility profile.`
+          : "Add the facility to the system first. If a treating doctor was requested, you can add them after the facility is linked.",
+      };
+    }
+
+    if (isPersonalPortal && doctorMissing && (trimmedExtracted || trimmedValue)) {
+      const missingName =
+        typedNameMissingOnFacility && trimmedValue
+          ? trimmedValue
+          : trimmedExtracted || trimmedValue;
+      return {
+        tone: "warning",
+        title: "Specific doctor not in facility",
+        message: `${missingName} is not on ${facilityLabel} yet (this facility has no matching doctor).`,
+        linkHref: facilityDoctorsHref,
+        linkLabel: "Add this doctor to facility",
+      };
+    }
 
     if (missingDefaultDoctor) {
       return {
         tone: "warning",
-        title: "No doctor available for this facility",
-        message: `This facility has no default doctor. Add a doctor on the facility profile, then return here to continue the order.`,
+        title: "No default doctor for this facility",
+        message: isPersonalPortal
+          ? trimmedExtracted
+            ? `Requested treating doctor is not on ${facilityLabel}. Add that doctor, or add/select a default doctor, then return here.`
+            : `No treating doctor was requested. Add a default doctor on the facility profile, then return here to continue.`
+          : `This facility has no default doctor. Add a doctor on the facility profile, then return here to continue the order.`,
         linkHref: facilityDoctorsHref,
         linkLabel: "Open facility profile to add doctors",
       };
     }
 
     if (!trimmedValue) {
+      if (isPersonalPortal && !trimmedExtracted && !missingDefaultDoctor) {
+        return null;
+      }
       return {
         tone: "warning",
         title: "No doctor selected",
@@ -133,7 +192,7 @@ export default function DoctorSearchField({
       };
     }
 
-    if (doctorCreated && trimmedExtracted) {
+    if (doctorCreated && trimmedExtracted && !isPersonalPortal) {
       return {
         tone: "success",
         title: "Doctor added from subpoena",
@@ -145,24 +204,57 @@ export default function DoctorSearchField({
       return {
         tone: "info",
         title: "Using facility default doctor",
-        message: `${trimmedValue} is the default doctor for ${facilityLabel}. No doctor was identified on the subpoena.`,
+        message: isPersonalPortal
+          ? `${trimmedValue} is the default doctor for ${facilityLabel}. No treating doctor was requested.`
+          : `${trimmedValue} is the default doctor for ${facilityLabel}. No doctor was identified on the subpoena.`,
       };
     }
 
     if (trimmedExtracted) {
-      if (namesMatch(trimmedValue, trimmedExtracted)) {
+      if (namesMatch(trimmedValue, trimmedExtracted) && !doctorMissing) {
         return {
           tone: "info",
-          title: "Matched from subpoena",
-          message: `${trimmedValue} was identified on the uploaded subpoena.`,
+          title: isPersonalPortal
+            ? "Matched requested treating doctor"
+            : "Matched from subpoena",
+          message: isPersonalPortal
+            ? `${trimmedValue} matches the treating doctor from the personal request.`
+            : `${trimmedValue} was identified on the uploaded subpoena.`,
         };
       }
 
-      return {
-        tone: "info",
-        title: "Doctor updated from facility profile",
-        message: `The subpoena listed ${trimmedExtracted}. The facility profile now shows ${trimmedValue}.`,
-      };
+      if (!doctorMissing) {
+        return {
+          tone: "info",
+          title: "Doctor updated from facility profile",
+          message: `The request listed ${trimmedExtracted}. The facility profile now shows ${trimmedValue}.`,
+        };
+      }
+    }
+
+    if (doctorMissing) {
+      return null;
+    }
+
+    if (
+      isPersonalPortal &&
+      trimmedValue &&
+      !specificDoctorIsDefault &&
+      !`${specificDoctorId || ""}`.trim() &&
+      !searchSettled
+    ) {
+      return null;
+    }
+
+    if (
+      isPersonalPortal &&
+      trimmedValue &&
+      !specificDoctorIsDefault &&
+      !`${specificDoctorId || ""}`.trim() &&
+      searchSettled &&
+      !queryMatchesFacility
+    ) {
+      return null;
     }
 
     return {
@@ -175,36 +267,60 @@ export default function DoctorSearchField({
     facilityId,
     facilityName,
     value,
-    extractedDoctorName,
+    requestedDoctor,
     missingDefaultDoctor,
     doctorCreated,
     specificDoctorIsDefault,
+    specificDoctorId,
     facilityDoctorsHref,
+    isPersonalPortal,
+    doctorNotInSystem,
+    facilityNotInSystem,
+    orderEndedNoFacility,
+    searchSettled,
+    queryMatchesFacility,
   ]);
 
   useEffect(() => {
     const query = value.trim();
+    const shouldSearch =
+      Boolean(facilityId) &&
+      query.length >= 1 &&
+      (open || (isPersonalPortal && !facilityNotInSystem && !specificDoctorIsDefault));
 
-    if (!open || query.length < 1) {
-      setSuggestions([]);
-      setLoading(false);
-      setSearchError("");
+    if (!shouldSearch) {
+      if (!isPersonalPortal || !query.length) {
+        setSuggestions([]);
+        setLoading(false);
+        setSearchError("");
+        setSearchSettled(false);
+        setQueryMatchesFacility(false);
+      }
       return undefined;
     }
 
     let active = true;
     setLoading(true);
     setSearchError("");
+    setSearchSettled(false);
 
     const timer = setTimeout(() => {
       searchOrderDoctors(query, { facility: facilityId })
         .then((doctors) => {
           if (!active) return;
-          setSuggestions(doctors);
+          if (open) {
+            setSuggestions(doctors);
+          }
+          setQueryMatchesFacility(
+            doctors.some((doctor) => namesMatch(doctor, query))
+          );
+          setSearchSettled(true);
         })
         .catch((err) => {
           if (!active) return;
-          setSuggestions([]);
+          if (open) {
+            setSuggestions([]);
+          }
           setSearchError(getApiErrorMessage(err, "Failed to search doctors"));
         })
         .finally(() => {
@@ -216,7 +332,14 @@ export default function DoctorSearchField({
       active = false;
       clearTimeout(timer);
     };
-  }, [value, open, facilityId]);
+  }, [
+    value,
+    open,
+    facilityId,
+    isPersonalPortal,
+    facilityNotInSystem,
+    specificDoctorIsDefault,
+  ]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -256,7 +379,10 @@ export default function DoctorSearchField({
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        onBlur={onBlur}
+        onBlur={(event) => {
+          onBlur?.(event);
+          onDoctorBlur?.(event);
+        }}
         placeholder={placeholder}
         className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
           hasError
@@ -317,7 +443,23 @@ export default function DoctorSearchField({
 
           {!loading && !searchError && suggestions.length === 0 && (
             <li className="px-3 py-2 text-[12px] text-[#94A3B8]">
-              No matching doctors — continue typing to add a new one
+              {isPersonalPortal && facilityDoctorsHref ? (
+                <>
+                  No matching doctors —{" "}
+                  <Link
+                    href={facilityDoctorsHref}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onBeforeFacilityProfileNavigate?.()}
+                    className="font-semibold text-[#007F96] underline"
+                  >
+                    Add this doctor to facility
+                  </Link>
+                </>
+              ) : isPersonalPortal ? (
+                "No matching doctors — use Add this doctor to facility above"
+              ) : (
+                "No matching doctors — continue typing to add a new one"
+              )}
             </li>
           )}
         </ul>

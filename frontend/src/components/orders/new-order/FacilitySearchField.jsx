@@ -21,6 +21,8 @@ export default function FacilitySearchField({
   hint = "",
   required = false,
   error = "",
+  allowCreateFacility = true,
+  createDisabledMessage = "",
 }) {
   const listboxId = useId();
   const rootRef = useRef(null);
@@ -46,7 +48,8 @@ export default function FacilitySearchField({
     return name.toLowerCase() === trimmedValue.toLowerCase();
   });
 
-  const showAddOption = Boolean(trimmedValue) && !hasExactMatch;
+  const showAddOption =
+    allowCreateFacility && Boolean(trimmedValue) && !hasExactMatch;
 
   const listItems = showAddOption
     ? [{ type: "add", label: trimmedValue }, ...suggestions.map((f) => ({ type: "facility", facility: f }))]
@@ -116,6 +119,10 @@ export default function FacilitySearchField({
     setHighlightIndex(-1);
 
     if (!nextValue) {
+      return;
+    }
+
+    if (!allowCreateFacility) {
       return;
     }
 
@@ -196,7 +203,7 @@ export default function FacilitySearchField({
 
           if (onCommit) {
             const nextValue = e.currentTarget.value.trim();
-            if (nextValue) {
+            if (nextValue && allowCreateFacility) {
               onCommit(nextValue);
             }
             return;
@@ -205,7 +212,11 @@ export default function FacilitySearchField({
           onBlur?.();
         }}
         onKeyDown={handleKeyDown}
-        placeholder="Search or type facility name"
+        placeholder={
+          allowCreateFacility
+            ? "Search or type facility name"
+            : "Search and select an existing facility"
+        }
         className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
           hasError
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
@@ -221,13 +232,13 @@ export default function FacilitySearchField({
         <p className="mt-[4px] text-[10px] text-[#64748B]">Resolving facility...</p>
       )}
 
-      {facilityId && !facilityProfileIncomplete && !resolving && (
+      {facilityId && !facilityProfileIncomplete && !resolving && allowCreateFacility && (
         <p className="mt-[4px] text-[10px] font-medium text-[#059669]">
           {facilityCreated ? "Facility added" : "Existing facility selected"}
         </p>
       )}
 
-      {facilityId && facilityProfileIncomplete && !resolving && (
+      {facilityId && facilityProfileIncomplete && !resolving && allowCreateFacility && (
         <div className="mt-2 rounded-[6px] border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
           <p className="text-[11px] font-semibold text-[#B45309]">
             {facilityCreated
@@ -247,9 +258,16 @@ export default function FacilitySearchField({
         </div>
       )}
 
-      {!facilityId && trimmedValue && !resolving && (
+      {!facilityId && trimmedValue && !resolving && allowCreateFacility && (
         <p className="mt-[4px] text-[10px] text-[#94A3B8]">
           Press Enter or pick from the list to add this facility
+        </p>
+      )}
+
+      {!facilityId && trimmedValue && !resolving && !allowCreateFacility && (
+        <p className="mt-[4px] text-[10px] text-[#94A3B8]">
+          Select an existing facility from the list, or use Add this facility to
+          system below
         </p>
       )}
 
@@ -330,7 +348,9 @@ export default function FacilitySearchField({
 
           {!loading && !searchError && suggestions.length === 0 && !showAddOption && (
             <li className="px-3 py-2 text-[12px] text-[#94A3B8]">
-              No matching facilities — continue typing to add a new one
+              {allowCreateFacility
+                ? "No matching facilities — continue typing to add a new one"
+                : "No matching facilities — select an existing facility or restore this order to In Process"}
             </li>
           )}
         </ul>
