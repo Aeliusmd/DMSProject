@@ -250,8 +250,8 @@ export default function PersonalRequestsListPage() {
                 <th className="px-5 py-3">Facility</th>
                 <th className="px-5 py-3">Date range</th>
                 <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Receipts</th>
-                <th className="px-5 py-3">Action</th>
+                <th className="w-[148px] px-5 py-3">Receipts</th>
+                <th className="w-[168px] px-5 py-3">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -299,10 +299,10 @@ export default function PersonalRequestsListPage() {
                         {request.statusLabel || request.status}
                       </span>
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3 align-top">
                       <PersonalRequestReceiptsCell request={request} />
                     </td>
-                    <td className="px-5 py-3">
+                    <td className="px-5 py-3 align-top">
                       <PersonalRequestActionsCell request={request} />
                     </td>
                   </tr>

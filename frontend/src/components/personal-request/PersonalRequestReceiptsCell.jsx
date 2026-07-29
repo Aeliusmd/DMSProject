@@ -54,7 +54,7 @@ export default function PersonalRequestReceiptsCell({ request }) {
   }
 
   return (
-    <div className="flex min-w-[148px] flex-col gap-1.5">
+    <div className="inline-flex w-[148px] flex-col gap-1.5">
       {hasPrepayment ? (
         <ReceiptActionRow
           label="Prepayment"
@@ -118,13 +118,13 @@ function ReceiptActionRow({ label, busyKeyPrefix, busy, onView, onDownload }) {
   const disabled = Boolean(busy);
 
   return (
-    <div className="grid grid-cols-[1fr_auto] items-center gap-2">
+    <div className="flex w-fit max-w-full items-center gap-2">
       <button
         type="button"
         onClick={onView}
         disabled={disabled}
         title={`View ${label}`}
-        className="truncate text-left text-[12px] font-semibold text-[#0097B2] hover:text-[#007F96] hover:underline disabled:cursor-not-allowed disabled:opacity-55"
+        className="text-left text-[12px] font-semibold text-[#0097B2] hover:text-[#007F96] hover:underline disabled:cursor-not-allowed disabled:opacity-55"
       >
         {viewing ? "Opening…" : label}
       </button>
