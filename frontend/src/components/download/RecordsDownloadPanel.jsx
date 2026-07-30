@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "@/config/api";
 
+const PUBLIC_DOWNLOAD_HEADERS = API_BASE_URL.includes(".ngrok-free.")
+  ? { "ngrok-skip-browser-warning": "true" }
+  : {};
+
 function formatExpiry(value) {
   if (!value) return "";
 
@@ -71,7 +75,8 @@ export default function RecordsDownloadPanel({
     async function loadAndDownload() {
       try {
         const metaResponse = await fetch(
-          `${API_BASE_URL}/public/records-download/${encodeURIComponent(token)}`
+          `${API_BASE_URL}/public/records-download/${encodeURIComponent(token)}`,
+          { headers: PUBLIC_DOWNLOAD_HEADERS }
         );
         const metaBody = await metaResponse.json();
 
@@ -87,7 +92,8 @@ export default function RecordsDownloadPanel({
         }
 
         const fileResponse = await fetch(
-          `${API_BASE_URL}/public/records-download/${encodeURIComponent(token)}/file`
+          `${API_BASE_URL}/public/records-download/${encodeURIComponent(token)}/file`,
+          { headers: PUBLIC_DOWNLOAD_HEADERS }
         );
 
         if (!fileResponse.ok) {
