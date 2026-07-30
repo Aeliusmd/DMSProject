@@ -1091,10 +1091,16 @@ export default function FacilityDetailsPage() {
             </div>
           )}
 
+          {submitAttempted && isFormInvalid && (
+            <div className="mt-4 rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
+              Please fill out all required facility fields before saving.
+            </div>
+          )}
+
           <button
             type="button"
             onClick={handleSaveFacility}
-            disabled={saving || isFormInvalid}
+            disabled={saving}
             className="mt-5 inline-flex h-[38px] items-center justify-center rounded-[6px] bg-[#0097B2] px-6 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? "Saving..." : "Save"}

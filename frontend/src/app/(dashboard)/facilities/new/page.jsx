@@ -456,7 +456,7 @@ function NewFacilityPageContent() {
                 </div>
               )}
 
-              {submitAttempted && Object.keys(errors).length > 0 && (
+              {submitAttempted && (isFormInvalid || Object.keys(errors).length > 0) && (
                 <div className="rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
                   Please fill out all required fields correctly.
                 </div>
@@ -466,7 +466,7 @@ function NewFacilityPageContent() {
                 <button
                   type="button"
                   onClick={handleSave}
-                  disabled={saving || isFormInvalid}
+                  disabled={saving}
                   className="inline-flex h-[38px] min-w-[74px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {saving ? "Saving..." : "Save"}
