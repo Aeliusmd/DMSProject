@@ -662,9 +662,12 @@ export default function FacilityDetailsPage() {
     setSubmitError("");
 
     try {
-      const updated = await persistFacilityUpdate(formData);
+      await persistFacilityUpdate(formData);
 
-      if (returnToOrderPath && !updated.isProfileIncomplete) {
+      // Return to the edit order even when this new facility still needs a
+      // doctor. The order page will clear the previous facility's doctor and
+      // show its existing "add doctor" action for the newly selected facility.
+      if (returnToOrderPath) {
         setReturnToOrderModal({ open: true });
         return;
       }
@@ -744,11 +747,7 @@ export default function FacilityDetailsPage() {
         null;
       setReturnDoctorId(doctorToApply?.id ? String(doctorToApply.id) : "");
 
-      const hasDefaultDoctor = (refreshed.doctors || []).some(
-        (doctor) => doctor.defaultDoctor
-      );
-
-      if (returnToOrderPath && hasDefaultDoctor) {
+      if (returnToOrderPath) {
         setReturnToOrderModal({ open: true });
       }
     } catch (err) {
