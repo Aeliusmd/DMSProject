@@ -38,7 +38,7 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, updateOrderFacility, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import {
   clearDraftOrderSession,
@@ -59,6 +59,8 @@ import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
 import { API_BASE_URL } from "@/config/api";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+
+const AUTO_PENDING_ORDER_PREFIX = "AUTO-PENDING-";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -604,6 +606,12 @@ function NewOrderPageContent() {
           { ...initialFormData, ...order },
           order.invoiceFees
         );
+        if (
+          order.creationSource === "auto" &&
+          `${nextForm.orderNumber || ""}`.startsWith(AUTO_PENDING_ORDER_PREFIX)
+        ) {
+          nextForm.orderNumber = "";
+        }
         let profileIncomplete = Boolean(order.facilityProfileIncomplete);
         let facilityWasCreated = Boolean(order.facilityIsAutoCreated);
         let facilityLabel = order.facilityName || "";
@@ -1174,42 +1182,19 @@ function NewOrderPageContent() {
       `${meta.pendingFacilityName || formUpdates.facilityName || ""}`.trim();
 
     if (unresolvedFacilityName) {
-      const resolved = await resolvePendingFacility({
-        facilityName: unresolvedFacilityName,
-        address: meta.facilityAddress || "",
-        city: meta.facilityCity || "",
-        state: meta.facilityState || "",
-        zip: meta.facilityZip || "",
-      });
       nextUpdates = {
         ...nextUpdates,
-        facility: resolved.facilityId,
-        facilityName: resolved.facilityName,
+        facility: "",
+        facilityName: unresolvedFacilityName,
       };
       nextMeta = {
         ...nextMeta,
-        facilityName: resolved.facilityName,
-        facilityCreated: resolved.facilityCreated,
-        pendingFacilityName: "",
+        facilityName: unresolvedFacilityName,
+        facilityCreated: false,
       };
-      setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
-      setFacilityCreated(resolved.facilityCreated);
-      markCommittedFacility(resolved.facilityId, resolved.facilityName);
-
-      if (resolved.facilityId) {
-        setFacilities((prev) => {
-          if (prev.some((item) => String(item.id) === String(resolved.facilityId))) {
-            return prev;
-          }
-          return [
-            {
-              id: Number(resolved.facilityId),
-              facility: resolved.facilityName,
-            },
-            ...prev,
-          ];
-        });
-      }
+      clearCommittedFacility();
+      setFacilityProfileIncomplete(false);
+      setFacilityCreated(false);
     }
 
     const facilityIdForDoctor = `${nextUpdates.facility || formUpdates.facility || ""}`.trim();
@@ -1560,11 +1545,22 @@ function NewOrderPageContent() {
       return;
     }
 
-    syncFacilityFromForm({
+    const nextForm = {
       ...formDataRef.current,
       facilityName: trimmedName,
       facility: "",
+      specificDoctor: "",
+      specificDoctorId: "",
+      specificDoctorIsDefault: false,
+    };
+    setFormDataAndRef(nextForm);
+    persistOrderDraft();
+
+    const params = new URLSearchParams({
+      facilityName: trimmedName,
+      returnTo: returnToOrderPath,
     });
+    router.push(`/facilities/new?${params.toString()}`);
   };
 
   const handleFacilityBlur = () => {
@@ -1841,6 +1837,14 @@ function NewOrderPageContent() {
     setSaveError("");
     setApiFieldErrors({});
 
+    if (
+      !`${formDataRef.current.facility || ""}`.trim() &&
+      `${formDataRef.current.facilityName || ""}`.trim()
+    ) {
+      handleFacilityCommit(formDataRef.current.facilityName);
+      return;
+    }
+
     const resolvedFacility = await syncFacilityFromForm(formDataRef.current);
 
     if (resolvedFacility?.facilityProfileIncomplete) {
@@ -1887,18 +1891,11 @@ function NewOrderPageContent() {
 
     try {
       if (isEditMode || activeOrderId) {
-        if (resolvedFacility?.facilityId) {
-          await updateOrderFacility(activeOrderId, {
-            facilityId: resolvedFacility.facilityId,
-            facilityName: resolvedFacility.facilityName,
-          });
-          markCommittedFacility(
-            resolvedFacility.facilityId,
-            resolvedFacility.facilityName
-          );
-        }
-
         await updateOrder(activeOrderId, syncedFormData);
+        markCommittedFacility(
+          resolvedFacility?.facilityId || syncedFormData.facility,
+          resolvedFacility?.facilityName || syncedFormData.facilityName
+        );
         clearDraftOrderSession(draftScope);
         draftRestoredRef.current = false;
         router.push(resolveListPath(syncedFormData.creationSource));

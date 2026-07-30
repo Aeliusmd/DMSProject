@@ -13,7 +13,6 @@ const Facility = require("../models/Facility");
 const Provider = require("../models/Provider");
 const { buildProviderPayload, findOrCreateProvider, resolveProviderFromHints } = require("./providerService");
 const {
-  findOrCreateFacility,
   isFacilityProfileIncomplete,
 } = require("./facilityService");
 const { normalizeFacilityName } = require("../utils/facilityNameUtils");
@@ -47,6 +46,7 @@ const {
   buildOrderPayloadFromExtractRow,
 } = require("../utils/extractToOrderPayload");
 const {
+  AUTO_PENDING_ORDER_PREFIX,
   computeMissingRequiredFields,
   mapOrderRowToRequiredFieldData,
 } = require("../utils/orderRequiredFields");
@@ -395,17 +395,17 @@ function buildOrderDbPayload(data) {
   return {
     facilityId: Number(data.facility),
     providerId: data.providerId ? Number(data.providerId) : null,
-    court: trimOrNull(data.court) || "WCAB",
-    caseNumber: trimOrNull(data.caseNumber),
-    recNumber: trimOrNull(data.recNumber),
-    orderRef: trimOrNull(data.orderRef),
+    court: trimOrNull(data.court, { maxLength: FIELD_LIMITS.VARCHAR_50 }) || "WCAB",
+    caseNumber: trimOrNull(data.caseNumber, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
+    recNumber: trimOrNull(data.recNumber, { maxLength: FIELD_LIMITS.VARCHAR_50 }),
+    orderRef: trimOrNull(data.orderRef, { maxLength: FIELD_LIMITS.VARCHAR_50 }),
     ssnLastFour: ssnLastFour(data.ssn),
     dob: dateOrNull(data.dob),
-    applicantFirstName: trimOrNull(data.firstName),
-    applicantMiddleName: trimOrNull(data.middleName),
-    applicantLastName: trimOrNull(data.lastName),
-    applicantAka: trimOrNull(data.aka),
-    defendant: trimOrNull(data.defendant),
+    applicantFirstName: trimOrNull(data.firstName, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
+    applicantMiddleName: trimOrNull(data.middleName, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
+    applicantLastName: trimOrNull(data.lastName, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
+    applicantAka: trimOrNull(data.aka, { maxLength: FIELD_LIMITS.VARCHAR_150 }),
+    defendant: trimOrNull(data.defendant, { maxLength: FIELD_LIMITS.VARCHAR_200 }),
     injuryType: enumOrNull(data.injuryType, ALLOWED_INJURY_TYPES),
     ...buildInjuryDatePayload(data),
     serveCompanyName: trimOrNull(data.serveCompanyName, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
@@ -1146,7 +1146,7 @@ function mapOrderDetail(
     state: row.serve_state || "",
     phone: row.serve_phone || "",
     fax: row.serve_fax || "",
-    email: row.serve_email || "",
+    email: row.serve_email || row.provider_email || "",
 
     contact1Name: row.contact1_name || "",
     contact1Title: row.contact1_title || "",
@@ -2110,11 +2110,20 @@ async function saveOrderDocuments(
   return false;
 }
 
-async function resolveOrderNumber(rawOrderNumber, excludeId = null) {
-  const orderNumber = trimOrNull(rawOrderNumber);
+async function resolveOrderNumber(
+  rawOrderNumber,
+  excludeId = null,
+  { allowAutoPlaceholder = false, extractId = null } = {}
+) {
+  let orderNumber = trimOrNull(rawOrderNumber, {
+    maxLength: FIELD_LIMITS.VARCHAR_50,
+  });
 
   if (!orderNumber) {
-    throw new ApiError(400, "Order number is required");
+    if (!allowAutoPlaceholder || !Number(extractId)) {
+      throw new ApiError(400, "Order number is required");
+    }
+    orderNumber = `${AUTO_PENDING_ORDER_PREFIX}${Number(extractId)}`;
   }
 
   const existing = await Order.findByOrderNumber(orderNumber, excludeId);
@@ -2177,18 +2186,9 @@ async function resolveFacilityId(connection, data) {
     return Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null;
   }
 
-  const { facility } = await findOrCreateFacility(
-    {
-      facilityName,
-      address: data.facilityAddress || "",
-      city: data.facilityCity || "",
-      state: data.facilityState || "",
-      zipCode: data.facilityZip || "",
-    },
-    connection
-  );
-
-  return facility.id;
+  // Order create/update requests must select a real facility. Only the
+  // batch-extraction path is allowed to auto-create an incomplete profile.
+  return null;
 }
 
 function assertFacilityProfileComplete(facility) {
@@ -2202,10 +2202,10 @@ function assertFacilityProfileComplete(facility) {
 
 function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
   const requiredFieldData = mapOrderRowToRequiredFieldData(row, orderRecords);
-  const missingRequiredFields = computeMissingRequiredFields(
-    requiredFieldData,
-    orderRecords
-  );
+  const missingRequiredFields = [
+    ...computeMissingRequiredFields(requiredFieldData, orderRecords),
+    ...(mappedOrder.facilityProfileIncomplete ? ["Facility profile"] : []),
+  ];
   const creationSource = row.creation_source || "manual";
   const isAutoCreated = creationSource === "auto";
 
@@ -2224,12 +2224,14 @@ function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
 
 async function createOrder(data, actorId, files, options = {}) {
   const { allowIncomplete = false, creationSource = "manual" } = options;
+  const canAllowIncomplete =
+    allowIncomplete === true && creationSource === "auto";
   const orderInput = {
     ...data,
     creationSource,
   };
 
-  if (!allowIncomplete) {
+  if (!canAllowIncomplete) {
     assertValidCnrDeliveryDate(orderInput);
   }
 
@@ -2253,16 +2255,19 @@ async function createOrder(data, actorId, files, options = {}) {
       throw new ApiError(400, "Selected facility does not exist");
     }
 
-    if (!allowIncomplete) {
+    if (!canAllowIncomplete) {
       assertFacilityProfileComplete(facility);
     }
 
-    const orderNumber = await resolveOrderNumber(orderInput.orderNumber);
+    const subpoenaExtractId = Number(orderInput.subpoenaExtractId) || null;
+    const orderNumber = await resolveOrderNumber(orderInput.orderNumber, null, {
+      allowAutoPlaceholder: canAllowIncomplete,
+      extractId: subpoenaExtractId,
+    });
     const payments = collectPayments(orderInput);
 
     const subpoenaFile = getUploadedFile(files, "subpoenaFile");
     const additionalDocFile = getUploadedFile(files, "additionalDocumentFile");
-    const subpoenaExtractId = Number(orderInput.subpoenaExtractId) || null;
 
     let linkedExtract = null;
     let subpoenaStoragePath = null;
@@ -2291,7 +2296,7 @@ async function createOrder(data, actorId, files, options = {}) {
       applyInjuryFromExtract({ ...orderInput, providerId }, linkedExtract)
     );
     const recordTypes = resolveRecordTypesFromForm(orderInput);
-    if (!recordTypes.length && !allowIncomplete) {
+    if (!recordTypes.length && !canAllowIncomplete) {
       throw new ApiError(400, "At least one record type is required");
     }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
@@ -2408,25 +2413,35 @@ async function createOrderFromExtract(extractId, actorId) {
     payload.serveCompanyName = orderHints.companyName;
   }
 
+  const facilityService = require("./facilityService");
   if (orderHints.customer) {
-    const facilityService = require("./facilityService");
     const { splitNameAndAddress } = require("../utils/addressParseUtils");
-    const { facility } = await facilityService.resolveFacilityFromHints(orderHints);
+    const { facility } = await facilityService.resolveFacilityFromHints(
+      orderHints,
+      null,
+      { allowCreate: true }
+    );
     if (facility) {
       const customerName =
         splitNameAndAddress(orderHints.customer).name || orderHints.customer;
       payload.facility = String(facility.id);
       payload.facilityName = facility.facilityName || customerName;
     }
+  } else {
+    const { facility } = await facilityService.findOrCreateFacility({
+      facilityName: `Unidentified Facility - Extract ${extractId}`,
+    });
+    payload.facility = String(facility.id);
+    payload.facilityName = facility.facilityName;
   }
 
   payload.subpoenaExtractId = String(extractId);
 
   if (payload.facility) {
-    const facilityService = require("./facilityService");
     const doctorResolution = await facilityService.resolveDoctorFromExtractHints(
       payload.facility,
-      orderHints
+      orderHints,
+      { allowCreate: true }
     );
     if (doctorResolution.doctorName) {
       payload.specificDoctor = doctorResolution.doctorName;

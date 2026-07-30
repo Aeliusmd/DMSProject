@@ -207,7 +207,10 @@ async function releaseFacilityCreateLock(connection, lockKey) {
 }
 
 async function findOrCreateFacility(data, connection = null) {
-  const facilityName = `${data.facilityName || ""}`.trim();
+  const facilityName = sanitizeText(data.facilityName, {
+    maxLength: 200,
+    allowEmpty: true,
+  });
 
   if (!facilityName) {
     throw new ApiError(400, "Facility name is required");
@@ -256,7 +259,11 @@ async function findOrCreateFacility(data, connection = null) {
   }
 }
 
-async function resolveFacilityFromHints(hints = {}, connection = null) {
+async function resolveFacilityFromHints(
+  hints = {},
+  connection = null,
+  { allowCreate = false } = {}
+) {
   const {
     parseUsAddress,
     splitNameAndAddress,
@@ -278,25 +285,34 @@ async function resolveFacilityFromHints(hints = {}, connection = null) {
     hints.address ||
     "";
   const parsed = parseUsAddress(addressSource);
+  const matchPayload = {
+    facilityName,
+    address:
+      hints.facilityAddress ||
+      parsed.address ||
+      addressSource ||
+      hints.address ||
+      "",
+    city: hints.facilityCity || parsed.city || hints.city || "",
+    state: hints.facilityState || parsed.state || hints.state || "",
+    zipCode:
+      hints.facilityZip ||
+      parsed.zip ||
+      hints.zip ||
+      hints.zipCode ||
+      "",
+  };
+
+  if (!allowCreate) {
+    const existing = await Facility.findBestMatch(matchPayload, connection);
+    return {
+      facility: existing ? mapFacilityRow(existing) : null,
+      created: false,
+    };
+  }
 
   const { facility, created } = await findOrCreateFacility(
-    {
-      facilityName,
-      address:
-        hints.facilityAddress ||
-        parsed.address ||
-        addressSource ||
-        hints.address ||
-        "",
-      city: hints.facilityCity || parsed.city || hints.city || "",
-      state: hints.facilityState || parsed.state || hints.state || "",
-      zipCode:
-        hints.facilityZip ||
-        parsed.zip ||
-        hints.zip ||
-        hints.zipCode ||
-        "",
-    },
+    matchPayload,
     connection
   );
 
@@ -309,20 +325,25 @@ async function resolveFacilityByName(data = {}) {
 }
 
 function buildFacilityDbPayload(data, credentials = null) {
-  const facilityName = data.facilityName?.trim();
+  const facilityName = sanitizeText(data.facilityName, {
+    maxLength: 200,
+    allowEmpty: true,
+  });
   const payload = {
     facilityName,
     nameNormalized: normalizeFacilityName(facilityName),
     slug: slugify(facilityName),
-    contactFirstName: data.firstName?.trim() || null,
-    contactMiddleName: data.middleName?.trim() || null,
-    contactLastName: data.lastName?.trim() || null,
-    address: data.address?.trim() || null,
-    zipCode: data.zipCode?.trim() || data.zip?.trim() || null,
-    city: data.city?.trim() || null,
-    state: data.state?.trim() || null,
-    phone: data.phone?.trim() || null,
-    fax: data.fax?.trim() || null,
+    contactFirstName: sanitizeText(data.firstName, { maxLength: 100, allowEmpty: true }) || null,
+    contactMiddleName: sanitizeText(data.middleName, { maxLength: 100, allowEmpty: true }) || null,
+    contactLastName: sanitizeText(data.lastName, { maxLength: 100, allowEmpty: true }) || null,
+    address: sanitizeText(data.address, { maxLength: 255, allowEmpty: true }) || null,
+    zipCode:
+      sanitizeText(data.zipCode || data.zip, { maxLength: 20, allowEmpty: true }) ||
+      null,
+    city: sanitizeText(data.city, { maxLength: 100, allowEmpty: true }) || null,
+    state: sanitizeText(data.state, { maxLength: 2, allowEmpty: true }) || null,
+    phone: sanitizeText(data.phone, { maxLength: 20, allowEmpty: true }) || null,
+    fax: sanitizeText(data.fax, { maxLength: 20, allowEmpty: true }) || null,
     email: resolveFacilityEmailForStorage(data),
     ipAddresses: data.ipAddresses?.trim() || null,
     isAutoCreated:
@@ -778,7 +799,12 @@ async function updateDoctor(facilityId, doctorId, doctorInput = {}) {
 
 async function resolveFacilityDoctor(
   facilityId,
-  { doctorName, doctorId, useDefaultWhenMissing = true } = {}
+  {
+    doctorName,
+    doctorId,
+    useDefaultWhenMissing = true,
+    allowCreate = false,
+  } = {}
 ) {
   const id = Number(facilityId);
 
@@ -825,6 +851,16 @@ async function resolveFacilityDoctor(
         created: false,
         usedDefault: false,
         missingDefault: false,
+      };
+    }
+
+    if (!allowCreate) {
+      return {
+        doctor: null,
+        doctorName: "",
+        created: false,
+        usedDefault: false,
+        missingDefault: true,
       };
     }
 
@@ -905,11 +941,16 @@ async function resolveFacilityDoctor(
   };
 }
 
-async function resolveDoctorFromExtractHints(facilityId, hints = {}) {
+async function resolveDoctorFromExtractHints(
+  facilityId,
+  hints = {},
+  { allowCreate = false } = {}
+) {
   const extractedDoctorName = `${hints.specificDoctor || ""}`.trim();
   const result = await resolveFacilityDoctor(facilityId, {
     doctorName: extractedDoctorName || undefined,
     useDefaultWhenMissing: !extractedDoctorName,
+    allowCreate,
   });
 
   return {

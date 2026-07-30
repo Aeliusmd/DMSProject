@@ -138,6 +138,8 @@ export default function DoctorSearchField({
         tone: "success",
         title: "Doctor added from subpoena",
         message: `${trimmedValue} was created for ${facilityLabel} based on the uploaded subpoena.`,
+        linkHref: facilityDoctorsHref,
+        linkLabel: "Add another doctor",
       };
     }
 
@@ -146,6 +148,8 @@ export default function DoctorSearchField({
         tone: "info",
         title: "Using facility default doctor",
         message: `${trimmedValue} is the default doctor for ${facilityLabel}. No doctor was identified on the subpoena.`,
+        linkHref: facilityDoctorsHref,
+        linkLabel: "Add another doctor",
       };
     }
 
@@ -155,6 +159,8 @@ export default function DoctorSearchField({
           tone: "info",
           title: "Matched from subpoena",
           message: `${trimmedValue} was identified on the uploaded subpoena.`,
+          linkHref: facilityDoctorsHref,
+          linkLabel: "Add another doctor",
         };
       }
 
@@ -162,6 +168,8 @@ export default function DoctorSearchField({
         tone: "info",
         title: "Doctor updated from facility profile",
         message: `The subpoena listed ${trimmedExtracted}. The facility profile now shows ${trimmedValue}.`,
+        linkHref: facilityDoctorsHref,
+        linkLabel: "Add another doctor",
       };
     }
 
@@ -169,6 +177,8 @@ export default function DoctorSearchField({
       tone: "info",
       title: "Doctor selected",
       message: `${trimmedValue} is linked to ${facilityLabel}.`,
+      linkHref: facilityDoctorsHref,
+      linkLabel: "Add another doctor",
     };
   }, [
     resolvingDoctor,

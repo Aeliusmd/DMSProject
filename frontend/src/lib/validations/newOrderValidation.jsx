@@ -8,6 +8,8 @@ import {
   addNoHtmlMarkupFieldErrors,
 } from "@/lib/validations/nameValidation";
 
+const AUTO_PENDING_ORDER_PREFIX = "AUTO-PENDING-";
+
 export const immediateRequiredFields = [
   "orderNumber",
   "facility",
@@ -46,7 +48,10 @@ export const paymentPrefixes = ["prepayment", "xray"];
 export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
 
-  if (!data.orderNumber?.trim()) {
+  if (
+    !data.orderNumber?.trim() ||
+    data.orderNumber.trim().startsWith(AUTO_PENDING_ORDER_PREFIX)
+  ) {
     errors.orderNumber = "Order number is required";
   } else {
     const orderNumberError = validateNoHtmlMarkup(data.orderNumber, {

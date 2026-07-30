@@ -8,6 +8,12 @@ const RECORD_TYPE_FLAG_MAP = {
   other: "otherRecord",
 };
 
+const AUTO_PENDING_ORDER_PREFIX = "AUTO-PENDING-";
+
+function isPendingAutoOrderNumber(value) {
+  return `${value || ""}`.trim().startsWith(AUTO_PENDING_ORDER_PREFIX);
+}
+
 function hasRecordTypesSelected(data = {}, orderRecords = []) {
   if (orderRecords.length > 0) {
     return true;
@@ -41,7 +47,9 @@ const REQUIRED_FIELD_RULES = [
   {
     key: "orderNumber",
     label: "Order number",
-    check: (data) => Boolean(`${data.orderNumber || ""}`.trim()),
+    check: (data) =>
+      Boolean(`${data.orderNumber || ""}`.trim()) &&
+      !isPendingAutoOrderNumber(data.orderNumber),
   },
   {
     key: "facility",
@@ -121,7 +129,9 @@ function mapOrderRowToRequiredFieldData(row = {}, orderRecords = []) {
 }
 
 module.exports = {
+  AUTO_PENDING_ORDER_PREFIX,
   computeMissingRequiredFields,
   mapOrderRowToRequiredFieldData,
   hasRecordTypesSelected,
+  isPendingAutoOrderNumber,
 };

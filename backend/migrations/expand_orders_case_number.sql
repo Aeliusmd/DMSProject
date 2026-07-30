@@ -1,0 +1,2 @@
+ALTER TABLE orders
+  MODIFY COLUMN case_number VARCHAR(255) NULL;

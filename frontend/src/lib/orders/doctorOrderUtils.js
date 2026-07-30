@@ -23,6 +23,15 @@ export function normalizeDoctorResolution(
     return resolved;
   }
 
+  if (!`${resolved?.specificDoctor || ""}`.trim()) {
+    return {
+      ...resolved,
+      specificDoctorIsDefault: false,
+      doctorCreated: false,
+      missingDefaultDoctor: true,
+    };
+  }
+
   return {
     ...resolved,
     specificDoctorIsDefault: false,

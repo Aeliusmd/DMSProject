@@ -17,6 +17,9 @@ const {
   addNoHtmlMarkupError,
   addNoHtmlMarkupErrors,
 } = require("../utils/nameValidation");
+const {
+  isPendingAutoOrderNumber,
+} = require("../utils/orderRequiredFields");
 
 const ORDER_FREE_TEXT_FIELDS = [
   "address",
@@ -67,7 +70,10 @@ function validateOrderPayload(body = {}, options = {}) {
   const errors = [];
 
   if (requireOrderNumber) {
-    if (isBlank(body.orderNumber)) {
+    if (
+      isBlank(body.orderNumber) ||
+      isPendingAutoOrderNumber(body.orderNumber)
+    ) {
       errors.push({ field: "orderNumber", message: "Order number is required" });
     } else {
       addMaxLengthError(errors, "orderNumber", body.orderNumber, 50);
@@ -155,7 +161,7 @@ function validateOrderPayload(body = {}, options = {}) {
   addMaxLengthError(errors, "city", body.city, FIELD_LIMITS.VARCHAR_100);
   addMaxLengthError(errors, "specificRecord", body.specificRecord, FIELD_LIMITS.TEXT);
   addMaxLengthError(errors, "court", body.court, 50);
-  addMaxLengthError(errors, "caseNumber", body.caseNumber, 50);
+  addMaxLengthError(errors, "caseNumber", body.caseNumber, FIELD_LIMITS.VARCHAR_255);
   addMaxLengthError(errors, "recNumber", body.recNumber, 50);
   addMaxLengthError(errors, "orderRef", body.orderRef, 50);
   addMaxLengthError(errors, "contact1Name", body.contact1Name, FIELD_LIMITS.VARCHAR_150);

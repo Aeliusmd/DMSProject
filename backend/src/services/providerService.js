@@ -41,12 +41,15 @@ async function getProviderById(id) {
   return mapProviderRow(provider);
 }
 
-function cleanText(value) {
-  return stripControlCharacters(value).trim();
+function cleanText(value, maxLength = 4000) {
+  return stripControlCharacters(value).trim().slice(0, maxLength);
 }
 
 function buildProviderPayload(data = {}) {
-  const companyName = cleanText(data.companyName ?? data.serveCompanyName ?? "");
+  const companyName = cleanText(
+    data.companyName ?? data.serveCompanyName ?? "",
+    255
+  );
 
   if (!companyName) {
     throw new ApiError(400, "Provider company name is required");
@@ -54,13 +57,13 @@ function buildProviderPayload(data = {}) {
 
   return {
     companyName,
-    address: cleanText(data.address ?? ""),
-    zipCode: cleanText(data.zipCode ?? data.zip ?? ""),
-    city: cleanText(data.city ?? ""),
-    state: cleanText(data.state ?? ""),
-    phone: cleanText(data.phone ?? ""),
-    fax: cleanText(data.fax ?? ""),
-    email: cleanText(data.email ?? ""),
+    address: cleanText(data.address ?? "", 255),
+    zipCode: cleanText(data.zipCode ?? data.zip ?? "", 5),
+    city: cleanText(data.city ?? "", 100),
+    state: cleanText(data.state ?? "", 2),
+    phone: cleanText(data.phone ?? "", 20),
+    fax: cleanText(data.fax ?? "", 20),
+    email: cleanText(data.email ?? "", 255),
   };
 }
 
@@ -173,7 +176,19 @@ async function findOrCreateProvider(data, connection = null) {
 
   const existing = await Provider.findByCompanyName(companyName, connection);
   if (existing) {
-    await Provider.update(connection, existing.id, payload);
+    // Extraction payloads often include blank contact fields. Keep any
+    // already-known provider details instead of wiping them on match.
+    const mergedPayload = {
+      companyName: payload.companyName || existing.company_name || "",
+      address: payload.address || existing.address || "",
+      zipCode: payload.zipCode || existing.zip_code || "",
+      city: payload.city || existing.city || "",
+      state: payload.state || existing.state || "",
+      phone: payload.phone || existing.phone || "",
+      fax: payload.fax || existing.fax || "",
+      email: payload.email || existing.email || "",
+    };
+    await Provider.update(connection, existing.id, mergedPayload);
     const updated = await Provider.findById(existing.id, connection);
     return { provider: mapProviderRow(updated), created: false };
   }

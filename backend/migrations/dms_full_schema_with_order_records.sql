@@ -224,7 +224,7 @@ CREATE TABLE orders (
   cancelled_at    DATETIME        NULL COMMENT 'When the order was cancelled',
   cancelled_by    BIGINT UNSIGNED NULL COMMENT 'matrix_employees.id who cancelled the order',
   court           VARCHAR(50)     NULL DEFAULT 'WCAB',
-  case_number     VARCHAR(50)     NULL,
+  case_number     VARCHAR(255)    NULL,
   subpoena_ref    VARCHAR(50)     NULL COMMENT 'Subpoena reference number',
   order_ref       VARCHAR(50)     NULL COMMENT 'e.g. Ord #W-27285-3',
   ssn_encrypted   VARBINARY(512)  NULL COMMENT 'Encrypted SSN',

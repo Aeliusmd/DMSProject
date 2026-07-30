@@ -99,7 +99,9 @@ function isUploadsRelativePath(relativePath) {
 }
 
 /**
- * Move a batch-scan subpoena PDF from FILE_SERVER into uploads/processed/.
+ * Copy a batch-scan subpoena PDF from FILE_SERVER into uploads/processed/.
+ * The source remains available if the surrounding database transaction fails
+ * and the extract needs to be retried.
  * Returns the relative path stored on orders.subpoena_storage_path.
  */
 function archiveBatchScanSubpoenaToProcessed(batchScanRelativePath, orderNumber) {
@@ -116,7 +118,7 @@ function archiveBatchScanSubpoenaToProcessed(batchScanRelativePath, orderNumber)
   const fileName = `${safeOrder}_${Date.now()}_${safeStem}.pdf`;
   const destAbsolute = path.join(ORDER_UPLOAD_DIRS.processed, fileName);
 
-  fs.renameSync(sourceAbsolute, destAbsolute);
+  fs.copyFileSync(sourceAbsolute, destAbsolute);
 
   return `processed/${fileName}`.replace(/\\/g, "/");
 }
