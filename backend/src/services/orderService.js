@@ -2206,12 +2206,19 @@ function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
     requiredFieldData,
     orderRecords
   );
+  const creationSource = row.creation_source || "manual";
+  const isAutoCreated = creationSource === "auto";
 
   return {
     ...mappedOrder,
-    creationSource: row.creation_source || "manual",
+    creationSource,
     missingRequiredFields,
     hasIncompleteRequiredFields: missingRequiredFields.length > 0,
+    autoProcessingStatus: isAutoCreated
+      ? missingRequiredFields.length > 0
+        ? "unprocessed"
+        : "processed"
+      : null,
   };
 }
 
@@ -2283,13 +2290,8 @@ async function createOrder(data, actorId, files, options = {}) {
     const payload = buildOrderDbPayload(
       applyInjuryFromExtract({ ...orderInput, providerId }, linkedExtract)
     );
-    let recordTypes = resolveRecordTypesFromForm(orderInput);
-    if (!recordTypes.length && allowIncomplete) {
-      recordTypes = ["other"];
-      orderInput.otherRecord = true;
-      orderInput.type = "other";
-    }
-    if (!recordTypes.length) {
+    const recordTypes = resolveRecordTypesFromForm(orderInput);
+    if (!recordTypes.length && !allowIncomplete) {
       throw new ApiError(400, "At least one record type is required");
     }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
@@ -2559,6 +2561,9 @@ async function updateOrder(id, data, actorId, files) {
 
     const providerId = await resolveProviderId(connection, data);
     const payload = buildOrderDbPayload({ ...data, providerId });
+    // Editing an auto-created order completes it; it must not convert the
+    // source to manual or lose its Processed/Unprocessed classification.
+    payload.creationSource = existing.creation_source || "manual";
     const doctorChanged =
       trimOrNull(data.specificDoctor) !== trimOrNull(existing.specific_doctor);
     payload.specificDoctorIsDefault = doctorChanged

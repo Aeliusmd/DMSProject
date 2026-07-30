@@ -649,6 +649,11 @@ function toRenderOrder(order, companyPortalMode = false) {
     providerName: order.providerName || "",
     providerEmail: order.providerEmail || order.invoice?.providerEmail || "",
     creationSource: order.creationSource || "manual",
+    missingRequiredFields: Array.isArray(order.missingRequiredFields)
+      ? order.missingRequiredFields
+      : [],
+    hasIncompleteRequiredFields: Boolean(order.hasIncompleteRequiredFields),
+    autoProcessingStatus: order.autoProcessingStatus || null,
     companyPortalStatus: order.companyPortalStatus || null,
     companyPortalOrderId: order.companyPortalOrderId || null,
     facilityNotInSystem: Boolean(order.facilityNotInSystem),
@@ -695,10 +700,6 @@ function toRenderOrder(order, companyPortalMode = false) {
     dateRequested: order.dateRequested || "",
     dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
-    hasIncompleteRequiredFields: Boolean(order.hasIncompleteRequiredFields),
-    missingRequiredFields: Array.isArray(order.missingRequiredFields)
-      ? order.missingRequiredFields
-      : [],
     portalStatus: order.portalStatus || null,
     portalStatusLabel: order.portalStatusLabel || null,
   };
@@ -1671,7 +1672,9 @@ export default function OrdersTable({
 
                         {order.creationSource === "auto" && (
                           <p className="mt-1 text-[10px] italic text-[#64748B]">
-                            Unprocessed
+                            {order.autoProcessingStatus === "processed"
+                              ? "Processed"
+                              : "Unprocessed"}
                           </p>
                         )}
                         {order.creationSource === "personal_portal" && (
