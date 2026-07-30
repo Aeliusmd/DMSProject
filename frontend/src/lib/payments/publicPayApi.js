@@ -4,7 +4,14 @@ import { isNetworkError, NETWORK_UNAVAILABLE_MESSAGE } from "@/lib/networkErrors
 
 async function safeFetch(url, options) {
   try {
-    return await fetch(url, options);
+    const headers = {
+      ...(API_BASE_URL.includes(".ngrok-free.")
+        ? { "ngrok-skip-browser-warning": "true" }
+        : {}),
+      ...(options?.headers || {}),
+    };
+
+    return await fetch(url, { ...options, headers });
   } catch (error) {
     if (isNetworkError(error)) {
       throw new ApiRequestError(NETWORK_UNAVAILABLE_MESSAGE, 0);
