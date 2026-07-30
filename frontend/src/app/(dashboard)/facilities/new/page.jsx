@@ -34,6 +34,12 @@ const initialFormData = {
   ipAddresses: "",
 };
 
+const CONTACT_NAME_FIELDS = [
+  { field: "firstName", label: "First name" },
+  { field: "middleName", label: "Middle name" },
+  { field: "lastName", label: "Last name" },
+];
+
 const createEmptyManager = () => ({
   firstName: "",
   middleName: "",
@@ -325,6 +331,7 @@ function NewFacilityPageContent() {
                   name="firstName"
                   value={formData.firstName}
                   onChange={handleChange}
+                  error={getError("firstName")}
                 />
 
                 <FacilityField
@@ -332,6 +339,7 @@ function NewFacilityPageContent() {
                   name="middleName"
                   value={formData.middleName}
                   onChange={handleChange}
+                  error={getError("middleName")}
                 />
 
                 <FacilityField
@@ -339,6 +347,7 @@ function NewFacilityPageContent() {
                   name="lastName"
                   value={formData.lastName}
                   onChange={handleChange}
+                  error={getError("lastName")}
                 />
               </div>
 
@@ -691,6 +700,11 @@ function validateFacilityForm(data, managers) {
     errors.email = "Enter a valid email address";
   }
 
+  CONTACT_NAME_FIELDS.forEach(({ field, label }) => {
+    const nameError = validatePersonName(data[field], { fieldLabel: label });
+    if (nameError) errors[field] = nameError;
+  });
+
   if (data.zipCode && data.zipCode.length !== 5) {
     errors.zipCode = "ZIP must be 5 digits";
   }
@@ -708,6 +722,13 @@ function validateFacilityForm(data, managers) {
   }
 
   managers.forEach((manager, index) => {
+    CONTACT_NAME_FIELDS.forEach(({ field, label }) => {
+      const nameError = validatePersonName(manager[field], {
+        fieldLabel: `Manager ${label.toLowerCase()}`,
+      });
+      if (nameError) errors[`managers.${index}.${field}`] = nameError;
+    });
+
     if (manager.phone && getDigits(manager.phone).length !== 10) {
       errors[`managers.${index}.phone`] = "Enter a valid 10 digit number";
     }
@@ -724,6 +745,14 @@ function validateFacilityField(field, value) {
   if (!value.trim()) {
     if (field === "facilityName") return "Facility name is required";
     if (field === "email") return "Email is required";
+  }
+
+  const contactNameField = CONTACT_NAME_FIELDS.find(
+    (item) => item.field === field
+  );
+
+  if (contactNameField) {
+    return validatePersonName(value, { fieldLabel: contactNameField.label });
   }
 
   if (field === "facilityName" && value) {

@@ -34,6 +34,12 @@ import {
   uploadFacilityDocument,
 } from "@/lib/facilities/facilityApi";
 
+const CONTACT_NAME_FIELDS = [
+  { field: "firstName", label: "First name" },
+  { field: "middleName", label: "Middle name" },
+  { field: "lastName", label: "Last name" },
+];
+
 const createEmptyDoctorInput = (id) => ({
   id,
   officeName: "",
@@ -962,6 +968,7 @@ export default function FacilityDetailsPage() {
               name="firstName"
               value={formData.firstName}
               onChange={handleChange}
+              error={getError("firstName")}
             />
 
             <TextField
@@ -969,6 +976,7 @@ export default function FacilityDetailsPage() {
               name="middleName"
               value={formData.middleName}
               onChange={handleChange}
+              error={getError("middleName")}
             />
 
             <TextField
@@ -976,6 +984,7 @@ export default function FacilityDetailsPage() {
               name="lastName"
               value={formData.lastName}
               onChange={handleChange}
+              error={getError("lastName")}
             />
           </div>
 
@@ -2116,6 +2125,11 @@ function validateFacilityForm(data) {
     errors.email = "Enter a valid email address";
   }
 
+  CONTACT_NAME_FIELDS.forEach(({ field, label }) => {
+    const nameError = validatePersonName(data[field], { fieldLabel: label });
+    if (nameError) errors[field] = nameError;
+  });
+
   if (data.zip && getDigits(data.zip).length !== 5) {
     errors.zipCode = "ZIP must be 5 digits";
   }
@@ -2160,6 +2174,14 @@ function validateFacilityField(field, value) {
   if (!value?.trim()) {
     if (field === "facilityName") return "Facility name is required";
     if (field === "email") return "Email is required";
+  }
+
+  const contactNameField = CONTACT_NAME_FIELDS.find(
+    (item) => item.field === field
+  );
+
+  if (contactNameField) {
+    return validatePersonName(value, { fieldLabel: contactNameField.label });
   }
 
   if (field === "facilityName" && value) {
