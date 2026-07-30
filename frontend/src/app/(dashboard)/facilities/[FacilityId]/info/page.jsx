@@ -668,7 +668,13 @@ export default function FacilityDetailsPage() {
       // doctor. The order page will clear the previous facility's doctor and
       // show its existing "add doctor" action for the newly selected facility.
       if (returnToOrderPath) {
-        setReturnToOrderModal({ open: true });
+        const separator = returnToOrderPath.includes("?") ? "&" : "?";
+        const facilityQuery = facilityId
+          ? `&applyFacilityId=${encodeURIComponent(facilityId)}`
+          : "";
+        router.push(
+          `${returnToOrderPath}${separator}facilityRefresh=1${facilityQuery}`
+        );
         return;
       }
 

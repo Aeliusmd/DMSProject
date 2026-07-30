@@ -2200,6 +2200,26 @@ function assertFacilityProfileComplete(facility) {
   }
 }
 
+async function assertDoctorBelongsToFacility(facilityId, doctorName) {
+  const facilityService = require("./facilityService");
+  const resolved = await facilityService.resolveFacilityDoctor(facilityId, {
+    doctorName,
+    useDefaultWhenMissing: false,
+    allowCreate: false,
+  });
+
+  if (!resolved.doctor?.id || !resolved.doctorName) {
+    throw new ApiError(400, "Validation failed", [
+      {
+        field: "specificDoctor",
+        message: "Select a doctor linked to the selected facility",
+      },
+    ]);
+  }
+
+  return resolved;
+}
+
 function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
   const requiredFieldData = mapOrderRowToRequiredFieldData(row, orderRecords);
   const missingRequiredFields = [
@@ -2257,6 +2277,12 @@ async function createOrder(data, actorId, files, options = {}) {
 
     if (!canAllowIncomplete) {
       assertFacilityProfileComplete(facility);
+      const doctor = await assertDoctorBelongsToFacility(
+        resolvedFacilityId,
+        orderInput.specificDoctor
+      );
+      orderInput.specificDoctor = doctor.doctorName;
+      orderInput.specificDoctorIsDefault = Boolean(doctor.usedDefault);
     }
 
     const subpoenaExtractId = Number(orderInput.subpoenaExtractId) || null;
@@ -2512,7 +2538,10 @@ async function updateOrderFacility(id, data, actorId) {
 
     await connection.execute(
       `UPDATE orders
-       SET facility_id = :facilityId, updated_at = NOW()
+       SET facility_id = :facilityId,
+           specific_doctor = NULL,
+           specific_doctor_is_default = 0,
+           updated_at = NOW()
        WHERE id = :orderId`,
       { facilityId: resolvedFacilityId, orderId: existing.id }
     );
@@ -2559,6 +2588,12 @@ async function updateOrder(id, data, actorId, files) {
     }
 
     assertFacilityProfileComplete(facility);
+    const doctor = await assertDoctorBelongsToFacility(
+      resolvedFacilityId,
+      data.specificDoctor
+    );
+    data.specificDoctor = doctor.doctorName;
+    data.specificDoctorIsDefault = Boolean(doctor.usedDefault);
 
     const rawOrderNumber = trimOrNull(data.orderNumber);
     if (!rawOrderNumber) {

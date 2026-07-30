@@ -775,11 +775,12 @@ function NewOrderPageContent() {
           } catch {
             // Keep the doctor already restored from the draft.
           }
-        } else if (nextForm.facility && !`${nextForm.specificDoctor || ""}`.trim()) {
+        } else if (nextForm.facility) {
           try {
             const doctorResolved = await resolvePendingDoctorForOrder({
               facilityId: nextForm.facility,
               doctorId: nextForm.specificDoctorId || "",
+              doctorName: nextForm.specificDoctor || "",
             });
             nextForm = {
               ...nextForm,
