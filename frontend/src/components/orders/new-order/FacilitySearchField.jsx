@@ -40,6 +40,13 @@ export default function FacilitySearchField({
       ? `/facilities/${facilityId}/info?returnTo=${encodeURIComponent(returnToOrderPath)}`
       : `/facilities/${facilityId}/info`
     : "";
+  const newFacilityHref = (() => {
+    const params = new URLSearchParams();
+    if (trimmedValue) params.set("facilityName", trimmedValue);
+    if (returnToOrderPath) params.set("returnTo", returnToOrderPath);
+    const query = params.toString();
+    return `/facilities/new${query ? `?${query}` : ""}`;
+  })();
 
   const hasExactMatch = suggestions.some((facility) => {
     const name = `${facility.facility || facility.facilityName || ""}`.trim();
@@ -295,6 +302,15 @@ export default function FacilitySearchField({
                   Press Enter to confirm
                 </span>
               </button>
+
+              <Link
+                href={newFacilityHref}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onBeforeFacilityProfileNavigate?.()}
+                className="block px-3 pb-2 text-[10px] font-semibold text-[#007F96] underline"
+              >
+                Or create the full facility profile now
+              </Link>
             </li>
           )}
 

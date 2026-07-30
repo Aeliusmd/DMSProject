@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import PersonalPortalDashboardShell from "@/components/personal-request/PersonalPortalDashboardShell";
@@ -37,6 +37,22 @@ const STATUS_STYLES = {
 };
 
 export default function PersonalPortalDashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <PersonalPortalDashboardShell title="Dashboard">
+          <p className="px-5 py-8 text-center text-[12px] text-[#94A3B8]">
+            Loading dashboard...
+          </p>
+        </PersonalPortalDashboardShell>
+      }
+    >
+      <PersonalPortalDashboardContent />
+    </Suspense>
+  );
+}
+
+function PersonalPortalDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [user, setUser] = useState(null);

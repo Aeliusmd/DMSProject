@@ -4,6 +4,7 @@ import { Suspense, useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import { createFacility } from "@/lib/facilities/facilityApi";
 import { linkCompanyOrderFacility } from "@/lib/orders/orderApi";
 import { ApiRequestError } from "@/lib/auth/authApi";
@@ -46,6 +47,7 @@ function NewFacilityPageContent() {
   const searchParams = useSearchParams();
 
   const linkOrderId = searchParams.get("linkOrderId") || "";
+  const returnToOrderPath = getSafeOrderReturnPath(searchParams.get("returnTo"));
 
   const [formData, setFormData] = useState(initialFormData);
   const [managers, setManagers] = useState([createEmptyManager()]);
@@ -53,6 +55,10 @@ function NewFacilityPageContent() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [returnToOrderModal, setReturnToOrderModal] = useState({
+    open: false,
+    facilityId: "",
+  });
 
   useEffect(() => {
     const prefill = {
@@ -228,6 +234,14 @@ function NewFacilityPageContent() {
           return;
         }
         router.push("/company-orders");
+        return;
+      }
+
+      if (returnToOrderPath) {
+        setReturnToOrderModal({
+          open: true,
+          facilityId: facility?.id ? String(facility.id) : "",
+        });
         return;
       }
 
@@ -462,6 +476,30 @@ function NewFacilityPageContent() {
           </div>
         </section>
       </div>
+
+      <ConfirmModal
+        open={returnToOrderModal.open}
+        title="Return to order?"
+        message="Facility was created. Do you want to go back to the order you were working on?"
+        variant="warning"
+        confirmLabel="Yes, go to order"
+        cancelLabel="No, go to Facilities"
+        onCancel={() => {
+          setReturnToOrderModal({ open: false, facilityId: "" });
+          router.push("/facilities");
+        }}
+        onConfirm={() => {
+          const facilityId = returnToOrderModal.facilityId;
+          setReturnToOrderModal({ open: false, facilityId: "" });
+          const separator = returnToOrderPath.includes("?") ? "&" : "?";
+          const facilityQuery = facilityId
+            ? `&applyFacilityId=${encodeURIComponent(facilityId)}`
+            : "";
+          router.push(
+            `${returnToOrderPath}${separator}facilityRefresh=1${facilityQuery}`
+          );
+        }}
+      />
     </DashboardShell>
   );
 }
@@ -729,6 +767,12 @@ function isValidEmail(email) {
 
 function getDigits(value) {
   return value.replace(/\D/g, "");
+}
+
+function getSafeOrderReturnPath(value) {
+  const path = `${value || ""}`.trim();
+  if (!path.startsWith("/orders/new")) return "";
+  return path;
 }
 
 function formatPhone(value) {

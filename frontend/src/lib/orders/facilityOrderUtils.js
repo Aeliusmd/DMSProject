@@ -4,6 +4,19 @@ const DRAFT_FORM_OMIT_KEYS = new Set(["subpoenaFile", "additionalDocumentFile"])
 
 const draftSessionStorageKey = (scope) => `dms:order-draft-session:${scope}`;
 
+// An in-progress order stays recoverable while the user steps away to create or
+// complete a facility, but a forgotten draft must not leak into a later order.
+const DRAFT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+export function isRestorableDraftOrderSession(draft) {
+  if (!draft?.formSnapshot) return false;
+
+  const savedAt = Number(draft.savedAt || 0);
+  if (!savedAt) return false;
+
+  return Date.now() - savedAt <= DRAFT_MAX_AGE_MS;
+}
+
 export function getDraftOrderScope({ orderId = "", subpoenaId = "" } = {}) {
   const order = `${orderId || ""}`.trim();
   if (order) return `order:${order}`;

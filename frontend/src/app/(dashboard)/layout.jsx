@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getCurrentUser,
@@ -56,5 +56,17 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  return <RoleRouteGuard>{children}</RoleRouteGuard>;
+  return (
+    <RoleRouteGuard>
+      <Suspense
+        fallback={
+          <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+            <p className="text-[13px] text-[#64748B]">Loading...</p>
+          </div>
+        }
+      >
+        {children}
+      </Suspense>
+    </RoleRouteGuard>
+  );
 }

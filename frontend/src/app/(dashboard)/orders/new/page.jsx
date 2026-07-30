@@ -44,6 +44,7 @@ import {
   clearDraftOrderSession,
   getDraftOrderScope,
   hasDraftableOrderContent,
+  isRestorableDraftOrderSession,
   isSameFacilityLabel,
   readDraftOrderSession,
   rememberDraftOrderSession,
@@ -199,6 +200,7 @@ function NewOrderPageContent() {
   const panel = searchParams.get("panel");
   const facilityRefresh = searchParams.get("facilityRefresh");
   const applyFacilityId = searchParams.get("applyFacilityId");
+  const applyDoctorId = searchParams.get("applyDoctorId");
   const returnToParam = searchParams.get("returnTo");
 
   const isEditMode = Boolean(orderId);
@@ -244,6 +246,7 @@ function NewOrderPageContent() {
   const formDataRef = useRef(formData);
   const committedFacilityRef = useRef({ id: "", name: "" });
   const draftRestoredRef = useRef(false);
+  const restoredDraftScopeRef = useRef("");
 
   useEffect(() => {
     formDataRef.current = formData;
@@ -358,6 +361,7 @@ function NewOrderPageContent() {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("facilityRefresh");
     params.delete("applyFacilityId");
+    params.delete("applyDoctorId");
     const query = params.toString();
     router.replace(`/orders/new${query ? `?${query}` : ""}`, { scroll: false });
   }, [router, searchParams]);
@@ -369,8 +373,16 @@ function NewOrderPageContent() {
     }
 
     let resolved = {
-      facilityId: draft.facilityId || draft.formSnapshot?.facility || "",
-      facilityName: draft.facilityName || draft.formSnapshot?.facilityName || "",
+      facilityId:
+        applyFacilityId ||
+        draft.facilityId ||
+        draft.formSnapshot?.facility ||
+        "",
+      // An explicit returned ID is authoritative. Passing the old draft name
+      // with a newly created ID can resolve back to the previous facility.
+      facilityName: applyFacilityId
+        ? ""
+        : draft.facilityName || draft.formSnapshot?.facilityName || "",
       facilityProfileIncomplete: false,
       facilityCreated: false,
     };
@@ -387,6 +399,7 @@ function NewOrderPageContent() {
     }
 
     let nextForm = {
+      ...initialFormData,
       ...(draft.formSnapshot || {}),
       facility: resolved.facilityId || draft.formSnapshot?.facility || "",
       facilityName: resolved.facilityName || draft.formSnapshot?.facilityName || "",
@@ -400,7 +413,10 @@ function NewOrderPageContent() {
         doctorResolved = await resolvePendingDoctorForOrder({
           facilityId: resolved.facilityId || nextForm.facility,
           doctorId:
-            nextForm.specificDoctorId || draft.formSnapshot?.specificDoctorId || "",
+            applyDoctorId ||
+            nextForm.specificDoctorId ||
+            draft.formSnapshot?.specificDoctorId ||
+            "",
           doctorName: nextForm.specificDoctor || extractedDoctorName,
           extractedDoctorName,
           priorDoctorCreated: Boolean(draft.extractionMeta?.doctorCreated),
@@ -436,7 +452,7 @@ function NewOrderPageContent() {
       }
     }
 
-    setFormData(nextForm);
+    setFormDataAndRef(nextForm);
     markCommittedFacility(resolved.facilityId, resolved.facilityName);
     setFacilityProfileIncomplete(resolved.facilityProfileIncomplete);
     setFacilityCreated(resolved.facilityCreated);
@@ -482,8 +498,15 @@ function NewOrderPageContent() {
     }
 
     draftRestoredRef.current = true;
+    restoredDraftScopeRef.current = draftScope;
     return true;
-  }, [draftScope, subpoenaId]);
+  }, [
+    applyDoctorId,
+    applyFacilityId,
+    draftScope,
+    setFormDataAndRef,
+    subpoenaId,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -511,15 +534,38 @@ function NewOrderPageContent() {
   useEffect(() => {
     let active = true;
 
+    if (
+      isEditMode &&
+      restoredDraftScopeRef.current === draftScope &&
+      facilityRefresh !== "1" &&
+      !applyFacilityId &&
+      !applyDoctorId
+    ) {
+      return undefined;
+    }
+
     if (!isEditMode || !orderId) {
-      if (!subpoenaId && facilityRefresh !== "1") {
-        if (!draftRestoredRef.current) {
-          setFormData(initialFormData);
-          setTouched({});
-          setSubmitAttempted(false);
-          setFileErrors({});
-          clearDraftOrderSession(draftScope);
+      if (!subpoenaId && facilityRefresh !== "1" && !draftRestoredRef.current) {
+        // Returning from facility/doctor creation by any route (link, modal or
+        // browser navigation) must keep the order the user was filling in.
+        if (isRestorableDraftOrderSession(readDraftOrderSession(draftScope))) {
+          setLoadingOrder(true);
+          restoreOrderDraftAfterFacilityReturn()
+            .catch(() => {})
+            .finally(() => {
+              if (active) setLoadingOrder(false);
+            });
+
+          return () => {
+            active = false;
+          };
         }
+
+        setFormData(initialFormData);
+        setTouched({});
+        setSubmitAttempted(false);
+        setFileErrors({});
+        clearDraftOrderSession(draftScope);
       }
       if (!isEditMode && !subpoenaId && facilityRefresh !== "1") {
         setLoadingOrder(false);
@@ -545,12 +591,13 @@ function NewOrderPageContent() {
           draftFacility?.facilityId || draftFacility?.formSnapshot?.facility || ""
         }`.trim();
         const orderFacilityId = `${order.facility || ""}`.trim();
-        // Restore draft when returning from facility profile, or when an unsaved
-        // facility change is still pending for this order.
+        // Restore the draft when returning from a facility/doctor detour, when a
+        // facility change is still pending, or whenever unsaved edits were kept.
         const shouldRestoreDraft = Boolean(
-          ((isReturnFromFacilityEdit || applyFacilityId) &&
+          ((isReturnFromFacilityEdit || applyFacilityId || applyDoctorId) &&
             (draftFacility?.formSnapshot || draftFacility?.facilityId)) ||
-            (draftFacilityId && draftFacilityId !== orderFacilityId)
+            (draftFacilityId && draftFacilityId !== orderFacilityId) ||
+            isRestorableDraftOrderSession(draftFacility)
         );
 
         let nextForm = syncPaymentDueFields(
@@ -561,24 +608,65 @@ function NewOrderPageContent() {
         let facilityWasCreated = Boolean(order.facilityIsAutoCreated);
         let facilityLabel = order.facilityName || "";
 
+        const pendingFacilityId = `${
+          applyFacilityId ||
+          draftFacility?.facilityId ||
+          draftFacility?.formSnapshot?.facility ||
+          ""
+        }`.trim();
+        const pendingFacilityName = `${
+          applyFacilityId
+            ? ""
+            : draftFacility?.facilityName ||
+              draftFacility?.formSnapshot?.facilityName ||
+              ""
+        }`.trim();
+
         if (shouldRestoreDraft) {
-          if (draftFacility.formSnapshot) {
-            nextForm = syncPaymentDueFields(
-              { ...nextForm, ...draftFacility.formSnapshot },
-              order.invoiceFees
-            );
-          }
+          const draftSnapshot = draftFacility?.formSnapshot || {};
+          const hasPendingFacilityChange = Boolean(
+            pendingFacilityId && pendingFacilityId !== orderFacilityId
+          );
+          const shouldApplyDraftDoctor = Boolean(
+            applyDoctorId ||
+              `${draftSnapshot.specificDoctorId || ""}`.trim() ||
+              `${draftSnapshot.specificDoctor || ""}`.trim() ||
+              hasPendingFacilityChange
+          );
+
+          // Existing-order fields always come from the database. The draft is
+          // only a temporary carrier for facility/doctor changes until Update
+          // Order succeeds; it must never blank Order No or other saved fields.
+          nextForm = {
+            ...nextForm,
+            facility: pendingFacilityId || nextForm.facility,
+            facilityName:
+              pendingFacilityName ||
+              (applyFacilityId ? "" : nextForm.facilityName),
+            ...(shouldApplyDraftDoctor
+              ? {
+                  specificDoctor: draftSnapshot.specificDoctor || "",
+                  specificDoctorId: draftSnapshot.specificDoctorId || "",
+                  specificDoctorIsDefault: Boolean(
+                    draftSnapshot.specificDoctorIsDefault
+                  ),
+                }
+              : {}),
+          };
 
           try {
-            const resolved = await resolvePendingFacility({
-              facilityId:
-                applyFacilityId ||
-                draftFacility.facilityId ||
-                draftFacility.formSnapshot?.facility,
-              facilityName:
-                draftFacility.facilityName ||
-                draftFacility.formSnapshot?.facilityName,
-            });
+            const resolved =
+              pendingFacilityId || pendingFacilityName
+                ? await resolvePendingFacility({
+                    facilityId: pendingFacilityId,
+                    facilityName: pendingFacilityName,
+                  })
+                : {
+                    facilityId: nextForm.facility,
+                    facilityName: nextForm.facilityName,
+                    facilityProfileIncomplete: profileIncomplete,
+                    facilityCreated: facilityWasCreated,
+                  };
 
             nextForm = {
               ...nextForm,
@@ -601,6 +689,7 @@ function NewOrderPageContent() {
               const doctorResolved = await resolvePendingDoctorForOrder({
                 facilityId: resolved.facilityId || nextForm.facility,
                 doctorId:
+                  applyDoctorId ||
                   nextForm.specificDoctorId ||
                   draftFacility.formSnapshot?.specificDoctorId ||
                   "",
@@ -647,12 +736,38 @@ function NewOrderPageContent() {
 
         if (!active) return;
 
-        if (isReturnFromFacilityEdit || applyFacilityId) {
+        if (
+          shouldRestoreDraft ||
+          isReturnFromFacilityEdit ||
+          applyFacilityId ||
+          applyDoctorId
+        ) {
+          // Marking the scope as restored keeps a later re-render from reloading
+          // the saved order over the draft the user is still editing.
           draftRestoredRef.current = true;
-          clearFacilityRefreshParam();
+          restoredDraftScopeRef.current = draftScope;
         }
 
-        if (nextForm.facility && !`${nextForm.specificDoctor || ""}`.trim()) {
+        if (nextForm.facility && applyDoctorId) {
+          try {
+            const doctorResolved = await resolvePendingDoctorForOrder({
+              facilityId: nextForm.facility,
+              doctorId: applyDoctorId,
+            });
+            nextForm = {
+              ...nextForm,
+              specificDoctor: doctorResolved.specificDoctor,
+              specificDoctorId: doctorResolved.specificDoctorId,
+              specificDoctorIsDefault: doctorResolved.specificDoctorIsDefault,
+            };
+            if (active) {
+              setMissingDefaultDoctor(doctorResolved.missingDefaultDoctor);
+              setDoctorCreated(doctorResolved.doctorCreated);
+            }
+          } catch {
+            // Keep the doctor already restored from the draft.
+          }
+        } else if (nextForm.facility && !`${nextForm.specificDoctor || ""}`.trim()) {
           try {
             const doctorResolved = await resolvePendingDoctorForOrder({
               facilityId: nextForm.facility,
@@ -675,6 +790,16 @@ function NewOrderPageContent() {
           setMissingDefaultDoctor(false);
         }
 
+        if (isReturnFromFacilityEdit || applyFacilityId || applyDoctorId) {
+          rememberDraftOrderSession(draftScope, {
+            facilityId: nextForm.facility,
+            facilityName: nextForm.facilityName,
+            formSnapshot: serializeFormForDraft(nextForm),
+            extractionMeta:
+              draftFacility?.extractionMeta || extractionMetaRef.current,
+          });
+        }
+
         setFormDataAndRef(nextForm);
         markCommittedFacility(nextForm.facility, nextForm.facilityName);
         setFacilityProfileIncomplete(profileIncomplete);
@@ -691,6 +816,9 @@ function NewOrderPageContent() {
         setTouched({});
         setSubmitAttempted(false);
         setFileErrors({});
+        if (isReturnFromFacilityEdit || applyFacilityId || applyDoctorId) {
+          clearFacilityRefreshParam();
+        }
       })
       .catch((err) => {
         if (active) setLoadError(err.message || "Failed to load order");
@@ -702,7 +830,18 @@ function NewOrderPageContent() {
     return () => {
       active = false;
     };
-  }, [isEditMode, orderId, subpoenaId, facilityRefresh, applyFacilityId, draftScope, clearFacilityRefreshParam, setFormDataAndRef]);
+  }, [
+    isEditMode,
+    orderId,
+    subpoenaId,
+    facilityRefresh,
+    applyFacilityId,
+    applyDoctorId,
+    draftScope,
+    clearFacilityRefreshParam,
+    restoreOrderDraftAfterFacilityReturn,
+    setFormDataAndRef,
+  ]);
 
   useEffect(() => {
     if (isEditMode || facilityRefresh !== "1") {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import {
   PORTAL_NAVIGATION_HIDDEN,
@@ -14,5 +15,15 @@ export default function CompanyPortalLayout({ children }) {
     redirect(PORTAL_ROUTE_REDIRECT);
   }
 
-  return children;
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+          <p className="text-[13px] text-[#64748B]">Loading...</p>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
 }

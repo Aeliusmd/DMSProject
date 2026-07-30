@@ -92,6 +92,7 @@ export default function FacilityDetailsPage() {
   const [doctorError, setDoctorError] = useState("");
   const [doctorErrors, setDoctorErrors] = useState({});
   const [doctorSubmitAttempted, setDoctorSubmitAttempted] = useState(false);
+  const [returnDoctorId, setReturnDoctorId] = useState("");
   const [savedSnapshot, setSavedSnapshot] = useState(null);
 
   const [saveConfirmModal, setSaveConfirmModal] = useState({ open: false });
@@ -724,12 +725,24 @@ export default function FacilityDetailsPage() {
     setCreatingDoctors(true);
 
     try {
-      await createDoctors(facilityId, doctorsToCreate);
+      const existingDoctorIds = new Set(
+        doctors.map((doctor) => String(doctor.id))
+      );
+      const savedDoctors = await createDoctors(facilityId, doctorsToCreate);
       const refreshed = await getFacility(facilityId);
       setDoctors(refreshed.doctors || []);
       setDoctorInputs([createEmptyDoctorInput(`doctor-input-${Date.now()}`)]);
       setDoctorSubmitAttempted(false);
       setDoctorErrors({});
+
+      const newlyCreatedDoctors = savedDoctors.filter(
+        (doctor) => !existingDoctorIds.has(String(doctor.id))
+      );
+      const doctorToApply =
+        newlyCreatedDoctors.find((doctor) => doctor.defaultDoctor) ||
+        newlyCreatedDoctors[0] ||
+        null;
+      setReturnDoctorId(doctorToApply?.id ? String(doctorToApply.id) : "");
 
       const hasDefaultDoctor = (refreshed.doctors || []).some(
         (doctor) => doctor.defaultDoctor
@@ -1190,8 +1203,11 @@ export default function FacilityDetailsPage() {
           const facilityQuery = facilityId
             ? `&applyFacilityId=${encodeURIComponent(facilityId)}`
             : "";
+          const doctorQuery = returnDoctorId
+            ? `&applyDoctorId=${encodeURIComponent(returnDoctorId)}`
+            : "";
           router.push(
-            `${returnToOrderPath}${separator}facilityRefresh=1${facilityQuery}`
+            `${returnToOrderPath}${separator}facilityRefresh=1${facilityQuery}${doctorQuery}`
           );
         }}
       />
