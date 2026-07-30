@@ -645,7 +645,12 @@ export default function FacilityDetailsPage() {
 
     if (Object.keys(validationErrors).length > 0) return;
 
-    if (!hasFacilityChanges(formData, savedSnapshot)) return;
+    if (!hasFacilityChanges(formData, savedSnapshot)) {
+      if (returnToOrderPath) {
+        setReturnToOrderModal({ open: true });
+      }
+      return;
+    }
 
     setSaveConfirmModal({ open: true });
   };
