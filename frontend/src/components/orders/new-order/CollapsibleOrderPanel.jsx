@@ -38,24 +38,24 @@ export default function CollapsibleOrderPanel({
   if (!expanded) {
     return (
       <section
-        className={`flex h-[72px] shrink-0 overflow-hidden rounded-[12px] border ${theme.border} ${theme.bg} xl:h-full xl:w-[64px]`}
+        className={`flex h-[64px] shrink-0 overflow-hidden rounded-[12px] border sm:h-[72px] ${theme.border} ${theme.bg} xl:h-full xl:w-[64px]`}
       >
         <button
           type="button"
           onClick={onToggle}
-          className="flex h-full w-full items-center justify-between px-4 py-3 xl:flex-col xl:px-0 xl:py-5"
+          className="flex h-full w-full items-center justify-between gap-2 px-3 py-3 sm:px-4 xl:flex-col xl:px-0 xl:py-5"
         >
-          <span className={`flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-[8px] bg-white ${theme.text}`}>
+          <span className={`flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[8px] bg-white sm:h-[36px] sm:w-[36px] ${theme.text}`}>
             {icon}
           </span>
 
           <span
-            className={`text-[13px] font-semibold tracking-wide ${theme.text} xl:[writing-mode:vertical-rl] xl:rotate-180`}
+            className={`min-w-0 truncate text-[13px] font-semibold tracking-wide ${theme.text} xl:overflow-visible xl:whitespace-normal xl:[writing-mode:vertical-rl] xl:rotate-180`}
           >
             {title}
           </span>
 
-          <span className={`flex h-[24px] w-[24px] items-center justify-center rounded-[6px] bg-white ${theme.text}`}>
+          <span className={`flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-[6px] bg-white ${theme.text}`}>
             <ChevronRightIcon />
           </span>
         </button>
@@ -65,17 +65,17 @@ export default function CollapsibleOrderPanel({
 
   return (
     <section
-      className={`flex min-w-0 flex-1 flex-col overflow-hidden rounded-[12px] border ${theme.border} bg-white shadow-sm`}
+      className={`flex min-h-[280px] min-w-0 flex-1 flex-col overflow-hidden rounded-[12px] border xl:min-h-0 ${theme.border} bg-white shadow-sm`}
     >
       <div
-        className={`flex h-[56px] shrink-0 items-center justify-between border-b border-[#E2E8F0] px-5 ${theme.header}`}
+        className={`flex h-[52px] shrink-0 items-center justify-between border-b border-[#E2E8F0] px-3 sm:h-[56px] sm:px-5 ${theme.header}`}
       >
-        <div className="flex min-w-0 items-center gap-3">
-          <span className={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[7px] bg-white ${theme.text}`}>
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <span className={`flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] bg-white sm:h-[30px] sm:w-[30px] ${theme.text}`}>
             {icon}
           </span>
 
-          <h2 className={`truncate text-[14px] font-semibold ${theme.text}`}>
+          <h2 className={`truncate text-[13px] font-semibold sm:text-[14px] ${theme.text}`}>
             {title}
           </h2>
         </div>
@@ -89,7 +89,7 @@ export default function CollapsibleOrderPanel({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 sm:py-5">
         {children}
       </div>
     </section>

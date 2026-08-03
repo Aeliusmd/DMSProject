@@ -1477,107 +1477,122 @@ export default function OrdersTable({
 
         {fitToWindow && (
           <style>{`
-            .orders-table-fit { font-size: 10px; width: 100%; }
-            .orders-table-fit th,
-            .orders-table-fit td {
-              padding-left: 5px !important;
-              padding-right: 5px !important;
-              padding-top: 8px !important;
-              padding-bottom: 8px !important;
-              width: auto !important;
-            }
-            .orders-table-fit td,
-            .orders-table-fit td * {
-              white-space: normal !important;
-              overflow-wrap: anywhere;
-              word-break: break-word;
-            }
-            ${
-              isReportView
-                ? `
-            .orders-table-fit th:nth-child(1),
-            .orders-table-fit td:nth-child(1) { width: 5% !important; }
-            .orders-table-fit th:nth-child(2),
-            .orders-table-fit td:nth-child(2) { width: 7% !important; }
-            .orders-table-fit th:nth-child(3),
-            .orders-table-fit td:nth-child(3) { width: 11% !important; }
-            .orders-table-fit th:nth-child(4),
-            .orders-table-fit td:nth-child(4) { width: 9% !important; }
-            .orders-table-fit th:nth-child(5),
-            .orders-table-fit td:nth-child(5) { width: 9% !important; }
-            .orders-table-fit th:nth-child(6),
-            .orders-table-fit td:nth-child(6) { width: 9% !important; }
-            .orders-table-fit th:nth-child(7),
-            .orders-table-fit td:nth-child(7) { width: 9% !important; }
-            .orders-table-fit th:nth-child(8),
-            .orders-table-fit td:nth-child(8) { width: 10% !important; }
-            .orders-table-fit th:nth-child(9),
-            .orders-table-fit td:nth-child(9) { width: 10% !important; }
-            .orders-table-fit th:nth-child(10),
-            .orders-table-fit td:nth-child(10) { width: 10% !important; }
-            .orders-table-fit th:nth-child(11),
-            .orders-table-fit td:nth-child(11) { width: 6% !important; }
-            .orders-table-fit th:nth-child(12),
-            .orders-table-fit td:nth-child(12) { width: 5% !important; }
-                `
-                : `
-            .orders-table-fit th:nth-child(1),
-            .orders-table-fit td:nth-child(1) { width: 6% !important; }
-            .orders-table-fit th:nth-child(2),
-            .orders-table-fit td:nth-child(2) { width: 8% !important; }
-            .orders-table-fit th:nth-child(3),
-            .orders-table-fit td:nth-child(3) { width: 10% !important; }
-            .orders-table-fit th:nth-child(4),
-            .orders-table-fit td:nth-child(4) { width: 10% !important; }
-            .orders-table-fit th:nth-child(5),
-            .orders-table-fit td:nth-child(5) { width: 11% !important; }
-            .orders-table-fit th:nth-child(6),
-            .orders-table-fit td:nth-child(6) { width: 10% !important; }
-            .orders-table-fit th:nth-child(7),
-            .orders-table-fit td:nth-child(7) { width: 10% !important; }
-            .orders-table-fit th:nth-child(8),
-            .orders-table-fit td:nth-child(8) { width: 11% !important; }
-            .orders-table-fit th:nth-child(9),
-            .orders-table-fit td:nth-child(9) { width: 8% !important; }
-            .orders-table-fit th:nth-child(10),
-            .orders-table-fit td:nth-child(10) { width: 7% !important; }
-            .orders-table-fit th:nth-child(11),
-            .orders-table-fit td:nth-child(11) { width: 9% !important; }
-                `
-            }
-            .orders-table-fit .order-action-btn {
+            /* Below xl: keep readable columns and allow horizontal scroll */
+            .orders-table-fit {
               width: 100%;
-              max-width: 100%;
-              min-width: 0;
-              height: 22px;
-              padding-left: 4px;
-              padding-right: 4px;
-              font-size: 9px;
-              line-height: 1.1;
-              gap: 3px;
-              white-space: nowrap !important;
-              overflow-wrap: normal !important;
-              word-break: normal !important;
+              min-width: 1420px;
+              table-layout: auto;
             }
-            .orders-table-fit .order-action-btn svg {
-              width: 10px;
-              height: 10px;
-              flex-shrink: 0;
-            }
-            .orders-table-fit .order-actions {
-              gap: 4px;
+
+            @media (min-width: 1280px) {
+              .orders-table-fit {
+                font-size: 10px;
+                min-width: 0;
+                table-layout: fixed;
+              }
+              .orders-table-fit th,
+              .orders-table-fit td {
+                padding-left: 5px !important;
+                padding-right: 5px !important;
+                padding-top: 8px !important;
+                padding-bottom: 8px !important;
+                width: auto !important;
+              }
+              .orders-table-fit td,
+              .orders-table-fit td * {
+                white-space: normal !important;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+              }
+              ${
+                isReportView
+                  ? `
+              .orders-table-fit th:nth-child(1),
+              .orders-table-fit td:nth-child(1) { width: 5% !important; }
+              .orders-table-fit th:nth-child(2),
+              .orders-table-fit td:nth-child(2) { width: 7% !important; }
+              .orders-table-fit th:nth-child(3),
+              .orders-table-fit td:nth-child(3) { width: 11% !important; }
+              .orders-table-fit th:nth-child(4),
+              .orders-table-fit td:nth-child(4) { width: 9% !important; }
+              .orders-table-fit th:nth-child(5),
+              .orders-table-fit td:nth-child(5) { width: 9% !important; }
+              .orders-table-fit th:nth-child(6),
+              .orders-table-fit td:nth-child(6) { width: 9% !important; }
+              .orders-table-fit th:nth-child(7),
+              .orders-table-fit td:nth-child(7) { width: 9% !important; }
+              .orders-table-fit th:nth-child(8),
+              .orders-table-fit td:nth-child(8) { width: 10% !important; }
+              .orders-table-fit th:nth-child(9),
+              .orders-table-fit td:nth-child(9) { width: 10% !important; }
+              .orders-table-fit th:nth-child(10),
+              .orders-table-fit td:nth-child(10) { width: 10% !important; }
+              .orders-table-fit th:nth-child(11),
+              .orders-table-fit td:nth-child(11) { width: 6% !important; }
+              .orders-table-fit th:nth-child(12),
+              .orders-table-fit td:nth-child(12) { width: 5% !important; }
+                  `
+                  : `
+              .orders-table-fit th:nth-child(1),
+              .orders-table-fit td:nth-child(1) { width: 6% !important; }
+              .orders-table-fit th:nth-child(2),
+              .orders-table-fit td:nth-child(2) { width: 8% !important; }
+              .orders-table-fit th:nth-child(3),
+              .orders-table-fit td:nth-child(3) { width: 10% !important; }
+              .orders-table-fit th:nth-child(4),
+              .orders-table-fit td:nth-child(4) { width: 10% !important; }
+              .orders-table-fit th:nth-child(5),
+              .orders-table-fit td:nth-child(5) { width: 11% !important; }
+              .orders-table-fit th:nth-child(6),
+              .orders-table-fit td:nth-child(6) { width: 10% !important; }
+              .orders-table-fit th:nth-child(7),
+              .orders-table-fit td:nth-child(7) { width: 10% !important; }
+              .orders-table-fit th:nth-child(8),
+              .orders-table-fit td:nth-child(8) { width: 11% !important; }
+              .orders-table-fit th:nth-child(9),
+              .orders-table-fit td:nth-child(9) { width: 8% !important; }
+              .orders-table-fit th:nth-child(10),
+              .orders-table-fit td:nth-child(10) { width: 7% !important; }
+              .orders-table-fit th:nth-child(11),
+              .orders-table-fit td:nth-child(11) { width: 9% !important; }
+                  `
+              }
+              .orders-table-fit .order-action-btn {
+                width: 100%;
+                max-width: 100%;
+                min-width: 0;
+                height: 22px;
+                padding-left: 4px;
+                padding-right: 4px;
+                font-size: 9px;
+                line-height: 1.1;
+                gap: 3px;
+                white-space: nowrap !important;
+                overflow-wrap: normal !important;
+                word-break: normal !important;
+              }
+              .orders-table-fit .order-action-btn svg {
+                width: 10px;
+                height: 10px;
+                flex-shrink: 0;
+              }
+              .orders-table-fit .order-actions {
+                gap: 4px;
+              }
             }
           `}</style>
         )}
 
         <div
           className={`min-h-0 flex-1 ${
-            fitToWindow ? "overflow-y-auto overflow-x-hidden" : "overflow-auto"
+            fitToWindow
+              ? "overflow-auto xl:overflow-y-auto xl:overflow-x-hidden"
+              : "overflow-auto"
           }`}
         >
           <table
             className={`w-full border-collapse ${
-              fitToWindow ? "table-fixed orders-table-fit" : "min-w-[1420px]"
+              fitToWindow ? "orders-table-fit" : "min-w-[1420px]"
             }`}
           >
             <thead className="sticky top-0 z-10 bg-white">
@@ -2226,7 +2241,7 @@ export default function OrdersTable({
           </table>
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-[#F1F5F9] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-t border-[#F1F5F9] bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
           <p className="text-[11px] text-[#64748B]">
             {useServerPagination
               ? keysetPagination.hasMore
@@ -2235,7 +2250,7 @@ export default function OrdersTable({
               : `Showing ${startRecord}-${endRecord} of ${filteredOrders.length} orders`}
           </p>
 
-          <div className="flex items-center gap-1">
+          <div className="flex max-w-full items-center gap-1 overflow-x-auto">
             <button
               type="button"
               onClick={goToPreviousPage}

@@ -1958,7 +1958,7 @@ function NewOrderPageContent() {
 
   return (
     <DashboardShell>
-      <div className="flex h-[calc(100vh-92px)] flex-col gap-4 overflow-hidden">
+      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4 overflow-y-auto xl:h-[calc(100vh-92px)] xl:overflow-hidden">
         {facilitiesLoadError && (
           <div className="shrink-0 rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-red-600">
             {facilitiesLoadError}
@@ -1966,8 +1966,8 @@ function NewOrderPageContent() {
         )}
 
         <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-[20px] font-semibold text-[#111827]">
+          <div className="min-w-0">
+            <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
               {isEditMode ? "Edit Order" : "New Order"}
             </h1>
 
@@ -2004,7 +2004,7 @@ function NewOrderPageContent() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 xl:flex-row xl:items-stretch">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-stretch">
           {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
             <CollapsibleOrderPanel
               title="Subpoena"
@@ -2789,7 +2789,7 @@ function ServeInfoForm({
 
 function OrderSaveActionBar({ onSave, disabled, label, saveError = "" }) {
   return (
-    <section className="shrink-0 rounded-[12px] border border-[#E2E8F0] bg-white px-5 py-4 shadow-sm">
+    <section className="shrink-0 rounded-[12px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="max-w-[720px] text-[11px] leading-[16px] text-[#64748B]">
           This button becomes clickable after you complete all mandatory fields
@@ -2800,7 +2800,7 @@ function OrderSaveActionBar({ onSave, disabled, label, saveError = "" }) {
           type="button"
           onClick={onSave}
           disabled={disabled}
-          className={`flex h-[44px] min-w-[220px] shrink-0 items-center justify-center gap-2 rounded-[8px] px-6 text-[13px] font-semibold transition ${
+          className={`flex h-[44px] w-full shrink-0 items-center justify-center gap-2 rounded-[8px] px-6 text-[13px] font-semibold transition sm:w-auto sm:min-w-[220px] ${
             disabled
               ? "cursor-not-allowed bg-[#E2E8F0] text-[#94A3B8]"
               : "bg-[#0097B2] text-white shadow-sm hover:bg-[#0086A0]"

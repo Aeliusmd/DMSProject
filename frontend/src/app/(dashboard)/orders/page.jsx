@@ -23,8 +23,8 @@ export default function OrdersPage() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] flex-col gap-4">
-        <div>
+      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4">
+        <div className="min-w-0">
           <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
             Orders
           </h1>
@@ -35,12 +35,12 @@ export default function OrdersPage() {
 
         <OrderStatsGrid />
 
-        <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
+        <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
           <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
             Quick Actions
           </h2>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-3">
             <OrderActionButton
               href="/orders/new"
               variant="primary"

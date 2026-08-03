@@ -120,13 +120,13 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
   };
 
   return (
-    <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
+    <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
       <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
         Filters
       </h2>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_auto_auto]">
-        <div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-[minmax(140px,1fr)_minmax(140px,1fr)_minmax(110px,0.8fr)_minmax(140px,1fr)_minmax(120px,0.9fr)_auto_auto]">
+        <div className="min-w-0">
           <select
             value={draftFilters.facility}
             onChange={(e) => updateDraftFilter("facility", e.target.value)}
@@ -149,7 +149,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
           )}
         </div>
 
-        <div>
+        <div className="min-w-0">
           <select
             value={draftFilters.company}
             onChange={(e) => updateDraftFilter("company", e.target.value)}
@@ -175,7 +175,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         <select
           value={draftFilters.year}
           onChange={(e) => updateDraftFilter("year", e.target.value)}
-          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+          className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">All Year</option>
           {yearOptions.map((year) => (
@@ -188,7 +188,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         <select
           value={draftFilters.period || ""}
           onChange={(e) => updateDraftFilter("period", e.target.value)}
-          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+          className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           {ORDER_PERIOD_OPTIONS.map((option) => (
             <option key={option.value || "all"} value={option.value}>
@@ -200,7 +200,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         <select
           value={draftFilters.status}
           onChange={(e) => updateDraftFilter("status", e.target.value)}
-          className="h-[34px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+          className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
         >
           <option value="">All Status</option>
           <option value="active">Active</option>
@@ -215,7 +215,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         <button
           type="button"
           onClick={handleApplyFilters}
-          className="h-[34px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+          className="h-[34px] w-full whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0] 2xl:w-auto"
         >
           Apply Filters
         </button>
@@ -223,7 +223,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         <button
           type="button"
           onClick={handleReset}
-          className="h-[34px] whitespace-nowrap rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+          className="h-[34px] w-full whitespace-nowrap rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC] 2xl:w-auto"
         >
           Reset
         </button>
@@ -244,7 +244,7 @@ export default function OrderFilterBar({ filters, onFiltersChange }) {
         <button
           type="button"
           onClick={handleSearch}
-          className="h-[34px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+          className="h-[34px] w-full whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] sm:w-auto"
         >
           Search
         </button>

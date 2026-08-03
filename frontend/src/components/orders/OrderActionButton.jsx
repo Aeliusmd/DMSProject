@@ -9,7 +9,7 @@ export default function OrderActionButton({
 }) {
   const isPrimary = variant === "primary";
 
-  const className = `inline-flex h-[34px] items-center gap-2 rounded-[6px] px-3 text-[12px] font-medium transition ${
+  const className = `inline-flex h-[34px] w-full items-center justify-center gap-2 rounded-[6px] px-3 text-[12px] font-medium transition sm:w-auto ${
     isPrimary
       ? "bg-[#0097B2] text-white hover:bg-[#0086A0]"
       : "border border-[#E2E8F0] bg-[#F8FAFC] text-[#334155] hover:bg-white"
