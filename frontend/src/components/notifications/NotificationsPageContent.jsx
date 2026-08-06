@@ -28,7 +28,7 @@ export default function NotificationsPageContent() {
       const data = await getNotifications({
         type: activeType,
         search: searchValue,
-        limit: 200,
+        limit: 100,
       });
 
       setNotifications(data.notifications);
