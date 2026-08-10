@@ -48,6 +48,20 @@ export function setAuth({ accessToken, refreshToken, user }) {
 export function clearAuth() {
   if (!isBrowser()) return;
 
+  // Wipe order drafts with the auth session so the next user on this tab
+  // cannot restore another person's unsaved edit.
+  try {
+    const prefix = "dms:order-draft-session:";
+    const keysToRemove = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (key && key.startsWith(prefix)) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((key) => window.sessionStorage.removeItem(key));
+  } catch {
+    // Ignore storage failures.
+  }
+
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);

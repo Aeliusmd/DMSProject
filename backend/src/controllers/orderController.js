@@ -276,6 +276,31 @@ exports.removeMedicalRecords = asyncHandler(async (req, res) => {
   return ApiResponse.success(res, { order }, "Records removed");
 });
 
+exports.deleteAdditionalDocument = asyncHandler(async (req, res) => {
+  const order = await orderService.deleteOrderAdditionalDocument(
+    req.params.id,
+    req.params.documentId
+  );
+
+  await logOrderActivity(req, order, {
+    action: "delete_document",
+    details: `Removed additional document #${req.params.documentId} from order ${order.orderNumber}`,
+  });
+
+  return ApiResponse.success(res, { order }, "Document removed");
+});
+
+exports.removeSubpoena = asyncHandler(async (req, res) => {
+  const order = await orderService.removeOrderSubpoena(req.params.id);
+
+  await logOrderActivity(req, order, {
+    action: "delete_document",
+    details: `Removed subpoena from order ${order.orderNumber}`,
+  });
+
+  return ApiResponse.success(res, { order }, "Subpoena removed");
+});
+
 exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
   throwIfInvalid(validateMedicalRecordTypeQuery(req.query));
 

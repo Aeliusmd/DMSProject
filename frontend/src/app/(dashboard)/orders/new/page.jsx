@@ -38,7 +38,8 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena, deleteOrderAdditionalDocument, removeOrderSubpoena } from "@/lib/orders/orderApi";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import {
   clearDraftOrderSession,
@@ -177,12 +178,59 @@ const initialFormData = {
   xrayMemo: "",
 };
 
+/** Form fields typically filled from subpoena extraction — cleared when subpoena is removed. */
+const SUBPOENA_EXTRACTED_FIELD_KEYS = [
+  "orderNumber",
+  "recNumber",
+  "caseNumber",
+  "ssn",
+  "dob",
+  "firstName",
+  "middleName",
+  "lastName",
+  "aka",
+  "defendant",
+  "injuryType",
+  "injuryDate",
+  "injuryDateBegin",
+  "injuryDateEnd",
+  "facility",
+  "facilityName",
+  "providerId",
+  "serveCompanyName",
+  "address",
+  "zip",
+  "city",
+  "state",
+  "phone",
+  "fax",
+  "email",
+  "dateServed",
+  "depoDueDate",
+  "subpoenaDate",
+  "dateRequested",
+  "specificRecord",
+  "specificDoctor",
+  "specificDoctorId",
+  "specificDoctorIsDefault",
+  "fullAddress",
+  "prepaymentCheck",
+  "prepaymentDate",
+  "prepaymentPaid",
+  "medicalRecords",
+  "billingRecords",
+  "employmentRecords",
+  "xrays",
+  "otherRecord",
+  "type",
+];
+
 export default function NewOrderPage() {
   return (
     <Suspense
       fallback={
-        <DashboardShell>
-          <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+        <DashboardShell lockScroll>
+          <div className="flex min-h-0 flex-1 items-center justify-center">
             <p className="text-[13px] text-[#64748B]">Loading...</p>
           </div>
         </DashboardShell>
@@ -254,6 +302,36 @@ function NewOrderPageContent() {
     formDataRef.current = formData;
   }, [formData]);
 
+  // Kill document scroll on this page — only the order cards may scroll.
+  useEffect(() => {
+    const html = document.documentElement;
+    const { body } = document;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      htmlHeight: html.style.height,
+      bodyHeight: body.style.height,
+      htmlBg: html.style.background,
+      bodyBg: body.style.background,
+    };
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    html.style.height = "100%";
+    body.style.height = "100%";
+    html.style.background = "#F8FAFC";
+    body.style.background = "#F8FAFC";
+
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.height = prev.bodyHeight;
+      html.style.background = prev.htmlBg;
+      body.style.background = prev.bodyBg;
+    };
+  }, []);
+
   const setFormDataAndRef = useCallback((updater) => {
     setFormData((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -301,6 +379,10 @@ function NewOrderPageContent() {
   const [doctorCreated, setDoctorCreated] = useState(false);
   const [resolvingDoctor, setResolvingDoctor] = useState(false);
   const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
+  const [subpoenaRemoveModal, setSubpoenaRemoveModal] = useState({
+    open: false,
+    removing: false,
+  });
   const extractionMetaRef = useRef(extractionMeta);
   const doctorCreatedRef = useRef(false);
 
@@ -547,10 +629,18 @@ function NewOrderPageContent() {
     }
 
     if (!isEditMode || !orderId) {
-      if (!subpoenaId && facilityRefresh !== "1" && !draftRestoredRef.current) {
-        // Returning from facility/doctor creation by any route (link, modal or
-        // browser navigation) must keep the order the user was filling in.
-        if (isRestorableDraftOrderSession(readDraftOrderSession(draftScope))) {
+      if (!subpoenaId && !draftRestoredRef.current) {
+        const returningFromFacilityOrDoctor =
+          facilityRefresh === "1" ||
+          Boolean(applyFacilityId) ||
+          Boolean(applyDoctorId);
+
+        // Only restore an in-progress draft when returning from facility/doctor
+        // create/edit. Opening New Order from the nav must start fresh.
+        if (
+          returningFromFacilityOrDoctor &&
+          isRestorableDraftOrderSession(readDraftOrderSession(draftScope))
+        ) {
           setLoadingOrder(true);
           restoreOrderDraftAfterFacilityReturn()
             .catch(() => {})
@@ -563,11 +653,21 @@ function NewOrderPageContent() {
           };
         }
 
-        setFormData(initialFormData);
-        setTouched({});
-        setSubmitAttempted(false);
-        setFileErrors({});
-        clearDraftOrderSession(draftScope);
+        if (!returningFromFacilityOrDoctor) {
+          setFormData(initialFormData);
+          setTouched({});
+          setSubmitAttempted(false);
+          setFileErrors({});
+          setExtractError("");
+          setExtractionMeta({
+            facilityName: "",
+            facilityCreated: false,
+            extractedDoctorName: "",
+            providerName: "",
+            providerCreated: false,
+          });
+          clearDraftOrderSession(draftScope);
+        }
       }
       if (!isEditMode && !subpoenaId && facilityRefresh !== "1") {
         setLoadingOrder(false);
@@ -1774,12 +1874,39 @@ function NewOrderPageContent() {
 
   const handleFileChange = async (e, fieldName) => {
     const file = e.target.files?.[0] || null;
-    const error = validateFile(file);
+    // Allow selecting the same file again after remove/replace.
+    e.target.value = "";
+
+    const error = validateFile(file, {
+      pdfOnly: fieldName === "subpoenaFile",
+    });
+
+    if (error) {
+      setFormData((prev) => ({
+        ...prev,
+        // Don't keep an invalid non-PDF as the selected subpoena.
+        ...(fieldName === "subpoenaFile" ? { [fieldName]: null } : { [fieldName]: file }),
+      }));
+      setFileErrors((prev) => ({
+        ...prev,
+        [fieldName]: error,
+      }));
+      setTouched((prev) => ({
+        ...prev,
+        [fieldName]: true,
+      }));
+      return;
+    }
 
     setFormData((prev) => ({
       ...prev,
       [fieldName]: file,
-      ...(fieldName === "subpoenaFile" && !file ? { subpoenaExtractId: "" } : {}),
+      ...(fieldName === "subpoenaFile" && !file
+        ? { subpoenaExtractId: "" }
+        : {}),
+      ...(fieldName === "subpoenaFile" && file && !isEditMode
+        ? { subpoenaExtractId: "" }
+        : {}),
     }));
 
     setFileErrors((prev) => ({
@@ -1791,6 +1918,14 @@ function NewOrderPageContent() {
       ...prev,
       [fieldName]: true,
     }));
+
+    if (fieldName === "subpoenaFile" && file && !error) {
+      setEditSubpoenaSrc("");
+      setExpandedPanels((prev) => ({
+        ...prev,
+        subpoena: true,
+      }));
+    }
 
     if (fieldName === "subpoenaFile" && file && !error && !isEditMode) {
       setExpandedPanels((prev) => ({
@@ -1830,6 +1965,119 @@ function NewOrderPageContent() {
       } finally {
         setExtractingSubpoena(false);
       }
+    }
+  };
+
+  const handleRemoveSelectedFile = (fieldName) => {
+    setFormData((prev) => ({
+      ...prev,
+      [fieldName]: null,
+      ...(fieldName === "subpoenaFile" ? { subpoenaExtractId: "" } : {}),
+      ...(fieldName === "additionalDocumentFile" ? { documentName: "" } : {}),
+    }));
+    setFileErrors((prev) => {
+      const next = { ...prev };
+      delete next[fieldName];
+      return next;
+    });
+    if (fieldName === "subpoenaFile") {
+      setExtractError("");
+      setEditSubpoenaSrc("");
+    }
+  };
+
+  const applyOrderDocumentState = (order) => {
+    if (!order) return;
+    setFormData((prev) => ({
+      ...prev,
+      documents: Array.isArray(order.documents) ? order.documents : [],
+      subpoenaFile: null,
+      subpoenaUrl: order.subpoenaUrl || "",
+      subpoenaStoragePath: order.subpoenaStoragePath || null,
+      additionalDocumentFile: null,
+      documentName: "",
+    }));
+    setEditSubpoenaSrc(order.subpoenaUrl ? toFileUrl(order.subpoenaUrl) : "");
+  };
+
+  const clearSubpoenaExtractedFormFields = () => {
+    setFormData((prev) => {
+      const next = { ...prev };
+      for (const key of SUBPOENA_EXTRACTED_FIELD_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(initialFormData, key)) {
+          next[key] = initialFormData[key];
+        }
+      }
+      next.subpoenaFile = null;
+      next.subpoenaExtractId = "";
+      next.subpoenaUrl = "";
+      next.subpoenaStoragePath = null;
+      return next;
+    });
+    setExtractionMeta({
+      facilityName: "",
+      facilityCreated: false,
+      extractedDoctorName: "",
+      providerName: "",
+      providerCreated: false,
+    });
+    setFacilityProfileIncomplete(false);
+    setFacilityCreated(false);
+    setMissingDefaultDoctor(false);
+    setDoctorCreated(false);
+    setExtractError("");
+    setEditSubpoenaSrc("");
+    clearCommittedFacility();
+    setFileErrors((prev) => {
+      const next = { ...prev };
+      delete next.subpoenaFile;
+      return next;
+    });
+  };
+
+  const requestRemoveSubpoena = () => {
+    setSubpoenaRemoveModal({ open: true, removing: false });
+  };
+
+  const handleRemoveExistingDocument = async (documentId) => {
+    if (!isEditMode || !orderId) {
+      setFormData((prev) => ({
+        ...prev,
+        documents: (prev.documents || []).filter(
+          (doc) => String(doc.id) !== String(documentId)
+        ),
+      }));
+      return;
+    }
+
+    try {
+      const order = await deleteOrderAdditionalDocument(orderId, documentId);
+      applyOrderDocumentState(order);
+    } catch (err) {
+      setSaveError(getApiErrorMessage(err, "Failed to remove document"));
+    }
+  };
+
+  const confirmRemoveSubpoena = async () => {
+    setSubpoenaRemoveModal((prev) => ({ ...prev, removing: true }));
+    setSaveError("");
+
+    try {
+      if (isEditMode && orderId && !formDataRef.current.subpoenaFile) {
+        const order = await removeOrderSubpoena(orderId);
+        clearSubpoenaExtractedFormFields();
+        setFormData((prev) => ({
+          ...prev,
+          documents: Array.isArray(order.documents) ? order.documents : prev.documents,
+        }));
+      } else {
+        clearSubpoenaExtractedFormFields();
+      }
+      setExpandedPanels((prev) => ({ ...prev, subpoena: false }));
+      setSubpoenaRemoveModal({ open: false, removing: false });
+    } catch (err) {
+      setSubpoenaRemoveModal((prev) => ({ ...prev, removing: false }));
+      setSaveError(getApiErrorMessage(err, "Failed to remove subpoena"));
     }
   };
 
@@ -1927,8 +2175,8 @@ function NewOrderPageContent() {
 
   if (isEditMode && loadingOrder) {
     return (
-      <DashboardShell>
-        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+      <DashboardShell lockScroll>
+        <div className="flex min-h-0 flex-1 items-center justify-center">
           <p className="text-[13px] text-[#64748B]">Loading order...</p>
         </div>
       </DashboardShell>
@@ -1937,8 +2185,8 @@ function NewOrderPageContent() {
 
   if (isEditMode && loadError) {
     return (
-      <DashboardShell>
-        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-3">
+      <DashboardShell lockScroll>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
           <p className="text-[13px] font-semibold text-red-500">{loadError}</p>
           <button
             type="button"
@@ -1957,8 +2205,11 @@ function NewOrderPageContent() {
   }
 
   return (
-    <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4 overflow-y-auto xl:h-[calc(100vh-92px)] xl:overflow-hidden">
+    <DashboardShell lockScroll>
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden"
+        style={{ background: "#F8FAFC" }}
+      >
         {facilitiesLoadError && (
           <div className="shrink-0 rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-red-600">
             {facilitiesLoadError}
@@ -2038,6 +2289,9 @@ function NewOrderPageContent() {
               onBlur={handleBlur}
               getError={getError}
               onFileChange={handleFileChange}
+              onRemoveFile={handleRemoveSelectedFile}
+              onRemoveExistingDocument={handleRemoveExistingDocument}
+              onRemoveExistingSubpoena={requestRemoveSubpoena}
               submitAttempted={submitAttempted}
               extractingSubpoena={extractingSubpoena}
               extractError={extractError}
@@ -2117,6 +2371,21 @@ function NewOrderPageContent() {
       </div>
 
       <SubpoenaExtractionOverlay open={extractingSubpoena} />
+
+      <ConfirmModal
+        open={subpoenaRemoveModal.open}
+        variant="danger"
+        title="Remove subpoena?"
+        message="Removing this subpoena will also clear form fields that were filled from the subpoena extraction (applicant, facility, doctor, case details, and related serve fields). Do you want to continue?"
+        confirmLabel={subpoenaRemoveModal.removing ? "Removing..." : "Remove"}
+        cancelLabel="Cancel"
+        confirmDisabled={subpoenaRemoveModal.removing}
+        onCancel={() => {
+          if (subpoenaRemoveModal.removing) return;
+          setSubpoenaRemoveModal({ open: false, removing: false });
+        }}
+        onConfirm={confirmRemoveSubpoena}
+      />
     </DashboardShell>
   );
 }
@@ -2127,6 +2396,9 @@ function OrderDetailsForm({
   onBlur,
   getError,
   onFileChange,
+  onRemoveFile,
+  onRemoveExistingDocument,
+  onRemoveExistingSubpoena,
   submitAttempted,
   extractingSubpoena = false,
   extractError = "",
@@ -2381,7 +2653,25 @@ function OrderDetailsForm({
         title="Upload Subpoena"
         onChange={(e) => onFileChange(e, "subpoenaFile")}
         error={getError("subpoenaFile")}
+        accept=".pdf,application/pdf"
+        statusText={
+          formData.subpoenaFile || formData.subpoenaUrl
+            ? "Choose File again will replace the existing document"
+            : "PDF only"
+        }
       />
+
+      {formData.subpoenaFile ? (
+        <SelectedFileCard
+          label={
+            formData.subpoenaUrl
+              ? "New subpoena (replaces current on save)"
+              : "Selected subpoena"
+          }
+          fileName={formData.subpoenaFile.name}
+          onRemove={() => onRemoveExistingSubpoena?.()}
+        />
+      ) : null}
 
       {extractError && (
         <p className="text-[12px] font-medium text-amber-600">{extractError}</p>
@@ -2398,6 +2688,7 @@ function OrderDetailsForm({
           label="Current subpoena"
           name={subpoenaFileName(formData.subpoenaStoragePath)}
           href={toFileUrl(formData.subpoenaUrl)}
+          onRemove={() => onRemoveExistingSubpoena?.()}
         />
       )}
 
@@ -2406,7 +2697,7 @@ function OrderDetailsForm({
           Upload Additional Document
         </h3>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
           <NewOrderField
             name="documentName"
             value={formData.documentName}
@@ -2420,8 +2711,25 @@ function OrderDetailsForm({
             compact
             onChange={(e) => onFileChange(e, "additionalDocumentFile")}
             error={getError("additionalDocumentFile")}
+            statusText={
+              formData.additionalDocumentFile
+                ? formData.additionalDocumentFile.name
+                : Array.isArray(formData.documents) && formData.documents.length > 0
+                  ? "Add another document (existing files stay unless removed)"
+                  : "No file chosen"
+            }
           />
         </div>
+
+        {formData.additionalDocumentFile ? (
+          <div className="mt-3">
+            <SelectedFileCard
+              label="Selected document (will be added on save)"
+              fileName={formData.additionalDocumentFile.name}
+              onRemove={() => onRemoveFile?.("additionalDocumentFile")}
+            />
+          </div>
+        ) : null}
 
         {Array.isArray(formData.documents) && formData.documents.length > 0 && (
           <div className="mt-3 space-y-2">
@@ -2435,6 +2743,7 @@ function OrderDetailsForm({
                 label={doc.documentName || "Document"}
                 name={doc.originalFileName}
                 href={toFileUrl(doc.url)}
+                onRemove={() => onRemoveExistingDocument?.(doc.id)}
               />
             ))}
           </div>
@@ -2952,23 +3261,50 @@ function ContactCard({ number, prefix, formData, onChange, onBlur, getError }) {
   );
 }
 
-function FileInput({ title, onChange, error, compact = false }) {
+function FileInput({
+  title,
+  onChange,
+  error,
+  compact = false,
+  buttonLabel = "Choose File",
+  statusText = "No file chosen",
+  accept = ".pdf,.doc,.docx,.jpg,.jpeg,.png",
+}) {
+  const inputRef = useRef(null);
+
   return (
-    <div>
+    <div className={compact ? "sm:pt-[2px]" : ""}>
       {title && (
         <h3 className="mb-3 text-[13px] font-semibold text-[#111827]">
           {title}
         </h3>
       )}
 
-      <input
-        type="file"
-        onChange={onChange}
-        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-        className={`block w-full text-[12px] text-[#64748B] file:mr-3 file:rounded-[6px] file:border file:border-[#E2E8F0] file:bg-white file:px-3 file:py-2 file:text-[12px] file:font-medium file:text-[#334155] ${
-          compact ? "max-w-full" : ""
-        }`}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          onChange={onChange}
+          accept={accept}
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+        />
+
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className={`inline-flex cursor-pointer items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 py-2 text-[12px] font-medium text-[#334155] shadow-sm transition hover:border-[#0097B2] hover:bg-[#F0FBFD] hover:text-[#007F96] hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0097B2]/30 ${
+            compact ? "whitespace-nowrap" : ""
+          }`}
+        >
+          {buttonLabel}
+        </button>
+
+        <span className="max-w-[280px] text-[12px] text-[#94A3B8]">
+          {statusText}
+        </span>
+      </div>
 
       {error && (
         <p className="mt-[5px] text-[11px] font-medium text-red-500">
@@ -2979,15 +3315,40 @@ function FileInput({ title, onChange, error, compact = false }) {
   );
 }
 
-function ExistingFileLink({ label, name, href }) {
+function SelectedFileCard({ label, fileName, onRemove }) {
   return (
-    <a
-      href={href || "#"}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 hover:border-[#0097B2] hover:bg-[#F0FBFD]"
-    >
+    <div className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
       <span className="min-w-0">
+        <span className="block truncate text-[12px] font-semibold text-[#111827]">
+          {label}
+        </span>
+        {fileName ? (
+          <span className="block truncate text-[11px] text-[#64748B]">
+            {fileName}
+          </span>
+        ) : null}
+      </span>
+
+      <button
+        type="button"
+        onClick={onRemove}
+        className="shrink-0 rounded-[6px] border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600 transition hover:bg-red-100"
+      >
+        Remove
+      </button>
+    </div>
+  );
+}
+
+function ExistingFileLink({ label, name, href, onRemove }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+      <a
+        href={href || "#"}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="min-w-0 flex-1 hover:opacity-90"
+      >
         <span className="block truncate text-[12px] font-semibold text-[#111827]">
           {label}
         </span>
@@ -2996,12 +3357,21 @@ function ExistingFileLink({ label, name, href }) {
             {name}
           </span>
         )}
-      </span>
+        <span className="mt-0.5 block text-[11px] font-semibold text-[#0097B2]">
+          View
+        </span>
+      </a>
 
-      <span className="shrink-0 text-[11px] font-semibold text-[#0097B2]">
-        View
-      </span>
-    </a>
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 rounded-[6px] border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600 transition hover:bg-red-100"
+        >
+          Remove
+        </button>
+      ) : null}
+    </div>
   );
 }
 

@@ -1115,7 +1115,7 @@ function mapOrderDetail(
     caseNumber: row.case_number || "",
     recNumber: row.rec_number || "",
     orderRef: row.order_ref || "",
-    ssn: "",
+    ssn: formatSsnLastFourDisplay(row.ssn_last_four),
     dob: toInputDate(row.dob),
 
     firstName: row.applicant_first_name || "",
@@ -2945,6 +2945,44 @@ async function scanMedicalRecords(
   return getOrderById(orderId);
 }
 
+async function deleteOrderAdditionalDocument(orderId, documentId) {
+  const id = Number(orderId);
+  const docId = Number(documentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+  if (!Number.isFinite(docId) || docId <= 0) {
+    throw new ApiError(400, "Invalid document id");
+  }
+
+  const existing = await Order.findById(id);
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  const deleted = await Order.softDeleteAdditionalDocument(id, docId);
+  if (!deleted) {
+    throw new ApiError(404, "Document not found");
+  }
+
+  return getOrderById(id);
+}
+
+async function removeOrderSubpoena(orderId) {
+  const id = Number(orderId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const existing = await Order.findById(id);
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  await Order.clearSubpoena(id);
+  return getOrderById(id);
+}
+
 async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {}) {
   const existing = await Order.findById(orderId);
   if (!existing) {
@@ -3803,6 +3841,8 @@ module.exports = {
   getOrderSubpoenaFile,
   scanMedicalRecords,
   removeMedicalRecords,
+  deleteOrderAdditionalDocument,
+  removeOrderSubpoena,
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
   sendCnrRecord,

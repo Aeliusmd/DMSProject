@@ -846,6 +846,32 @@ class Order {
     return rows;
   }
 
+  static async softDeleteAdditionalDocument(orderId, documentId, connection = null) {
+    const executor = connection || getPool();
+    const [result] = await executor.execute(
+      `UPDATE order_additional_documents
+       SET is_deleted = 1, updated_at = NOW()
+       WHERE id = :documentId
+         AND order_id = :orderId
+         AND is_deleted = 0`,
+      { orderId, documentId }
+    );
+    return Number(result.affectedRows || 0) > 0;
+  }
+
+  static async clearSubpoena(orderId, connection = null) {
+    const executor = connection || getPool();
+    const [result] = await executor.execute(
+      `UPDATE orders
+       SET subpoena_storage_path = NULL,
+           has_subpoena = 0,
+           updated_at = NOW()
+       WHERE id = :orderId`,
+      { orderId }
+    );
+    return Number(result.affectedRows || 0) > 0;
+  }
+
   static async seedWorkflowStages(connection, orderId) {
     const stages = ["Review Records", "Serve", "SENT"];
 

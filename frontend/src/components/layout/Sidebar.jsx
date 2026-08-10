@@ -59,7 +59,7 @@ export default function Sidebar({ isCollapsed }) {
 
   return (
     <aside
-      className={`fixed left-0 top-0 z-40 flex h-screen shrink-0 flex-col border-r border-[#E2E8F0] bg-white transition-all duration-300 ${
+      className={`fixed left-0 top-0 z-40 flex h-dvh shrink-0 flex-col border-r border-[#E2E8F0] bg-white transition-all duration-300 ${
         isCollapsed ? "w-[72px]" : "w-[190px]"
       } max-md:w-[72px]`}
     >

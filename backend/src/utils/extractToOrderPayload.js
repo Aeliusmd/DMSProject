@@ -1,4 +1,4 @@
-const { toInputDate } = require("./dateUtils");
+const { toInputDate, formatSsnLastFourDisplay } = require("./dateUtils");
 const {
   findFacilityByNameMatch,
 } = require("./facilityNameUtils");
@@ -98,7 +98,11 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
   if (hints.orderNumber) payload.orderNumber = hints.orderNumber;
   if (hints.recNumber) payload.recNumber = hints.recNumber;
   if (hints.caseName) payload.caseNumber = hints.caseName;
-  if (hints.ssn) payload.ssn = hints.ssn;
+  if (hints.ssn) {
+    // Persist/display as order-table format (XXX-XX-1234); do not alter extraction output itself.
+    const formattedSsn = formatSsnLastFourDisplay(hints.ssn);
+    if (formattedSsn) payload.ssn = formattedSsn;
+  }
   if (hints.dateOfBirth) payload.dob = hints.dateOfBirth;
   if (hints.specificDoctor) payload.specificDoctor = hints.specificDoctor;
   if (hints.doctorAddress) payload.fullAddress = hints.doctorAddress;

@@ -159,6 +159,15 @@ const orderStorage = multer.diskStorage({
 });
 
 function orderFileFilter(_req, file, cb) {
+  if (file.fieldname === "subpoenaFile") {
+    if (file.mimetype === "application/pdf") {
+      cb(null, true);
+      return;
+    }
+    cb(new ApiError(400, "Only PDF files are allowed for subpoena"));
+    return;
+  }
+
   if (ORDER_ALLOWED_MIME_TYPES.has(file.mimetype)) {
     cb(null, true);
     return;

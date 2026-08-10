@@ -115,6 +115,7 @@ export function normalizeAutofillAmount(value) {
 
 export function normalizeAutofillSSN(value) {
   if (!value) return "";
+  // Order table format: XXX-XX-1234 (last 4 only).
   return formatMaskedSSN(String(value).trim());
 }
 

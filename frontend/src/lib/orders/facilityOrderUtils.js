@@ -1,8 +1,26 @@
+import { getStoredUser } from "@/lib/auth/authStorage";
 import { getFacility, resolveFacility } from "@/lib/facilities/facilityApi";
 
-const DRAFT_FORM_OMIT_KEYS = new Set(["subpoenaFile", "additionalDocumentFile"]);
+const DRAFT_FORM_OMIT_KEYS = new Set([
+  "subpoenaFile",
+  "additionalDocumentFile",
+  // Pending File objects can't be restored; don't keep prior upload metadata
+  // that would look like a document is still attached on a fresh New Order.
+  "documents",
+]);
 
-const draftSessionStorageKey = (scope) => `dms:order-draft-session:${scope}`;
+const DRAFT_STORAGE_PREFIX = "dms:order-draft-session:";
+
+function draftOwnerKey() {
+  const user = getStoredUser();
+  const userId = user?.id ?? user?.userId ?? user?.employeeId;
+  return userId != null && `${userId}`.trim() ? `${userId}`.trim() : "anon";
+}
+
+// Scoped per signed-in user so Person A's unsaved edit cannot restore for Person B
+// on the same browser tab.
+const draftSessionStorageKey = (scope) =>
+  `${DRAFT_STORAGE_PREFIX}${draftOwnerKey()}:${scope}`;
 
 // An in-progress order stays recoverable while the user steps away to create or
 // complete a facility, but a forgotten draft must not leak into a later order.
@@ -139,6 +157,22 @@ export function clearDraftOrderSession(scope) {
 
   try {
     window.sessionStorage.removeItem(draftSessionStorageKey(draftScope));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+/** Clears all in-progress order drafts (e.g. on login or logout). */
+export function clearAllDraftOrderSessions() {
+  if (typeof window === "undefined") return;
+
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (key && key.startsWith(DRAFT_STORAGE_PREFIX)) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((key) => window.sessionStorage.removeItem(key));
   } catch {
     // Ignore storage failures.
   }
