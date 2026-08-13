@@ -35,15 +35,16 @@ export default function OrdersPage() {
     let message = "";
     let failedCount = 0;
     let duplicateCount = 0;
+    let shownAt = Date.now();
 
     try {
       const raw = window.sessionStorage.getItem(BATCH_SCAN_FLASH_KEY);
       if (raw) {
-        window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
         const parsed = JSON.parse(raw);
         message = `${parsed?.message || ""}`.trim();
         failedCount = Number(parsed?.failedCount) || 0;
         duplicateCount = Number(parsed?.duplicateCount) || 0;
+        shownAt = Number(parsed?.at) || Date.now();
       }
     } catch {
       message = "";
@@ -51,10 +52,17 @@ export default function OrdersPage() {
 
     if (!message) return undefined;
 
+    const remaining = BATCH_SCAN_FLASH_MS - (Date.now() - shownAt);
+    if (remaining <= 0) {
+      window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
+      return undefined;
+    }
+
     setBatchScanFlash({ message, failedCount, duplicateCount });
     const timer = window.setTimeout(() => {
+      window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
       setBatchScanFlash(null);
-    }, BATCH_SCAN_FLASH_MS);
+    }, remaining);
 
     return () => window.clearTimeout(timer);
   }, []);

@@ -1,9 +1,20 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
+import SubpoenaExtractionOverlay from "@/components/orders/new-order/SubpoenaExtractionOverlay";
 import { uploadBatchScan } from "@/lib/orders/orderApi";
+
+const MAX_FILE_SIZE_MB = 50;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const ERROR_FLASH_MS = 10000;
+
+function isPdfFile(file) {
+  if (!file) return false;
+  const name = `${file.name || ""}`.toLowerCase();
+  return file.type === "application/pdf" || name.endsWith(".pdf");
+}
 
 export default function BatchScanPage() {
   const router = useRouter();
@@ -13,31 +24,43 @@ export default function BatchScanPage() {
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  useEffect(() => {
+    if (!error) return undefined;
+    const timer = window.setTimeout(() => setError(""), ERROR_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [error]);
+
+  const clearFileInput = () => {
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const rejectFile = (message) => {
+    setSelectedFile(null);
+    setUploading(false);
+    clearFileInput();
+    setError(message);
+  };
+
   const handleChooseFile = () => {
+    if (uploading) return;
     fileInputRef.current?.click();
   };
 
-  const MAX_FILE_SIZE_MB = 50;
-
   const validateAndSetFile = (file) => {
-    setError("");
-
     if (!file) return;
 
-    if (file.type !== "application/pdf") {
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      setError("Only PDF files are allowed.");
+    if (!isPdfFile(file)) {
+      rejectFile("Only PDF files are allowed.");
       return;
     }
 
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      setError(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      // Do not keep or preview oversize PDFs.
+      rejectFile(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
       return;
     }
 
+    setError("");
     setSelectedFile(file);
   };
 
@@ -48,6 +71,7 @@ export default function BatchScanPage() {
 
   const handleDragOver = (e) => {
     e.preventDefault();
+    if (uploading) return;
     setIsDragging(true);
   };
 
@@ -58,6 +82,7 @@ export default function BatchScanPage() {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
+    if (uploading) return;
 
     const file = e.dataTransfer.files?.[0];
     validateAndSetFile(file);
@@ -139,9 +164,7 @@ export default function BatchScanPage() {
       }
 
       setSelectedFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
+      clearFileInput();
 
       router.push("/orders");
     } catch (err) {
@@ -228,13 +251,27 @@ export default function BatchScanPage() {
             )}
 
             {error && (
-              <p className="mt-4 text-[11px] font-medium text-red-500">
-                {error}
-              </p>
+              <div className="mt-4 rounded-[8px] border border-red-200 bg-red-50 px-3 py-3 text-left">
+                <p className="text-[12px] font-semibold text-red-600">
+                  {error}
+                </p>
+                {/50\s*MB/i.test(error) ? (
+                  <p className="mt-1 text-[11px] leading-relaxed text-red-500">
+                    This PDF was not loaded. Choose a file smaller than{" "}
+                    {MAX_FILE_SIZE_MB}MB.
+                  </p>
+                ) : null}
+              </div>
             )}
           </div>
         </div>
       </div>
+
+      <SubpoenaExtractionOverlay
+        open={uploading}
+        title="AI Processing Batch"
+        description="Reading your batch PDF and extracting each subpoena. This may take a few minutes."
+      />
     </DashboardShell>
   );
 }

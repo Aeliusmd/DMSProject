@@ -1,6 +1,10 @@
 "use client";
 
-export default function SubpoenaExtractionOverlay({ open = false }) {
+export default function SubpoenaExtractionOverlay({
+  open = false,
+  title = "AI Processing Subpoena",
+  description = "Reading your document and extracting order fields. This may take a minute.",
+}) {
   if (!open) return null;
 
   return (
@@ -27,15 +31,14 @@ export default function SubpoenaExtractionOverlay({ open = false }) {
           id="subpoena-extraction-title"
           className="text-[16px] font-semibold text-[#111827]"
         >
-          AI Processing Subpoena
+          {title}
         </h2>
 
         <p
           id="subpoena-extraction-desc"
           className="mt-2 text-[13px] leading-relaxed text-[#64748B]"
         >
-          Reading your document and extracting order fields. This may take a
-          minute.
+          {description}
         </p>
 
         <div className="mt-5 flex items-center justify-center gap-1.5">
