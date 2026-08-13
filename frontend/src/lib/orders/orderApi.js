@@ -159,6 +159,22 @@ export async function updateOrderFacility(id, { facilityId, facilityName = "" } 
   return data?.data?.order;
 }
 
+export async function deleteOrderAdditionalDocument(orderId, documentId) {
+  const data = await request(`/orders/${orderId}/documents/${documentId}`, {
+    method: "DELETE",
+    auth: true,
+  });
+  return data?.data?.order;
+}
+
+export async function removeOrderSubpoena(orderId) {
+  const data = await request(`/orders/${orderId}/subpoena`, {
+    method: "DELETE",
+    auth: true,
+  });
+  return data?.data?.order;
+}
+
 export async function deleteOrder(id) {
   await request(`/orders/${id}`, {
     method: "DELETE",

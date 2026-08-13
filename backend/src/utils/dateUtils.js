@@ -108,11 +108,43 @@ function normalizeDate(value) {
   return sql || "";
 }
 
-function formatSsnLastFourDisplay(lastFour) {
-  const digits = `${lastFour || ""}`.replace(/\D/g, "").slice(-4);
-  if (digits.length < 4) return "";
+/**
+ * Format SSN for order display.
+ * Prefer full ###-##-#### when all 9 digits are available.
+ * If extract only provided a masked value, keep XXX-XX-####.
+ */
+function formatSsnLastFourDisplay(value) {
+  const raw = `${value || ""}`.trim();
+  if (!raw) return "";
 
-  return `XXX-XX-${digits.padStart(4, "0")}`;
+  if (/^\d{3}-\d{2}-\d{4}$/.test(raw)) {
+    return raw;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length >= 9) {
+    const nine = digits.slice(-9);
+    return `${nine.slice(0, 3)}-${nine.slice(3, 5)}-${nine.slice(5)}`;
+  }
+
+  if (/^XXX-XX-\d{4}$/i.test(raw)) {
+    return `XXX-XX-${raw.slice(-4)}`;
+  }
+
+  if (digits.length >= 4) {
+    return `XXX-XX-${digits.slice(-4).padStart(4, "0")}`;
+  }
+
+  return "";
+}
+
+/**
+ * Normalize SSN for orders.ssn_last_four storage.
+ * Saves full ###-##-#### when all digits exist; otherwise XXX-XX-####.
+ */
+function normalizeOrderSsn(ssn) {
+  const formatted = formatSsnLastFourDisplay(ssn);
+  return formatted || null;
 }
 
 function getTodayInputDate() {
@@ -131,5 +163,6 @@ module.exports = {
   extractYear,
   normalizeDate,
   formatSsnLastFourDisplay,
+  normalizeOrderSsn,
   getTodayInputDate,
 };

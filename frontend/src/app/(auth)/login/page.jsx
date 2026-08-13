@@ -9,6 +9,7 @@ import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
 import { login } from "@/lib/auth/authApi";
 import { isAuthenticated } from "@/lib/auth/authStorage";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { clearAllDraftOrderSessions } from "@/lib/orders/facilityOrderUtils";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -89,6 +90,7 @@ export default function LoginPage() {
   };
 
   const handleTwoFactorSuccess = () => {
+    clearAllDraftOrderSessions();
     setIsTwoFactorOpen(false);
     setSessionToken("");
     router.push("/dashboard");

@@ -134,22 +134,24 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     recNumber: "REC number",
     orderRef: "Order reference",
     fullAddress: "Full address",
-    documentName: "Document name",
     prepaymentMemo: "Prepayment memo",
     custodianMemo: "Custodian memo",
     xrayMemo: "X-Ray memo",
   });
 
   if (data.ssn && !isValidSSN(data.ssn)) {
-    errors.ssn = "Enter SSN as XXX-XX-1234";
+    errors.ssn = "Enter SSN as 123-45-6789";
   }
 
   if (data.dob && isFutureDate(data.dob)) {
     errors.dob = "DOB cannot be in the future";
   }
 
-  if (data.zip && data.zip.length !== 5) {
-    errors.zip = "ZIP must be 5 digits";
+  if (data.zip) {
+    const zipDigits = getDigits(data.zip);
+    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+      errors.zip = "ZIP must be 5 digits or ZIP+4";
+    }
   }
 
   if (data.state && data.state.length !== 2) {
@@ -196,10 +198,6 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     }
   });
 
-  if (data.documentName && !data.additionalDocumentFile) {
-    errors.additionalDocumentFile = "Please choose a document file";
-  }
-
   if (fileErrors.subpoenaFile) {
     errors.subpoenaFile = fileErrors.subpoenaFile;
   }
@@ -242,21 +240,33 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   return errors;
 }
 
-export function validateFile(file) {
+export function validateFile(file, { pdfOnly = false } = {}) {
   if (!file) return "";
 
-  const allowedTypes = [
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "image/jpeg",
-    "image/png",
-  ];
+  const allowedTypes = pdfOnly
+    ? ["application/pdf"]
+    : [
+        "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "image/jpeg",
+        "image/png",
+      ];
 
   const maxSize = 10 * 1024 * 1024;
 
   if (!allowedTypes.includes(file.type)) {
-    return "Only PDF, Word, JPG, or PNG files are allowed";
+    return pdfOnly
+      ? "Only PDF files are allowed for subpoena"
+      : "Only PDF, Word, JPG, or PNG files are allowed";
+  }
+
+  // Some browsers leave type empty; fall back to extension for PDF-only.
+  if (pdfOnly && !file.type) {
+    const name = `${file.name || ""}`.toLowerCase();
+    if (!name.endsWith(".pdf")) {
+      return "Only PDF files are allowed for subpoena";
+    }
   }
 
   if (file.size > maxSize) {

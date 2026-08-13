@@ -248,6 +248,20 @@ function resolveOrderWriteOffState(row, invoiceRow, xrayRow) {
   };
 }
 
+function assertOrderEditable(existing) {
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (existing.status === "Cancelled") {
+    throw new ApiError(400, "Cannot update a cancelled order");
+  }
+
+  if (existing.status === "Deleted") {
+    throw new ApiError(400, "Cannot update a deleted order");
+  }
+}
+
 function resolveOrderFlags(data, hasSubpoenaFile) {
   return {
     hasSubpoena: hasSubpoenaFile ? 1 : 0,
@@ -261,17 +275,8 @@ function enumOrNull(value, allowed) {
 }
 
 function ssnLastFour(ssn) {
-  const trimmed = `${ssn || ""}`.trim();
-  const masked = trimmed.match(/^XXX-XX-(\d{4})$/i);
-
-  if (masked) {
-    return masked[1];
-  }
-
-  const digits = trimmed.replace(/\D/g, "");
-  if (digits.length < 4) return null;
-
-  return digits.slice(-4).padStart(4, "0");
+  const { normalizeOrderSsn } = require("../utils/dateUtils");
+  return normalizeOrderSsn(ssn);
 }
 
 function buildFullName(first, middle, last) {
@@ -399,7 +404,7 @@ function buildOrderDbPayload(data) {
     caseNumber: trimOrNull(data.caseNumber, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
     recNumber: trimOrNull(data.recNumber, { maxLength: FIELD_LIMITS.VARCHAR_50 }),
     orderRef: trimOrNull(data.orderRef, { maxLength: FIELD_LIMITS.VARCHAR_50 }),
-    ssnLastFour: ssnLastFour(data.ssn),
+    ssnLastFour: ssnLastFour(data.ssn || data.ssnLastFour),
     dob: dateOrNull(data.dob),
     applicantFirstName: trimOrNull(data.firstName, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
     applicantMiddleName: trimOrNull(data.middleName, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
@@ -1093,6 +1098,10 @@ function mapOrderDetail(
     id: row.id,
     orderNumber: row.order_number || "",
     status: writeOffState.status,
+    statusBeforeInactive: row.status_before_inactive || "",
+    cancelReason: row.cancel_reason || "",
+    cancelledAt: row.cancelled_at || null,
+    deletedAt: row.deleted_at || null,
     isSubpoena: readHasSubpoena(row),
     isRecords: hasAnyRecordsRequested(orderRecords),
     isWriteOffs: writeOffState.isWriteOffs,
@@ -1115,7 +1124,7 @@ function mapOrderDetail(
     caseNumber: row.case_number || "",
     recNumber: row.rec_number || "",
     orderRef: row.order_ref || "",
-    ssn: "",
+    ssn: formatSsnLastFourDisplay(row.ssn_last_four),
     dob: toInputDate(row.dob),
 
     firstName: row.applicant_first_name || "",
@@ -1632,7 +1641,8 @@ async function resolvePersonalPortalPrepaymentReceipt(orderId, payments = []) {
 }
 
 async function getOrderById(id) {
-  const order = await Order.findById(id);
+  // Include Cancelled/Deleted so staff can open them in read-only view.
+  const order = await Order.findByIdRaw(id);
 
   if (!order) {
     throw new ApiError(404, "Order not found");
@@ -2129,7 +2139,10 @@ async function resolveOrderNumber(
   const existing = await Order.findByOrderNumber(orderNumber, excludeId);
 
   if (existing) {
-    throw new ApiError(409, "An order with this order number already exists");
+    throw new ApiError(
+      409,
+      `An order with this order number already exists (${orderNumber})`
+    );
   }
 
   return orderNumber;
@@ -2495,13 +2508,39 @@ async function autoCreateOrdersFromBatch({ childIds = [], actorId }) {
         hasIncompleteRequiredFields: order.hasIncompleteRequiredFields,
       });
     } catch (error) {
+      const message = error.message || "Failed to auto-create order";
+      const isDuplicate =
+        error.statusCode === 409 ||
+        /already exists/i.test(message) ||
+        /already processed/i.test(message);
+
+      let orderNumber = "";
+      const orderNumberMatch = message.match(/\(([^)]+)\)\s*$/);
+      if (orderNumberMatch?.[1]) {
+        orderNumber = orderNumberMatch[1].trim();
+      } else {
+        try {
+          const extract = await batchScanRepository.getExtractById(extractId);
+          orderNumber = `${extract?.order_number || ""}`.trim();
+        } catch {
+          orderNumber = "";
+        }
+      }
+
       failed.push({
         extractId,
-        message: error.message || "Failed to auto-create order",
+        orderNumber,
+        reason: isDuplicate ? "duplicate_order_number" : "create_failed",
+        message: isDuplicate
+          ? orderNumber
+            ? `Duplicate order number ${orderNumber} — order already exists`
+            : "Duplicate order — order number already exists"
+          : message,
       });
       logger.error("Auto order creation failed", {
         extractId,
-        error: error.message,
+        orderNumber: orderNumber || undefined,
+        error: message,
       });
     }
   }
@@ -2511,10 +2550,7 @@ async function autoCreateOrdersFromBatch({ childIds = [], actorId }) {
 
 async function updateOrderFacility(id, data, actorId) {
   const existing = await Order.findById(id);
-
-  if (!existing) {
-    throw new ApiError(404, "Order not found");
-  }
+  assertOrderEditable(existing);
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -2562,10 +2598,7 @@ async function updateOrder(id, data, actorId, files) {
   assertValidCnrDeliveryDate(data);
 
   const existing = await Order.findById(id);
-
-  if (!existing) {
-    throw new ApiError(404, "Order not found");
-  }
+  assertOrderEditable(existing);
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -2943,6 +2976,40 @@ async function scanMedicalRecords(
   }
 
   return getOrderById(orderId);
+}
+
+async function deleteOrderAdditionalDocument(orderId, documentId) {
+  const id = Number(orderId);
+  const docId = Number(documentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+  if (!Number.isFinite(docId) || docId <= 0) {
+    throw new ApiError(400, "Invalid document id");
+  }
+
+  const existing = await Order.findById(id);
+  assertOrderEditable(existing);
+
+  const deleted = await Order.softDeleteAdditionalDocument(id, docId);
+  if (!deleted) {
+    throw new ApiError(404, "Document not found");
+  }
+
+  return getOrderById(id);
+}
+
+async function removeOrderSubpoena(orderId) {
+  const id = Number(orderId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const existing = await Order.findById(id);
+  assertOrderEditable(existing);
+
+  await Order.clearSubpoena(id);
+  return getOrderById(id);
 }
 
 async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {}) {
@@ -3803,6 +3870,8 @@ module.exports = {
   getOrderSubpoenaFile,
   scanMedicalRecords,
   removeMedicalRecords,
+  deleteOrderAdditionalDocument,
+  removeOrderSubpoena,
   getOrderMedicalRecordsFile,
   mailCompletedOrder,
   sendCnrRecord,

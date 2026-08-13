@@ -115,14 +115,24 @@ export function validateNoteForm({
   }
 
   if (attachment) {
-    const fileSizeMb = attachment.size / (1024 * 1024);
-    if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
-      errors.attachment = "Only PDF, Word, JPG, and PNG files are allowed.";
-    }
-    if (fileSizeMb > MAX_FILE_SIZE_MB) {
-      errors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
-    }
+    const attachmentError = getNoteAttachmentError(attachment);
+    if (attachmentError) errors.attachment = attachmentError;
   }
 
   return errors;
+}
+
+export function getNoteAttachmentError(file) {
+  if (!file) return "";
+
+  if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+    return "Only PDF, Word, JPG, and PNG files are allowed.";
+  }
+
+  const fileSizeMb = file.size / (1024 * 1024);
+  if (fileSizeMb > MAX_FILE_SIZE_MB) {
+    return `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
+  }
+
+  return "";
 }

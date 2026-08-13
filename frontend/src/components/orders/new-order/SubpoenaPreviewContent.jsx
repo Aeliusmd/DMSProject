@@ -12,7 +12,7 @@ const PDF_BASE_HEIGHT = 760;
 export default function SubpoenaPreviewContent({ file, src, name }) {
   if (!file && !src) {
     return (
-      <div className="flex h-full min-h-[480px] items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#94A3B8]">
+      <div className="flex h-full min-h-0 items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#94A3B8]">
         Upload a subpoena PDF to preview it here.
       </div>
     );
@@ -83,7 +83,7 @@ function SubpoenaPreviewInner({ file, src, name }) {
   };
 
   return (
-    <div className="flex h-full min-h-[520px] flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden xl:min-h-0">
       <div className="mb-4 flex shrink-0 items-center justify-between gap-3 rounded-[8px] bg-[#F8FAFC] px-3 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[6px] bg-[#DDF6FA] text-[#0097B2]">
@@ -156,7 +156,7 @@ function SubpoenaPreviewInner({ file, src, name }) {
             />
           </div>
         ) : (
-          <div className="flex h-full min-h-[420px] items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-white px-4 text-center text-[12px] text-[#94A3B8]">
+          <div className="flex h-full min-h-0 items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-white px-4 text-center text-[12px] text-[#94A3B8]">
             Only PDF subpoenas can be previewed here.
           </div>
         )}

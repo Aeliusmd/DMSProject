@@ -38,7 +38,8 @@ import {
   SubpoenaIcon,
 } from "@/components/icons/NewOrderIcons";
 
-import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena } from "@/lib/orders/orderApi";
+import { createOrder, getOrder, updateOrder, getUnprocessedSubpoenaById, fetchUnprocessedSubpoenaPdf, fetchOrderSubpoenaPdf, uploadSingleSubpoena, deleteOrderAdditionalDocument, removeOrderSubpoena } from "@/lib/orders/orderApi";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import {
   clearDraftOrderSession,
@@ -177,12 +178,63 @@ const initialFormData = {
   xrayMemo: "",
 };
 
+function isOrderInactiveStatus(status) {
+  return status === "Cancelled" || status === "Deleted";
+}
+
+/** Form fields typically filled from subpoena extraction — cleared when subpoena is removed. */
+const SUBPOENA_EXTRACTED_FIELD_KEYS = [
+  "orderNumber",
+  "recNumber",
+  "caseNumber",
+  "ssn",
+  "dob",
+  "firstName",
+  "middleName",
+  "lastName",
+  "aka",
+  "defendant",
+  "injuryType",
+  "injuryDate",
+  "injuryDateBegin",
+  "injuryDateEnd",
+  "facility",
+  "facilityName",
+  "providerId",
+  "serveCompanyName",
+  "address",
+  "zip",
+  "city",
+  "state",
+  "phone",
+  "fax",
+  "email",
+  "dateServed",
+  "depoDueDate",
+  "subpoenaDate",
+  "dateRequested",
+  "specificRecord",
+  "specificDoctor",
+  "specificDoctorId",
+  "specificDoctorIsDefault",
+  "fullAddress",
+  "prepaymentCheck",
+  "prepaymentDate",
+  "prepaymentPaid",
+  "medicalRecords",
+  "billingRecords",
+  "employmentRecords",
+  "xrays",
+  "otherRecord",
+  "type",
+];
+
 export default function NewOrderPage() {
   return (
     <Suspense
       fallback={
-        <DashboardShell>
-          <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+        <DashboardShell lockScroll>
+          <div className="flex min-h-0 flex-1 items-center justify-center">
             <p className="text-[13px] text-[#64748B]">Loading...</p>
           </div>
         </DashboardShell>
@@ -254,6 +306,36 @@ function NewOrderPageContent() {
     formDataRef.current = formData;
   }, [formData]);
 
+  // Kill document scroll on this page — only the order cards may scroll.
+  useEffect(() => {
+    const html = document.documentElement;
+    const { body } = document;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      htmlHeight: html.style.height,
+      bodyHeight: body.style.height,
+      htmlBg: html.style.background,
+      bodyBg: body.style.background,
+    };
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    html.style.height = "100%";
+    body.style.height = "100%";
+    html.style.background = "#F8FAFC";
+    body.style.background = "#F8FAFC";
+
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      html.style.height = prev.htmlHeight;
+      body.style.height = prev.bodyHeight;
+      html.style.background = prev.htmlBg;
+      body.style.background = prev.bodyBg;
+    };
+  }, []);
+
   const setFormDataAndRef = useCallback((updater) => {
     setFormData((prev) => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -301,6 +383,10 @@ function NewOrderPageContent() {
   const [doctorCreated, setDoctorCreated] = useState(false);
   const [resolvingDoctor, setResolvingDoctor] = useState(false);
   const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
+  const [subpoenaRemoveModal, setSubpoenaRemoveModal] = useState({
+    open: false,
+    removing: false,
+  });
   const extractionMetaRef = useRef(extractionMeta);
   const doctorCreatedRef = useRef(false);
 
@@ -547,10 +633,18 @@ function NewOrderPageContent() {
     }
 
     if (!isEditMode || !orderId) {
-      if (!subpoenaId && facilityRefresh !== "1" && !draftRestoredRef.current) {
-        // Returning from facility/doctor creation by any route (link, modal or
-        // browser navigation) must keep the order the user was filling in.
-        if (isRestorableDraftOrderSession(readDraftOrderSession(draftScope))) {
+      if (!subpoenaId && !draftRestoredRef.current) {
+        const returningFromFacilityOrDoctor =
+          facilityRefresh === "1" ||
+          Boolean(applyFacilityId) ||
+          Boolean(applyDoctorId);
+
+        // Only restore an in-progress draft when returning from facility/doctor
+        // create/edit. Opening New Order from the nav must start fresh.
+        if (
+          returningFromFacilityOrDoctor &&
+          isRestorableDraftOrderSession(readDraftOrderSession(draftScope))
+        ) {
           setLoadingOrder(true);
           restoreOrderDraftAfterFacilityReturn()
             .catch(() => {})
@@ -563,11 +657,21 @@ function NewOrderPageContent() {
           };
         }
 
-        setFormData(initialFormData);
-        setTouched({});
-        setSubmitAttempted(false);
-        setFileErrors({});
-        clearDraftOrderSession(draftScope);
+        if (!returningFromFacilityOrDoctor) {
+          setFormData(initialFormData);
+          setTouched({});
+          setSubmitAttempted(false);
+          setFileErrors({});
+          setExtractError("");
+          setExtractionMeta({
+            facilityName: "",
+            facilityCreated: false,
+            extractedDoctorName: "",
+            providerName: "",
+            providerCreated: false,
+          });
+          clearDraftOrderSession(draftScope);
+        }
       }
       if (!isEditMode && !subpoenaId && facilityRefresh !== "1") {
         setLoadingOrder(false);
@@ -1282,6 +1386,8 @@ function NewOrderPageContent() {
   );
 
   const hasValidationErrors = Object.values(errors).some(Boolean);
+  const isOrderReadOnly =
+    isEditMode && isOrderInactiveStatus(formData.status);
 
   const syncDoctorFromForm = async (data, options = {}) => {
     const facilityId = `${data.facility || ""}`.trim();
@@ -1473,6 +1579,7 @@ function NewOrderPageContent() {
   };
 
   const handleFacilityInput = (facilityName) => {
+    if (isOrderReadOnly) return;
     clearCommittedFacility();
     setExtractionMeta((prev) => ({
       ...prev,
@@ -1496,6 +1603,7 @@ function NewOrderPageContent() {
   };
 
   const handleFacilitySelect = (facility) => {
+    if (isOrderReadOnly) return;
     const newFacilityId = String(facility.id);
     const prevFacilityId = `${formDataRef.current.facility || ""}`.trim();
     const selectedFacilityName = facility.facility || facility.facilityName || "";
@@ -1531,6 +1639,7 @@ function NewOrderPageContent() {
   };
 
   const handleFacilityCommit = (typedName = "") => {
+    if (isOrderReadOnly) return;
     const trimmedName = `${typedName || formDataRef.current.facilityName || ""}`.trim();
 
     if (!trimmedName) {
@@ -1668,6 +1777,7 @@ function NewOrderPageContent() {
   };
 
   const handlePaymentValuesChange = (updates) => {
+    if (isOrderReadOnly) return;
     setFormData((prev) =>
       syncPaymentDueFields(
         {
@@ -1680,6 +1790,7 @@ function NewOrderPageContent() {
   };
 
   const handleChange = (e) => {
+    if (isOrderReadOnly) return;
     const { name, value, type, checked } = e.target;
 
     if (name === "recordTypes" && value && typeof value === "object") {
@@ -1742,6 +1853,7 @@ function NewOrderPageContent() {
   };
 
   const handleProviderInput = (companyName) => {
+    if (isOrderReadOnly) return;
     setExtractionMeta((prev) => ({ ...prev, providerName: "" }));
     setFormData((prev) => ({
       ...prev,
@@ -1758,6 +1870,7 @@ function NewOrderPageContent() {
   };
 
   const handleProviderSelect = (provider) => {
+    if (isOrderReadOnly) return;
     setFormData((prev) => ({
       ...prev,
       providerId: String(provider.id),
@@ -1773,13 +1886,45 @@ function NewOrderPageContent() {
   };
 
   const handleFileChange = async (e, fieldName) => {
+    if (isOrderReadOnly) return;
     const file = e.target.files?.[0] || null;
-    const error = validateFile(file);
+    // Allow selecting the same file again after remove/replace.
+    e.target.value = "";
+
+    const error = validateFile(file, {
+      pdfOnly: fieldName === "subpoenaFile",
+    });
+
+    if (error) {
+      // Reject oversize/invalid files: do not keep them or load preview.
+      setFormData((prev) => ({
+        ...prev,
+        [fieldName]: null,
+      }));
+      if (fieldName === "subpoenaFile") {
+        setExtractError("");
+        setExtractingSubpoena(false);
+      }
+      setFileErrors((prev) => ({
+        ...prev,
+        [fieldName]: error,
+      }));
+      setTouched((prev) => ({
+        ...prev,
+        [fieldName]: true,
+      }));
+      return;
+    }
 
     setFormData((prev) => ({
       ...prev,
       [fieldName]: file,
-      ...(fieldName === "subpoenaFile" && !file ? { subpoenaExtractId: "" } : {}),
+      ...(fieldName === "subpoenaFile" && !file
+        ? { subpoenaExtractId: "" }
+        : {}),
+      ...(fieldName === "subpoenaFile" && file && !isEditMode
+        ? { subpoenaExtractId: "" }
+        : {}),
     }));
 
     setFileErrors((prev) => ({
@@ -1791,6 +1936,14 @@ function NewOrderPageContent() {
       ...prev,
       [fieldName]: true,
     }));
+
+    if (fieldName === "subpoenaFile" && file && !error) {
+      setEditSubpoenaSrc("");
+      setExpandedPanels((prev) => ({
+        ...prev,
+        subpoena: true,
+      }));
+    }
 
     if (fieldName === "subpoenaFile" && file && !error && !isEditMode) {
       setExpandedPanels((prev) => ({
@@ -1833,7 +1986,124 @@ function NewOrderPageContent() {
     }
   };
 
+  const handleRemoveSelectedFile = (fieldName) => {
+    if (isOrderReadOnly) return;
+    setFormData((prev) => ({
+      ...prev,
+      [fieldName]: null,
+      ...(fieldName === "subpoenaFile" ? { subpoenaExtractId: "" } : {}),
+      ...(fieldName === "additionalDocumentFile" ? { documentName: "" } : {}),
+    }));
+    setFileErrors((prev) => {
+      const next = { ...prev };
+      delete next[fieldName];
+      return next;
+    });
+    if (fieldName === "subpoenaFile") {
+      setExtractError("");
+      setEditSubpoenaSrc("");
+    }
+  };
+
+  const applyOrderDocumentState = (order) => {
+    if (!order) return;
+    setFormData((prev) => ({
+      ...prev,
+      documents: Array.isArray(order.documents) ? order.documents : [],
+      subpoenaFile: null,
+      subpoenaUrl: order.subpoenaUrl || "",
+      subpoenaStoragePath: order.subpoenaStoragePath || null,
+      additionalDocumentFile: null,
+      documentName: "",
+    }));
+    setEditSubpoenaSrc(order.subpoenaUrl ? toFileUrl(order.subpoenaUrl) : "");
+  };
+
+  const clearSubpoenaExtractedFormFields = () => {
+    setFormData((prev) => {
+      const next = { ...prev };
+      for (const key of SUBPOENA_EXTRACTED_FIELD_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(initialFormData, key)) {
+          next[key] = initialFormData[key];
+        }
+      }
+      next.subpoenaFile = null;
+      next.subpoenaExtractId = "";
+      next.subpoenaUrl = "";
+      next.subpoenaStoragePath = null;
+      return next;
+    });
+    setExtractionMeta({
+      facilityName: "",
+      facilityCreated: false,
+      extractedDoctorName: "",
+      providerName: "",
+      providerCreated: false,
+    });
+    setFacilityProfileIncomplete(false);
+    setFacilityCreated(false);
+    setMissingDefaultDoctor(false);
+    setDoctorCreated(false);
+    setExtractError("");
+    setEditSubpoenaSrc("");
+    clearCommittedFacility();
+    setFileErrors((prev) => {
+      const next = { ...prev };
+      delete next.subpoenaFile;
+      return next;
+    });
+  };
+
+  const requestRemoveSubpoena = () => {
+    if (isOrderReadOnly) return;
+    setSubpoenaRemoveModal({ open: true, removing: false });
+  };
+
+  const handleRemoveExistingDocument = async (documentId) => {
+    if (isOrderReadOnly) return;
+    if (!isEditMode || !orderId) {
+      setFormData((prev) => ({
+        ...prev,
+        documents: (prev.documents || []).filter(
+          (doc) => String(doc.id) !== String(documentId)
+        ),
+      }));
+      return;
+    }
+
+    try {
+      const order = await deleteOrderAdditionalDocument(orderId, documentId);
+      applyOrderDocumentState(order);
+    } catch (err) {
+      setSaveError(getApiErrorMessage(err, "Failed to remove document"));
+    }
+  };
+
+  const confirmRemoveSubpoena = async () => {
+    setSubpoenaRemoveModal((prev) => ({ ...prev, removing: true }));
+    setSaveError("");
+
+    try {
+      if (isEditMode && orderId && !formDataRef.current.subpoenaFile) {
+        const order = await removeOrderSubpoena(orderId);
+        clearSubpoenaExtractedFormFields();
+        setFormData((prev) => ({
+          ...prev,
+          documents: Array.isArray(order.documents) ? order.documents : prev.documents,
+        }));
+      } else {
+        clearSubpoenaExtractedFormFields();
+      }
+      setExpandedPanels((prev) => ({ ...prev, subpoena: false }));
+      setSubpoenaRemoveModal({ open: false, removing: false });
+    } catch (err) {
+      setSubpoenaRemoveModal((prev) => ({ ...prev, removing: false }));
+      setSaveError(getApiErrorMessage(err, "Failed to remove subpoena"));
+    }
+  };
+
   const handleSaveOrder = async () => {
+    if (isOrderReadOnly) return;
     setSubmitAttempted(true);
     setSaveError("");
     setApiFieldErrors({});
@@ -1927,8 +2197,8 @@ function NewOrderPageContent() {
 
   if (isEditMode && loadingOrder) {
     return (
-      <DashboardShell>
-        <div className="flex min-h-[calc(100vh-92px)] items-center justify-center">
+      <DashboardShell lockScroll>
+        <div className="flex min-h-0 flex-1 items-center justify-center">
           <p className="text-[13px] text-[#64748B]">Loading order...</p>
         </div>
       </DashboardShell>
@@ -1937,8 +2207,8 @@ function NewOrderPageContent() {
 
   if (isEditMode && loadError) {
     return (
-      <DashboardShell>
-        <div className="flex min-h-[calc(100vh-92px)] flex-col items-center justify-center gap-3">
+      <DashboardShell lockScroll>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
           <p className="text-[13px] font-semibold text-red-500">{loadError}</p>
           <button
             type="button"
@@ -1957,8 +2227,11 @@ function NewOrderPageContent() {
   }
 
   return (
-    <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4 overflow-y-auto xl:h-[calc(100vh-92px)] xl:overflow-hidden">
+    <DashboardShell lockScroll>
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden"
+        style={{ background: "#F8FAFC" }}
+      >
         {facilitiesLoadError && (
           <div className="shrink-0 rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-2 text-[12px] font-medium text-red-600">
             {facilitiesLoadError}
@@ -1968,24 +2241,34 @@ function NewOrderPageContent() {
         <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
-              {isEditMode ? "Edit Order" : "New Order"}
+              {isOrderReadOnly
+                ? "View Order"
+                : isEditMode
+                  ? "Edit Order"
+                  : "New Order"}
             </h1>
 
             <p className="mt-[4px] text-[13px] text-[#64748B]">
-              {isEditMode
-                ? `Editing existing order ${formData.orderNumber || orderId}`
-                : formData.subpoenaFile
-                ? "Create a new DMS order with attached subpoena"
-                : "Create a new DMS order with all required information"}
+              {isOrderReadOnly
+                ? `This order is ${String(formData.status || "").toLowerCase()} and cannot be edited`
+                : isEditMode
+                  ? `Editing existing order ${formData.orderNumber || orderId}`
+                  : formData.subpoenaFile
+                    ? "Create a new DMS order with attached subpoena"
+                    : "Create a new DMS order with all required information"}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {isEditMode && (
+            {isOrderReadOnly ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-[#FEE2E2] px-4 py-2 text-[12px] font-semibold text-[#B91C1C]">
+                {formData.status || "Cancelled"} — Read only
+              </span>
+            ) : isEditMode ? (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#FFF7ED] px-4 py-2 text-[12px] font-semibold text-[#EA580C]">
                 Editing Order #{formData.orderNumber || orderId}
               </span>
-            )}
+            ) : null}
 
             {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#E6F7FA] px-4 py-2 text-[12px] font-semibold text-[#007F96]">
@@ -2003,6 +2286,22 @@ function NewOrderPageContent() {
             </button>
           </div>
         </div>
+
+        {isOrderReadOnly && (
+          <div className="shrink-0 rounded-[8px] border border-[#FECACA] bg-[#FEF2F2] px-3 py-3 text-[12px] text-[#991B1B]">
+            <p className="font-semibold">
+              Order #{formData.orderNumber || orderId} is {formData.status || "Cancelled"}
+            </p>
+            {formData.cancelReason ? (
+              <p className="mt-1 text-[11px] leading-relaxed text-[#B91C1C]">
+                Reason: {formData.cancelReason}
+              </p>
+            ) : null}
+            <p className="mt-1 text-[11px] text-[#B91C1C]">
+              Recover the order from the orders list to make changes.
+            </p>
+          </div>
+        )}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-stretch">
           {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
@@ -2032,26 +2331,39 @@ function NewOrderPageContent() {
             expanded={expandedPanels.order}
             onToggle={() => togglePanel("order")}
           >
-            <OrderDetailsForm
-              formData={formData}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              getError={getError}
-              onFileChange={handleFileChange}
-              submitAttempted={submitAttempted}
-              extractingSubpoena={extractingSubpoena}
-              extractError={extractError}
-              extractionMeta={extractionMeta}
-              facilityProfileIncomplete={facilityProfileIncomplete}
-              facilityCreated={facilityCreated}
-              resolvingFacility={resolvingFacility}
-              onFacilityInput={handleFacilityInput}
-              onFacilitySelect={handleFacilitySelect}
-              onFacilityBlur={handleFacilityBlur}
-              onFacilityCommit={handleFacilityCommit}
-              returnToOrderPath={returnToOrderPath}
-              onBeforeFacilityProfileNavigate={persistOrderDraft}
-            />
+            <fieldset
+              disabled={isOrderReadOnly}
+              className="min-w-0 border-0 p-0 disabled:[&_button]:cursor-not-allowed"
+            >
+              <OrderDetailsForm
+                formData={formData}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                getError={getError}
+                onFileChange={isOrderReadOnly ? undefined : handleFileChange}
+                onRemoveFile={isOrderReadOnly ? undefined : handleRemoveSelectedFile}
+                onRemoveExistingDocument={
+                  isOrderReadOnly ? undefined : handleRemoveExistingDocument
+                }
+                onRemoveExistingSubpoena={
+                  isOrderReadOnly ? undefined : requestRemoveSubpoena
+                }
+                submitAttempted={submitAttempted}
+                extractingSubpoena={extractingSubpoena}
+                extractError={extractError}
+                extractionMeta={extractionMeta}
+                facilityProfileIncomplete={facilityProfileIncomplete}
+                facilityCreated={facilityCreated}
+                resolvingFacility={resolvingFacility}
+                onFacilityInput={handleFacilityInput}
+                onFacilitySelect={handleFacilitySelect}
+                onFacilityBlur={handleFacilityBlur}
+                onFacilityCommit={handleFacilityCommit}
+                returnToOrderPath={returnToOrderPath}
+                onBeforeFacilityProfileNavigate={persistOrderDraft}
+                readOnly={isOrderReadOnly}
+              />
+            </fieldset>
           </CollapsibleOrderPanel>
 
           <CollapsibleOrderPanel
@@ -2061,21 +2373,27 @@ function NewOrderPageContent() {
             expanded={expandedPanels.serve}
             onToggle={() => togglePanel("serve")}
           >
-            <ServeInfoForm
-              formData={formData}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              getError={getError}
-              onProviderInput={handleProviderInput}
-              onProviderSelect={handleProviderSelect}
-              onProviderBlur={handleProviderBlur}
-              extractionMeta={extractionMeta}
-              missingDefaultDoctor={missingDefaultDoctor}
-              doctorCreated={doctorCreated}
-              resolvingDoctor={resolvingDoctor}
-              returnToOrderPath={returnToOrderPath}
-              onBeforeFacilityProfileNavigate={persistOrderDraft}
-            />
+            <fieldset
+              disabled={isOrderReadOnly}
+              className="min-w-0 border-0 p-0 disabled:[&_button]:cursor-not-allowed"
+            >
+              <ServeInfoForm
+                formData={formData}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                getError={getError}
+                onProviderInput={handleProviderInput}
+                onProviderSelect={handleProviderSelect}
+                onProviderBlur={handleProviderBlur}
+                extractionMeta={extractionMeta}
+                missingDefaultDoctor={missingDefaultDoctor}
+                doctorCreated={doctorCreated}
+                resolvingDoctor={resolvingDoctor}
+                returnToOrderPath={returnToOrderPath}
+                onBeforeFacilityProfileNavigate={persistOrderDraft}
+                readOnly={isOrderReadOnly}
+              />
+            </fieldset>
           </CollapsibleOrderPanel>
 
           <CollapsibleOrderPanel
@@ -2085,38 +2403,81 @@ function NewOrderPageContent() {
             expanded={expandedPanels.payment}
             onToggle={() => togglePanel("payment")}
           >
-            <PaymentForm
-              formData={formData}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              getError={getError}
-              onValuesChange={handlePaymentValuesChange}
-            />
+            <fieldset
+              disabled={isOrderReadOnly}
+              className="min-w-0 border-0 p-0 disabled:[&_button]:cursor-not-allowed"
+            >
+              <PaymentForm
+                formData={formData}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                getError={getError}
+                onValuesChange={handlePaymentValuesChange}
+                readOnly={isOrderReadOnly}
+              />
+            </fieldset>
           </CollapsibleOrderPanel>
         </div>
 
-        <OrderSaveActionBar
-          onSave={handleSaveOrder}
-          disabled={
-            (isEditMode ? hasValidationErrors : hasImmediateRequiredErrors) ||
-            saving ||
-            facilityProfileIncomplete ||
-            missingDefaultDoctor ||
-            resolvingFacility ||
-            resolvingDoctor
-          }
-          label={
-            saving
-              ? "Saving..."
-              : isEditMode
-              ? "Update Order"
-              : "Save Order"
-          }
-          saveError={saveError}
-        />
+        {isOrderReadOnly ? (
+          <section className="shrink-0 rounded-[12px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="max-w-[720px] text-[11px] leading-[16px] text-[#64748B]">
+                This order is read-only. Recover it from the orders list if you need to
+                make changes.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push(resolveListPath(formData.creationSource))}
+                className="flex h-[44px] w-full shrink-0 items-center justify-center gap-2 rounded-[8px] bg-[#0097B2] px-6 text-[13px] font-semibold text-white shadow-sm transition hover:bg-[#0086A0] sm:w-auto sm:min-w-[220px]"
+              >
+                {resolveListPath(formData.creationSource) === "/personal-orders"
+                  ? "Back to Personal Orders"
+                  : resolveListPath(formData.creationSource) === "/company-orders"
+                    ? "Back to Company Orders"
+                    : "Back to Orders"}
+              </button>
+            </div>
+          </section>
+        ) : (
+          <OrderSaveActionBar
+            onSave={handleSaveOrder}
+            disabled={
+              (isEditMode ? hasValidationErrors : hasImmediateRequiredErrors) ||
+              saving ||
+              facilityProfileIncomplete ||
+              missingDefaultDoctor ||
+              resolvingFacility ||
+              resolvingDoctor
+            }
+            label={
+              saving
+                ? "Saving..."
+                : isEditMode
+                  ? "Update Order"
+                  : "Save Order"
+            }
+            saveError={saveError}
+          />
+        )}
       </div>
 
       <SubpoenaExtractionOverlay open={extractingSubpoena} />
+
+      <ConfirmModal
+        open={subpoenaRemoveModal.open}
+        variant="danger"
+        title="Remove subpoena?"
+        message="Removing this subpoena will also clear form fields that were filled from the subpoena extraction (applicant, facility, doctor, case details, and related serve fields). Do you want to continue?"
+        confirmLabel={subpoenaRemoveModal.removing ? "Removing..." : "Remove"}
+        cancelLabel="Cancel"
+        confirmDisabled={subpoenaRemoveModal.removing}
+        onCancel={() => {
+          if (subpoenaRemoveModal.removing) return;
+          setSubpoenaRemoveModal({ open: false, removing: false });
+        }}
+        onConfirm={confirmRemoveSubpoena}
+      />
     </DashboardShell>
   );
 }
@@ -2127,6 +2488,9 @@ function OrderDetailsForm({
   onBlur,
   getError,
   onFileChange,
+  onRemoveFile,
+  onRemoveExistingDocument,
+  onRemoveExistingSubpoena,
   submitAttempted,
   extractingSubpoena = false,
   extractError = "",
@@ -2140,6 +2504,7 @@ function OrderDetailsForm({
   onFacilityCommit,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  readOnly = false,
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -2209,7 +2574,7 @@ function OrderDetailsForm({
           value={formData.ssn}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="XXX-XX-1234"
+          placeholder="123-45-6789"
           inputMode="numeric"
           maxLength={11}
           hint="SSN required if you have one"
@@ -2377,11 +2742,31 @@ function OrderDetailsForm({
 
       <Divider />
 
-      <FileInput
-        title="Upload Subpoena"
-        onChange={(e) => onFileChange(e, "subpoenaFile")}
-        error={getError("subpoenaFile")}
-      />
+      {!readOnly ? (
+        <FileInput
+          title="Upload Subpoena"
+          onChange={(e) => onFileChange(e, "subpoenaFile")}
+          error={getError("subpoenaFile")}
+          accept=".pdf,application/pdf"
+          statusText={
+            formData.subpoenaFile || formData.subpoenaUrl
+              ? "Choose File again will replace the existing document"
+              : "PDF only"
+          }
+        />
+      ) : null}
+
+      {formData.subpoenaFile ? (
+        <SelectedFileCard
+          label={
+            formData.subpoenaUrl
+              ? "New subpoena (replaces current on save)"
+              : "Selected subpoena"
+          }
+          fileName={formData.subpoenaFile.name}
+          onRemove={readOnly ? undefined : () => onRemoveExistingSubpoena?.()}
+        />
+      ) : null}
 
       {extractError && (
         <p className="text-[12px] font-medium text-amber-600">{extractError}</p>
@@ -2398,30 +2783,43 @@ function OrderDetailsForm({
           label="Current subpoena"
           name={subpoenaFileName(formData.subpoenaStoragePath)}
           href={toFileUrl(formData.subpoenaUrl)}
+          onRemove={
+            readOnly ? undefined : () => onRemoveExistingSubpoena?.()
+          }
         />
       )}
 
       <div>
         <h3 className="mb-3 text-[13px] font-semibold text-[#111827]">
-          Upload Additional Document
+          {readOnly ? "Additional Documents" : "Upload Additional Document"}
         </h3>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
-          <NewOrderField
-            name="documentName"
-            value={formData.documentName}
-            onChange={onChange}
-            onBlur={onBlur}
-            placeholder="Document Name"
-            error={getError("documentName")}
-          />
-
+        {!readOnly ? (
           <FileInput
             compact
             onChange={(e) => onFileChange(e, "additionalDocumentFile")}
             error={getError("additionalDocumentFile")}
+            statusText={
+              formData.additionalDocumentFile
+                ? formData.additionalDocumentFile.name
+                : Array.isArray(formData.documents) && formData.documents.length > 0
+                  ? "Add another document (existing files stay unless removed)"
+                  : "No file chosen"
+            }
           />
-        </div>
+        ) : null}
+
+        {formData.additionalDocumentFile ? (
+          <div className="mt-3">
+            <SelectedFileCard
+              label="Selected document (will be added on save)"
+              fileName={formData.additionalDocumentFile.name}
+              onRemove={
+                readOnly ? undefined : () => onRemoveFile?.("additionalDocumentFile")
+              }
+            />
+          </div>
+        ) : null}
 
         {Array.isArray(formData.documents) && formData.documents.length > 0 && (
           <div className="mt-3 space-y-2">
@@ -2435,6 +2833,11 @@ function OrderDetailsForm({
                 label={doc.documentName || "Document"}
                 name={doc.originalFileName}
                 href={toFileUrl(doc.url)}
+                onRemove={
+                  readOnly
+                    ? undefined
+                    : () => onRemoveExistingDocument?.(doc.id)
+                }
               />
             ))}
           </div>
@@ -2479,6 +2882,7 @@ function ServeInfoForm({
   resolvingDoctor = false,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  readOnly = false,
 }) {
   return (
     <div className="space-y-5">
@@ -2496,6 +2900,7 @@ function ServeInfoForm({
         required
         error={getError("orderNumber")}
         maxLength={50}
+        disabled={readOnly}
       />
 
       <NewOrderField
@@ -2505,6 +2910,7 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Enter REC number"
+        disabled={readOnly}
       />
 
       <Divider />
@@ -2512,12 +2918,14 @@ function ServeInfoForm({
       <div className="flex items-center justify-between">
         <h3 className="text-[13px] font-semibold text-[#111827]">Company</h3>
 
-        <button
-          type="button"
-          className="text-[11px] font-semibold text-[#0097B2]"
-        >
-          clear
-        </button>
+        {!readOnly ? (
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-[#0097B2]"
+          >
+            clear
+          </button>
+        ) : null}
       </div>
 
       <ProviderSearchField
@@ -2832,6 +3240,7 @@ function PaymentForm({
   onBlur,
   getError,
   onValuesChange,
+  readOnly = false,
 }) {
   const invoiceFees = formData.invoiceFees;
   const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
@@ -2863,15 +3272,17 @@ function PaymentForm({
         checkDisplayValue={
           isPersonalPortalOrder ? formData.prepaymentCheck || "" : null
         }
-        checkReadOnly={isPersonalPortalOrder}
+        checkReadOnly={readOnly || isPersonalPortalOrder}
+        fieldsReadOnly={readOnly}
+        paidReadOnly={readOnly}
       />
 
       <PaymentChargeCard
         title="Xray Charge"
         paidAmount={formData.xrayPaid}
         showPaidField
-        paidReadOnly={false}
-        fieldsReadOnly={false}
+        paidReadOnly={readOnly}
+        fieldsReadOnly={readOnly}
         autoDueOnPaidChange
         capPaidToDue
         paymentType="xray"
@@ -2952,23 +3363,50 @@ function ContactCard({ number, prefix, formData, onChange, onBlur, getError }) {
   );
 }
 
-function FileInput({ title, onChange, error, compact = false }) {
+function FileInput({
+  title,
+  onChange,
+  error,
+  compact = false,
+  buttonLabel = "Choose File",
+  statusText = "No file chosen",
+  accept = ".pdf,.doc,.docx,.jpg,.jpeg,.png",
+}) {
+  const inputRef = useRef(null);
+
   return (
-    <div>
+    <div className={compact ? "sm:pt-[2px]" : ""}>
       {title && (
         <h3 className="mb-3 text-[13px] font-semibold text-[#111827]">
           {title}
         </h3>
       )}
 
-      <input
-        type="file"
-        onChange={onChange}
-        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-        className={`block w-full text-[12px] text-[#64748B] file:mr-3 file:rounded-[6px] file:border file:border-[#E2E8F0] file:bg-white file:px-3 file:py-2 file:text-[12px] file:font-medium file:text-[#334155] ${
-          compact ? "max-w-full" : ""
-        }`}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          onChange={onChange}
+          accept={accept}
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+        />
+
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className={`inline-flex cursor-pointer items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 py-2 text-[12px] font-medium text-[#334155] shadow-sm transition hover:border-[#0097B2] hover:bg-[#F0FBFD] hover:text-[#007F96] hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0097B2]/30 ${
+            compact ? "whitespace-nowrap" : ""
+          }`}
+        >
+          {buttonLabel}
+        </button>
+
+        <span className="max-w-[280px] text-[12px] text-[#94A3B8]">
+          {statusText}
+        </span>
+      </div>
 
       {error && (
         <p className="mt-[5px] text-[11px] font-medium text-red-500">
@@ -2979,15 +3417,42 @@ function FileInput({ title, onChange, error, compact = false }) {
   );
 }
 
-function ExistingFileLink({ label, name, href }) {
+function SelectedFileCard({ label, fileName, onRemove }) {
   return (
-    <a
-      href={href || "#"}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 hover:border-[#0097B2] hover:bg-[#F0FBFD]"
-    >
+    <div className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
       <span className="min-w-0">
+        <span className="block truncate text-[12px] font-semibold text-[#111827]">
+          {label}
+        </span>
+        {fileName ? (
+          <span className="block truncate text-[11px] text-[#64748B]">
+            {fileName}
+          </span>
+        ) : null}
+      </span>
+
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 rounded-[6px] border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600 transition hover:bg-red-100"
+        >
+          Remove
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ExistingFileLink({ label, name, href, onRemove }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+      <a
+        href={href || "#"}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="min-w-0 flex-1 hover:opacity-90"
+      >
         <span className="block truncate text-[12px] font-semibold text-[#111827]">
           {label}
         </span>
@@ -2996,12 +3461,21 @@ function ExistingFileLink({ label, name, href }) {
             {name}
           </span>
         )}
-      </span>
+        <span className="mt-0.5 block text-[11px] font-semibold text-[#0097B2]">
+          View
+        </span>
+      </a>
 
-      <span className="shrink-0 text-[11px] font-semibold text-[#0097B2]">
-        View
-      </span>
-    </a>
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 rounded-[6px] border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600 transition hover:bg-red-100"
+        >
+          Remove
+        </button>
+      ) : null}
+    </div>
   );
 }
 

@@ -99,8 +99,20 @@ function appendOrderSearchFilter(conditions, params, rawSearch) {
 
   const ssnDigits = search.replace(/\D/g, "");
   if (ssnDigits.length === 4) {
-    searchClauses.push("o.ssn_last_four = :searchSsnLastFour");
+    searchClauses.push(
+      "o.ssn_last_four = :searchSsnLastFour",
+      "RIGHT(REPLACE(REPLACE(o.ssn_last_four, '-', ''), 'X', ''), 4) = :searchSsnLastFour"
+    );
     params.searchSsnLastFour = ssnDigits;
+  } else if (ssnDigits.length === 9) {
+    searchClauses.push(
+      "o.ssn_last_four = :searchSsnFull",
+      "REPLACE(o.ssn_last_four, '-', '') = :searchSsnDigits",
+      "RIGHT(REPLACE(REPLACE(UPPER(o.ssn_last_four), '-', ''), 'X', ''), 4) = :searchSsnLastFourFromFull"
+    );
+    params.searchSsnFull = `${ssnDigits.slice(0, 3)}-${ssnDigits.slice(3, 5)}-${ssnDigits.slice(5)}`;
+    params.searchSsnDigits = ssnDigits;
+    params.searchSsnLastFourFromFull = ssnDigits.slice(-4);
   }
 
   const searchDate = toSqlDateOnly(search);
@@ -844,6 +856,32 @@ class Order {
     );
 
     return rows;
+  }
+
+  static async softDeleteAdditionalDocument(orderId, documentId, connection = null) {
+    const executor = connection || getPool();
+    const [result] = await executor.execute(
+      `UPDATE order_additional_documents
+       SET is_deleted = 1, updated_at = NOW()
+       WHERE id = :documentId
+         AND order_id = :orderId
+         AND is_deleted = 0`,
+      { orderId, documentId }
+    );
+    return Number(result.affectedRows || 0) > 0;
+  }
+
+  static async clearSubpoena(orderId, connection = null) {
+    const executor = connection || getPool();
+    const [result] = await executor.execute(
+      `UPDATE orders
+       SET subpoena_storage_path = NULL,
+           has_subpoena = 0,
+           updated_at = NOW()
+       WHERE id = :orderId`,
+      { orderId }
+    );
+    return Number(result.affectedRows || 0) > 0;
   }
 
   static async seedWorkflowStages(connection, orderId) {

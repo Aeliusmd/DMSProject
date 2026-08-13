@@ -16,6 +16,7 @@ import {
   getStoredPersonalUser,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import {
+  getDriverLicenseFileError,
   RECORD_TYPE_OPTIONS,
   toApiDate,
   validatePersonalRequestForm,
@@ -203,8 +204,40 @@ export default function PersonalNewRequestPage() {
     const { name, value, type, checked, files } = e.target;
 
     if (type === "file") {
-      setForm((prev) => ({ ...prev, driverLicenseFile: files?.[0] || null }));
+      const file = files?.[0] || null;
+      e.target.value = "";
+
+      if (!file) {
+        setForm((prev) => ({ ...prev, driverLicenseFile: null }));
+        setTouched((prev) => ({ ...prev, driverLicenseFile: true }));
+        setApiErrors((prev) => {
+          if (!prev.driverLicenseFile) return prev;
+          const next = { ...prev };
+          delete next.driverLicenseFile;
+          return next;
+        });
+        return;
+      }
+
+      const fileError = getDriverLicenseFileError(file);
+      if (fileError) {
+        setForm((prev) => ({ ...prev, driverLicenseFile: null }));
+        setTouched((prev) => ({ ...prev, driverLicenseFile: true }));
+        setApiErrors((prev) => ({
+          ...prev,
+          driverLicenseFile: fileError,
+        }));
+        return;
+      }
+
+      setForm((prev) => ({ ...prev, driverLicenseFile: file }));
       setTouched((prev) => ({ ...prev, driverLicenseFile: true }));
+      setApiErrors((prev) => {
+        if (!prev.driverLicenseFile) return prev;
+        const next = { ...prev };
+        delete next.driverLicenseFile;
+        return next;
+      });
       return;
     }
 

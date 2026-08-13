@@ -115,7 +115,18 @@ export function normalizeAutofillAmount(value) {
 
 export function normalizeAutofillSSN(value) {
   if (!value) return "";
-  return formatMaskedSSN(String(value).trim());
+  const trimmed = String(value).trim();
+  // Prefer full ###-##-#### when all digits exist; keep XXX-XX-#### only if masked.
+  if (/^XXX-XX-\d{4}$/i.test(trimmed)) {
+    return `XXX-XX-${trimmed.slice(-4)}`;
+  }
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length >= 9) {
+    const nine = digits.slice(-9);
+    return `${nine.slice(0, 3)}-${nine.slice(3, 5)}-${nine.slice(5)}`;
+  }
+  if (digits.length >= 4) return formatMaskedSSN(trimmed);
+  return "";
 }
 
 const DATE_TOKEN_PATTERN =

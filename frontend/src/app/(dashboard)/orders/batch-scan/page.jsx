@@ -12,21 +12,29 @@ export default function BatchScanPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [successMessage, setSuccessMessage] = useState("");
 
   const handleChooseFile = () => {
     fileInputRef.current?.click();
   };
 
+  const MAX_FILE_SIZE_MB = 50;
+
   const validateAndSetFile = (file) => {
     setError("");
-    setSuccessMessage("");
 
     if (!file) return;
 
     if (file.type !== "application/pdf") {
       setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       setError("Only PDF files are allowed.");
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      setError(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
       return;
     }
 
@@ -59,30 +67,83 @@ export default function BatchScanPage() {
     if (!selectedFile || uploading) return;
 
     setError("");
-    setSuccessMessage("");
     setUploading(true);
 
     try {
       const result = await uploadBatchScan(selectedFile);
-      const createdCount = result?.autoCreate?.created?.length ?? 0;
-      const failedCount = result?.autoCreate?.failed?.length ?? 0;
-      const incompleteCount =
-        result?.autoCreate?.created?.filter((item) => item.hasIncompleteRequiredFields)
-          .length ?? 0;
-
-      setSuccessMessage(
-        `Batch scan complete. ${createdCount} order(s) created automatically${
-          failedCount ? `, ${failedCount} need manual review` : ""
-        }${incompleteCount ? ` (${incompleteCount} missing required fields)` : ""}.`
+      const created = result?.autoCreate?.created || [];
+      const failed = result?.autoCreate?.failed || [];
+      const createdCount = created.length;
+      const failedCount = failed.length;
+      const duplicateFailures = failed.filter(
+        (item) =>
+          item?.reason === "duplicate_order_number" ||
+          /already exists|duplicate/i.test(`${item?.message || ""}`)
       );
+      const otherFailures = failed.filter(
+        (item) => !duplicateFailures.includes(item)
+      );
+      const duplicateNumbers = [
+        ...new Set(
+          duplicateFailures
+            .map((item) => `${item?.orderNumber || ""}`.trim())
+            .filter(Boolean)
+        ),
+      ];
+
+      let message = `Batch scan complete. ${createdCount} order${
+        createdCount === 1 ? "" : "s"
+      } created.`;
+
+      if (duplicateFailures.length > 0) {
+        message += ` ${duplicateFailures.length} duplicate order${
+          duplicateFailures.length === 1 ? "" : "s"
+        } skipped`;
+        if (duplicateNumbers.length) {
+          message += ` (${duplicateNumbers.slice(0, 5).join(", ")}${
+            duplicateNumbers.length > 5
+              ? `, +${duplicateNumbers.length - 5} more`
+              : ""
+          })`;
+        }
+        message += " — order number already exists.";
+      }
+
+      if (otherFailures.length > 0) {
+        const otherMessages = otherFailures
+          .map((item) => item?.message)
+          .filter(Boolean)
+          .slice(0, 2);
+        message += ` ${otherFailures.length} other create failure${
+          otherFailures.length === 1 ? "" : "s"
+        }`;
+        if (otherMessages.length) {
+          message += `: ${otherMessages.join("; ")}`;
+        }
+        message += ".";
+      }
+
+      try {
+        window.sessionStorage.setItem(
+          "dms.batchScanFlash",
+          JSON.stringify({
+            message,
+            createdCount,
+            failedCount,
+            duplicateCount: duplicateFailures.length,
+            at: Date.now(),
+          })
+        );
+      } catch {
+        // Ignore storage errors; still navigate to orders.
+      }
+
       setSelectedFile(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
 
-      setTimeout(() => {
-        router.push("/orders");
-      }, 1500);
+      router.push("/orders");
     } catch (err) {
       setError(err.message || "Batch scan upload failed.");
     } finally {
@@ -136,7 +197,9 @@ export default function BatchScanPage() {
                 Choose File
               </button>
 
-              <p className="mt-4 text-[10px] text-[#94A3B8]">PDF files only</p>
+              <p className="mt-4 text-[10px] text-[#94A3B8]">
+                PDF files only, max {MAX_FILE_SIZE_MB}MB
+              </p>
 
               <input
                 ref={fileInputRef}
@@ -162,12 +225,6 @@ export default function BatchScanPage() {
               >
                 {uploading ? "Uploading..." : "Upload & Process"}
               </button>
-            )}
-
-            {successMessage && (
-              <p className="mt-4 text-[11px] font-medium text-[#059669]">
-                {successMessage}
-              </p>
             )}
 
             {error && (

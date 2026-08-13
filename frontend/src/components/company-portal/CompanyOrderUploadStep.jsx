@@ -17,6 +17,7 @@ export default function CompanyOrderUploadStep({
 
   const handleFiles = (files) => {
     const file = files?.[0];
+    if (inputRef.current) inputRef.current.value = "";
     if (!file) return;
     onFileSelected?.(file);
   };

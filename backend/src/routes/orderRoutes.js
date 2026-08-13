@@ -42,6 +42,11 @@ router.post(
   orderController.scanMedicalRecords
 );
 router.delete("/:id/medical-records", orderController.removeMedicalRecords);
+router.delete(
+  "/:id/documents/:documentId",
+  orderController.deleteAdditionalDocument
+);
+router.delete("/:id/subpoena", orderController.removeSubpoena);
 router.get("/:id", orderController.getById);
 router.post("/", uploadOrderFiles, orderController.create);
 router.put("/:id", uploadOrderFiles, orderController.update);

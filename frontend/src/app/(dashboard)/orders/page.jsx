@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import OrderStatsGrid from "@/components/orders/OrderStatsGrid";
 import OrderActionButton from "@/components/orders/OrderActionButton";
 import OrderFilterBar from "@/components/orders/OrderFilterBar";
 import OrdersTable from "@/components/orders/OrdersTable";
 import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal";
+
+const BATCH_SCAN_FLASH_KEY = "dms.batchScanFlash";
+const BATCH_SCAN_FLASH_MS = 10000;
 
 const defaultFilters = {
   facility: "",
@@ -20,10 +23,53 @@ const defaultFilters = {
 export default function OrdersPage() {
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [filters, setFilters] = useState(defaultFilters);
+  const [batchScanFlash, setBatchScanFlash] = useState(null);
+
+  useEffect(() => {
+    let message = "";
+    let failedCount = 0;
+    let duplicateCount = 0;
+
+    try {
+      const raw = window.sessionStorage.getItem(BATCH_SCAN_FLASH_KEY);
+      if (raw) {
+        window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
+        const parsed = JSON.parse(raw);
+        message = `${parsed?.message || ""}`.trim();
+        failedCount = Number(parsed?.failedCount) || 0;
+        duplicateCount = Number(parsed?.duplicateCount) || 0;
+      }
+    } catch {
+      message = "";
+    }
+
+    if (!message) return undefined;
+
+    setBatchScanFlash({ message, failedCount, duplicateCount });
+    const timer = window.setTimeout(() => {
+      setBatchScanFlash(null);
+    }, BATCH_SCAN_FLASH_MS);
+
+    return () => window.clearTimeout(timer);
+  }, []);
 
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4">
+        {batchScanFlash ? (
+          <div
+            className={`rounded-[8px] border px-3 py-2.5 text-[12px] font-medium shadow-sm ${
+              batchScanFlash.failedCount > 0
+                ? batchScanFlash.duplicateCount > 0
+                  ? "border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]"
+                  : "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]"
+                : "border-[#A7F3D0] bg-[#ECFDF5] text-[#047857]"
+            }`}
+          >
+            {batchScanFlash.message}
+          </div>
+        ) : null}
+
         <div className="min-w-0">
           <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
             Orders

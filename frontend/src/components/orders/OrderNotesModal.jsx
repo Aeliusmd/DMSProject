@@ -9,7 +9,7 @@ import {
   updateOrderNote,
 } from "@/lib/orders/orderApi";
 import { API_BASE_URL } from "@/config/api";
-import { buildCallbackLine } from "@/lib/orders/orderNoteUtils";
+import { buildCallbackLine, getNoteAttachmentError } from "@/lib/orders/orderNoteUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
@@ -48,14 +48,6 @@ function getNoteTextError(noteText) {
   }
   return validateNoHtmlMarkup(trimmedNote, { fieldLabel: "Note text" }) || "";
 }
-const MAX_FILE_SIZE_MB = 10;
-const ALLOWED_FILE_TYPES = [
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
 
 export default function OrderNotesModal({
   isOpen,
@@ -170,14 +162,8 @@ export default function OrderNotesModal({
     }
 
     if (attachment) {
-      const fileSizeMb = attachment.size / (1024 * 1024);
-
-      if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
-        newErrors.attachment =
-          "Only PDF, Word, JPG, and PNG files are allowed.";
-      } else if (fileSizeMb > MAX_FILE_SIZE_MB) {
-        newErrors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
-      }
+      const attachmentError = getNoteAttachmentError(attachment);
+      if (attachmentError) newErrors.attachment = attachmentError;
     }
 
     return newErrors;
@@ -198,18 +184,8 @@ export default function OrderNotesModal({
   };
 
   const validateAttachment = (newErrors) => {
-    if (attachment) {
-      const fileSizeMb = attachment.size / (1024 * 1024);
-
-      if (!ALLOWED_FILE_TYPES.includes(attachment.type)) {
-        newErrors.attachment =
-          "Only PDF, Word, JPG, and PNG files are allowed.";
-      }
-
-      if (fileSizeMb > MAX_FILE_SIZE_MB) {
-        newErrors.attachment = `File size must be less than ${MAX_FILE_SIZE_MB} MB.`;
-      }
-    }
+    const attachmentError = getNoteAttachmentError(attachment);
+    if (attachmentError) newErrors.attachment = attachmentError;
   };
 
   const validateCallback = (newErrors) => {
@@ -350,6 +326,23 @@ export default function OrderNotesModal({
 
   const handleAttachmentChange = (e) => {
     const file = e.target.files?.[0] || null;
+    e.target.value = "";
+
+    if (!file) {
+      setAttachment(null);
+      clearError("attachment");
+      return;
+    }
+
+    const attachmentError = getNoteAttachmentError(file);
+    if (attachmentError) {
+      setAttachment(null);
+      setErrors((prev) => ({
+        ...prev,
+        attachment: attachmentError,
+      }));
+      return;
+    }
 
     setAttachment(file);
     clearError("attachment");

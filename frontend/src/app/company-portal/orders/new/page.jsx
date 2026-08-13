@@ -147,6 +147,7 @@ function CompanyOrderCreateClient() {
 
     if (file.size > 50 * 1024 * 1024) {
       setError("PDF must be 50MB or smaller");
+      // Do not accept or preview oversize files.
       return;
     }
 

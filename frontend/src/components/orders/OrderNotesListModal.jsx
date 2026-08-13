@@ -7,6 +7,7 @@ import { getOrderNotesPaginated, updateOrderNote } from "@/lib/orders/orderApi";
 import {
   buildCallbackLine,
   filterNotesByDate,
+  getNoteAttachmentError,
   MAX_NOTE_LENGTH,
   toHistoryItem,
   validateNoteForm,
@@ -167,6 +168,24 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
       delete next[field];
       return next;
     });
+  };
+
+  const handleAttachmentChange = (file) => {
+    if (!file) {
+      setAttachment(null);
+      clearError("attachment");
+      return;
+    }
+
+    const attachmentError = getNoteAttachmentError(file);
+    if (attachmentError) {
+      setAttachment(null);
+      setErrors((prev) => ({ ...prev, attachment: attachmentError }));
+      return;
+    }
+
+    setAttachment(file);
+    clearError("attachment");
   };
 
   const handleSelectNote = (item) => {
@@ -435,10 +454,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
                             setCallbackDate(value);
                             clearError("callbackDate");
                           }}
-                          onAttachmentChange={(file) => {
-                            setAttachment(file);
-                            clearError("attachment");
-                          }}
+                          onAttachmentChange={handleAttachmentChange}
                         />
 
                         {!isReadOnly && (

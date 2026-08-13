@@ -32,10 +32,16 @@ function validateUpdateProvider(body = {}) {
   addNoHtmlMarkupErrors(errors, body, ["address", "city"]);
 
   const zip = trimToString(body.zipCode ?? body.zip);
-  if (zip && getDigits(zip).length !== 5) {
-    errors.push({ field: "zipCode", message: "ZIP must be 5 digits" });
-  } else {
-    addMaxLengthError(errors, "zipCode", zip, 20);
+  if (zip) {
+    const zipDigits = getDigits(zip);
+    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+      errors.push({
+        field: "zipCode",
+        message: "ZIP must be 5 digits or ZIP+4",
+      });
+    } else {
+      addMaxLengthError(errors, "zipCode", zip, 20);
+    }
   }
 
   const state = trimToString(body.state);

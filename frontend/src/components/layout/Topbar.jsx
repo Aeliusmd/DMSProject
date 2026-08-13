@@ -34,7 +34,7 @@ export default function Topbar({ onToggleSidebar }) {
   }, [loadNotifications]);
 
   return (
-    <header className="sticky top-0 z-30 flex min-h-[52px] items-center gap-2 border-b border-[#E2E8F0] bg-white px-2 py-2 sm:gap-3 sm:px-[18px]">
+    <header className="z-30 flex min-h-[52px] shrink-0 items-center gap-2 border-b border-[#E2E8F0] bg-white px-2 py-2 sm:gap-3 sm:px-[18px]">
       <button
         type="button"
         onClick={onToggleSidebar}

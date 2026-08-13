@@ -65,7 +65,7 @@ export default function CollapsibleOrderPanel({
 
   return (
     <section
-      className={`flex min-h-[280px] min-w-0 flex-1 flex-col overflow-hidden rounded-[12px] border xl:min-h-0 ${theme.border} bg-white shadow-sm`}
+      className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[12px] border ${theme.border} bg-white shadow-sm`}
     >
       <div
         className={`flex h-[52px] shrink-0 items-center justify-between border-b border-[#E2E8F0] px-3 sm:h-[56px] sm:px-5 ${theme.header}`}

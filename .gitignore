@@ -37,6 +37,9 @@ Subpoena_Extraction/'platinum-honor-468520-e6-43ba2ce59daf.json
 # Generated docs
 docs/*.pdf
 
+# Local temp / Node compile cache (e.g. redirected TEMP)
+.tmp/
+
 # OS / IDE
 .DS_Store
 Thumbs.db
