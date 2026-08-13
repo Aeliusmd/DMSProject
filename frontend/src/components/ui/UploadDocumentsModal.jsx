@@ -13,6 +13,8 @@ export const DOCUMENT_TYPES = [
   "Other",
 ];
 
+const MAX_FILE_SIZE_MB = 15;
+
 export default function UploadDocumentsModal({
   open,
   title = "Upload Documents",
@@ -55,6 +57,20 @@ export default function UploadDocumentsModal({
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files || []);
+    const oversized = selectedFiles.find(
+      (file) => file.size > MAX_FILE_SIZE_MB * 1024 * 1024
+    );
+
+    if (oversized) {
+      e.target.value = "";
+      setFiles([]);
+      setFieldErrors({
+        file: `Each file must be less than ${MAX_FILE_SIZE_MB}MB`,
+      });
+      setLocalError("");
+      return;
+    }
+
     setFiles(selectedFiles);
     setFieldErrors({});
     setLocalError("");
@@ -142,6 +158,10 @@ export default function UploadDocumentsModal({
                 fileError ? "rounded-[6px] border border-red-500 px-2 py-1" : ""
               }`}
             />
+
+            <p className="mt-1 text-[10px] text-[#94A3B8]">
+              Max {MAX_FILE_SIZE_MB}MB per file
+            </p>
 
             {fileError ? (
               <p className="mt-1 text-[11px] font-semibold text-red-600">{fileError}</p>

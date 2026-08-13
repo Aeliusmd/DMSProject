@@ -134,7 +134,6 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     recNumber: "REC number",
     orderRef: "Order reference",
     fullAddress: "Full address",
-    documentName: "Document name",
     prepaymentMemo: "Prepayment memo",
     custodianMemo: "Custodian memo",
     xrayMemo: "X-Ray memo",
@@ -195,10 +194,6 @@ export function validateNewOrderForm(data, fileErrors = {}) {
       errors[paidField] = "Enter a valid amount";
     }
   });
-
-  if (data.documentName && !data.additionalDocumentFile) {
-    errors.additionalDocumentFile = "Please choose a document file";
-  }
 
   if (fileErrors.subpoenaFile) {
     errors.subpoenaFile = fileErrors.subpoenaFile;

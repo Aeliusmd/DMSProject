@@ -92,6 +92,18 @@ export default function ScanMedicalRecordsPage() {
 
   const isCnrOrder = Boolean(order?.certificateNoRecords);
 
+  const MAX_FILE_SIZE_MB = 50;
+
+  const clearSelectedFile = (recordType) => {
+    setSelectedFiles((prev) => {
+      const next = { ...prev };
+      delete next[recordType];
+      return next;
+    });
+    const input = fileInputRefs.current[recordType];
+    if (input) input.value = "";
+  };
+
   const validateAndSetFile = (recordType, file) => {
     setError("");
     setSuccessMessage("");
@@ -99,12 +111,14 @@ export default function ScanMedicalRecordsPage() {
     if (!file) return false;
 
     if (file.type !== "application/pdf") {
-      setSelectedFiles((prev) => {
-        const next = { ...prev };
-        delete next[recordType];
-        return next;
-      });
+      clearSelectedFile(recordType);
       setError("Only PDF files are allowed.");
+      return false;
+    }
+
+    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+      clearSelectedFile(recordType);
+      setError(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
       return false;
     }
 
@@ -482,6 +496,9 @@ export default function ScanMedicalRecordsPage() {
                     >
                       <p className="text-[11px] font-medium text-[#334155]">
                         Drop PDF here
+                      </p>
+                      <p className="mt-0.5 text-[10px] text-[#94A3B8]">
+                        Max {MAX_FILE_SIZE_MB}MB
                       </p>
                       <p className="mt-0.5 text-[10px] text-[#94A3B8]">or</p>
                       <button

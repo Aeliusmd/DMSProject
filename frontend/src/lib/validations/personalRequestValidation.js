@@ -6,6 +6,34 @@ import {
 const MM_DD_YYYY = /^(0[1-9]|1[0-2])\/(0[1-9]|[12]\d|3[01])\/\d{4}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DRIVER_LICENSE_PATTERN = /^[A-Za-z0-9-]{4,20}$/;
+const DRIVER_LICENSE_MAX_MB = 10;
+const DRIVER_LICENSE_MIME_TYPES = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+];
+
+export function getDriverLicenseFileError(file) {
+  if (!file) return "Upload a copy of your driver's license";
+
+  const name = String(file.name || "").toLowerCase();
+  const typeOk =
+    DRIVER_LICENSE_MIME_TYPES.includes(file.type) ||
+    name.endsWith(".pdf") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".png");
+
+  if (!typeOk) {
+    return "Driver's license must be a PDF, JPG, or PNG";
+  }
+
+  if (file.size > DRIVER_LICENSE_MAX_MB * 1024 * 1024) {
+    return `File size must be less than ${DRIVER_LICENSE_MAX_MB}MB`;
+  }
+
+  return "";
+}
 
 export const RECORD_TYPE_OPTIONS = [
   { id: "medical", label: "Medical Records" },
@@ -155,6 +183,9 @@ export function validatePersonalRequestForm(data, { emailVerified = false } = {}
 
   if (!data.driverLicenseFile) {
     errors.driverLicenseFile = "Upload a copy of your driver's license";
+  } else {
+    const fileError = getDriverLicenseFileError(data.driverLicenseFile);
+    if (fileError) errors.driverLicenseFile = fileError;
   }
 
   return errors;

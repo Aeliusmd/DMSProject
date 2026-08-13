@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { createOrderNote } from "@/lib/orders/orderApi";
-import { validateNoteForm } from "@/lib/orders/orderNoteUtils";
+import {
+  getNoteAttachmentError,
+  validateNoteForm,
+} from "@/lib/orders/orderNoteUtils";
 import OrderNoteFormFields from "@/components/orders/OrderNoteFormFields";
 import { applyApiFieldErrors, getApiErrorMessage, hasValidationErrors } from "@/lib/apiErrorUtils";
 
@@ -56,6 +59,24 @@ export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
       delete next[field];
       return next;
     });
+  };
+
+  const handleAttachmentChange = (file) => {
+    if (!file) {
+      setAttachment(null);
+      clearError("attachment");
+      return;
+    }
+
+    const attachmentError = getNoteAttachmentError(file);
+    if (attachmentError) {
+      setAttachment(null);
+      setErrors((prev) => ({ ...prev, attachment: attachmentError }));
+      return;
+    }
+
+    setAttachment(file);
+    clearError("attachment");
   };
 
   const handleSave = async () => {
@@ -117,10 +138,7 @@ export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
               setCallbackDate(value);
               clearError("callbackDate");
             }}
-            onAttachmentChange={(file) => {
-              setAttachment(file);
-              clearError("attachment");
-            }}
+            onAttachmentChange={handleAttachmentChange}
           />
 
           <div className="mt-4">

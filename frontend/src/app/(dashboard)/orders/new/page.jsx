@@ -178,6 +178,10 @@ const initialFormData = {
   xrayMemo: "",
 };
 
+function isOrderInactiveStatus(status) {
+  return status === "Cancelled" || status === "Deleted";
+}
+
 /** Form fields typically filled from subpoena extraction — cleared when subpoena is removed. */
 const SUBPOENA_EXTRACTED_FIELD_KEYS = [
   "orderNumber",
@@ -1382,6 +1386,8 @@ function NewOrderPageContent() {
   );
 
   const hasValidationErrors = Object.values(errors).some(Boolean);
+  const isOrderReadOnly =
+    isEditMode && isOrderInactiveStatus(formData.status);
 
   const syncDoctorFromForm = async (data, options = {}) => {
     const facilityId = `${data.facility || ""}`.trim();
@@ -1573,6 +1579,7 @@ function NewOrderPageContent() {
   };
 
   const handleFacilityInput = (facilityName) => {
+    if (isOrderReadOnly) return;
     clearCommittedFacility();
     setExtractionMeta((prev) => ({
       ...prev,
@@ -1596,6 +1603,7 @@ function NewOrderPageContent() {
   };
 
   const handleFacilitySelect = (facility) => {
+    if (isOrderReadOnly) return;
     const newFacilityId = String(facility.id);
     const prevFacilityId = `${formDataRef.current.facility || ""}`.trim();
     const selectedFacilityName = facility.facility || facility.facilityName || "";
@@ -1631,6 +1639,7 @@ function NewOrderPageContent() {
   };
 
   const handleFacilityCommit = (typedName = "") => {
+    if (isOrderReadOnly) return;
     const trimmedName = `${typedName || formDataRef.current.facilityName || ""}`.trim();
 
     if (!trimmedName) {
@@ -1768,6 +1777,7 @@ function NewOrderPageContent() {
   };
 
   const handlePaymentValuesChange = (updates) => {
+    if (isOrderReadOnly) return;
     setFormData((prev) =>
       syncPaymentDueFields(
         {
@@ -1780,6 +1790,7 @@ function NewOrderPageContent() {
   };
 
   const handleChange = (e) => {
+    if (isOrderReadOnly) return;
     const { name, value, type, checked } = e.target;
 
     if (name === "recordTypes" && value && typeof value === "object") {
@@ -1842,6 +1853,7 @@ function NewOrderPageContent() {
   };
 
   const handleProviderInput = (companyName) => {
+    if (isOrderReadOnly) return;
     setExtractionMeta((prev) => ({ ...prev, providerName: "" }));
     setFormData((prev) => ({
       ...prev,
@@ -1858,6 +1870,7 @@ function NewOrderPageContent() {
   };
 
   const handleProviderSelect = (provider) => {
+    if (isOrderReadOnly) return;
     setFormData((prev) => ({
       ...prev,
       providerId: String(provider.id),
@@ -1873,6 +1886,7 @@ function NewOrderPageContent() {
   };
 
   const handleFileChange = async (e, fieldName) => {
+    if (isOrderReadOnly) return;
     const file = e.target.files?.[0] || null;
     // Allow selecting the same file again after remove/replace.
     e.target.value = "";
@@ -1882,11 +1896,15 @@ function NewOrderPageContent() {
     });
 
     if (error) {
+      // Reject oversize/invalid files: do not keep them or load preview.
       setFormData((prev) => ({
         ...prev,
-        // Don't keep an invalid non-PDF as the selected subpoena.
-        ...(fieldName === "subpoenaFile" ? { [fieldName]: null } : { [fieldName]: file }),
+        [fieldName]: null,
       }));
+      if (fieldName === "subpoenaFile") {
+        setExtractError("");
+        setExtractingSubpoena(false);
+      }
       setFileErrors((prev) => ({
         ...prev,
         [fieldName]: error,
@@ -1969,6 +1987,7 @@ function NewOrderPageContent() {
   };
 
   const handleRemoveSelectedFile = (fieldName) => {
+    if (isOrderReadOnly) return;
     setFormData((prev) => ({
       ...prev,
       [fieldName]: null,
@@ -2036,10 +2055,12 @@ function NewOrderPageContent() {
   };
 
   const requestRemoveSubpoena = () => {
+    if (isOrderReadOnly) return;
     setSubpoenaRemoveModal({ open: true, removing: false });
   };
 
   const handleRemoveExistingDocument = async (documentId) => {
+    if (isOrderReadOnly) return;
     if (!isEditMode || !orderId) {
       setFormData((prev) => ({
         ...prev,
@@ -2082,6 +2103,7 @@ function NewOrderPageContent() {
   };
 
   const handleSaveOrder = async () => {
+    if (isOrderReadOnly) return;
     setSubmitAttempted(true);
     setSaveError("");
     setApiFieldErrors({});
@@ -2219,24 +2241,34 @@ function NewOrderPageContent() {
         <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
-              {isEditMode ? "Edit Order" : "New Order"}
+              {isOrderReadOnly
+                ? "View Order"
+                : isEditMode
+                  ? "Edit Order"
+                  : "New Order"}
             </h1>
 
             <p className="mt-[4px] text-[13px] text-[#64748B]">
-              {isEditMode
-                ? `Editing existing order ${formData.orderNumber || orderId}`
-                : formData.subpoenaFile
-                ? "Create a new DMS order with attached subpoena"
-                : "Create a new DMS order with all required information"}
+              {isOrderReadOnly
+                ? `This order is ${String(formData.status || "").toLowerCase()} and cannot be edited`
+                : isEditMode
+                  ? `Editing existing order ${formData.orderNumber || orderId}`
+                  : formData.subpoenaFile
+                    ? "Create a new DMS order with attached subpoena"
+                    : "Create a new DMS order with all required information"}
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {isEditMode && (
+            {isOrderReadOnly ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-[#FEE2E2] px-4 py-2 text-[12px] font-semibold text-[#B91C1C]">
+                {formData.status || "Cancelled"} — Read only
+              </span>
+            ) : isEditMode ? (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#FFF7ED] px-4 py-2 text-[12px] font-semibold text-[#EA580C]">
                 Editing Order #{formData.orderNumber || orderId}
               </span>
-            )}
+            ) : null}
 
             {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
               <span className="inline-flex items-center gap-2 rounded-full bg-[#E6F7FA] px-4 py-2 text-[12px] font-semibold text-[#007F96]">
@@ -2254,6 +2286,22 @@ function NewOrderPageContent() {
             </button>
           </div>
         </div>
+
+        {isOrderReadOnly && (
+          <div className="shrink-0 rounded-[8px] border border-[#FECACA] bg-[#FEF2F2] px-3 py-3 text-[12px] text-[#991B1B]">
+            <p className="font-semibold">
+              Order #{formData.orderNumber || orderId} is {formData.status || "Cancelled"}
+            </p>
+            {formData.cancelReason ? (
+              <p className="mt-1 text-[11px] leading-relaxed text-[#B91C1C]">
+                Reason: {formData.cancelReason}
+              </p>
+            ) : null}
+            <p className="mt-1 text-[11px] text-[#B91C1C]">
+              Recover the order from the orders list to make changes.
+            </p>
+          </div>
+        )}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-stretch">
           {(formData.subpoenaFile || formData.subpoenaUrl || formData.subpoenaStoragePath) && (
@@ -2283,29 +2331,39 @@ function NewOrderPageContent() {
             expanded={expandedPanels.order}
             onToggle={() => togglePanel("order")}
           >
-            <OrderDetailsForm
-              formData={formData}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              getError={getError}
-              onFileChange={handleFileChange}
-              onRemoveFile={handleRemoveSelectedFile}
-              onRemoveExistingDocument={handleRemoveExistingDocument}
-              onRemoveExistingSubpoena={requestRemoveSubpoena}
-              submitAttempted={submitAttempted}
-              extractingSubpoena={extractingSubpoena}
-              extractError={extractError}
-              extractionMeta={extractionMeta}
-              facilityProfileIncomplete={facilityProfileIncomplete}
-              facilityCreated={facilityCreated}
-              resolvingFacility={resolvingFacility}
-              onFacilityInput={handleFacilityInput}
-              onFacilitySelect={handleFacilitySelect}
-              onFacilityBlur={handleFacilityBlur}
-              onFacilityCommit={handleFacilityCommit}
-              returnToOrderPath={returnToOrderPath}
-              onBeforeFacilityProfileNavigate={persistOrderDraft}
-            />
+            <fieldset
+              disabled={isOrderReadOnly}
+              className="min-w-0 border-0 p-0 disabled:[&_button]:cursor-not-allowed"
+            >
+              <OrderDetailsForm
+                formData={formData}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                getError={getError}
+                onFileChange={isOrderReadOnly ? undefined : handleFileChange}
+                onRemoveFile={isOrderReadOnly ? undefined : handleRemoveSelectedFile}
+                onRemoveExistingDocument={
+                  isOrderReadOnly ? undefined : handleRemoveExistingDocument
+                }
+                onRemoveExistingSubpoena={
+                  isOrderReadOnly ? undefined : requestRemoveSubpoena
+                }
+                submitAttempted={submitAttempted}
+                extractingSubpoena={extractingSubpoena}
+                extractError={extractError}
+                extractionMeta={extractionMeta}
+                facilityProfileIncomplete={facilityProfileIncomplete}
+                facilityCreated={facilityCreated}
+                resolvingFacility={resolvingFacility}
+                onFacilityInput={handleFacilityInput}
+                onFacilitySelect={handleFacilitySelect}
+                onFacilityBlur={handleFacilityBlur}
+                onFacilityCommit={handleFacilityCommit}
+                returnToOrderPath={returnToOrderPath}
+                onBeforeFacilityProfileNavigate={persistOrderDraft}
+                readOnly={isOrderReadOnly}
+              />
+            </fieldset>
           </CollapsibleOrderPanel>
 
           <CollapsibleOrderPanel
@@ -2315,21 +2373,27 @@ function NewOrderPageContent() {
             expanded={expandedPanels.serve}
             onToggle={() => togglePanel("serve")}
           >
-            <ServeInfoForm
-              formData={formData}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              getError={getError}
-              onProviderInput={handleProviderInput}
-              onProviderSelect={handleProviderSelect}
-              onProviderBlur={handleProviderBlur}
-              extractionMeta={extractionMeta}
-              missingDefaultDoctor={missingDefaultDoctor}
-              doctorCreated={doctorCreated}
-              resolvingDoctor={resolvingDoctor}
-              returnToOrderPath={returnToOrderPath}
-              onBeforeFacilityProfileNavigate={persistOrderDraft}
-            />
+            <fieldset
+              disabled={isOrderReadOnly}
+              className="min-w-0 border-0 p-0 disabled:[&_button]:cursor-not-allowed"
+            >
+              <ServeInfoForm
+                formData={formData}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                getError={getError}
+                onProviderInput={handleProviderInput}
+                onProviderSelect={handleProviderSelect}
+                onProviderBlur={handleProviderBlur}
+                extractionMeta={extractionMeta}
+                missingDefaultDoctor={missingDefaultDoctor}
+                doctorCreated={doctorCreated}
+                resolvingDoctor={resolvingDoctor}
+                returnToOrderPath={returnToOrderPath}
+                onBeforeFacilityProfileNavigate={persistOrderDraft}
+                readOnly={isOrderReadOnly}
+              />
+            </fieldset>
           </CollapsibleOrderPanel>
 
           <CollapsibleOrderPanel
@@ -2339,35 +2403,63 @@ function NewOrderPageContent() {
             expanded={expandedPanels.payment}
             onToggle={() => togglePanel("payment")}
           >
-            <PaymentForm
-              formData={formData}
-              onChange={handleChange}
-              onBlur={handleBlur}
-              getError={getError}
-              onValuesChange={handlePaymentValuesChange}
-            />
+            <fieldset
+              disabled={isOrderReadOnly}
+              className="min-w-0 border-0 p-0 disabled:[&_button]:cursor-not-allowed"
+            >
+              <PaymentForm
+                formData={formData}
+                onChange={handleChange}
+                onBlur={handleBlur}
+                getError={getError}
+                onValuesChange={handlePaymentValuesChange}
+                readOnly={isOrderReadOnly}
+              />
+            </fieldset>
           </CollapsibleOrderPanel>
         </div>
 
-        <OrderSaveActionBar
-          onSave={handleSaveOrder}
-          disabled={
-            (isEditMode ? hasValidationErrors : hasImmediateRequiredErrors) ||
-            saving ||
-            facilityProfileIncomplete ||
-            missingDefaultDoctor ||
-            resolvingFacility ||
-            resolvingDoctor
-          }
-          label={
-            saving
-              ? "Saving..."
-              : isEditMode
-              ? "Update Order"
-              : "Save Order"
-          }
-          saveError={saveError}
-        />
+        {isOrderReadOnly ? (
+          <section className="shrink-0 rounded-[12px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="max-w-[720px] text-[11px] leading-[16px] text-[#64748B]">
+                This order is read-only. Recover it from the orders list if you need to
+                make changes.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push(resolveListPath(formData.creationSource))}
+                className="flex h-[44px] w-full shrink-0 items-center justify-center gap-2 rounded-[8px] bg-[#0097B2] px-6 text-[13px] font-semibold text-white shadow-sm transition hover:bg-[#0086A0] sm:w-auto sm:min-w-[220px]"
+              >
+                {resolveListPath(formData.creationSource) === "/personal-orders"
+                  ? "Back to Personal Orders"
+                  : resolveListPath(formData.creationSource) === "/company-orders"
+                    ? "Back to Company Orders"
+                    : "Back to Orders"}
+              </button>
+            </div>
+          </section>
+        ) : (
+          <OrderSaveActionBar
+            onSave={handleSaveOrder}
+            disabled={
+              (isEditMode ? hasValidationErrors : hasImmediateRequiredErrors) ||
+              saving ||
+              facilityProfileIncomplete ||
+              missingDefaultDoctor ||
+              resolvingFacility ||
+              resolvingDoctor
+            }
+            label={
+              saving
+                ? "Saving..."
+                : isEditMode
+                  ? "Update Order"
+                  : "Save Order"
+            }
+            saveError={saveError}
+          />
+        )}
       </div>
 
       <SubpoenaExtractionOverlay open={extractingSubpoena} />
@@ -2412,6 +2504,7 @@ function OrderDetailsForm({
   onFacilityCommit,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  readOnly = false,
 }) {
   const hasRequiredErrors =
     getError("facility") ||
@@ -2649,17 +2742,19 @@ function OrderDetailsForm({
 
       <Divider />
 
-      <FileInput
-        title="Upload Subpoena"
-        onChange={(e) => onFileChange(e, "subpoenaFile")}
-        error={getError("subpoenaFile")}
-        accept=".pdf,application/pdf"
-        statusText={
-          formData.subpoenaFile || formData.subpoenaUrl
-            ? "Choose File again will replace the existing document"
-            : "PDF only"
-        }
-      />
+      {!readOnly ? (
+        <FileInput
+          title="Upload Subpoena"
+          onChange={(e) => onFileChange(e, "subpoenaFile")}
+          error={getError("subpoenaFile")}
+          accept=".pdf,application/pdf"
+          statusText={
+            formData.subpoenaFile || formData.subpoenaUrl
+              ? "Choose File again will replace the existing document"
+              : "PDF only"
+          }
+        />
+      ) : null}
 
       {formData.subpoenaFile ? (
         <SelectedFileCard
@@ -2669,7 +2764,7 @@ function OrderDetailsForm({
               : "Selected subpoena"
           }
           fileName={formData.subpoenaFile.name}
-          onRemove={() => onRemoveExistingSubpoena?.()}
+          onRemove={readOnly ? undefined : () => onRemoveExistingSubpoena?.()}
         />
       ) : null}
 
@@ -2688,25 +2783,18 @@ function OrderDetailsForm({
           label="Current subpoena"
           name={subpoenaFileName(formData.subpoenaStoragePath)}
           href={toFileUrl(formData.subpoenaUrl)}
-          onRemove={() => onRemoveExistingSubpoena?.()}
+          onRemove={
+            readOnly ? undefined : () => onRemoveExistingSubpoena?.()
+          }
         />
       )}
 
       <div>
         <h3 className="mb-3 text-[13px] font-semibold text-[#111827]">
-          Upload Additional Document
+          {readOnly ? "Additional Documents" : "Upload Additional Document"}
         </h3>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
-          <NewOrderField
-            name="documentName"
-            value={formData.documentName}
-            onChange={onChange}
-            onBlur={onBlur}
-            placeholder="Document Name"
-            error={getError("documentName")}
-          />
-
+        {!readOnly ? (
           <FileInput
             compact
             onChange={(e) => onFileChange(e, "additionalDocumentFile")}
@@ -2719,14 +2807,16 @@ function OrderDetailsForm({
                   : "No file chosen"
             }
           />
-        </div>
+        ) : null}
 
         {formData.additionalDocumentFile ? (
           <div className="mt-3">
             <SelectedFileCard
               label="Selected document (will be added on save)"
               fileName={formData.additionalDocumentFile.name}
-              onRemove={() => onRemoveFile?.("additionalDocumentFile")}
+              onRemove={
+                readOnly ? undefined : () => onRemoveFile?.("additionalDocumentFile")
+              }
             />
           </div>
         ) : null}
@@ -2743,7 +2833,11 @@ function OrderDetailsForm({
                 label={doc.documentName || "Document"}
                 name={doc.originalFileName}
                 href={toFileUrl(doc.url)}
-                onRemove={() => onRemoveExistingDocument?.(doc.id)}
+                onRemove={
+                  readOnly
+                    ? undefined
+                    : () => onRemoveExistingDocument?.(doc.id)
+                }
               />
             ))}
           </div>
@@ -2788,6 +2882,7 @@ function ServeInfoForm({
   resolvingDoctor = false,
   returnToOrderPath = "",
   onBeforeFacilityProfileNavigate,
+  readOnly = false,
 }) {
   return (
     <div className="space-y-5">
@@ -2805,6 +2900,7 @@ function ServeInfoForm({
         required
         error={getError("orderNumber")}
         maxLength={50}
+        disabled={readOnly}
       />
 
       <NewOrderField
@@ -2814,6 +2910,7 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         placeholder="Enter REC number"
+        disabled={readOnly}
       />
 
       <Divider />
@@ -2821,12 +2918,14 @@ function ServeInfoForm({
       <div className="flex items-center justify-between">
         <h3 className="text-[13px] font-semibold text-[#111827]">Company</h3>
 
-        <button
-          type="button"
-          className="text-[11px] font-semibold text-[#0097B2]"
-        >
-          clear
-        </button>
+        {!readOnly ? (
+          <button
+            type="button"
+            className="text-[11px] font-semibold text-[#0097B2]"
+          >
+            clear
+          </button>
+        ) : null}
       </div>
 
       <ProviderSearchField
@@ -3141,6 +3240,7 @@ function PaymentForm({
   onBlur,
   getError,
   onValuesChange,
+  readOnly = false,
 }) {
   const invoiceFees = formData.invoiceFees;
   const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
@@ -3172,15 +3272,17 @@ function PaymentForm({
         checkDisplayValue={
           isPersonalPortalOrder ? formData.prepaymentCheck || "" : null
         }
-        checkReadOnly={isPersonalPortalOrder}
+        checkReadOnly={readOnly || isPersonalPortalOrder}
+        fieldsReadOnly={readOnly}
+        paidReadOnly={readOnly}
       />
 
       <PaymentChargeCard
         title="Xray Charge"
         paidAmount={formData.xrayPaid}
         showPaidField
-        paidReadOnly={false}
-        fieldsReadOnly={false}
+        paidReadOnly={readOnly}
+        fieldsReadOnly={readOnly}
         autoDueOnPaidChange
         capPaidToDue
         paymentType="xray"
@@ -3329,13 +3431,15 @@ function SelectedFileCard({ label, fileName, onRemove }) {
         ) : null}
       </span>
 
-      <button
-        type="button"
-        onClick={onRemove}
-        className="shrink-0 rounded-[6px] border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600 transition hover:bg-red-100"
-      >
-        Remove
-      </button>
+      {onRemove ? (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="shrink-0 rounded-[6px] border border-red-200 bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-600 transition hover:bg-red-100"
+        >
+          Remove
+        </button>
+      ) : null}
     </div>
   );
 }

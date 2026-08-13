@@ -248,6 +248,20 @@ function resolveOrderWriteOffState(row, invoiceRow, xrayRow) {
   };
 }
 
+function assertOrderEditable(existing) {
+  if (!existing) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  if (existing.status === "Cancelled") {
+    throw new ApiError(400, "Cannot update a cancelled order");
+  }
+
+  if (existing.status === "Deleted") {
+    throw new ApiError(400, "Cannot update a deleted order");
+  }
+}
+
 function resolveOrderFlags(data, hasSubpoenaFile) {
   return {
     hasSubpoena: hasSubpoenaFile ? 1 : 0,
@@ -1093,6 +1107,10 @@ function mapOrderDetail(
     id: row.id,
     orderNumber: row.order_number || "",
     status: writeOffState.status,
+    statusBeforeInactive: row.status_before_inactive || "",
+    cancelReason: row.cancel_reason || "",
+    cancelledAt: row.cancelled_at || null,
+    deletedAt: row.deleted_at || null,
     isSubpoena: readHasSubpoena(row),
     isRecords: hasAnyRecordsRequested(orderRecords),
     isWriteOffs: writeOffState.isWriteOffs,
@@ -1632,7 +1650,8 @@ async function resolvePersonalPortalPrepaymentReceipt(orderId, payments = []) {
 }
 
 async function getOrderById(id) {
-  const order = await Order.findById(id);
+  // Include Cancelled/Deleted so staff can open them in read-only view.
+  const order = await Order.findByIdRaw(id);
 
   if (!order) {
     throw new ApiError(404, "Order not found");
@@ -2511,10 +2530,7 @@ async function autoCreateOrdersFromBatch({ childIds = [], actorId }) {
 
 async function updateOrderFacility(id, data, actorId) {
   const existing = await Order.findById(id);
-
-  if (!existing) {
-    throw new ApiError(404, "Order not found");
-  }
+  assertOrderEditable(existing);
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -2562,10 +2578,7 @@ async function updateOrder(id, data, actorId, files) {
   assertValidCnrDeliveryDate(data);
 
   const existing = await Order.findById(id);
-
-  if (!existing) {
-    throw new ApiError(404, "Order not found");
-  }
+  assertOrderEditable(existing);
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -2956,9 +2969,7 @@ async function deleteOrderAdditionalDocument(orderId, documentId) {
   }
 
   const existing = await Order.findById(id);
-  if (!existing) {
-    throw new ApiError(404, "Order not found");
-  }
+  assertOrderEditable(existing);
 
   const deleted = await Order.softDeleteAdditionalDocument(id, docId);
   if (!deleted) {
@@ -2975,9 +2986,7 @@ async function removeOrderSubpoena(orderId) {
   }
 
   const existing = await Order.findById(id);
-  if (!existing) {
-    throw new ApiError(404, "Order not found");
-  }
+  assertOrderEditable(existing);
 
   await Order.clearSubpoena(id);
   return getOrderById(id);
