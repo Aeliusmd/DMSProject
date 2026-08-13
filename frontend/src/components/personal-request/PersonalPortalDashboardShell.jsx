@@ -1,20 +1,70 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import PersonalPortalSidebar from "@/components/personal-request/PersonalPortalSidebar";
 import useIsClient from "@/hooks/useIsClient";
 import { PORTAL_NAVIGATION_HIDDEN } from "@/lib/portalNavigationVisibility";
-import { getStoredPersonalUser } from "@/lib/personal-request/personalPortalAuthStorage";
+import {
+  clearPersonalAuth,
+  getStoredPersonalUser,
+} from "@/lib/personal-request/personalPortalAuthStorage";
+import {
+  getPersonalCurrentUser,
+  startPersonalAuthAutoRefresh,
+  stopPersonalAuthAutoRefresh,
+} from "@/lib/personal-request/personalPortalAuthApi";
 
 /** Same layout structure as CompanyPortalDashboardShell */
-export default function PersonalPortalDashboardShell({ children, title }) {
+export default function PersonalPortalDashboardShell({
+  children,
+  title,
+  requireAuth = true,
+}) {
+  const router = useRouter();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [sessionReady, setSessionReady] = useState(!requireAuth);
   const isClient = useIsClient();
   const user = isClient ? getStoredPersonalUser() : null;
   const displayName =
     user?.displayName ||
     `${user?.firstName || ""} ${user?.lastName || ""}`.trim() ||
     "Personal Portal";
+
+  useEffect(() => {
+    if (!requireAuth) return;
+
+    let isMounted = true;
+
+    async function verifySession() {
+      try {
+        await getPersonalCurrentUser();
+
+        if (isMounted) {
+          setSessionReady(true);
+          startPersonalAuthAutoRefresh();
+        }
+      } catch {
+        clearPersonalAuth();
+        router.replace("/personalrequest/login");
+      }
+    }
+
+    verifySession();
+
+    return () => {
+      isMounted = false;
+      stopPersonalAuthAutoRefresh();
+    };
+  }, [requireAuth, router]);
+
+  if (requireAuth && !sessionReady) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
+        <p className="text-[13px] text-[#64748B]">Checking session...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#111827]">

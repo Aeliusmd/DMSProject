@@ -1,5 +1,5 @@
 const configuredApiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000/api";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
 
 function normalizeApiBaseUrl(value) {
   const baseUrl = `${value || ""}`.trim().replace(/\/+$/, "");
@@ -17,4 +17,5 @@ function normalizeApiBaseUrl(value) {
   return baseUrl || "/api";
 }
 
+/** Same-origin `/api` is proxied to the Express backend via next.config rewrites. */
 export const API_BASE_URL = normalizeApiBaseUrl(configuredApiBaseUrl);

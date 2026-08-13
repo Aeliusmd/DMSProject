@@ -3,11 +3,12 @@ import {
   isNetworkError,
   NETWORK_UNAVAILABLE_MESSAGE,
 } from "@/lib/networkErrors";
+import { withCredentials } from "@/lib/auth/fetchCredentials";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   clearCompanyAuth,
-  getCompanyAccessToken,
-  getCompanyRefreshToken,
+  getCompanyAccessExpiresAt,
+  getStoredCompanyUser,
   setCompanyAuth,
 } from "./companyPortalAuthStorage";
 
@@ -21,18 +22,116 @@ async function parseResponse(response) {
 
 async function safeFetch(url, options) {
   try {
-    const headers = {
-      ...(API_BASE_URL.includes(".ngrok-free.")
-        ? { "ngrok-skip-browser-warning": "true" }
-        : {}),
-      ...(options?.headers || {}),
-    };
-    return await fetch(url, { ...options, headers });
+    return await fetch(url, withCredentials(options));
   } catch (error) {
     if (isNetworkError(error)) {
       throw new ApiRequestError(NETWORK_UNAVAILABLE_MESSAGE, 0);
     }
     throw error;
+  }
+}
+
+let refreshPromise = null;
+
+function refreshCompanyOnce() {
+  if (!refreshPromise) {
+    refreshPromise = refreshCompanyAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+
+  return refreshPromise;
+}
+
+const REFRESH_SKEW_MS = 60 * 1000;
+const ACTIVITY_WINDOW_MS = 15 * 60 * 1000;
+const INACTIVE_RECHECK_MS = 60 * 1000;
+const ACTIVITY_EVENTS = [
+  "mousedown",
+  "keydown",
+  "scroll",
+  "touchstart",
+  "click",
+];
+
+let refreshTimer = null;
+let activityListenersBound = false;
+let lastActivityAt = Date.now();
+
+function markActivity() {
+  lastActivityAt = Date.now();
+}
+
+async function autoRefreshTick() {
+  if (typeof window === "undefined") return;
+  if (!getStoredCompanyUser()) return;
+
+  const isActive = Date.now() - lastActivityAt <= ACTIVITY_WINDOW_MS;
+
+  if (isActive) {
+    try {
+      await refreshCompanyOnce();
+    } catch {
+      return;
+    }
+
+    return;
+  }
+
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(autoRefreshTick, INACTIVE_RECHECK_MS);
+}
+
+export function scheduleCompanyTokenRefresh() {
+  if (typeof window === "undefined") return;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+
+  if (!getStoredCompanyUser()) return;
+
+  const expiryMs = getCompanyAccessExpiresAt();
+  if (!expiryMs) return;
+
+  const delay = Math.max(0, expiryMs - Date.now() - REFRESH_SKEW_MS);
+  refreshTimer = setTimeout(autoRefreshTick, delay);
+}
+
+export function startCompanyAuthAutoRefresh() {
+  if (typeof window === "undefined") return;
+
+  if (!activityListenersBound) {
+    ACTIVITY_EVENTS.forEach((event) =>
+      window.addEventListener(event, markActivity, { passive: true })
+    );
+    activityListenersBound = true;
+  }
+
+  markActivity();
+  scheduleCompanyTokenRefresh();
+}
+
+export function stopCompanyAuthAutoRefresh() {
+  if (typeof window === "undefined") return;
+
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
+
+  if (activityListenersBound) {
+    ACTIVITY_EVENTS.forEach((event) =>
+      window.removeEventListener(event, markActivity)
+    );
+    activityListenersBound = false;
+  }
+}
+
+export async function tryRefreshCompanyAccessToken() {
+  try {
+    await refreshCompanyOnce();
+    return true;
+  } catch {
+    clearCompanyAuth();
+    return false;
   }
 }
 
@@ -59,43 +158,39 @@ async function request(path, options = {}) {
 }
 
 async function authRequest(path, options = {}) {
-  const accessToken = getCompanyAccessToken();
-
   const response = await safeFetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...(options.headers || {}),
     },
   });
 
   if (response.status === 401) {
-    const refreshed = await refreshCompanyAccessToken();
-    if (refreshed) {
-      const retryToken = getCompanyAccessToken();
-      const retry = await safeFetch(`${API_BASE_URL}${path}`, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          ...(retryToken ? { Authorization: `Bearer ${retryToken}` } : {}),
-          ...(options.headers || {}),
-        },
-      });
-
-      const retryPayload = await parseResponse(retry);
-      if (!retry.ok) {
-        throw new ApiRequestError(
-          retryPayload?.message || "Request failed",
-          retry.status,
-          retryPayload?.errors || null
-        );
-      }
-      return retryPayload;
+    try {
+      await refreshCompanyOnce();
+    } catch {
+      clearCompanyAuth();
+      throw new ApiRequestError("Session expired. Please sign in again.", 401);
     }
 
-    clearCompanyAuth();
-    throw new ApiRequestError("Session expired. Please sign in again.", 401);
+    const retry = await safeFetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+
+    const retryPayload = await parseResponse(retry);
+    if (!retry.ok) {
+      throw new ApiRequestError(
+        retryPayload?.message || "Request failed",
+        retry.status,
+        retryPayload?.errors || null
+      );
+    }
+    return retryPayload;
   }
 
   const payload = await parseResponse(response);
@@ -151,38 +246,30 @@ export async function resendCompanyTwoFactor(sessionToken) {
 }
 
 export async function refreshCompanyAccessToken() {
-  const refreshToken = getCompanyRefreshToken();
-  if (!refreshToken) return false;
+  const response = await request("/company-portal/auth/refresh", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 
-  try {
-    const response = await request("/company-portal/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refreshToken }),
-    });
+  const payload = response?.data || {};
+  setCompanyAuth({
+    user: payload.user,
+    accessExpiresAt: payload.accessExpiresAt,
+  });
 
-    const payload = response?.data || {};
-    setCompanyAuth({
-      accessToken: payload.accessToken,
-      refreshToken: payload.refreshToken || refreshToken,
-      user: payload.user,
-    });
-    return true;
-  } catch {
-    clearCompanyAuth();
-    return false;
-  }
+  scheduleCompanyTokenRefresh();
+
+  return payload;
 }
 
 export async function logoutCompany() {
-  const refreshToken = getCompanyRefreshToken();
+  stopCompanyAuthAutoRefresh();
 
   try {
-    if (refreshToken) {
-      await request("/company-portal/auth/logout", {
-        method: "POST",
-        body: JSON.stringify({ refreshToken }),
-      });
-    }
+    await request("/company-portal/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   } catch {
     // Always clear local session.
   } finally {
@@ -200,5 +287,9 @@ export async function getCompanyCurrentUser() {
 }
 
 export function saveCompanyAuthSession(payload) {
-  setCompanyAuth(payload);
+  setCompanyAuth({
+    user: payload.user,
+    accessExpiresAt: payload.accessExpiresAt,
+  });
+  startCompanyAuthAutoRefresh();
 }

@@ -6,7 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { createFacility } from "@/lib/facilities/facilityApi";
-import { linkCompanyOrderFacility } from "@/lib/orders/orderApi";
+import {
+  linkCompanyOrderFacility,
+  linkPersonalOrderFacility,
+  getPersonalOrderNewFacility,
+} from "@/lib/orders/orderApi";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   mapApiErrors,
@@ -53,6 +57,8 @@ function NewFacilityPageContent() {
   const searchParams = useSearchParams();
 
   const linkOrderId = searchParams.get("linkOrderId") || "";
+  const linkSource = searchParams.get("linkSource") || "company";
+  const isPersonalLink = linkSource === "personal";
   const returnToOrderPath = getSafeOrderReturnPath(searchParams.get("returnTo"));
 
   const [formData, setFormData] = useState(initialFormData);
@@ -65,6 +71,28 @@ function NewFacilityPageContent() {
     open: false,
     facilityId: "",
   });
+  const [linkBlocked, setLinkBlocked] = useState(false);
+
+  useEffect(() => {
+    if (!linkOrderId || !isPersonalLink) return undefined;
+    let active = true;
+    getPersonalOrderNewFacility(linkOrderId)
+      .then((data) => {
+        if (!active) return;
+        if (data?.personalPortalStatus === "no_facility") {
+          setLinkBlocked(true);
+          setSubmitError(
+            "This personal order was ended (No facility). Restore it to In Process before adding a facility."
+          );
+        }
+      })
+      .catch(() => {
+        // Non-blocking — create/link will still be validated by the API.
+      });
+    return () => {
+      active = false;
+    };
+  }, [linkOrderId, isPersonalLink]);
 
   useEffect(() => {
     const prefill = {
@@ -202,6 +230,13 @@ function NewFacilityPageContent() {
     setSubmitAttempted(true);
     setSubmitError("");
 
+    if (linkBlocked) {
+      setSubmitError(
+        "This personal order was ended (No facility). Restore it to In Process before adding a facility."
+      );
+      return;
+    }
+
     const validationErrors = validateFacilityForm(formData, managers);
     setErrors(validationErrors);
 
@@ -226,20 +261,33 @@ function NewFacilityPageContent() {
         officeManagers: managers,
       });
 
-      // When arriving from a company portal order whose facility was not in our
+      // When arriving from a portal order whose facility was not in our
       // system, link the newly created facility back to that order.
       if (linkOrderId && facility?.id) {
         try {
-          await linkCompanyOrderFacility(linkOrderId, facility.id);
+          if (isPersonalLink) {
+            await linkPersonalOrderFacility(linkOrderId, facility.id);
+          } else {
+            await linkCompanyOrderFacility(linkOrderId, facility.id);
+          }
         } catch (linkErr) {
           setSubmitError(
             linkErr?.message ||
-              "Facility created, but linking it to the order failed. Link it from Company Orders."
+              `Facility created, but linking it to the order failed. Link it from ${
+                isPersonalLink ? "Personal Orders" : "Company Orders"
+              }.`
           );
           setSaving(false);
           return;
         }
-        router.push("/company-orders");
+        if (returnToOrderPath) {
+          const separator = returnToOrderPath.includes("?") ? "&" : "?";
+          router.push(
+            `${returnToOrderPath}${separator}facilityRefresh=1&applyFacilityId=${encodeURIComponent(String(facility.id))}`
+          );
+          return;
+        }
+        router.push(isPersonalLink ? "/personal-orders" : "/company-orders");
         return;
       }
 

@@ -57,6 +57,28 @@ export function serializeFormForDraft(formData = {}) {
   return snapshot;
 }
 
+/** Personal portal: licence # and document flags come from personal_request_orders, not DMS orders. */
+export function mergePersonalPortalFieldsFromOrder(form = {}, order = {}) {
+  if (`${order.creationSource || ""}`.trim() !== "personal_portal") {
+    return form;
+  }
+
+  const license = `${order.driverLicenseNumber || order.driver_license_number || ""}`.trim();
+
+  return {
+    ...form,
+    driverLicenseNumber: license || `${form.driverLicenseNumber || ""}`.trim(),
+    hasDriverLicenseDocument: Boolean(
+      order.hasDriverLicenseDocument ?? form.hasDriverLicenseDocument
+    ),
+    hasPersonalDocument: Boolean(
+      order.hasPersonalDocument ??
+        order.hasDriverLicenseDocument ??
+        form.hasPersonalDocument
+    ),
+  };
+}
+
 export function hasDraftableOrderContent(formData = {}) {
   const data = formData || {};
 
@@ -209,6 +231,7 @@ export async function resolvePendingFacility({
   state = "",
   zip = "",
   zipCode = "",
+  allowCreate = true,
 } = {}) {
   const trimmedName = `${facilityName || ""}`.trim();
   const existingId = `${facilityId || ""}`.trim();
@@ -243,6 +266,15 @@ export async function resolvePendingFacility({
     return {
       facilityId: "",
       facilityName: "",
+      facilityCreated: false,
+      facilityProfileIncomplete: false,
+    };
+  }
+
+  if (!allowCreate) {
+    return {
+      facilityId: "",
+      facilityName: trimmedName,
       facilityCreated: false,
       facilityProfileIncomplete: false,
     };

@@ -85,12 +85,13 @@ export default function TwoFactorAuthModal({
       const payload = response?.data || {};
 
       saveSessionFn({
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken,
         user: payload.user,
+        accessExpiresAt: payload.accessExpiresAt,
       });
 
-      onSuccess?.();
+      // Allow personal portal login to await a "session verified" call
+      // before routing.
+      await Promise.resolve(onSuccess?.());
     } catch (requestError) {
       const { fieldErrors, message } = applyApiFieldErrors(requestError, {
         code: "otp",

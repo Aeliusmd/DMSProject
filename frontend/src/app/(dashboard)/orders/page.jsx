@@ -1,29 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import OrderStatsGrid from "@/components/orders/OrderStatsGrid";
 import OrderActionButton from "@/components/orders/OrderActionButton";
-import OrderFilterBar from "@/components/orders/OrderFilterBar";
+import OrderFilterBar, {
+  defaultOrderFilters,
+} from "@/components/orders/OrderFilterBar";
 import OrdersTable from "@/components/orders/OrdersTable";
 import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal";
+import {
+  isCompanyOrderSource,
+  isPersonalOrderSource,
+  toApiCreationSource,
+} from "@/lib/orders/orderFilterConstants";
 
 const BATCH_SCAN_FLASH_KEY = "dms.batchScanFlash";
 const BATCH_SCAN_FLASH_MS = 10000;
 
-const defaultFilters = {
-  facility: "",
-  company: "",
-  year: "",
-  period: "",
-  status: "",
-  search: "",
-};
-
 export default function OrdersPage() {
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
-  const [filters, setFilters] = useState(defaultFilters);
+  const [filters, setFilters] = useState(defaultOrderFilters);
   const [batchScanFlash, setBatchScanFlash] = useState(null);
+
+  const orderSource = filters.creationSource || "internal";
+  const companyPortalMode = isCompanyOrderSource(orderSource);
+  const personalMode = isPersonalOrderSource(orderSource);
+  const apiCreationSource = useMemo(
+    () => toApiCreationSource(orderSource) || null,
+    [orderSource]
+  );
 
   useEffect(() => {
     let message = "";
@@ -108,9 +114,21 @@ export default function OrdersPage() {
           </div>
         </section>
 
-        <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
+        <OrderFilterBar
+          filters={filters}
+          onFiltersChange={setFilters}
+          showOrderSourceFilter
+        />
 
-        <OrdersTable filters={filters} fitToWindow useServerPagination />
+        <OrdersTable
+          filters={filters}
+          fitToWindow
+          useServerPagination
+          creationSource={apiCreationSource}
+          companyPortalMode={companyPortalMode}
+          personalMode={personalMode}
+          listReturnTo="orders"
+        />
       </div>
 
       <ReminderNotesModal

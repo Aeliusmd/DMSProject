@@ -42,6 +42,8 @@ import {
   removeMedicalRecords,
   updateCompanyOrderStage,
   emailCompanyOrderRecords,
+  restoreCompanyOrderInProcess,
+  restorePersonalOrderInProcess,
 } from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
@@ -147,8 +149,17 @@ function getPersonalScanRecordsHref(order) {
 
 function resolveOrderListReturnTo(
   order = {},
-  { personalMode = false, companyPortalMode = false } = {}
+  { personalMode = false, companyPortalMode = false, listReturnTo = "" } = {}
 ) {
+  const preferred = `${listReturnTo || ""}`.trim().replace(/^\/+/, "");
+  if (
+    preferred === "orders" ||
+    preferred === "company-orders" ||
+    preferred === "personal-orders" ||
+    preferred === "reports"
+  ) {
+    return preferred;
+  }
   if (personalMode || order.creationSource === "personal_portal") {
     return "personal-orders";
   }
@@ -238,6 +249,41 @@ function IncompleteOrderIndicator({ missingFields = [] }) {
       </span>
     </span>
   );
+}
+
+function orderHasIncompleteRequiredFields(order = {}) {
+  const missing = Array.isArray(order.missingRequiredFields)
+    ? order.missingRequiredFields
+    : Array.isArray(order.missing_required_fields)
+      ? order.missing_required_fields
+      : [];
+
+  const hasDoctorName = Boolean(
+    `${order.doctor || order.specificDoctor || order.requestedTreatingDoctor || ""}`.trim()
+  );
+  const doctorUnresolved =
+    order.creationSource === "personal_portal" &&
+    Boolean(order.doctorNotInSystem) &&
+    hasDoctorName;
+
+  return (
+    Boolean(
+      order.hasIncompleteRequiredFields ?? order.has_incomplete_required_fields
+    ) ||
+    missing.length > 0 ||
+    doctorUnresolved
+  );
+}
+
+function buildIncompleteOrderTooltip(missingFields = []) {
+  const fields = missingFields.filter(Boolean);
+  return fields.length > 0
+    ? `Required fields are not completed: ${fields.join(", ")}`
+    : "Required fields are not completed";
+}
+
+function isPersonalOrderIncompleteDisplay(order, personalMode) {
+  return personalMode || order.creationSource === "personal_portal";
 }
 
 function openCnrTextModal(setModal, order, title, note = order?.cnrReason || "") {
@@ -656,7 +702,10 @@ function toRenderOrder(order, companyPortalMode = false) {
     autoProcessingStatus: order.autoProcessingStatus || null,
     companyPortalStatus: order.companyPortalStatus || null,
     companyPortalOrderId: order.companyPortalOrderId || null,
+    personalPortalStatus: order.personalPortalStatus || null,
     facilityNotInSystem: Boolean(order.facilityNotInSystem),
+    doctorNotInSystem: Boolean(order.doctorNotInSystem),
+    requestedTreatingDoctor: order.requestedTreatingDoctor || "",
     newFacilityRequest: order.newFacilityRequest || null,
     pendingFacilitySearchFee: Number(order.pendingFacilitySearchFee) || 0,
     companyPortalInvoiceSent: Boolean(order.companyPortalInvoiceSent),
@@ -700,6 +749,12 @@ function toRenderOrder(order, companyPortalMode = false) {
     dateRequested: order.dateRequested || "",
     dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
+    hasIncompleteRequiredFields: orderHasIncompleteRequiredFields(order),
+    missingRequiredFields: Array.isArray(order.missingRequiredFields)
+      ? order.missingRequiredFields
+      : Array.isArray(order.missing_required_fields)
+        ? order.missing_required_fields
+        : [],
     portalStatus: order.portalStatus || null,
     portalStatusLabel: order.portalStatusLabel || null,
   };
@@ -716,6 +771,7 @@ export default function OrdersTable({
   creationSource = null,
   companyPortalMode = false,
   personalMode = false,
+  listReturnTo = "",
 }) {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState(1);
@@ -731,6 +787,8 @@ export default function OrdersTable({
   const [selectedCopyLetterOrder, setSelectedCopyLetterOrder] = useState(null);
   const [selectedLogOrder, setSelectedLogOrder] = useState(null);
   const [facilityModalState, setFacilityModalState] = useState(null);
+  const [restoreInProcessOrder, setRestoreInProcessOrder] = useState(null);
+  const [restoringInProcess, setRestoringInProcess] = useState(false);
   const [selectedNoteListOrder, setSelectedNoteListOrder] = useState(null);
   const [selectedAddNoteOrder, setSelectedAddNoteOrder] = useState(null);
   const [selectedMedicalRecordsOrder, setSelectedMedicalRecordsOrder] =
@@ -796,7 +854,15 @@ export default function OrdersTable({
     createdTo: filters.createdTo || "",
     creationSource: personalMode
       ? "personal_portal"
-      : creationSource || filters.creationSource || "",
+      : (() => {
+          const raw = `${creationSource || filters.creationSource || ""}`
+            .trim()
+            .toLowerCase();
+          // "internal" is UI-only; API expects empty to exclude portal rows.
+          if (!raw || raw === "internal") return "";
+          if (raw === "company_portal" || raw === "personal_portal") return raw;
+          return "";
+        })(),
   };
 
   const sortDir =
@@ -1599,7 +1665,7 @@ export default function OrdersTable({
               <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
                 <th
                   className={`${
-                    companyPortalMode ? "w-[132px]" : "w-[90px]"
+                    companyPortalMode ? "w-[132px]" : personalMode ? "w-[118px]" : "w-[90px]"
                   } px-4 py-3`}
                 >
                   ID
@@ -1659,15 +1725,25 @@ export default function OrdersTable({
                   </td>
                 </tr>
               ) : (
-                currentOrders.map((order) => (
+                currentOrders.map((order) => {
+                  const incompleteRequired = orderHasIncompleteRequiredFields(order);
+                  const personalIncompletePrefix = isPersonalOrderIncompleteDisplay(
+                    order,
+                    personalMode
+                  );
+                  const incompleteTooltip = buildIncompleteOrderTooltip(
+                    order.missingRequiredFields
+                  );
+
+                  return (
                   <tr
                     key={order.dbId}
                     className={getOrderRowClassName(order.orderStatus)}
                   >
                     <td className="px-4 py-5 align-top">
                       <div className="w-full min-w-0">
-                        <div className="inline-flex items-start gap-1">
-                          {order.hasIncompleteRequiredFields && (
+                        <div className="inline-flex min-w-0 items-start gap-1">
+                          {incompleteRequired && !personalIncompletePrefix && (
                             <IncompleteOrderIndicator
                               missingFields={order.missingRequiredFields}
                             />
@@ -1677,28 +1753,50 @@ export default function OrdersTable({
                               returnTo: resolveOrderListReturnTo(order, {
                                 personalMode,
                                 companyPortalMode,
+                                listReturnTo,
                               }),
                             })}
-                            className="font-semibold text-[#007F96] hover:underline"
+                            className="min-w-0 font-semibold text-[#007F96] hover:underline"
+                            title={
+                              incompleteRequired ? incompleteTooltip : undefined
+                            }
                           >
-                            {order.id}
+                            {incompleteRequired && personalIncompletePrefix ? (
+                              <>
+                                <span
+                                  className="font-bold text-red-600"
+                                  aria-hidden="true"
+                                >
+                                  !{" "}
+                                </span>
+                                <span className="break-all">{order.id}</span>
+                              </>
+                            ) : (
+                              order.id
+                            )}
                           </Link>
                         </div>
 
-                        {order.creationSource === "auto" && (
-                          <p className="mt-1 text-[10px] italic text-[#64748B]">
-                            {order.autoProcessingStatus === "processed"
-                              ? "Processed"
-                              : "Unprocessed"}
-                          </p>
-                        )}
+                        {order.creationSource === "auto" &&
+                          order.hasIncompleteRequiredFields && (
+                            <p className="mt-1 text-[10px] italic text-[#64748B]">
+                              Unprocessed
+                            </p>
+                          )}
+                        {order.creationSource === "auto" &&
+                          !order.hasIncompleteRequiredFields && (
+                            <p className="mt-1 text-[10px] italic text-[#0F766E]">
+                              Processed
+                            </p>
+                          )}
                         {order.creationSource === "personal_portal" && (
                           <p className="mt-1 text-[10px] font-medium text-[#0097B2]">
                             Personal Portal
                           </p>
                         )}
 
-                        {companyPortalMode && order.facilityNotInSystem && (
+                        {(companyPortalMode || personalMode) &&
+                          order.facilityNotInSystem && (
                           <div className="mt-1.5 w-full space-y-1">
                             <div className="flex w-full items-start gap-1 rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1">
                               <span
@@ -1740,11 +1838,22 @@ export default function OrdersTable({
                             </div>
                           </div>
                         )}
-                        {companyPortalMode &&
-                          order.companyPortalStatus === "No facility" && (
-                            <p className="mt-1.5 w-full rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1 text-[10px] font-medium leading-snug text-red-600">
-                              No facility — order ended
-                            </p>
+                        {((companyPortalMode &&
+                          order.companyPortalStatus === "No facility") ||
+                          (personalMode &&
+                            order.personalPortalStatus === "no_facility")) && (
+                            <div className="mt-1.5 w-full space-y-1">
+                              <p className="w-full rounded-[6px] border border-red-200 bg-red-50 px-1.5 py-1 text-[10px] font-medium leading-snug text-red-600">
+                                No facility — order ended
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setRestoreInProcessOrder(order)}
+                                className="text-left text-[10px] font-semibold text-[#007F96] hover:underline"
+                              >
+                                Back to In Process
+                              </button>
+                            </div>
                           )}
 
                         {order.year && (
@@ -1913,7 +2022,11 @@ export default function OrdersTable({
                             <WorkflowStageItem
                               key={stage.key || stage.label}
                               stage={stage}
-                              href={getWorkflowStageHref(stage, order)}
+                              href={getWorkflowStageHref(stage, order, {
+                                listReturnTo,
+                                personalMode,
+                                companyPortalMode,
+                              })}
                               onAdvance={
                                 stage.canAdvance
                                   ? () =>
@@ -2031,6 +2144,12 @@ export default function OrdersTable({
                           openCnrTextModal(setCnrTextModal, order, "Reason")
                         }
                         allowStandardInvoice={true}
+                        blockInvoiceCreate={
+                          (companyPortalMode &&
+                            order.companyPortalStatus === "No facility") ||
+                          (personalMode &&
+                            order.personalPortalStatus === "no_facility")
+                        }
                         providerEmail={
                           order.providerEmail ||
                           order.invoice?.providerEmail ||
@@ -2154,6 +2273,7 @@ export default function OrdersTable({
                                 returnTo: resolveOrderListReturnTo(order, {
                                   personalMode,
                                   companyPortalMode,
+                                  listReturnTo,
                                 }),
                               })}
                               className="font-semibold text-red-500 hover:underline"
@@ -2235,7 +2355,8 @@ export default function OrdersTable({
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -2389,6 +2510,7 @@ export default function OrdersTable({
         open={Boolean(facilityModalState?.order)}
         order={facilityModalState?.order}
         startAtConfirm={Boolean(facilityModalState?.startAtConfirm)}
+        portalType={personalMode ? "personal" : "company"}
         onClose={() => setFacilityModalState(null)}
         onNoFacility={() => fetchOrders({ silent: true, force: true })}
       />
@@ -2490,6 +2612,39 @@ export default function OrdersTable({
             notes,
           });
           await fetchOrders({ silent: true });
+        }}
+      />
+
+      <ConfirmModal
+        open={Boolean(restoreInProcessOrder)}
+        title="Restore to In Process?"
+        message="Do you really want to change this order status back to In Process? Invoice and facility tooling will be available again."
+        variant="warning"
+        confirmLabel={restoringInProcess ? "Restoring..." : "Yes, restore"}
+        cancelLabel="Cancel"
+        confirmDisabled={restoringInProcess}
+        onCancel={() => {
+          if (restoringInProcess) return;
+          setRestoreInProcessOrder(null);
+        }}
+        onConfirm={async () => {
+          if (!restoreInProcessOrder?.dbId || restoringInProcess) return;
+          setRestoringInProcess(true);
+          try {
+            if (personalMode) {
+              await restorePersonalOrderInProcess(restoreInProcessOrder.dbId);
+            } else {
+              await restoreCompanyOrderInProcess(restoreInProcessOrder.dbId);
+            }
+            setRestoreInProcessOrder(null);
+            await fetchOrders({ silent: true, force: true });
+          } catch (err) {
+            setError(
+              getApiErrorMessage(err, "Failed to restore order to In Process")
+            );
+          } finally {
+            setRestoringInProcess(false);
+          }
         }}
       />
 
@@ -2693,7 +2848,7 @@ function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
   );
 }
 
-function getWorkflowStageHref(stage, order) {
+function getWorkflowStageHref(stage, order, options = {}) {
   if (stage?.isCompanyPortalStage) {
     if (stage.showScanRecordsLink) {
       return getCompanyPortalRecordsUploadHref(order);
@@ -2711,7 +2866,7 @@ function getWorkflowStageHref(stage, order) {
       isWorkflowStageComplete(stage.status) || allUploaded;
 
     if (!isComplete) {
-      const returnTo = resolveOrderListReturnTo(order);
+      const returnTo = resolveOrderListReturnTo(order, options);
       return `/orders/scan-medical-records?orderId=${encodeURIComponent(
         order.dbId
       )}&returnTo=${encodeURIComponent(returnTo)}`;
@@ -2723,7 +2878,7 @@ function getWorkflowStageHref(stage, order) {
     !isWorkflowStageComplete(stage.status)
   ) {
     return buildOrderEditHref(order.dbId, {
-      returnTo: resolveOrderListReturnTo(order),
+      returnTo: resolveOrderListReturnTo(order, options),
       panel: "payment",
     });
   }
@@ -2973,6 +3128,7 @@ function InvoiceBlock({
   onSendCnrRecord,
   onResendCnrRecord,
   allowStandardInvoice = true,
+  blockInvoiceCreate = false,
   providerEmail = "",
   onCreateInvoice,
   onReviewInvoice,
@@ -3205,13 +3361,17 @@ function InvoiceBlock({
       ) : null}
     </>
   ) : !isCnr ? (
-        <button
-          type="button"
-          onClick={onCreateXrayInvoice}
-      className="block text-left text-[#007F96] underline"
-        >
-          Create Xray Invoice
-        </button>
+    blockInvoiceCreate ? (
+      <p className="text-[#94A3B8]">X-ray invoice unavailable (No facility)</p>
+    ) : (
+      <button
+        type="button"
+        onClick={onCreateXrayInvoice}
+        className="block text-left text-[#007F96] underline"
+      >
+        Create Xray Invoice
+      </button>
+    )
   ) : null;
 
   if (isCnr) {
@@ -3219,13 +3379,19 @@ function InvoiceBlock({
       <>
         {allowStandardInvoice ? (
           <>
-            <button
-              type="button"
-              onClick={onCreateInvoice}
-              className="block text-left text-[#007F96] underline"
-            >
-              Create Invoice
-            </button>
+            {blockInvoiceCreate ? (
+              <p className="text-[#94A3B8]">
+                Invoice unavailable (No facility)
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={onCreateInvoice}
+                className="block text-left text-[#007F96] underline"
+              >
+                Create Invoice
+              </button>
+            )}
 
             <button
               type="button"
@@ -3235,8 +3401,8 @@ function InvoiceBlock({
               Cover Sheet
             </button>
 
-            {sendInvoiceButton}
-            {resendInvoiceButton}
+            {!blockInvoiceCreate ? sendInvoiceButton : null}
+            {!blockInvoiceCreate ? resendInvoiceButton : null}
           </>
         ) : null}
       </>
@@ -3290,15 +3456,21 @@ function InvoiceBlock({
       <div className="space-y-1 text-[10px]">
         {allowStandardInvoice ? (
           <>
-            <button
-              type="button"
-              onClick={onCreateInvoice}
-              className="block text-left text-[#007F96] underline"
-            >
-              Create Invoice
-        </button>
+            {blockInvoiceCreate ? (
+              <p className="text-[#94A3B8]">
+                Invoice unavailable (No facility)
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={onCreateInvoice}
+                className="block text-left text-[#007F96] underline"
+              >
+                Create Invoice
+              </button>
+            )}
 
-            {facilityFee > 0 ? (
+            {!blockInvoiceCreate && facilityFee > 0 ? (
               <p className="text-[#B45309]">
                 Facility fee {formatMoneyAmount(facilityFee)} (included in invoice)
               </p>
@@ -3312,14 +3484,14 @@ function InvoiceBlock({
               Cover Sheet
             </button>
 
-            {sendInvoiceButton}
-            {resendInvoiceButton}
+            {!blockInvoiceCreate ? sendInvoiceButton : null}
+            {!blockInvoiceCreate ? resendInvoiceButton : null}
           </>
         ) : null}
         {!isCnr ? xraySection : null}
-    </div>
-  );
-}
+      </div>
+    );
+  }
 
   if (!allowStandardInvoice) {
     return <div className="space-y-1 text-[10px]">{xraySection}</div>;

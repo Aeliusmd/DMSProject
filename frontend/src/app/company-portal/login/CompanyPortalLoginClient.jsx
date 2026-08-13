@@ -13,6 +13,7 @@ import {
 } from "@/lib/company-portal/companyPortalAuthApi";
 import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthStorage";
 import {
+  sanitizeEmail,
   sanitizeInput,
   validateCompanyEmail,
   validatePassword,
@@ -170,7 +171,7 @@ export default function CompanyPortalLoginClient() {
               placeholder="email@company.com"
               value={email}
               onChange={(event) => {
-                setEmail(event.target.value);
+                setEmail(sanitizeEmail(event.target.value));
                 setApiFieldErrors((prev) => {
                   if (!prev.email) return prev;
                   const next = { ...prev };

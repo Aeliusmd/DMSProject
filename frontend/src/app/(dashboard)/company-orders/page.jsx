@@ -72,7 +72,7 @@ export default function CompanyOrdersPage() {
           <StatCard label="Released" value={stats.released} />
         </section>
 
-        <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
+        <OrderFilterBar filters={filters} onFiltersChange={setFilters} statusOptionsVariant="company" />
 
         <OrdersTable
           filters={filters}
@@ -80,6 +80,7 @@ export default function CompanyOrdersPage() {
           useServerPagination
           creationSource="company_portal"
           companyPortalMode
+          listReturnTo="company-orders"
         />
       </div>
     </DashboardShell>

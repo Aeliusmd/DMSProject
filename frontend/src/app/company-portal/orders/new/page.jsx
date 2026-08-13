@@ -9,6 +9,7 @@ import CompanyOrderUploadStep from "@/components/company-portal/CompanyOrderUplo
 import CompanyOrderVerifyStep from "@/components/company-portal/CompanyOrderVerifyStep";
 import CompanyOrderPaymentStep from "@/components/company-portal/CompanyOrderPaymentStep";
 import CompanyEmployeeInsufficientWalletModal from "@/components/company-portal/CompanyEmployeeInsufficientWalletModal";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import {
   clearCompanyOrderWizardState,
   createCompanyPortalCheckout,
@@ -34,6 +35,10 @@ import {
   applyApiFieldErrors,
   getApiErrorMessage,
 } from "@/lib/apiErrorUtils";
+import {
+  sanitizeCompanyOrderField,
+  sanitizeSearchText,
+} from "@/lib/company-portal/companyPortalValidation";
 
 function CompanyOrderCreateClient() {
   const router = useRouter();
@@ -54,6 +59,7 @@ function CompanyOrderCreateClient() {
   const [walletBalance, setWalletBalance] = useState(null);
   const [walletLoading, setWalletLoading] = useState(true);
   const [showEmployeeWalletModal, setShowEmployeeWalletModal] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const storedUser = getStoredCompanyUser();
   const isEmployee = storedUser?.isAdmin === false;
   const availableWalletBalance = Number(walletBalance ?? 0);
@@ -223,8 +229,9 @@ function CompanyOrderCreateClient() {
   };
 
   const handleFormChange = (name, value) => {
+    const sanitizedValue = sanitizeCompanyOrderField(name, value);
     setForm((prev) => {
-      const next = { ...prev, [name]: value };
+      const next = { ...prev, [name]: sanitizedValue };
       persistWizard({ form: next });
       return next;
     });
@@ -275,10 +282,11 @@ function CompanyOrderCreateClient() {
   };
 
   const handleFacilityInputChange = (value) => {
+    const sanitized = sanitizeSearchText(value);
     setForm((prev) => {
       const next = {
         ...prev,
-        facilityName: value,
+        facilityName: sanitized,
         facilitySelectionMode: "",
         internalFacilityId: null,
         requestNewFacilitySearch: false,
@@ -352,7 +360,7 @@ function CompanyOrderCreateClient() {
   };
 
   const handleContinueToPayment = async () => {
-    const nextErrors = validateCompanyOrderForm(form);
+    const { errors: nextErrors, sanitized } = validateCompanyOrderForm(form);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0 || !uploadToken) {
       if (!uploadToken) {
@@ -379,7 +387,7 @@ function CompanyOrderCreateClient() {
     setError("");
 
     try {
-      await validateCompanyPortalOrderNumber(form.caseNumber);
+      await validateCompanyPortalOrderNumber(sanitized.caseNumber);
       setStep(3);
       persistWizard({ step: 3 });
       router.replace("/company-portal/orders/new?step=payment");
@@ -400,10 +408,29 @@ function CompanyOrderCreateClient() {
     }
   };
 
+  const resetOrderWizard = () => {
+    clearCompanyOrderWizardState();
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setStep(1);
+    setUploadToken("");
+    setForm(createEmptyCompanyOrderForm());
+    setErrors({});
+    setFileMeta(null);
+    setLocalFile(null);
+    setPreviewUrl("");
+    setExtracting(false);
+    setPaying(false);
+    setValidatingOrderNumber(false);
+    setError("");
+    setCanceled(false);
+    setShowCancelConfirm(false);
+    router.replace("/company-portal/orders/new");
+  };
+
   const handlePay = async () => {
     if (!uploadToken || paying) return;
 
-    const nextErrors = validateCompanyOrderForm(form);
+    const { errors: nextErrors, sanitized } = validateCompanyOrderForm(form);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       setStep(2);
@@ -430,7 +457,7 @@ function CompanyOrderCreateClient() {
     try {
       const response = await createCompanyPortalCheckout({
         uploadToken,
-        ...form,
+        ...sanitized,
       });
       const payload = response?.data || {};
 
@@ -466,6 +493,16 @@ function CompanyOrderCreateClient() {
         balance={availableWalletBalance}
         requiredAmount={orderTotal}
         onClose={() => setShowEmployeeWalletModal(false)}
+      />
+      <ConfirmModal
+        open={showCancelConfirm}
+        title="Cancel order creation?"
+        message="This will clear the current upload, extracted details, and payment progress. You will start with a fresh order form."
+        variant="warning"
+        confirmLabel="Yes, cancel"
+        cancelLabel="No, keep editing"
+        onCancel={() => setShowCancelConfirm(false)}
+        onConfirm={resetOrderWizard}
       />
 
       <div className="mx-auto w-full max-w-[720px]">
@@ -512,6 +549,7 @@ function CompanyOrderCreateClient() {
                 onFileSelected={handleFileSelected}
                 onRemoveFile={handleRemoveFile}
                 onProcess={handleProcess}
+                onCancel={() => setShowCancelConfirm(true)}
               />
             </>
           ) : null}
@@ -535,6 +573,7 @@ function CompanyOrderCreateClient() {
                 onClearNewFacility={handleClearFacilitySelection}
                 onBack={() => setStep(1)}
                 onContinue={handleContinueToPayment}
+                onCancel={() => setShowCancelConfirm(true)}
                 saving={validatingOrderNumber}
               />
             </>
@@ -549,6 +588,7 @@ function CompanyOrderCreateClient() {
               walletBalance={availableWalletBalance}
               onBack={() => setStep(2)}
               onPay={handlePay}
+              onCancel={() => setShowCancelConfirm(true)}
               paying={paying}
               error={error}
               canceled={canceled}

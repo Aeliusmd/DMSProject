@@ -11,6 +11,12 @@ const {
   hasAnyRecordType,
   formatRecordTypesLabel,
 } = require("../utils/companyPortalRecordTypes");
+const {
+  addNoHtmlMarkupError,
+  addNoHtmlMarkupErrors,
+  addPersonNameFormatError,
+  addOrganizationNameFormatError,
+} = require("../utils/nameValidation");
 
 function sanitizeField(value, maxLength) {
   return sanitizeText(value, { maxLength, allowEmpty: true });
@@ -49,6 +55,40 @@ function validateStateZipPair(errors, { state, zip, stateField, zipField, requir
 
 function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true } = {}) {
   const errors = [];
+
+  addNoHtmlMarkupErrors(errors, body, [
+    "facilityName",
+    "treatingFacilityName",
+    "facilityAddress",
+    "treatingFacilityAddress",
+    "address",
+    "facilityCity",
+    "city",
+    "facilityState",
+    "state",
+    "facilityZip",
+    "zip",
+    "zipCode",
+    "companyName",
+    "companyAddress",
+    "companyCity",
+    "companyState",
+    "companyZip",
+    "treatingDoctor",
+    "specificDoctor",
+    "doctor",
+    "applicantName",
+    "caseName",
+    "caseNumber",
+    "orderNumber",
+    "recNumber",
+    "ssn",
+    "dateOfInjuryText",
+    "doctorAddress",
+    "requestedRecord",
+    "contactEmail",
+    "email",
+  ]);
 
   const facilityName = sanitizeField(
     body.facilityName || body.treatingFacilityName,
@@ -183,12 +223,26 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
     });
   }
 
-  if (facilityName) addMaxLengthError(errors, "facilityName", facilityName, 255);
+  if (facilityName) {
+    addMaxLengthError(errors, "facilityName", facilityName, 255);
+    addOrganizationNameFormatError(errors, "facilityName", facilityName);
+  }
   if (facilityAddress) {
     addMaxLengthError(errors, "facilityAddress", facilityAddress, 500);
   }
   if (facilityCity) addMaxLengthError(errors, "facilityCity", facilityCity, 100);
-  if (companyName) addMaxLengthError(errors, "companyName", companyName, 255);
+  if (companyName) {
+    addMaxLengthError(errors, "companyName", companyName, 255);
+    addOrganizationNameFormatError(errors, "companyName", companyName);
+  }
+  if (treatingDoctor) {
+    addMaxLengthError(errors, "treatingDoctor", treatingDoctor, 255);
+    addPersonNameFormatError(errors, "treatingDoctor", treatingDoctor);
+  }
+  if (applicantName) {
+    addMaxLengthError(errors, "applicantName", applicantName, 255);
+    addPersonNameFormatError(errors, "applicantName", applicantName);
+  }
   if (companyAddress) {
     addMaxLengthError(errors, "companyAddress", companyAddress, 500);
   }

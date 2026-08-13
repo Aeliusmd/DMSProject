@@ -4,7 +4,7 @@
  *
  * Set to `false` to show everything again.
  */
-export const PORTAL_NAVIGATION_HIDDEN = true;
+export const PORTAL_NAVIGATION_HIDDEN = false;
 
 /** Where external portal routes redirect when hidden. */
 export const PORTAL_ROUTE_REDIRECT = "/login";

@@ -803,7 +803,7 @@ async function resolveFacilityDoctor(
     doctorName,
     doctorId,
     useDefaultWhenMissing = true,
-    allowCreate = false,
+    allowCreate = true,
   } = {}
 ) {
   const id = Number(facilityId);
@@ -835,6 +835,7 @@ async function resolveFacilityDoctor(
         created: false,
         usedDefault: false,
         missingDefault: false,
+        doctorMissing: false,
       };
     }
   }
@@ -851,6 +852,18 @@ async function resolveFacilityDoctor(
         created: false,
         usedDefault: false,
         missingDefault: false,
+        doctorMissing: false,
+      };
+    }
+
+    if (!allowCreate) {
+      return {
+        doctor: null,
+        doctorName: trimmedName,
+        created: false,
+        usedDefault: false,
+        missingDefault: false,
+        doctorMissing: true,
       };
     }
 
@@ -901,6 +914,7 @@ async function resolveFacilityDoctor(
         created: true,
         usedDefault: false,
         missingDefault: false,
+        doctorMissing: false,
       };
     } catch (error) {
       await connection.rollback();
@@ -917,6 +931,7 @@ async function resolveFacilityDoctor(
       created: false,
       usedDefault: false,
       missingDefault: false,
+      doctorMissing: false,
     };
   }
 
@@ -929,6 +944,7 @@ async function resolveFacilityDoctor(
       created: false,
       usedDefault: false,
       missingDefault: true,
+      doctorMissing: false,
     };
   }
 
@@ -938,6 +954,7 @@ async function resolveFacilityDoctor(
     created: false,
     usedDefault: true,
     missingDefault: false,
+    doctorMissing: false,
   };
 }
 

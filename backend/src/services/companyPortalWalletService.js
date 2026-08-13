@@ -1,8 +1,11 @@
 const Stripe = require("stripe");
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
+const logger = require("../utils/logger");
+const { runNonCritical } = require("../utils/serviceErrorUtils");
 const { getPool } = require("../config/database");
 const CompanyPortalEmployee = require("../models/CompanyPortalEmployee");
+const CompanyPortalUser = require("../models/CompanyPortalUser");
 const CompanyPortalWallet = require("../models/CompanyPortalWallet");
 const CompanyPortalWalletTopup = require("../models/CompanyPortalWalletTopup");
 const CompanyPortalWalletTransaction = require("../models/CompanyPortalWalletTransaction");
@@ -26,6 +29,57 @@ function getStripe() {
 
 function toMoney(value) {
   return Number(Number(value || 0).toFixed(2));
+}
+
+function formatMoney(value) {
+  return `$${toMoney(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+async function sendWalletTopupReceiptNotification(session, { companyUserId, amount }) {
+  await runNonCritical(
+    "Failed to send company wallet top-up receipt email",
+    async () => {
+      const companyUser = await CompanyPortalUser.findById(companyUserId);
+      const recipientEmail = String(companyUser?.email || "").trim();
+      if (!recipientEmail) {
+        return;
+      }
+
+      const stripePaymentService = require("./stripePaymentService");
+      const stripeDetails = await stripePaymentService.extractStripePaymentDetails(
+        session
+      );
+
+      if (stripeDetails.stripeChargeId) {
+        try {
+          const stripe = getStripe();
+          await stripe.charges.update(stripeDetails.stripeChargeId, {
+            receipt_email: recipientEmail,
+          });
+        } catch (error) {
+          logger.warn("Unable to trigger Stripe receipt for wallet top-up", {
+            chargeId: stripeDetails.stripeChargeId,
+            message: error.message,
+          });
+        }
+      }
+
+      const { sendPaymentResultEmail } = require("./emailService");
+      await sendPaymentResultEmail({
+        to: recipientEmail,
+        outcome: "success",
+        companyName: companyUser?.company_name || "Customer",
+        orderNumber: "Wallet Top-up",
+        invoiceNumber: "Company Portal",
+        amount: formatMoney(amount),
+        receiptUrl: stripeDetails.receiptUrl || "",
+      });
+    },
+    logger
+  );
 }
 
 async function getAvailableOrderBalance(companyUserId, employeeId = null) {
@@ -121,9 +175,10 @@ async function getWalletSummary(companyUserId) {
   const allocatedBalance = toMoney(allocatedTotal);
   const totalBalance = toMoney(unallocatedBalance + allocatedBalance);
 
-  const transactions = await CompanyPortalWalletTransaction.listForCompany(
+  // First page only — use listWalletTransactions for full keyset browsing.
+  const txPage = await CompanyPortalWalletTransaction.listForCompanyKeyset(
     companyUserId,
-    { limit: 25 }
+    { pageSize: 10 }
   );
 
   return {
@@ -131,7 +186,34 @@ async function getWalletSummary(companyUserId) {
     allocatedBalance,
     totalBalance,
     currency: (config.stripe.currency || "usd").toUpperCase(),
-    transactions: transactions.map(formatTransaction),
+    transactions: txPage.rows.map(formatTransaction),
+    transactionPagination: {
+      type: "keyset",
+      pageSize: txPage.pageSize,
+      hasMore: txPage.hasMore,
+      nextCursor: txPage.nextCursor,
+    },
+  };
+}
+
+async function listWalletTransactions(
+  companyUserId,
+  { cursor = null, pageSize = 10 } = {}
+) {
+  await CompanyPortalWallet.ensureForCompany(companyUserId);
+  const txPage = await CompanyPortalWalletTransaction.listForCompanyKeyset(
+    companyUserId,
+    { cursor, pageSize }
+  );
+
+  return {
+    transactions: txPage.rows.map(formatTransaction),
+    pagination: {
+      type: "keyset",
+      pageSize: txPage.pageSize,
+      hasMore: txPage.hasMore,
+      nextCursor: txPage.nextCursor,
+    },
   };
 }
 
@@ -168,12 +250,21 @@ async function createTopupCheckout(companyUserId, { amount }) {
     amount: numericAmount,
   });
 
+  const companyUser = await CompanyPortalUser.findById(companyUserId);
+  const customerEmail = String(companyUser?.email || "").trim() || undefined;
+
   const successUrl = `${baseClient}/company-portal/money?topup=success&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${baseClient}/company-portal/money?topup=canceled`;
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     payment_method_types: ["card"],
+    ...(customerEmail
+      ? {
+          customer_email: customerEmail,
+          payment_intent_data: { receipt_email: customerEmail },
+        }
+      : {}),
     line_items: [
       {
         price_data: {
@@ -218,29 +309,81 @@ async function fulfillWalletTopupSession(session) {
 
   const topupId = Number(session.metadata?.topup_id);
   const companyUserId = Number(session.metadata?.company_user_id);
-  const amount = toMoney(session.metadata?.amount);
 
-  if (!topupId || !companyUserId || !amount) {
+  if (!topupId || !companyUserId) {
     return null;
   }
 
   const pool = getPool();
   const connection = await pool.getConnection();
+  let resultPayload = null;
+  let didCredit = false;
 
   try {
     await connection.beginTransaction();
 
-    const topup = await CompanyPortalWalletTopup.findById(topupId, connection);
-    if (!topup || topup.status === "paid") {
+    const topup = await CompanyPortalWalletTopup.findByIdForUpdate(
+      topupId,
+      connection
+    );
+
+    if (!topup) {
+      await connection.commit();
+      return null;
+    }
+
+    if (topup.status === "paid") {
       await connection.commit();
       return topup;
     }
 
-    const companyBalanceAfter = await CompanyPortalWallet.adjustUnallocatedBalance(
-      companyUserId,
-      amount,
+    if (Number(topup.company_user_id) !== Number(companyUserId)) {
+      await connection.rollback();
+      return null;
+    }
+
+    // Prefer Stripe amount_total (what was actually paid); fall back to DB row.
+    const stripePaidAmount =
+      session.amount_total != null
+        ? toMoney(Number(session.amount_total) / 100)
+        : null;
+    const recordedAmount = toMoney(topup.amount);
+    const amount = stripePaidAmount || recordedAmount;
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      await connection.rollback();
+      return null;
+    }
+
+    if (
+      stripePaidAmount != null &&
+      Math.abs(stripePaidAmount - recordedAmount) > 0.009
+    ) {
+      logger.warn("Wallet top-up Stripe amount differs from recorded amount", {
+        topupId,
+        stripePaidAmount,
+        recordedAmount,
+        sessionId: session.id,
+      });
+    }
+
+    // Claim pending → paid first so only one worker can credit.
+    const claimed = await CompanyPortalWalletTopup.markPaidIfPending(
+      topupId,
       connection
     );
+
+    if (!claimed) {
+      await connection.commit();
+      return CompanyPortalWalletTopup.findById(topupId, connection);
+    }
+
+    const companyBalanceAfter =
+      await CompanyPortalWallet.adjustUnallocatedBalance(
+        companyUserId,
+        amount,
+        connection
+      );
 
     await CompanyPortalWalletTransaction.create(
       {
@@ -254,10 +397,9 @@ async function fulfillWalletTopupSession(session) {
       connection
     );
 
-    await CompanyPortalWalletTopup.markPaid(topupId, connection);
     await connection.commit();
-
-    return {
+    didCredit = true;
+    resultPayload = {
       companyUserId,
       amount,
       companyBalanceAfter,
@@ -268,6 +410,15 @@ async function fulfillWalletTopupSession(session) {
   } finally {
     connection.release();
   }
+
+  if (didCredit && resultPayload) {
+    await sendWalletTopupReceiptNotification(session, {
+      companyUserId,
+      amount: resultPayload.amount,
+    });
+  }
+
+  return resultPayload;
 }
 
 async function confirmTopup(companyUserId, sessionId) {
@@ -329,27 +480,24 @@ async function allocateToEmployee(companyUserId, { employeeId, amount }) {
     throw new ApiError(404, "Employee not found");
   }
 
+  if (!employee.is_active) {
+    throw new ApiError(400, "Cannot allocate funds to a blocked employee", [
+      {
+        field: "employeeId",
+        message: "Enable this employee before allocating funds",
+      },
+    ]);
+  }
+
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const wallet = await CompanyPortalWallet.ensureForCompany(
-      companyUserId,
-      connection
-    );
-    const unallocated = toMoney(wallet.unallocated_balance);
+    await CompanyPortalWallet.ensureForCompany(companyUserId, connection);
 
-    if (unallocated < numericAmount) {
-      throw new ApiError(400, "Insufficient unallocated balance", [
-        {
-          field: "amount",
-          message: `Only $${unallocated.toFixed(2)} is available to allocate`,
-        },
-      ]);
-    }
-
+    // Atomic debit of company wallet; fails if concurrent allocate/spend wins.
     const companyBalanceAfter = await CompanyPortalWallet.adjustUnallocatedBalance(
       companyUserId,
       -numericAmount,
@@ -379,6 +527,17 @@ async function allocateToEmployee(companyUserId, { employeeId, amount }) {
     return getWalletSummary(companyUserId);
   } catch (error) {
     await connection.rollback();
+    if (
+      error instanceof ApiError &&
+      error.message === "Insufficient company wallet balance"
+    ) {
+      throw new ApiError(400, "Insufficient unallocated balance", [
+        {
+          field: "amount",
+          message: `Only the current unallocated balance is available to allocate`,
+        },
+      ]);
+    }
     throw error;
   } finally {
     connection.release();
@@ -396,6 +555,11 @@ async function debitForOrder(
   connection = null
 ) {
   const numericAmount = toMoney(amount);
+
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    throw new ApiError(400, "Payment amount must be greater than zero");
+  }
+
   const pool = connection || getPool();
   const ownsConnection = !connection;
   const conn = ownsConnection ? await pool.getConnection() : connection;
@@ -419,36 +583,16 @@ async function debitForOrder(
         throw new ApiError(404, "Employee not found");
       }
 
-      if (toMoney(employee.wallet_balance) < numericAmount) {
-        throw new ApiError(400, "Insufficient employee wallet balance", [
-          {
-            field: "paymentMethod",
-            message: "Employee wallet balance is too low for this order",
-          },
-        ]);
-      }
-
+      // Atomic debit: UPDATE ... WHERE wallet_balance >= amount
       employeeBalanceAfter = await CompanyPortalEmployee.adjustWalletBalance(
         employeeId,
         -numericAmount,
         conn
       );
     } else {
-      const wallet = await CompanyPortalWallet.ensureForCompany(
-        companyUserId,
-        conn
-      );
+      await CompanyPortalWallet.ensureForCompany(companyUserId, conn);
 
-      if (toMoney(wallet.unallocated_balance) < numericAmount) {
-        throw new ApiError(400, "Insufficient company wallet balance", [
-          {
-            field: "paymentMethod",
-            message:
-              "Company wallet balance is too low. Top up or use card payment.",
-          },
-        ]);
-      }
-
+      // Atomic debit: UPDATE ... WHERE unallocated_balance >= amount
       companyBalanceAfter = await CompanyPortalWallet.adjustUnallocatedBalance(
         companyUserId,
         -numericAmount,
@@ -489,6 +633,7 @@ async function debitForOrder(
 
 module.exports = {
   getWalletSummary,
+  listWalletTransactions,
   getAvailableOrderBalance,
   assertSufficientBalance,
   assertSufficientOrderBalance,

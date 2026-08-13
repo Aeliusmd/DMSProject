@@ -57,6 +57,7 @@ export default function CompanyOrderVerifyStep({
   onClearNewFacility,
   onBack,
   onContinue,
+  onCancel,
   saving,
 }) {
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
@@ -276,6 +277,14 @@ export default function CompanyOrderVerifyStep({
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onCancel}
+          className="inline-flex h-11 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white px-5 text-[13px] font-medium text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancel
+        </button>
         <button
           type="button"
           onClick={onBack}

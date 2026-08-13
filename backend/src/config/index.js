@@ -70,4 +70,35 @@ module.exports = {
     researchFeeCents: Number(process.env.PERSONAL_PORTAL_RESEARCH_FEE_CENTS) || 500,
     lookupDays: Number(process.env.PERSONAL_PORTAL_LOOKUP_DAYS) || 7,
   },
+
+  authRateLimit: {
+    enabled: process.env.AUTH_RATE_LIMIT_ENABLED !== "false",
+    login: {
+      windowMs:
+        Number(process.env.AUTH_RATE_LIMIT_LOGIN_WINDOW_MS) || 15 * 60 * 1000,
+      max: Number(process.env.AUTH_RATE_LIMIT_LOGIN_MAX) || 10,
+    },
+    register: {
+      windowMs:
+        Number(process.env.AUTH_RATE_LIMIT_REGISTER_WINDOW_MS) || 60 * 60 * 1000,
+      max: Number(process.env.AUTH_RATE_LIMIT_REGISTER_MAX) || 5,
+    },
+    twoFactorVerify: {
+      windowMs:
+        Number(process.env.AUTH_RATE_LIMIT_2FA_VERIFY_WINDOW_MS) ||
+        15 * 60 * 1000,
+      max: Number(process.env.AUTH_RATE_LIMIT_2FA_VERIFY_MAX) || 10,
+    },
+    twoFactorResend: {
+      windowMs:
+        Number(process.env.AUTH_RATE_LIMIT_2FA_RESEND_WINDOW_MS) ||
+        15 * 60 * 1000,
+      max: Number(process.env.AUTH_RATE_LIMIT_2FA_RESEND_MAX) || 5,
+    },
+    refresh: {
+      windowMs:
+        Number(process.env.AUTH_RATE_LIMIT_REFRESH_WINDOW_MS) || 15 * 60 * 1000,
+      max: Number(process.env.AUTH_RATE_LIMIT_REFRESH_MAX) || 120,
+    },
+  },
 };

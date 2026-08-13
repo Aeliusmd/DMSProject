@@ -18,7 +18,7 @@ function normalizePaymentMethod(value) {
   return `${value || ""}`.trim().toLowerCase() === "stripe" ? "stripe" : "wallet";
 }
 
-async function resolvePortalOrder(orderNumber, companyUserId) {
+async function resolvePortalOrder(orderNumber, companyUserId, { employeeId = null } = {}) {
   const cleaned = String(orderNumber || "").trim().toUpperCase();
   if (!cleaned) {
     throw new ApiError(400, "Order number is required");
@@ -26,7 +26,8 @@ async function resolvePortalOrder(orderNumber, companyUserId) {
 
   const order = await CompanyPortalOrder.findByOrderNumberForUser(
     cleaned,
-    companyUserId
+    companyUserId,
+    { employeeId }
   );
 
   if (!order) {
@@ -49,7 +50,9 @@ async function payInvoiceWithWallet({
   orderNumber,
   invoiceType,
 }) {
-  const portalOrder = await resolvePortalOrder(orderNumber, companyUserId);
+  const portalOrder = await resolvePortalOrder(orderNumber, companyUserId, {
+    employeeId,
+  });
   const internalOrderId = Number(portalOrder.internal_order_id);
   const normalizedType = normalizeInvoiceType(invoiceType);
 
@@ -132,8 +135,15 @@ async function payInvoiceWithWallet({
   });
 }
 
-async function startInvoiceStripeCheckout({ companyUserId, orderNumber, invoiceType }) {
-  const portalOrder = await resolvePortalOrder(orderNumber, companyUserId);
+async function startInvoiceStripeCheckout({
+  companyUserId,
+  employeeId = null,
+  orderNumber,
+  invoiceType,
+}) {
+  const portalOrder = await resolvePortalOrder(orderNumber, companyUserId, {
+    employeeId,
+  });
   const normalizedType = normalizeInvoiceType(invoiceType);
   const internalOrderId = Number(portalOrder.internal_order_id);
 
@@ -179,7 +189,9 @@ async function confirmInvoiceStripePayment({
     throw new ApiError(400, "session_id is required");
   }
 
-  const portalOrder = await resolvePortalOrder(orderNumber, companyUserId);
+  const portalOrder = await resolvePortalOrder(orderNumber, companyUserId, {
+    employeeId,
+  });
   const internalOrderId = Number(portalOrder.internal_order_id);
 
   const Stripe = require("stripe");
@@ -226,6 +238,7 @@ async function payInvoice({
 
     return startInvoiceStripeCheckout({
       companyUserId,
+      employeeId,
       orderNumber,
       invoiceType,
     });

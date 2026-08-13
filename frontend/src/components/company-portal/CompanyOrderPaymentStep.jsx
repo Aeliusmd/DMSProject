@@ -15,6 +15,7 @@ export default function CompanyOrderPaymentStep({
   walletBalance = null,
   onBack,
   onPay,
+  onCancel,
   paying,
   error,
   canceled,
@@ -115,8 +116,17 @@ export default function CompanyOrderPaymentStep({
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
         <button
           type="button"
+          disabled={paying}
+          onClick={onCancel}
+          className="inline-flex h-11 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white px-5 text-[13px] font-medium text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={paying}
           onClick={onBack}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] px-5 text-[13px] font-medium text-[#334155] hover:bg-[#F1F5F9]"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] px-5 text-[13px] font-medium text-[#334155] hover:bg-[#F1F5F9] disabled:cursor-not-allowed disabled:opacity-60"
         >
           ← Back
         </button>

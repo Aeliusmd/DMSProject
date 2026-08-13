@@ -34,6 +34,7 @@ export default function PersonalOrdersPage() {
           fitToWindow
           useServerPagination
           personalMode
+          listReturnTo="personal-orders"
         />
       </div>
     </DashboardShell>

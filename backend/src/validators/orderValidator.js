@@ -65,9 +65,183 @@ function hasRecordTypesSelected(body = {}) {
   ].some(Boolean);
 }
 
+function hasPersonalDocument(body = {}) {
+  if (body.hasDriverLicenseDocument === true || body.hasDriverLicenseDocument === "true") {
+    return true;
+  }
+  if (body.hasPersonalDocument === true || body.hasPersonalDocument === "true") {
+    return true;
+  }
+  if (body.additionalDocumentFile) return true;
+  const docs = body.documents;
+  if (Array.isArray(docs) && docs.length > 0) return true;
+  if (typeof docs === "string" && docs.trim() && docs.trim() !== "[]") return true;
+  return false;
+}
+
+function validatePersonalPortalOrderPayload(body = {}, options = {}) {
+  const { requireOrderNumber = true } = options;
+  const errors = [];
+
+  if (requireOrderNumber) {
+    if (isBlank(body.orderNumber)) {
+      errors.push({ field: "orderNumber", message: "Order number is required" });
+    } else {
+      addMaxLengthError(errors, "orderNumber", body.orderNumber, 50);
+      addNoHtmlMarkupError(errors, "orderNumber", body.orderNumber);
+    }
+  }
+
+  if (isBlank(body.firstName)) {
+    errors.push({ field: "firstName", message: "First name is required" });
+  } else {
+    addMaxLengthError(errors, "firstName", body.firstName, FIELD_LIMITS.VARCHAR_100);
+    addPersonNameFormatError(errors, "firstName", body.firstName);
+  }
+
+  if (isBlank(body.lastName)) {
+    errors.push({ field: "lastName", message: "Last name is required" });
+  } else {
+    addMaxLengthError(errors, "lastName", body.lastName, FIELD_LIMITS.VARCHAR_100);
+    addPersonNameFormatError(errors, "lastName", body.lastName);
+  }
+
+  if (isBlank(body.dob)) {
+    errors.push({ field: "dob", message: "Date of birth is required" });
+  } else if (!isValidIsoDate(body.dob)) {
+    errors.push({ field: "dob", message: "Enter a valid date of birth" });
+  } else if (isFutureDate(body.dob)) {
+    errors.push({ field: "dob", message: "DOB cannot be in the future" });
+  }
+
+  const facilityName = trimToString(body.facilityName);
+  if (!facilityName && isBlank(body.facility)) {
+    errors.push({
+      field: "facilityName",
+      message: "Treating facility is required",
+    });
+  } else if (facilityName) {
+    addMaxLengthError(errors, "facilityName", facilityName, FIELD_LIMITS.VARCHAR_255);
+    addNoHtmlMarkupError(errors, "facilityName", facilityName);
+  }
+
+  if (isBlank(body.injuryDateBegin)) {
+    errors.push({
+      field: "injuryDateBegin",
+      message: "Specific dates needed: start date is required",
+    });
+  } else if (!isValidIsoDate(body.injuryDateBegin)) {
+    errors.push({
+      field: "injuryDateBegin",
+      message: "Enter a valid start date",
+    });
+  }
+
+  if (isBlank(body.injuryDateEnd)) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "Specific dates needed: end date is required",
+    });
+  } else if (!isValidIsoDate(body.injuryDateEnd)) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "Enter a valid end date",
+    });
+  } else if (
+    !isBlank(body.injuryDateBegin) &&
+    isValidIsoDate(body.injuryDateBegin) &&
+    body.injuryDateEnd < body.injuryDateBegin
+  ) {
+    errors.push({
+      field: "injuryDateEnd",
+      message: "End date must be on or after start date",
+    });
+  }
+
+  if (!hasRecordTypesSelected(body) && isBlank(body.type)) {
+    errors.push({
+      field: "type",
+      message: "Select at least one record type needed",
+    });
+  }
+
+  if (isBlank(body.driverLicenseNumber)) {
+    errors.push({
+      field: "driverLicenseNumber",
+      message: "Driver's licence number is required",
+    });
+  } else {
+    addMaxLengthError(
+      errors,
+      "driverLicenseNumber",
+      body.driverLicenseNumber,
+      50
+    );
+    addNoHtmlMarkupError(
+      errors,
+      "driverLicenseNumber",
+      body.driverLicenseNumber
+    );
+  }
+
+  if (!hasPersonalDocument(body)) {
+    errors.push({
+      field: "additionalDocumentFile",
+      message: "Driver's licence / document is required",
+    });
+  }
+
+  if (isBlank(body.specificDoctor)) {
+    errors.push({ field: "specificDoctor", message: "Specific doctor is required" });
+  } else {
+    addMaxLengthError(
+      errors,
+      "specificDoctor",
+      body.specificDoctor,
+      FIELD_LIMITS.VARCHAR_200
+    );
+    addOrganizationNameFormatError(errors, "specificDoctor", body.specificDoctor);
+  }
+
+  // Optional format checks (non-required fields for personal)
+  if (!isBlank(body.email) && !isValidEmail(trimToString(body.email))) {
+    errors.push({ field: "email", message: "Enter a valid email address" });
+  }
+  if (!isBlank(body.ssn) && !isValidSSN(body.ssn)) {
+    errors.push({ field: "ssn", message: "Enter SSN as XXX-XX-1234" });
+  }
+
+  if (!isBlank(body.serveCompanyName)) {
+    addMaxLengthError(
+      errors,
+      "serveCompanyName",
+      body.serveCompanyName,
+      FIELD_LIMITS.VARCHAR_255
+    );
+  }
+
+  // Personal orders still need a facility id row (linked or placeholder) for DMS.
+  if (!isBlank(body.facility)) {
+    if (Number.isNaN(Number(body.facility)) || Number(body.facility) <= 0) {
+      errors.push({ field: "facility", message: "Facility is invalid" });
+    }
+  }
+
+  errors.push(...validateCnrFields(body));
+
+  return { valid: errors.length === 0, errors };
+}
+
 function validateOrderPayload(body = {}, options = {}) {
   const { requireOrderNumber = true } = options;
   const errors = [];
+  const isPersonalPortal =
+    body.creationSource === "personal_portal" ||
+    body.creation_source === "personal_portal";
+
+  if (isPersonalPortal) {
+    return validatePersonalPortalOrderPayload(body, { requireOrderNumber });
+  }
 
   if (requireOrderNumber) {
     if (
@@ -227,11 +401,20 @@ function validateOrderPayload(body = {}, options = {}) {
     const checkField = `${prefix}Check`;
     const paidField = `${prefix}Paid`;
     const checkValue = trimToString(body[checkField]);
+    const isCompanyPortalPrepayment =
+      trimToString(body.creationSource) === "company_portal" &&
+      prefix === "prepayment";
     const isPrepaymentReceipt =
       prefix === "prepayment" &&
       (checkValue === "STRIPE-PORTAL" || /^[\d-]+$/.test(checkValue));
 
-    if (!isBlank(body[checkField]) && !isPrepaymentReceipt && !/^\d+$/.test(checkValue)) {
+    // Company portal prepayment check may include letters / symbols.
+    if (
+      !isBlank(body[checkField]) &&
+      !isCompanyPortalPrepayment &&
+      !isPrepaymentReceipt &&
+      !/^\d+$/.test(checkValue)
+    ) {
       errors.push({
         field: checkField,
         message: "Check number must contain only numbers",
