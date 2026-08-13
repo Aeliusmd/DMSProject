@@ -99,8 +99,20 @@ function appendOrderSearchFilter(conditions, params, rawSearch) {
 
   const ssnDigits = search.replace(/\D/g, "");
   if (ssnDigits.length === 4) {
-    searchClauses.push("o.ssn_last_four = :searchSsnLastFour");
+    searchClauses.push(
+      "o.ssn_last_four = :searchSsnLastFour",
+      "RIGHT(REPLACE(REPLACE(o.ssn_last_four, '-', ''), 'X', ''), 4) = :searchSsnLastFour"
+    );
     params.searchSsnLastFour = ssnDigits;
+  } else if (ssnDigits.length === 9) {
+    searchClauses.push(
+      "o.ssn_last_four = :searchSsnFull",
+      "REPLACE(o.ssn_last_four, '-', '') = :searchSsnDigits",
+      "RIGHT(REPLACE(REPLACE(UPPER(o.ssn_last_four), '-', ''), 'X', ''), 4) = :searchSsnLastFourFromFull"
+    );
+    params.searchSsnFull = `${ssnDigits.slice(0, 3)}-${ssnDigits.slice(3, 5)}-${ssnDigits.slice(5)}`;
+    params.searchSsnDigits = ssnDigits;
+    params.searchSsnLastFourFromFull = ssnDigits.slice(-4);
   }
 
   const searchDate = toSqlDateOnly(search);

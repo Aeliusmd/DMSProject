@@ -71,23 +71,56 @@ export default function BatchScanPage() {
 
     try {
       const result = await uploadBatchScan(selectedFile);
-      const createdCount = result?.autoCreate?.created?.length ?? 0;
-      const failedCount = result?.autoCreate?.failed?.length ?? 0;
-      const failedMessages = (result?.autoCreate?.failed || [])
-        .map((item) => item?.message)
-        .filter(Boolean)
-        .slice(0, 3);
+      const created = result?.autoCreate?.created || [];
+      const failed = result?.autoCreate?.failed || [];
+      const createdCount = created.length;
+      const failedCount = failed.length;
+      const duplicateFailures = failed.filter(
+        (item) =>
+          item?.reason === "duplicate_order_number" ||
+          /already exists|duplicate/i.test(`${item?.message || ""}`)
+      );
+      const otherFailures = failed.filter(
+        (item) => !duplicateFailures.includes(item)
+      );
+      const duplicateNumbers = [
+        ...new Set(
+          duplicateFailures
+            .map((item) => `${item?.orderNumber || ""}`.trim())
+            .filter(Boolean)
+        ),
+      ];
 
       let message = `Batch scan complete. ${createdCount} order${
         createdCount === 1 ? "" : "s"
       } created.`;
-      if (failedCount > 0) {
-        message += ` ${failedCount} order${
-          failedCount === 1 ? "" : "s"
-        } failed to create.`;
-        if (failedMessages.length) {
-          message += ` ${failedMessages.join("; ")}`;
+
+      if (duplicateFailures.length > 0) {
+        message += ` ${duplicateFailures.length} duplicate order${
+          duplicateFailures.length === 1 ? "" : "s"
+        } skipped`;
+        if (duplicateNumbers.length) {
+          message += ` (${duplicateNumbers.slice(0, 5).join(", ")}${
+            duplicateNumbers.length > 5
+              ? `, +${duplicateNumbers.length - 5} more`
+              : ""
+          })`;
         }
+        message += " — order number already exists.";
+      }
+
+      if (otherFailures.length > 0) {
+        const otherMessages = otherFailures
+          .map((item) => item?.message)
+          .filter(Boolean)
+          .slice(0, 2);
+        message += ` ${otherFailures.length} other create failure${
+          otherFailures.length === 1 ? "" : "s"
+        }`;
+        if (otherMessages.length) {
+          message += `: ${otherMessages.join("; ")}`;
+        }
+        message += ".";
       }
 
       try {
@@ -97,6 +130,7 @@ export default function BatchScanPage() {
             message,
             createdCount,
             failedCount,
+            duplicateCount: duplicateFailures.length,
             at: Date.now(),
           })
         );

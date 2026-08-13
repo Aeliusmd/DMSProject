@@ -180,7 +180,7 @@ function validateOrderPayload(body = {}, options = {}) {
   addNoHtmlMarkupError(errors, "documentName", body.documentName);
 
   if (!isBlank(body.ssn) && !isValidSSN(body.ssn)) {
-    errors.push({ field: "ssn", message: "Enter SSN as XXX-XX-1234" });
+    errors.push({ field: "ssn", message: "Enter SSN as 123-45-6789" });
   }
 
   if (!isBlank(body.dob)) {
@@ -192,8 +192,14 @@ function validateOrderPayload(body = {}, options = {}) {
   }
 
   const zip = trimToString(body.zip);
-  if (zip && getDigits(zip).length !== 5) {
-    errors.push({ field: "zip", message: "ZIP must be 5 digits" });
+  if (zip) {
+    const zipDigits = getDigits(zip);
+    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+      errors.push({
+        field: "zip",
+        message: "ZIP must be 5 digits or ZIP+4",
+      });
+    }
   }
 
   const state = trimToString(body.state);

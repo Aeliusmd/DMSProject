@@ -9,7 +9,7 @@ import OrdersTable from "@/components/orders/OrdersTable";
 import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal";
 
 const BATCH_SCAN_FLASH_KEY = "dms.batchScanFlash";
-const BATCH_SCAN_FLASH_MS = 5000;
+const BATCH_SCAN_FLASH_MS = 10000;
 
 const defaultFilters = {
   facility: "",
@@ -28,6 +28,7 @@ export default function OrdersPage() {
   useEffect(() => {
     let message = "";
     let failedCount = 0;
+    let duplicateCount = 0;
 
     try {
       const raw = window.sessionStorage.getItem(BATCH_SCAN_FLASH_KEY);
@@ -36,6 +37,7 @@ export default function OrdersPage() {
         const parsed = JSON.parse(raw);
         message = `${parsed?.message || ""}`.trim();
         failedCount = Number(parsed?.failedCount) || 0;
+        duplicateCount = Number(parsed?.duplicateCount) || 0;
       }
     } catch {
       message = "";
@@ -43,7 +45,7 @@ export default function OrdersPage() {
 
     if (!message) return undefined;
 
-    setBatchScanFlash({ message, failedCount });
+    setBatchScanFlash({ message, failedCount, duplicateCount });
     const timer = window.setTimeout(() => {
       setBatchScanFlash(null);
     }, BATCH_SCAN_FLASH_MS);
@@ -58,7 +60,9 @@ export default function OrdersPage() {
           <div
             className={`rounded-[8px] border px-3 py-2.5 text-[12px] font-medium shadow-sm ${
               batchScanFlash.failedCount > 0
-                ? "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]"
+                ? batchScanFlash.duplicateCount > 0
+                  ? "border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]"
+                  : "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]"
                 : "border-[#A7F3D0] bg-[#ECFDF5] text-[#047857]"
             }`}
           >

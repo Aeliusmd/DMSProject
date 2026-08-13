@@ -2574,7 +2574,7 @@ function OrderDetailsForm({
           value={formData.ssn}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="XXX-XX-1234"
+          placeholder="123-45-6789"
           inputMode="numeric"
           maxLength={11}
           hint="SSN required if you have one"

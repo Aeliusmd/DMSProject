@@ -132,9 +132,8 @@ function buildInternalOrderPayload(portalOrder, options = {}) {
   const { placeholderFacilityId = null } = options;
   const flags = flagsFromDbRow(portalOrder);
   const name = splitApplicantName(portalOrder.applicant_name);
-  const ssnDigits = String(portalOrder.ssn || "").replace(/\D/g, "");
-  const ssnLastFour =
-    ssnDigits.length >= 4 ? ssnDigits.slice(-4) : ssnDigits || null;
+  const { normalizeOrderSsn } = require("../utils/dateUtils");
+  const ssnLastFour = normalizeOrderSsn(portalOrder.ssn);
 
   // When the facility isn't in our system yet, point the internal order at the
   // reserved placeholder facility (by id) and clear the name so resolveFacilityId
@@ -149,6 +148,7 @@ function buildInternalOrderPayload(portalOrder, options = {}) {
     middleName: "",
     lastName: name.lastName,
     dob: toDateOnly(portalOrder.date_of_birth),
+    ssn: ssnLastFour || "",
     ssnLastFour,
     caseNumber: portalOrder.case_number || "",
     recNumber: portalOrder.rec_number || "",

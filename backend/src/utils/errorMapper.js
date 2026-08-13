@@ -36,6 +36,17 @@ function mapMysqlError(error) {
     return new ApiError(503, "Database is temporarily unavailable. Please try again.");
   }
 
+  if (code === "ER_DATA_TOO_LONG") {
+    const columnMatch = `${error.sqlMessage || ""}`.match(
+      /column '([^']+)'/i
+    );
+    const column = columnMatch?.[1];
+    const message = column
+      ? `Field "${column}" exceeds the allowed length.`
+      : MYSQL_ERROR_MESSAGES.ER_DATA_TOO_LONG;
+    return new ApiError(400, message);
+  }
+
   const message = MYSQL_ERROR_MESSAGES[code];
   if (message) {
     const statusCode =

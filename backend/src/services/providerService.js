@@ -58,7 +58,7 @@ function buildProviderPayload(data = {}) {
   return {
     companyName,
     address: cleanText(data.address ?? "", 255),
-    zipCode: cleanText(data.zipCode ?? data.zip ?? "", 5),
+    zipCode: cleanText(data.zipCode ?? data.zip ?? "", 20),
     city: cleanText(data.city ?? "", 100),
     state: cleanText(data.state ?? "", 2),
     phone: cleanText(data.phone ?? "", 20),

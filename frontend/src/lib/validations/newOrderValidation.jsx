@@ -140,15 +140,18 @@ export function validateNewOrderForm(data, fileErrors = {}) {
   });
 
   if (data.ssn && !isValidSSN(data.ssn)) {
-    errors.ssn = "Enter SSN as XXX-XX-1234";
+    errors.ssn = "Enter SSN as 123-45-6789";
   }
 
   if (data.dob && isFutureDate(data.dob)) {
     errors.dob = "DOB cannot be in the future";
   }
 
-  if (data.zip && data.zip.length !== 5) {
-    errors.zip = "ZIP must be 5 digits";
+  if (data.zip) {
+    const zipDigits = getDigits(data.zip);
+    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+      errors.zip = "ZIP must be 5 digits or ZIP+4";
+    }
   }
 
   if (data.state && data.state.length !== 2) {
