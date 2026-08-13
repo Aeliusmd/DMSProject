@@ -187,10 +187,16 @@ function generatePaymentReceiptPdf(payment = {}) {
     y = section("Order Information", y);
 
     const boxPadding = 18;
+    const hideCompany = Boolean(
+      payment.hideCompany ||
+        payment.invoice_type === "personal_portal" ||
+        payment.creation_source === "personal_portal" ||
+        payment.creationSource === "personal_portal"
+    );
     const orderRows = [
       ["Order Number", payment.order_number || String(payment.order_id || "—")],
       ["Case Number", payment.case_number || "—"],
-      ["Company", payment.company_name || "—"],
+      ...(!hideCompany ? [["Company", payment.company_name || "—"]] : []),
       ["Applicant", payment.applicant_name || "—"],
     ];
 

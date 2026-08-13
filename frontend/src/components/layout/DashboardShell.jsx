@@ -90,7 +90,7 @@ export default function DashboardShell({ children, lockScroll = false }) {
             className={`mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col ${
               lockScroll
                 ? "overflow-hidden"
-                : "overflow-x-hidden overflow-y-auto"
+                : "overflow-x-hidden overflow-y-auto [&>*]:shrink-0"
             }`}
             style={{ background: "#F8FAFC" }}
           >

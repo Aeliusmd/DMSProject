@@ -89,8 +89,8 @@ export default function CompanyOrderFacilityModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-lg rounded-[12px] bg-white p-5 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/40 px-4 py-6">
+      <div className="my-auto max-h-[calc(100dvh-48px)] w-full max-w-lg overflow-y-auto rounded-[12px] bg-white p-5 shadow-xl">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-[16px] font-semibold text-[#0F172A]">

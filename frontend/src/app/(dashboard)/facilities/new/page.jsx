@@ -325,7 +325,7 @@ function NewFacilityPageContent() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-[18px] font-semibold text-[#111827]">
             Facility Information

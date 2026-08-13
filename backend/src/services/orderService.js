@@ -2365,7 +2365,8 @@ function appendOrderCompletenessFields(
 async function createOrder(data, actorId, files, options = {}) {
   const { allowIncomplete = false, creationSource = "manual" } = options;
   const canAllowIncomplete =
-    allowIncomplete === true && creationSource === "auto";
+    allowIncomplete === true &&
+    (creationSource === "auto" || creationSource === "personal_portal");
   const orderInput = {
     ...data,
     creationSource,

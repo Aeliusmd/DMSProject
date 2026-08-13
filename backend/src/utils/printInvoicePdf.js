@@ -396,8 +396,10 @@ function generatePrintInvoicePdf(data = {}) {
     writeCenteredTitle(doc, "Your request for records is ready");
     writeSectionHeading(doc, "Patient Information");
 
-    writeInfoLine(doc, "Customer:", data.customer);
-    writeInfoLine(doc, "Requested By:", data.requestedBy);
+    if (!data.hideCompany) {
+      writeInfoLine(doc, "Customer:", data.customer);
+      writeInfoLine(doc, "Requested By:", data.requestedBy);
+    }
     writeInfoLine(doc, "Your File #:", data.yourFileNumber);
     writeInfoLine(doc, "Our Case #:", data.ourCaseNumber);
     writeInfoLine(doc, "Applicant:", data.applicant);

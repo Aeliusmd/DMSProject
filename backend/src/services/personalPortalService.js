@@ -1521,6 +1521,7 @@ async function getPrepaymentReceiptPdf(
   const pdfBuffer = await buildReceiptPdf({
     ...prepayment,
     invoice_type: "personal_portal",
+    hideCompany: true,
     invoice_number:
       requestOrder.confirmation_reference || `PR-${requestOrder.id}`,
     amount: prepayment.amount,
@@ -1602,6 +1603,7 @@ async function getFacilityFeeReceiptPdf(
   const pdfBuffer = await buildReceiptPdf({
     ...facilityFee,
     invoice_type: "personal_portal",
+    hideCompany: true,
     invoice_number:
       requestOrder.confirmation_reference || `PR-${requestOrder.id}`,
     amount: facilityFee.amount,
@@ -1643,13 +1645,10 @@ async function getInvoiceReceiptPdf(
 
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT s.*, o.order_number, o.case_number,
-            TRIM(CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name)) AS applicant_name,
-            COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
+    `SELECT s.*, o.order_number, o.case_number, o.creation_source,
+            TRIM(CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name)) AS applicant_name
      FROM stripe_online_payments s
      INNER JOIN orders o ON o.id = s.order_id
-     LEFT JOIN facilities f ON f.id = o.facility_id
-     LEFT JOIN providers p ON p.id = o.provider_id
      WHERE s.order_id = :orderId
        AND s.status = 'succeeded'
        AND s.invoice_type IN ('regular', 'personal_portal')
@@ -1675,6 +1674,7 @@ async function getInvoiceReceiptPdf(
   const pdfBuffer = await buildReceiptPdf({
     ...payment,
     invoice_type: payment.invoice_type || "regular",
+    hideCompany: true,
     invoice_number:
       payment.invoice_number ||
       invoice.invoice_number ||

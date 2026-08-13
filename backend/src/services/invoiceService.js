@@ -1133,9 +1133,15 @@ function buildPrintInvoicePdfData(invoiceRow, orderRow, orderPayments = []) {
   const isCnrPrint = isCnrWitnessOnlyInvoice(invoiceRow, orderRow);
   const isQuickPrint = isQuickRecordsFeeInvoice(invoiceRow);
   const feeLines = [];
+  const personalPortal = isPersonalPortalOrder(orderRow);
   const commonMeta = {
-    customer: orderRow.serve_company_name || orderRow.provider_name || "",
-    requestedBy: orderRow.serve_company_name || orderRow.provider_name || "",
+    hideCompany: personalPortal,
+    customer: personalPortal
+      ? ""
+      : orderRow.serve_company_name || orderRow.provider_name || "",
+    requestedBy: personalPortal
+      ? ""
+      : orderRow.serve_company_name || orderRow.provider_name || "",
     yourFileNumber: resolveYourFileNumber(
       withOrderRecordTypes(orderRow, invoiceRow)
     ),
@@ -3685,7 +3691,9 @@ async function deliverInvoiceEmail(
   for (const email of recipients) {
     const result = await sendInvoiceEmail({
       to: email,
-      companyName: invoice.provider_name || invoice.facility_name || "Company",
+      companyName: isPersonalPortalOrder(invoice)
+        ? buildApplicantName(invoice) || "Valued Customer"
+        : invoice.provider_name || invoice.facility_name || "Company",
       caseNo: invoice.order_number || "",
       applicant: buildApplicantName(invoice),
       invoiceDate: toShortDate(invoice.invoice_date),
@@ -3786,7 +3794,9 @@ async function deliverXrayInvoiceEmail(
   for (const email of recipients) {
     const result = await sendInvoiceEmail({
       to: email,
-      companyName: order.provider_name || order.serve_company_name || "Company",
+      companyName: isPersonalPortalOrder(order)
+        ? buildApplicantName(order) || "Valued Customer"
+        : order.provider_name || order.serve_company_name || "Company",
       caseNo: order.order_number || "",
       applicant: buildApplicantName(order),
       invoiceDate: toShortDate(xrayRow.xray_invoice_date),
@@ -4753,4 +4763,5 @@ module.exports = {
   buildPrintXrayInvoicePdfData,
   syncInvoiceAmountPaidFromOrder,
   syncServeWorkflowFromPrepayment,
+  resolvePendingFacilitySearchFee,
 };
