@@ -14,6 +14,7 @@ import {
   isPersonalOrderSource,
   toApiCreationSource,
 } from "@/lib/orders/orderFilterConstants";
+import { STAFF_PORTAL_ORDERS_HIDDEN } from "@/lib/portalNavigationVisibility";
 
 const BATCH_SCAN_FLASH_KEY = "dms.batchScanFlash";
 const BATCH_SCAN_FLASH_MS = 10000;
@@ -125,7 +126,7 @@ export default function OrdersPage() {
         <OrderFilterBar
           filters={filters}
           onFiltersChange={setFilters}
-          showOrderSourceFilter
+          showOrderSourceFilter={!STAFF_PORTAL_ORDERS_HIDDEN}
         />
 
         <OrdersTable

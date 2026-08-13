@@ -2,6 +2,12 @@
  * Shared US address helpers for portal/order autofill.
  */
 
+const { sanitizeZip } = require("./zipUtils");
+
+function withSanitizedZip(parsed) {
+  return { ...parsed, zip: sanitizeZip(parsed.zip || "") };
+}
+
 function parseUsAddress(fullAddress) {
   const trimmed = `${fullAddress || ""}`.trim();
   if (!trimmed) {
@@ -16,27 +22,27 @@ function parseUsAddress(fullAddress) {
     );
 
     if (inlineMatch) {
-      return {
+      return withSanitizedZip({
         address: inlineMatch[1].trim(),
         city: "",
         state: inlineMatch[2].toUpperCase(),
         zip: inlineMatch[3],
-      };
+      });
     }
 
-    return { address: trimmed, city: "", state: "", zip: "" };
+    return withSanitizedZip({ address: trimmed, city: "", state: "", zip: "" });
   }
 
   const last = parts[parts.length - 1];
   const stateZipMatch = last.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
 
   if (stateZipMatch) {
-    return {
+    return withSanitizedZip({
       address: parts.slice(0, -2).join(", "),
       city: parts.length >= 2 ? parts[parts.length - 2] : "",
       state: stateZipMatch[1].toUpperCase(),
       zip: stateZipMatch[2],
-    };
+    });
   }
 
   const cityStateZipMatch = last.match(
@@ -44,20 +50,20 @@ function parseUsAddress(fullAddress) {
   );
 
   if (cityStateZipMatch) {
-    return {
+    return withSanitizedZip({
       address: parts.slice(0, -1).join(", "),
       city: cityStateZipMatch[1].trim(),
       state: cityStateZipMatch[2].toUpperCase(),
       zip: cityStateZipMatch[3],
-    };
+    });
   }
 
-  return {
+  return withSanitizedZip({
     address: parts.slice(0, -1).join(", "),
     city: parts[parts.length - 1],
     state: "",
     zip: "",
-  };
+  });
 }
 
 function looksLikeAddressSegment(segment = "") {

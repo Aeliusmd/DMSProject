@@ -563,6 +563,15 @@ async function getOnlinePayments(query = {}) {
     }
   }
 
+  const excludePortal = String(query.excludePortalOrders ?? "")
+    .trim()
+    .toLowerCase();
+  if (excludePortal === "1" || excludePortal === "true" || excludePortal === "yes") {
+    conditions.push(
+      "(o.creation_source IS NULL OR o.creation_source NOT IN ('company_portal', 'personal_portal'))"
+    );
+  }
+
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
   const [rows] = await pool.execute(

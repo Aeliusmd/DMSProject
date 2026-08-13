@@ -1,6 +1,7 @@
 "use client";
 
 import AuthInput from "@/components/ui/AuthInput";
+import { ZIP_MAX_CHARS } from "@/lib/validations/zipUtils";
 
 export default function CompanyRegisterFormFields({
   form,
@@ -89,7 +90,13 @@ export default function CompanyRegisterFormFields({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <AuthInput label="City" placeholder="City" {...field("city")} />
         <AuthInput label="State" placeholder="CA" {...field("state")} />
-        <AuthInput label="ZIP" placeholder="91723" {...field("zip")} />
+        <AuthInput
+          label="ZIP"
+          placeholder="12345 or 12345-6789"
+          maxLength={ZIP_MAX_CHARS}
+          inputMode="numeric"
+          {...field("zip")}
+        />
       </div>
     </div>
   );

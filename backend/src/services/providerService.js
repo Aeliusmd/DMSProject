@@ -5,14 +5,16 @@
 const ApiError = require("../utils/ApiError");
 const { stripControlCharacters, sanitizeSearchText } = require("../utils/sanitize");
 const Provider = require("../models/Provider");
+const { sanitizeZip } = require("../utils/zipUtils");
+const { parseUsAddress } = require("../utils/addressParseUtils");
 
 function mapProviderRow(row) {
   return {
     id: row.id,
     companyName: row.company_name,
     address: row.address || "",
-    zip: row.zip_code || "",
-    zipCode: row.zip_code || "",
+    zip: sanitizeZip(row.zip_code || ""),
+    zipCode: sanitizeZip(row.zip_code || ""),
     city: row.city || "",
     state: row.state || "",
     phone: row.phone || "",
@@ -58,7 +60,7 @@ function buildProviderPayload(data = {}) {
   return {
     companyName,
     address: cleanText(data.address ?? "", 255),
-    zipCode: cleanText(data.zipCode ?? data.zip ?? "", 20),
+    zipCode: sanitizeZip(data.zipCode ?? data.zip ?? ""),
     city: cleanText(data.city ?? "", 100),
     state: cleanText(data.state ?? "", 2),
     phone: cleanText(data.phone ?? "", 20),
@@ -86,64 +88,6 @@ async function updateProvider(id, data) {
   return getProviderById(providerId);
 }
 
-function parseUsAddress(fullAddress) {
-  const trimmed = `${fullAddress || ""}`.trim();
-  if (!trimmed) {
-    return { address: "", city: "", state: "", zip: "" };
-  }
-
-  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length === 1) {
-    const inlineMatch = trimmed.match(
-      /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-    );
-
-    if (inlineMatch) {
-      return {
-        address: inlineMatch[1].trim(),
-        city: "",
-        state: inlineMatch[2].toUpperCase(),
-        zip: inlineMatch[3],
-      };
-    }
-
-    return { address: trimmed, city: "", state: "", zip: "" };
-  }
-
-  const last = parts[parts.length - 1];
-  const stateZipMatch = last.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
-
-  if (stateZipMatch) {
-    return {
-      address: parts.slice(0, -2).join(", "),
-      city: parts.length >= 2 ? parts[parts.length - 2] : "",
-      state: stateZipMatch[1].toUpperCase(),
-      zip: stateZipMatch[2],
-    };
-  }
-
-  const cityStateZipMatch = last.match(
-    /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-  );
-
-  if (cityStateZipMatch) {
-    return {
-      address: parts.slice(0, -1).join(", "),
-      city: cityStateZipMatch[1].trim(),
-      state: cityStateZipMatch[2].toUpperCase(),
-      zip: cityStateZipMatch[3],
-    };
-  }
-
-  return {
-    address: parts.slice(0, -1).join(", "),
-    city: parts[parts.length - 1],
-    state: "",
-    zip: "",
-  };
-}
-
 function buildProviderDataFromHints(orderHints = {}) {
   const companyName = `${orderHints.companyName || ""}`.trim();
   if (!companyName) {
@@ -156,8 +100,8 @@ function buildProviderDataFromHints(orderHints = {}) {
     companyName,
     serveCompanyName: companyName,
     address: parsed.address || `${orderHints.companyAddress || ""}`.trim(),
-    zip: parsed.zip || "",
-    zipCode: parsed.zip || "",
+    zip: sanitizeZip(parsed.zip || ""),
+    zipCode: sanitizeZip(parsed.zip || ""),
     city: parsed.city || "",
     state: parsed.state || "",
     phone: "",

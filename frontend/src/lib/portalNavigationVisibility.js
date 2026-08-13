@@ -6,6 +6,13 @@
  */
 export const PORTAL_NAVIGATION_HIDDEN = false;
 
+/**
+ * Hide staff Company Orders / Personal Orders (sidebar, dedicated pages,
+ * Orders source filter, Reports source filter, Payments).
+ * Set to `false` to show them again — do not delete the pages.
+ */
+export const STAFF_PORTAL_ORDERS_HIDDEN = true;
+
 /** Where external portal routes redirect when hidden. */
 export const PORTAL_ROUTE_REDIRECT = "/login";
 
@@ -40,12 +47,25 @@ export function isPortalRouteAllowedWhenHidden(pathname = "") {
   );
 }
 
+export function isStaffPortalOrdersHidden() {
+  return STAFF_PORTAL_ORDERS_HIDDEN || PORTAL_NAVIGATION_HIDDEN;
+}
+
 export function isPortalRouteBlocked(pathname = "") {
+  const normalizedPath = `${pathname || ""}`.split("?")[0] || "/";
+
+  const isStaffOrderRoute = STAFF_ORDER_ROUTE_PREFIXES.some(
+    (prefix) =>
+      normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+  );
+
+  if (isStaffOrderRoute && isStaffPortalOrdersHidden()) {
+    return true;
+  }
+
   if (!PORTAL_NAVIGATION_HIDDEN) {
     return false;
   }
-
-  const normalizedPath = `${pathname || ""}`.split("?")[0] || "/";
 
   if (isPortalRouteAllowedWhenHidden(normalizedPath)) {
     return false;
@@ -72,7 +92,7 @@ export function getBlockedRouteRedirect(pathname = "") {
 
 /** Hide Company Orders / Personal Orders from the staff sidebar when flag is on. */
 export function isStaffPortalOrdersNavHidden(href = "") {
-  if (!PORTAL_NAVIGATION_HIDDEN) {
+  if (!isStaffPortalOrdersHidden()) {
     return false;
   }
 

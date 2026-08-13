@@ -23,6 +23,7 @@ import {
   formatMoneyInput,
   formatPhone,
   formatSSN,
+  formatZip,
   getImmediateRequiredFields,
   moneyFields,
   numericOnlyFields,
@@ -719,7 +720,7 @@ function NewOrderPageContent() {
         );
 
         let nextForm = syncPaymentDueFields(
-          { ...initialFormData, ...order },
+          { ...initialFormData, ...order, zip: formatZip(order.zip) },
           order.invoiceFees
         );
         if (
@@ -1857,7 +1858,7 @@ function NewOrderPageContent() {
       await updateProvider(providerId, {
         companyName: data.serveCompanyName,
         address: data.address,
-        zip: data.zip,
+        zip: formatZip(data.zip),
         city: data.city,
         state: data.state,
         phone: data.phone,
@@ -1968,7 +1969,7 @@ function NewOrderPageContent() {
     } else if (name === "ssn") {
       nextValue = formatSSN(value);
     } else if (name === "zip") {
-      nextValue = value.replace(/\D/g, "").slice(0, 5);
+      nextValue = formatZip(value);
     } else if (name === "state") {
       nextValue = value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2);
     } else if (numericOnlyFields.includes(name)) {
@@ -2021,7 +2022,7 @@ function NewOrderPageContent() {
       providerId: String(provider.id),
       serveCompanyName: provider.companyName || "",
       address: provider.address || "",
-      zip: provider.zipCode || provider.zip || "",
+      zip: formatZip(provider.zipCode || provider.zip || ""),
       city: provider.city || "",
       state: provider.state || "",
       phone: provider.phone || "",
@@ -2844,7 +2845,7 @@ function OrderDetailsForm({
                   if (address) params.set("address", address);
                   if (req.facilityCity) params.set("city", req.facilityCity);
                   if (req.facilityState) params.set("state", req.facilityState);
-                  if (req.facilityZip) params.set("zip", req.facilityZip);
+                  if (req.facilityZip) params.set("zip", formatZip(req.facilityZip));
                   return `/facilities/new?${params.toString()}`;
                 })()}
                 onClick={() => onBeforeFacilityProfileNavigate?.()}
@@ -3326,9 +3327,9 @@ function ServeInfoForm({
           value={formData.zip}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="ZIP"
+          placeholder="12345 or 12345-6789"
           inputMode="numeric"
-          maxLength={5}
+          maxLength={10}
           error={getError("zip")}
         />
 

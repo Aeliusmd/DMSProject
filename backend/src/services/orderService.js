@@ -39,6 +39,7 @@ const {
   parseOptionalCursor,
 } = require("../lib/reportQueryParser");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
+const { sanitizeZip, sanitizeZipOrNull } = require("../utils/zipUtils");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
@@ -415,7 +416,7 @@ function buildOrderDbPayload(data) {
     ...buildInjuryDatePayload(data),
     serveCompanyName: trimOrNull(data.serveCompanyName, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
     serveAddress: trimOrNull(data.address, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
-    serveZip: trimOrNull(data.zip, { maxLength: 20 }),
+    serveZip: sanitizeZipOrNull(data.zip),
     serveCity: trimOrNull(data.city, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
     serveState: trimOrNull(data.state, { maxLength: 2 }),
     servePhone: trimOrNull(data.phone, { maxLength: 20 }),
@@ -1166,7 +1167,7 @@ function mapOrderDetail(
 
     serveCompanyName: row.serve_company_name || "",
     address: row.serve_address || "",
-    zip: row.serve_zip || "",
+    zip: sanitizeZip(row.serve_zip || ""),
     city: row.serve_city || "",
     state: row.serve_state || "",
     phone: row.serve_phone || "",
@@ -1588,7 +1589,7 @@ async function getAllOrders(query = {}) {
           facilityAddress: row.facility_address || "",
           facilityCity: row.facility_city || "",
           facilityState: row.facility_state || "",
-          facilityZip: row.facility_zip || "",
+          facilityZip: sanitizeZip(row.facility_zip || ""),
           treatingDoctor: row.treating_doctor || "",
           searchFeeAmount,
           internalFacilityId: row.internal_facility_id || null,
@@ -2264,7 +2265,7 @@ async function resolveFacilityId(connection, data, options = {}) {
         address: data.facilityAddress || "",
         city: data.facilityCity || "",
         state: data.facilityState || "",
-        zipCode: data.facilityZip || "",
+        zipCode: sanitizeZip(data.facilityZip || ""),
       },
       connection
     );

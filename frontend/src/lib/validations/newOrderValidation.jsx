@@ -7,6 +7,11 @@ import {
   validateNoHtmlMarkup,
   addNoHtmlMarkupFieldErrors,
 } from "@/lib/validations/nameValidation";
+import {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
 
 const AUTO_PENDING_ORDER_PREFIX = "AUTO-PENDING-";
 
@@ -298,11 +303,8 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     errors.dob = "DOB cannot be in the future";
   }
 
-  if (data.zip) {
-    const zipDigits = getDigits(data.zip);
-    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-      errors.zip = "ZIP must be 5 digits or ZIP+4";
-    }
+  if (data.zip && !isValidZip(data.zip)) {
+    errors.zip = ZIP_VALIDATION_MESSAGE;
   }
 
   if (data.state && data.state.length !== 2) {
@@ -468,7 +470,15 @@ export function formatPhone(value) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
+export function formatZip(value) {
+  return sanitizeZip(value);
+}
+
 export function formatSSN(value) {
+  const trimmed = String(value || "").trim();
+  if (/^XXX-XX-\d{4}$/i.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
   const digits = getDigits(value).slice(0, 9);
 
   if (digits.length <= 3) return digits;

@@ -8,6 +8,8 @@ export default function AuthInput({
   leftIcon,
   rightIcon,
   error,
+  maxLength,
+  inputMode,
 }) {
   return (
     <div>
@@ -28,6 +30,8 @@ export default function AuthInput({
           value={value}
           onChange={onChange}
           onBlur={onBlur}
+          maxLength={maxLength}
+          inputMode={inputMode}
           className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:bg-white focus:ring-2 ${
             leftIcon ? "pl-[42px]" : "pl-[14px]"
           } ${rightIcon ? "pr-[42px]" : "pr-[14px]"} ${

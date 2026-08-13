@@ -1,4 +1,5 @@
 import { formatMaskedSSN } from "@/lib/validations/newOrderValidation";
+import { sanitizeZip } from "@/lib/validations/zipUtils";
 
 const ORDER_TYPE_KEYWORDS = {
   billing: ["billing"],
@@ -248,10 +249,14 @@ export function applyDateOfInjuryFromHints(updates, hints = {}) {
   }
 }
 
+function withSanitizedZip(parsed) {
+  return { ...parsed, zip: sanitizeZip(parsed.zip || "") };
+}
+
 export function parseUsAddress(fullAddress) {
   const trimmed = String(fullAddress || "").trim();
   if (!trimmed) {
-    return { address: "", city: "", state: "", zip: "" };
+    return withSanitizedZip({ address: "", city: "", state: "", zip: "" });
   }
 
   const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
@@ -262,27 +267,27 @@ export function parseUsAddress(fullAddress) {
     );
 
     if (inlineMatch) {
-      return {
+      return withSanitizedZip({
         address: inlineMatch[1].trim(),
         city: "",
         state: inlineMatch[2].toUpperCase(),
         zip: inlineMatch[3],
-      };
+      });
     }
 
-    return { address: trimmed, city: "", state: "", zip: "" };
+    return withSanitizedZip({ address: trimmed, city: "", state: "", zip: "" });
   }
 
   const last = parts[parts.length - 1];
   const stateZipMatch = last.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
 
   if (stateZipMatch) {
-    return {
+    return withSanitizedZip({
       address: parts.slice(0, -2).join(", "),
       city: parts.length >= 2 ? parts[parts.length - 2] : "",
       state: stateZipMatch[1].toUpperCase(),
       zip: stateZipMatch[2],
-    };
+    });
   }
 
   const cityStateZipMatch = last.match(
@@ -290,20 +295,20 @@ export function parseUsAddress(fullAddress) {
   );
 
   if (cityStateZipMatch) {
-    return {
+    return withSanitizedZip({
       address: parts.slice(0, -1).join(", "),
       city: cityStateZipMatch[1].trim(),
       state: cityStateZipMatch[2].toUpperCase(),
       zip: cityStateZipMatch[3],
-    };
+    });
   }
 
-  return {
+  return withSanitizedZip({
     address: parts.slice(0, -1).join(", "),
     city: parts[parts.length - 1],
     state: "",
     zip: "",
-  };
+  });
 }
 
 function looksLikeAddressSegment(segment = "") {
@@ -400,7 +405,7 @@ function applyParsedServeAddress(updates, fullAddress) {
 
   if (!updates.city && parsed.city) updates.city = parsed.city;
   if (!updates.state && parsed.state) updates.state = parsed.state;
-  if (!updates.zip && parsed.zip) updates.zip = parsed.zip;
+  if (!updates.zip && parsed.zip) updates.zip = sanitizeZip(parsed.zip);
 }
 
 function fillMissingServeAddressParts(updates) {
@@ -414,7 +419,7 @@ function fillMissingServeAddressParts(updates) {
   updates.address = parsed.address;
   if (!updates.city && parsed.city) updates.city = parsed.city;
   if (!updates.state && parsed.state) updates.state = parsed.state;
-  if (!updates.zip && parsed.zip) updates.zip = parsed.zip;
+  if (!updates.zip && parsed.zip) updates.zip = sanitizeZip(parsed.zip);
 }
 
 export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [] } = {}) {
@@ -505,7 +510,7 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
     meta.facilityAddress = facilityAddressParts.address || facilityLabel.address;
     meta.facilityCity = facilityAddressParts.city || "";
     meta.facilityState = facilityAddressParts.state || "";
-    meta.facilityZip = facilityAddressParts.zip || "";
+    meta.facilityZip = sanitizeZip(facilityAddressParts.zip || "");
   }
 
   if (hints.missingDefaultDoctor) {
@@ -534,7 +539,7 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
 
     if (matched) {
       updates.address = matched.address || updates.address || "";
-      updates.zip = matched.zipCode || matched.zip || updates.zip || "";
+      updates.zip = sanitizeZip(matched.zipCode || matched.zip || updates.zip || "");
       updates.city = matched.city || updates.city || "";
       updates.state = matched.state || updates.state || "";
       updates.phone = matched.phone || updates.phone || "";
@@ -552,7 +557,7 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
       updates.providerId = String(providerMatch.id);
       updates.serveCompanyName = getProviderLabel(providerMatch);
       updates.address = providerMatch.address || updates.address || "";
-      updates.zip = providerMatch.zipCode || providerMatch.zip || "";
+      updates.zip = sanitizeZip(providerMatch.zipCode || providerMatch.zip || "");
       updates.city = providerMatch.city || "";
       updates.state = providerMatch.state || "";
       updates.phone = providerMatch.phone || "";

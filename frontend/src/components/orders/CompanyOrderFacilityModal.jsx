@@ -7,6 +7,7 @@ import {
   markPersonalOrderNoFacility,
 } from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { sanitizeZip } from "@/lib/validations/zipUtils";
 
 function buildAddFacilityHref(order, portalType = "company") {
   const req = order?.newFacilityRequest || {};
@@ -17,7 +18,7 @@ function buildAddFacilityHref(order, portalType = "company") {
   if (req.facilityAddress) params.set("address", req.facilityAddress);
   if (req.facilityCity) params.set("city", req.facilityCity);
   if (req.facilityState) params.set("state", req.facilityState);
-  if (req.facilityZip) params.set("zip", req.facilityZip);
+  if (req.facilityZip) params.set("zip", sanitizeZip(req.facilityZip));
   return `/facilities/new?${params.toString()}`;
 }
 

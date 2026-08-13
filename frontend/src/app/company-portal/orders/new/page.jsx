@@ -312,7 +312,7 @@ function CompanyOrderCreateClient() {
         facilityAddress: facility.streetAddress || "",
         facilityCity: facility.city || "",
         facilityState: facility.state || "",
-        facilityZip: facility.zip || "",
+        facilityZip: sanitizeCompanyOrderField("facilityZip", facility.zip || ""),
       };
       persistWizard({ form: next });
       return next;
@@ -331,7 +331,10 @@ function CompanyOrderCreateClient() {
         facilityAddress: values.facilityAddress || "",
         facilityCity: values.facilityCity || "",
         facilityState: values.facilityState || "",
-        facilityZip: values.facilityZip || "",
+        facilityZip: sanitizeCompanyOrderField(
+          "facilityZip",
+          values.facilityZip || ""
+        ),
         treatingDoctor: values.treatingDoctor || prev.treatingDoctor || "",
       };
       persistWizard({ form: next });

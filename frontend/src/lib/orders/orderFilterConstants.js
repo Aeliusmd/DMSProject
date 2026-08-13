@@ -19,6 +19,13 @@ export const ORDER_SOURCE_INTERNAL = "internal";
 export const ORDER_SOURCE_COMPANY = "company_portal";
 export const ORDER_SOURCE_PERSONAL = "personal_portal";
 
+export function getOrderSourceOptions({ hidePortalOrders = false } = {}) {
+  if (!hidePortalOrders) return ORDER_SOURCE_OPTIONS;
+  return ORDER_SOURCE_OPTIONS.filter(
+    (option) => option.value === ORDER_SOURCE_INTERNAL
+  );
+}
+
 export const INTERNAL_ORDER_STATUS_OPTIONS = [
   { value: "", label: "All Status" },
   { value: "active", label: "Active" },

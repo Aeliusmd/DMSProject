@@ -19,9 +19,33 @@ const FIELD_LIMITS = {
   VARCHAR_150: 150,
   VARCHAR_100: 100,
   VARCHAR_50: 50,
+  // US ZIP / ZIP+4 from batch-scan extracts (5 or 10 chars) and USPS.
+  ZIP_MIN_CHARS: 5,
+  ZIP_MAX_CHARS: 10,
+  ZIP_MIN_DIGITS: 5,
+  ZIP_MAX_DIGITS: 9,
+};
+
+// batch_scan_extracts column sizes. XSS-strip extracts, only cap at these.
+const EXTRACT_FIELD_LIMITS = {
+  applicant_name: 200,
+  case_name: 255,
+  order_number: 50,
+  rec_number: 50,
+  ssn: 20,
+  customer: 200,
+  company_name: 255,
+  company_address: 500,
+  specific_doctor: 200,
+  doctor_address: 500,
+  record_type: 100,
+  requested_record: TEXT_FIELD_MAX_LENGTH,
+  amount: 50,
+  cheque_number: 50,
 };
 
 module.exports = {
   TEXT_FIELD_MAX_LENGTH,
   FIELD_LIMITS,
+  EXTRACT_FIELD_LIMITS,
 };

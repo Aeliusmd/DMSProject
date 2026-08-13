@@ -1,5 +1,5 @@
 const HTML_MARKUP_PATTERN = /[<>]/;
-const PERSON_NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}'.\- ]*$/u;
+const PERSON_NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}',.\- ]*$/u;
 const ORGANIZATION_NAME_PATTERN =
   /^[\p{L}\p{M}0-9#("'][\p{L}\p{M}0-9&.,:'"()#\-+/;[\] ]*$/u;
 

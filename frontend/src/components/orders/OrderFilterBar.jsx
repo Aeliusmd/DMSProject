@@ -8,11 +8,12 @@ import {
   ORDER_PERIOD_OPTIONS,
   ORDER_SOURCE_COMPANY,
   ORDER_SOURCE_INTERNAL,
-  ORDER_SOURCE_OPTIONS,
   ORDER_SOURCE_PERSONAL,
+  getOrderSourceOptions,
   getStatusOptionsForOrderSource,
   isPersonalOrderSource,
 } from "@/lib/orders/orderFilterConstants";
+import { STAFF_PORTAL_ORDERS_HIDDEN } from "@/lib/portalNavigationVisibility";
 
 export const defaultOrderFilters = {
   facility: "",
@@ -39,7 +40,14 @@ export default function OrderFilterBar({
   const [companiesLoadError, setCompaniesLoadError] = useState("");
 
   const appliedFilters = filters || defaultOrderFilters;
-  const draftOrderSource = showOrderSourceFilter
+  const sourceOptions = getOrderSourceOptions({
+    hidePortalOrders: STAFF_PORTAL_ORDERS_HIDDEN,
+  });
+  const showSourceFilter =
+    showOrderSourceFilter &&
+    !STAFF_PORTAL_ORDERS_HIDDEN &&
+    sourceOptions.length > 1;
+  const draftOrderSource = showSourceFilter
     ? draftFilters.creationSource || ORDER_SOURCE_INTERNAL
     : statusOptionsVariant === "company"
       ? ORDER_SOURCE_COMPANY
@@ -168,7 +176,7 @@ export default function OrderFilterBar({
       </h2>
 
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]">
-        {showOrderSourceFilter ? (
+        {showSourceFilter ? (
           <div className="min-w-0">
             <select
               value={draftOrderSource}
@@ -176,7 +184,7 @@ export default function OrderFilterBar({
               className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               aria-label="Order source"
             >
-              {ORDER_SOURCE_OPTIONS.map((option) => (
+              {sourceOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>

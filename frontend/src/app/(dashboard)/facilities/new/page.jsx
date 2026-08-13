@@ -21,6 +21,12 @@ import {
   validateOrganizationName,
   validatePersonName,
 } from "@/lib/validations/nameValidation";
+import {
+  ZIP_MAX_CHARS,
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
 
 const initialFormData = {
   facilityName: "",
@@ -103,7 +109,7 @@ function NewFacilityPageContent() {
         .replace(/[^a-zA-Z]/g, "")
         .toUpperCase()
         .slice(0, 2),
-      zipCode: (searchParams.get("zip") || "").replace(/\D/g, "").slice(0, 5),
+      zipCode: sanitizeZip(searchParams.get("zip") || ""),
     };
 
     const hasPrefill = Object.values(prefill).some((value) => value);
@@ -137,7 +143,7 @@ function NewFacilityPageContent() {
     }
 
     if (name === "zipCode") {
-      nextValue = value.replace(/\D/g, "").slice(0, 5);
+      nextValue = sanitizeZip(value);
     }
 
     if (name === "state") {
@@ -415,6 +421,8 @@ function NewFacilityPageContent() {
                   onChange={handleChange}
                   error={getError("zipCode")}
                   inputMode="numeric"
+                  maxLength={ZIP_MAX_CHARS}
+                  placeholder="12345 or 12345-6789"
                 />
 
                 <FacilityField
@@ -753,8 +761,8 @@ function validateFacilityForm(data, managers) {
     if (nameError) errors[field] = nameError;
   });
 
-  if (data.zipCode && data.zipCode.length !== 5) {
-    errors.zipCode = "ZIP must be 5 digits";
+  if (data.zipCode && !isValidZip(data.zipCode)) {
+    errors.zipCode = ZIP_VALIDATION_MESSAGE;
   }
 
   if (data.state && data.state.length !== 2) {
@@ -814,8 +822,8 @@ function validateFacilityField(field, value) {
     return "Enter a valid email address";
   }
 
-  if (field === "zipCode" && value && value.length !== 5) {
-    return "ZIP must be 5 digits";
+  if (field === "zipCode" && value && !isValidZip(value)) {
+    return ZIP_VALIDATION_MESSAGE;
   }
 
   if (field === "state" && value && value.length !== 2) {

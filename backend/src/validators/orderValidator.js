@@ -20,6 +20,11 @@ const {
 const {
   isPendingAutoOrderNumber,
 } = require("../utils/orderRequiredFields");
+const {
+  ZIP_MAX_CHARS,
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+} = require("../utils/zipUtils");
 
 const ORDER_FREE_TEXT_FIELDS = [
   "address",
@@ -367,12 +372,13 @@ function validateOrderPayload(body = {}, options = {}) {
 
   const zip = trimToString(body.zip);
   if (zip) {
-    const zipDigits = getDigits(zip);
-    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+    if (!isValidZip(zip)) {
       errors.push({
         field: "zip",
-        message: "ZIP must be 5 digits or ZIP+4",
+        message: ZIP_VALIDATION_MESSAGE,
       });
+    } else {
+      addMaxLengthError(errors, "zip", zip, ZIP_MAX_CHARS);
     }
   }
 

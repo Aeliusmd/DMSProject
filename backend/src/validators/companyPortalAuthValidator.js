@@ -6,6 +6,11 @@ const {
 } = require("./validationHelpers");
 const { sanitizeText } = require("../utils/sanitize");
 const { addNoHtmlMarkupError } = require("../utils/nameValidation");
+const {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} = require("../utils/zipUtils");
 
 const MAX_PASSWORD_LENGTH = 128;
 const MIN_PASSWORD_LENGTH = 8;
@@ -79,7 +84,7 @@ function validateCompanyRegister(body = {}) {
   const addressLine2 = sanitizeField(body.addressLine2, 255);
   const city = sanitizeField(body.city, 100);
   const state = sanitizeField(body.state, 2).toUpperCase();
-  const zip = sanitizeField(body.zip || body.zipCode, 20);
+  const zip = sanitizeZip(body.zip || body.zipCode);
 
   if (!companyName) {
     errors.push({ field: "companyName", message: "Company name is required" });
@@ -132,11 +137,10 @@ function validateCompanyRegister(body = {}) {
     errors.push({ field: "state", message: "State must be 2 letters" });
   }
 
-  const zipDigits = getDigits(zip);
   if (!zip) {
     errors.push({ field: "zip", message: "ZIP code is required" });
-  } else if (zipDigits.length !== 5) {
-    errors.push({ field: "zip", message: "ZIP must be 5 digits" });
+  } else if (!isValidZip(zip, { required: true })) {
+    errors.push({ field: "zip", message: ZIP_VALIDATION_MESSAGE });
   }
 
   return {
@@ -151,7 +155,7 @@ function validateCompanyRegister(body = {}) {
       addressLine2: addressLine2 || null,
       city,
       state,
-      zip: zipDigits,
+      zip: sanitizeZip(zip),
     },
   };
 }

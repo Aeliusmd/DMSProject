@@ -8,6 +8,7 @@ const {
   resolveExtractionSchema,
 } = require("./extractionMapper");
 const { splitNameAndAddress, parseUsAddress } = require("./addressParseUtils");
+const { sanitizeZip } = require("./zipUtils");
 
 const ORDER_TYPE_KEYWORDS = {
   billing: ["billing"],
@@ -79,7 +80,7 @@ function applyParsedServeAddress(updates, fullAddress) {
   updates.address = parsed.address || String(fullAddress).trim();
   if (!updates.city && parsed.city) updates.city = parsed.city;
   if (!updates.state && parsed.state) updates.state = parsed.state;
-  if (!updates.zip && parsed.zip) updates.zip = parsed.zip;
+  if (!updates.zip && parsed.zip) updates.zip = sanitizeZip(parsed.zip);
 }
 
 function buildOrderPayloadFromExtractRow(extract, facilities = []) {

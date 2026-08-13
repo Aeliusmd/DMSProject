@@ -14,6 +14,7 @@ const {
   formatRecordTypesLabel,
 } = require("../utils/companyPortalRecordTypes");
 const { getPool } = require("../config/database");
+const { sanitizeZip } = require("../utils/zipUtils");
 
 const COMPANY_PORTAL_STAGES = [
   "In Process",
@@ -160,7 +161,7 @@ function buildInternalOrderPayload(portalOrder, options = {}) {
     facilityAddress: portalOrder.facility_address || "",
     facilityCity: portalOrder.facility_city || "",
     facilityState: portalOrder.facility_state || "",
-    facilityZip: portalOrder.facility_zip || "",
+    facilityZip: sanitizeZip(portalOrder.facility_zip || ""),
     fullAddress: [
       portalOrder.facility_address,
       portalOrder.facility_city,
@@ -181,7 +182,7 @@ function buildInternalOrderPayload(portalOrder, options = {}) {
     serveAddress: portalOrder.company_address || "",
     serveCity: portalOrder.company_city || "",
     serveState: portalOrder.company_state || "",
-    serveZip: portalOrder.company_zip || "",
+    serveZip: sanitizeZip(portalOrder.company_zip || ""),
     serveEmail: portalOrder.contact_email || "",
     servePhone: portalOrder.contact_phone || "",
     subpoenaDate: toDateOnly(portalOrder.subpoena_date),
@@ -702,7 +703,9 @@ async function linkFacilityToPortalOrder(internalOrderId, facilityId) {
       facilityAddress: facility.address || portalOrder.facility_address,
       facilityCity: facility.city ?? portalOrder.facility_city,
       facilityState: facility.state ?? portalOrder.facility_state,
-      facilityZip: facility.zip_code ?? portalOrder.facility_zip,
+      facilityZip: sanitizeZip(
+        facility.zip_code ?? portalOrder.facility_zip ?? ""
+      ),
     });
   }
 

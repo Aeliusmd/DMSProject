@@ -6,6 +6,7 @@ const CompanyPortalSession = require("../models/CompanyPortalSession");
 const { sendTwoFactorCode } = require("./emailService");
 const twoFactorStore = require("./twoFactorStore");
 const tokenService = require("./tokenService");
+const { sanitizeZip } = require("../utils/zipUtils");
 
 function companyOtpKey(sessionId) {
   return `company:${sessionId}`;
@@ -23,7 +24,7 @@ function formatCompanyUser(row) {
     addressLine2: row.address_line2 || "",
     city: row.city,
     state: row.state,
-    zip: row.zip,
+    zip: sanitizeZip(row.zip),
     role: "Company",
     portal: "company",
     isAdmin: true,
@@ -50,7 +51,7 @@ async function register(data) {
     addressLine2: data.addressLine2,
     city: data.city,
     state: data.state,
-    zip: data.zip,
+    zip: sanitizeZip(data.zip),
   });
 
   return {

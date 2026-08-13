@@ -8,6 +8,11 @@ const {
   addNoHtmlMarkupError,
   addNoHtmlMarkupErrors,
 } = require("../utils/nameValidation");
+const {
+  ZIP_MAX_CHARS,
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+} = require("../utils/zipUtils");
 
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || "").trim());
@@ -17,7 +22,7 @@ const LIMITS = {
   facilityName: 200,
   contactName: 100,
   address: 255,
-  zipCode: 20,
+  zipCode: ZIP_MAX_CHARS,
   city: 100,
   state: 2,
   phone: 20,
@@ -84,8 +89,8 @@ function validateFacilityPayload(data) {
   addMaxLengthError(errors, "phone", phone, LIMITS.phone);
   addMaxLengthError(errors, "fax", fax, LIMITS.fax);
 
-  if (zipCode && getDigits(zipCode).length !== 5) {
-    errors.push({ field: "zipCode", message: "ZIP must be 5 digits" });
+  if (zipCode && !isValidZip(zipCode)) {
+    errors.push({ field: "zipCode", message: ZIP_VALIDATION_MESSAGE });
   }
 
   if (state && String(state).trim().length !== 2) {

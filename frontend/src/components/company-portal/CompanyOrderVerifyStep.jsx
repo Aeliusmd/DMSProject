@@ -19,6 +19,7 @@ function Field({
   error,
   type = "text",
   placeholder,
+  maxLength,
 }) {
   return (
     <div>
@@ -34,6 +35,7 @@ function Field({
         name={name}
         value={value}
         placeholder={placeholder}
+        maxLength={maxLength}
         onChange={(event) => onChange(name, event.target.value)}
         className={`h-10 w-full rounded-[8px] border bg-[#F8FAFC] px-3 text-[13px] text-[#0F172A] outline-none transition focus:bg-white focus:ring-2 ${
           error
@@ -255,7 +257,8 @@ export default function CompanyOrderVerifyStep({
             value={form.companyZip}
             onChange={onChange}
             error={errors.companyZip}
-            placeholder="91723"
+            placeholder="12345 or 12345-6789"
+            maxLength={10}
           />
         </div>
 

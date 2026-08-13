@@ -7,6 +7,11 @@ import {
   htmlMarkupError,
   sanitizeCompanyOrderForm,
 } from "@/lib/company-portal/companyPortalValidation";
+import {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
 
 export const COMPANY_ORDER_STEPS = [
   { id: 1, key: "upload", label: "Upload" },
@@ -65,7 +70,7 @@ export function mapOrderToForm(order = {}) {
     facilityAddress: order.facilityAddress || "",
     facilityCity: order.facilityCity || "",
     facilityState: order.facilityState || "",
-    facilityZip: order.facilityZip || "",
+    facilityZip: sanitizeZip(order.facilityZip || ""),
     treatingDoctor: order.treatingDoctor || "",
     applicantName: order.applicantName || "",
     caseName: order.caseName || "",
@@ -79,7 +84,7 @@ export function mapOrderToForm(order = {}) {
     companyAddress: order.companyAddress || "",
     companyCity: order.companyCity || "",
     companyState: order.companyState || "",
-    companyZip: order.companyZip || "",
+    companyZip: sanitizeZip(order.companyZip || ""),
     doctorAddress: order.doctorAddress || "",
     medicalRecords: Boolean(order.medicalRecords),
     billingRecords: Boolean(order.billingRecords),
@@ -188,11 +193,10 @@ export function validateCompanyOrderForm(form) {
       errors.facilityState = "State must be 2 letters";
     }
 
-    const zipDigits = `${sanitized.facilityZip || ""}`.replace(/\D/g, "");
-    if (!zipDigits) {
-      errors.facilityZip = "ZIP code is required";
-    } else if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-      errors.facilityZip = "ZIP must be 5 digits";
+    if (!isValidZip(sanitized.facilityZip, { required: true })) {
+      errors.facilityZip = sanitized.facilityZip
+        ? ZIP_VALIDATION_MESSAGE
+        : "ZIP code is required";
     }
   } else if (mode === "existing" || facilityId > 0) {
     if (requestNew) {
@@ -219,13 +223,8 @@ export function validateCompanyOrderForm(form) {
     errors.companyState = "State must be 2 letters";
   }
 
-  const companyZipDigits = `${sanitized.companyZip || ""}`.replace(/\D/g, "");
-  if (
-    companyZipDigits &&
-    companyZipDigits.length !== 5 &&
-    companyZipDigits.length !== 9
-  ) {
-    errors.companyZip = "ZIP must be 5 digits";
+  if (sanitized.companyZip && !isValidZip(sanitized.companyZip)) {
+    errors.companyZip = ZIP_VALIDATION_MESSAGE;
   }
 
   return { errors, sanitized };

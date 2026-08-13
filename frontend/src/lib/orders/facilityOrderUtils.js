@@ -1,5 +1,6 @@
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { getFacility, resolveFacility } from "@/lib/facilities/facilityApi";
+import { sanitizeZip } from "@/lib/validations/zipUtils";
 
 const DRAFT_FORM_OMIT_KEYS = new Set([
   "subpoenaFile",
@@ -285,8 +286,8 @@ export async function resolvePendingFacility({
     address: `${address || ""}`.trim() || undefined,
     city: `${city || ""}`.trim() || undefined,
     state: `${state || ""}`.trim() || undefined,
-    zipCode: `${zipCode || zip || ""}`.trim() || undefined,
-    zip: `${zip || zipCode || ""}`.trim() || undefined,
+    zipCode: sanitizeZip(`${zipCode || zip || ""}`) || undefined,
+    zip: sanitizeZip(`${zip || zipCode || ""}`) || undefined,
   });
 
   return {

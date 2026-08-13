@@ -20,6 +20,7 @@ const {
   splitNameAndAddress,
   formatAddressLine,
 } = require("../utils/addressParseUtils");
+const { sanitizeZip } = require("../utils/zipUtils");
 const {
   mapRecordTextToFlags,
   normalizeRecordTypeFlags,
@@ -72,7 +73,7 @@ function resolveFacilityFromHints(hints = {}) {
     facilityAddress: parsed.address || addressSource || "",
     facilityCity: parsed.city || "",
     facilityState: parsed.state || "",
-    facilityZip: parsed.zip || "",
+    facilityZip: sanitizeZip(parsed.zip || ""),
   };
 }
 
@@ -103,8 +104,8 @@ function resolveCompanyFromHints(hints = {}, companyUser = {}) {
       ? parsed.state || ""
       : companyUser.state || "",
     companyZip: hasParsedAddress
-      ? parsed.zip || ""
-      : companyUser.zip || "",
+      ? sanitizeZip(parsed.zip || "")
+      : sanitizeZip(companyUser.zip || ""),
   };
 }
 
@@ -124,7 +125,7 @@ function mapHintsToDraftFields(hints = {}, companyUser = {}) {
     facilityAddress: facility.facilityAddress,
     facilityCity: facility.facilityCity || null,
     facilityState: facility.facilityState || null,
-    facilityZip: facility.facilityZip || null,
+    facilityZip: sanitizeZip(facility.facilityZip || "") || null,
     treatingDoctor: hints.specificDoctor || null,
     applicantName: hints.applicantName || null,
     caseName: hints.caseName || null,
@@ -138,7 +139,7 @@ function mapHintsToDraftFields(hints = {}, companyUser = {}) {
     companyAddress: company.companyAddress || null,
     companyCity: company.companyCity || null,
     companyState: company.companyState || null,
-    companyZip: company.companyZip || null,
+    companyZip: sanitizeZip(company.companyZip || "") || null,
     doctorAddress: hints.doctorAddress || null,
     recordType: formatRecordTypesLabel(recordFlags) || hints.recordType || null,
     requestedRecord: hints.requestedRecord || null,
@@ -159,7 +160,7 @@ async function enrichDraftFieldsWithFacilityMatch(draftFields = {}) {
 
   const match = await Facility.findBestMatch({
     facilityName: name,
-    zipCode: draftFields.facilityZip || null,
+    zipCode: sanitizeZip(draftFields.facilityZip || "") || null,
   });
 
   if (!match) {
@@ -174,7 +175,7 @@ async function enrichDraftFieldsWithFacilityMatch(draftFields = {}) {
     facilityAddress: match.address || draftFields.facilityAddress,
     facilityCity: match.city || draftFields.facilityCity,
     facilityState: match.state || draftFields.facilityState,
-    facilityZip: match.zip_code || draftFields.facilityZip,
+    facilityZip: sanitizeZip(match.zip_code || draftFields.facilityZip || ""),
   };
 }
 
@@ -295,7 +296,7 @@ function formatOrder(row) {
     facilityAddress: row.facility_address || "",
     facilityCity: row.facility_city || "",
     facilityState: row.facility_state || "",
-    facilityZip: row.facility_zip || "",
+    facilityZip: sanitizeZip(row.facility_zip || ""),
     facilityAddressDisplay,
     treatingDoctor: row.treating_doctor || "",
     applicantName: row.applicant_name || "",
@@ -310,7 +311,7 @@ function formatOrder(row) {
     companyAddress: row.company_address || "",
     companyCity: row.company_city || "",
     companyState: row.company_state || "",
-    companyZip: row.company_zip || "",
+    companyZip: sanitizeZip(row.company_zip || ""),
     companyAddressDisplay,
     doctorAddress: row.doctor_address || "",
     recordType: row.record_type || formatRecordTypesLabel(recordFlags) || "",
@@ -660,7 +661,7 @@ function formatDraftForm(fields = {}) {
     facilityAddress: fields.facilityAddress || "",
     facilityCity: fields.facilityCity || "",
     facilityState: fields.facilityState || "",
-    facilityZip: fields.facilityZip || "",
+    facilityZip: sanitizeZip(fields.facilityZip || ""),
     treatingDoctor: fields.treatingDoctor || "",
     applicantName: fields.applicantName || "",
     caseName: fields.caseName || "",
@@ -678,7 +679,7 @@ function formatDraftForm(fields = {}) {
     companyAddress: fields.companyAddress || "",
     companyCity: fields.companyCity || "",
     companyState: fields.companyState || "",
-    companyZip: fields.companyZip || "",
+    companyZip: sanitizeZip(fields.companyZip || ""),
     doctorAddress: fields.doctorAddress || "",
     recordType: formatRecordTypesLabel(recordFlags) || fields.recordType || "",
     requestedRecord: fields.requestedRecord || "",
@@ -959,7 +960,7 @@ async function createOrderFromPending(
     facilityAddress: payload.facilityAddress || "",
     facilityCity: payload.facilityCity || null,
     facilityState: payload.facilityState || null,
-    facilityZip: payload.facilityZip || null,
+    facilityZip: sanitizeZip(payload.facilityZip || "") || null,
     treatingDoctor: payload.treatingDoctor || null,
     applicantName: payload.applicantName || null,
     caseName: payload.caseName || null,
@@ -973,7 +974,7 @@ async function createOrderFromPending(
     companyAddress: payload.companyAddress || null,
     companyCity: payload.companyCity || null,
     companyState: payload.companyState || null,
-    companyZip: payload.companyZip || null,
+    companyZip: sanitizeZip(payload.companyZip || "") || null,
     doctorAddress: payload.doctorAddress || null,
     recordType:
       formatRecordTypesLabel(recordFlags) || payload.recordType || null,
@@ -1031,7 +1032,7 @@ async function createOrderFromPending(
       facilityAddress: payload.facilityAddress,
       facilityCity: payload.facilityCity,
       facilityState: payload.facilityState,
-      facilityZip: payload.facilityZip,
+      facilityZip: sanitizeZip(payload.facilityZip || "") || null,
       treatingDoctor: payload.treatingDoctor || null,
       searchFeeAmount: COMPANY_PORTAL_FACILITY_SEARCH_FEE,
     });

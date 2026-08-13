@@ -12,12 +12,13 @@ import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { RUSH_LEVEL_LEGEND } from "@/lib/orders/rushUtils";
 import {
   ORDER_SOURCE_INTERNAL,
-  ORDER_SOURCE_OPTIONS,
+  getOrderSourceOptions,
   getStatusOptionsForOrderSource,
   isCompanyOrderSource,
   isPersonalOrderSource,
   toApiCreationSource,
 } from "@/lib/orders/orderFilterConstants";
+import { STAFF_PORTAL_ORDERS_HIDDEN } from "@/lib/portalNavigationVisibility";
 
 const RUSH_LEVEL_OPTIONS = [
   { value: "", label: "All Rush Levels" },
@@ -57,8 +58,13 @@ export default function ReportsPage() {
     loading: true,
   });
 
-  const draftOrderSource =
-    draftFilters.creationSource || ORDER_SOURCE_INTERNAL;
+  const sourceOptions = getOrderSourceOptions({
+    hidePortalOrders: STAFF_PORTAL_ORDERS_HIDDEN,
+  });
+  const showSourceFilter = !STAFF_PORTAL_ORDERS_HIDDEN && sourceOptions.length > 1;
+  const draftOrderSource = STAFF_PORTAL_ORDERS_HIDDEN
+    ? ORDER_SOURCE_INTERNAL
+    : draftFilters.creationSource || ORDER_SOURCE_INTERNAL;
   const statusOptions = getStatusOptionsForOrderSource(draftOrderSource);
 
   useEffect(() => {
@@ -133,8 +139,9 @@ export default function ReportsPage() {
     });
   };
 
-  const appliedOrderSource =
-    appliedFilters.creationSource || ORDER_SOURCE_INTERNAL;
+  const appliedOrderSource = STAFF_PORTAL_ORDERS_HIDDEN
+    ? ORDER_SOURCE_INTERNAL
+    : appliedFilters.creationSource || ORDER_SOURCE_INTERNAL;
   const companyPortalMode = isCompanyOrderSource(appliedOrderSource);
   const personalMode = isPersonalOrderSource(appliedOrderSource);
   const apiCreationSource = toApiCreationSource(appliedOrderSource) || null;
@@ -173,12 +180,12 @@ export default function ReportsPage() {
   }, [facilities, appliedFilters.facility]);
 
   const sourceLabel =
-    ORDER_SOURCE_OPTIONS.find((opt) => opt.value === appliedOrderSource)
+    sourceOptions.find((opt) => opt.value === appliedOrderSource)
       ?.label || "Internal Orders";
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-3 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-col gap-3">
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -244,13 +251,14 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
+        <section className="min-w-0 rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
           <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
             Filters
           </h2>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[minmax(150px,1fr)_minmax(160px,1fr)_130px_130px_130px_130px_170px_auto_auto]">
-            <div>
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]">
+            {showSourceFilter ? (
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Order Source
               </label>
@@ -261,15 +269,16 @@ export default function ReportsPage() {
                 }
                 className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
               >
-                {ORDER_SOURCE_OPTIONS.map((option) => (
+                {sourceOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
               </select>
             </div>
+            ) : null}
 
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Facility
               </label>
@@ -296,7 +305,7 @@ export default function ReportsPage() {
               </select>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Status
               </label>
@@ -313,7 +322,7 @@ export default function ReportsPage() {
               </select>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Rush Level
               </label>
@@ -330,7 +339,7 @@ export default function ReportsPage() {
               </select>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 From (Created)
               </label>
@@ -343,7 +352,7 @@ export default function ReportsPage() {
               />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 To (Created)
               </label>
@@ -356,7 +365,7 @@ export default function ReportsPage() {
               />
             </div>
 
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold text-[#64748B]">
                 Sort by Created
               </label>
@@ -379,7 +388,7 @@ export default function ReportsPage() {
               </button>
             </div>
 
-            <div className="flex items-end">
+            <div className="flex min-w-0 items-end">
               <button
                 type="button"
                 onClick={handleApplyFilters}
@@ -389,7 +398,7 @@ export default function ReportsPage() {
               </button>
             </div>
 
-            <div className="flex items-end">
+            <div className="flex min-w-0 items-end">
               <button
                 type="button"
                 onClick={handleReset}

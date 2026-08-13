@@ -8,6 +8,7 @@ const {
   addOrganizationNameFormatError,
   addPersonNameFormatError,
 } = require("../utils/nameValidation");
+const { ZIP_MAX_CHARS } = require("../utils/zipUtils");
 
 const DOCUMENT_TYPES = new Set([
   "Standard",
@@ -43,7 +44,7 @@ function validateResolveFacility(body = {}) {
 
   addMaxLengthError(errors, "address", body.address, 255);
   addMaxLengthError(errors, "city", body.city, 100);
-  addMaxLengthError(errors, "zipCode", body.zipCode ?? body.zip, 20);
+  addMaxLengthError(errors, "zipCode", body.zipCode ?? body.zip, ZIP_MAX_CHARS);
   addMaxLengthError(errors, "state", body.state, 2);
 
   return { valid: errors.length === 0, errors };

@@ -6,6 +6,7 @@ const Order = require("../models/Order");
 const companyPortalInternalSyncService = require("../services/companyPortalInternalSyncService");
 const orderService = require("../services/orderService");
 const activityLogService = require("../services/activityLogService");
+const { sanitizeZip } = require("../utils/zipUtils");
 
 function getInternalOrderLogContext(orderRow = {}) {
   const facilityId = Number(orderRow.facility_id);
@@ -135,7 +136,7 @@ exports.getNewFacilityRequest = asyncHandler(async (req, res) => {
           facilityAddress: newFacility.facility_address || "",
           facilityCity: newFacility.facility_city || "",
           facilityState: newFacility.facility_state || "",
-          facilityZip: newFacility.facility_zip || "",
+          facilityZip: sanitizeZip(newFacility.facility_zip || ""),
           treatingDoctor: newFacility.treating_doctor || "",
           searchFeeAmount: Number(newFacility.search_fee_amount) || 0,
           internalFacilityId: newFacility.internal_facility_id || null,
