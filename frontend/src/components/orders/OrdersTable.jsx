@@ -1497,7 +1497,7 @@ export default function OrdersTable({
     <>
       <section
         ref={tableTopRef}
-        className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-[9px] border border-[#E2E8F0] bg-white shadow-sm"
+        className="flex min-h-[520px] min-w-0 flex-1 flex-col overflow-hidden rounded-[9px] border border-[#E2E8F0] bg-white shadow-sm"
       >
         <div className="flex flex-col gap-2 border-b border-[#F1F5F9] px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-[13px] font-semibold text-[#111827]">

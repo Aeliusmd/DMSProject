@@ -26,8 +26,18 @@ export default function DashboardLayout({ children }) {
           startAuthAutoRefresh();
         }
       } catch {
-        clearAuth();
-        router.replace("/login");
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          await getCurrentUser();
+
+          if (isMounted) {
+            setIsAuthorized(true);
+            startAuthAutoRefresh();
+          }
+        } catch {
+          clearAuth();
+          router.replace("/login");
+        }
       }
     }
 

@@ -161,30 +161,28 @@ export default function OrderFilterBar({
     onFiltersChange?.(defaultOrderFilters);
   };
 
-  const filterGridClass = showOrderSourceFilter
-    ? "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[170px_160px_180px_140px_170px_140px_auto_auto]"
-    : "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[160px_180px_140px_170px_140px_auto_auto]";
-
   return (
-    <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
+    <section className="min-w-0 rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
       <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
         Filters
       </h2>
 
-      <div className={filterGridClass}>
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]">
         {showOrderSourceFilter ? (
-          <select
-            value={draftOrderSource}
-            onChange={(e) => updateDraftFilter("creationSource", e.target.value)}
-            className="h-[34px] min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-            aria-label="Order source"
-          >
-            {ORDER_SOURCE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <div className="min-w-0">
+            <select
+              value={draftOrderSource}
+              onChange={(e) => updateDraftFilter("creationSource", e.target.value)}
+              className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+              aria-label="Order source"
+            >
+              {ORDER_SOURCE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
         ) : null}
 
         <div className="min-w-0">

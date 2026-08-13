@@ -89,8 +89,7 @@ export default function TwoFactorAuthModal({
         accessExpiresAt: payload.accessExpiresAt,
       });
 
-      // Allow personal portal login to await a "session verified" call
-      // before routing.
+      // Keep the OTP screen up until the parent finishes routing.
       await Promise.resolve(onSuccess?.());
     } catch (requestError) {
       const { fieldErrors, message } = applyApiFieldErrors(requestError, {
@@ -104,7 +103,6 @@ export default function TwoFactorAuthModal({
       );
       setOtp(["", "", "", "", "", ""]);
       inputRefs.current[0]?.focus();
-    } finally {
       setIsVerifying(false);
     }
   };

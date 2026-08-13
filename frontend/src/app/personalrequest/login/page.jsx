@@ -139,14 +139,14 @@ export default function PersonalPortalLoginClient() {
           setMaskedEmail("");
         }}
         onSuccess={async () => {
-          setIsTwoFactorOpen(false);
-          setSessionToken("");
           setLoginError("");
 
           try {
             await getPersonalCurrentUser();
-            router.replace("/personalrequest/dashboard");
+            await router.replace("/personalrequest/dashboard");
           } catch (error) {
+            setIsTwoFactorOpen(false);
+            setSessionToken("");
             setLoginError(
               getApiErrorMessage(
                 error,

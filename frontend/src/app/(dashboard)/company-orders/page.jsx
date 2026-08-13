@@ -52,7 +52,7 @@ export default function CompanyOrdersPage() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] flex-col gap-4">
+      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4">
         <div>
           <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
             Company Orders
