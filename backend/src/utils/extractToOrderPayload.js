@@ -7,7 +7,11 @@ const {
   enrichOrderHintsFromRow,
   resolveExtractionSchema,
 } = require("./extractionMapper");
-const { splitNameAndAddress, parseUsAddress } = require("./addressParseUtils");
+const {
+  splitNameAndAddress,
+  parseUsAddress,
+  looksLikeAddressSegment,
+} = require("./addressParseUtils");
 const { sanitizeZip } = require("./zipUtils");
 
 const ORDER_TYPE_KEYWORDS = {
@@ -126,7 +130,9 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
   const companySplit = splitNameAndAddress(hints.companyName || "");
   const companyName = companySplit.name || hints.companyName;
   const companyAddressSource =
-    companySplit.address || hints.companyAddress || "";
+    companySplit.address && looksLikeAddressSegment(companySplit.address)
+      ? companySplit.address
+      : hints.companyAddress || companySplit.address || "";
 
   if (hints.providerId) {
     payload.providerId = String(hints.providerId);

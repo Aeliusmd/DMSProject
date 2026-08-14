@@ -3340,6 +3340,12 @@ function ServeInfoForm({
           onChange={onChange}
           onBlur={onBlur}
           placeholder="City"
+          hint={
+            !formData.city && formData.address && (formData.zip || formData.state)
+              ? "City could not be parsed from the address. Please recheck."
+              : undefined
+          }
+          hintTone="warning"
         />
 
         <NewOrderField

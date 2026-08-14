@@ -250,65 +250,25 @@ export function applyDateOfInjuryFromHints(updates, hints = {}) {
 }
 
 function withSanitizedZip(parsed) {
-  return { ...parsed, zip: sanitizeZip(parsed.zip || "") };
+  const zip = sanitizeZip(parsed.zip || "");
+  const city = `${parsed.city || ""}`.trim();
+  const state = `${parsed.state || ""}`.trim();
+
+  return {
+    ...parsed,
+    city,
+    state,
+    zip,
+    cityNeedsRecheck: !city && Boolean(state || zip),
+  };
 }
 
-export function parseUsAddress(fullAddress) {
-  const trimmed = String(fullAddress || "").trim();
-  if (!trimmed) {
-    return withSanitizedZip({ address: "", city: "", state: "", zip: "" });
-  }
-
-  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
-
-  if (parts.length === 1) {
-    const inlineMatch = trimmed.match(
-      /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-    );
-
-    if (inlineMatch) {
-      return withSanitizedZip({
-        address: inlineMatch[1].trim(),
-        city: "",
-        state: inlineMatch[2].toUpperCase(),
-        zip: inlineMatch[3],
-      });
-    }
-
-    return withSanitizedZip({ address: trimmed, city: "", state: "", zip: "" });
-  }
-
-  const last = parts[parts.length - 1];
-  const stateZipMatch = last.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
-
-  if (stateZipMatch) {
-    return withSanitizedZip({
-      address: parts.slice(0, -2).join(", "),
-      city: parts.length >= 2 ? parts[parts.length - 2] : "",
-      state: stateZipMatch[1].toUpperCase(),
-      zip: stateZipMatch[2],
-    });
-  }
-
-  const cityStateZipMatch = last.match(
-    /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
-  );
-
-  if (cityStateZipMatch) {
-    return withSanitizedZip({
-      address: parts.slice(0, -1).join(", "),
-      city: cityStateZipMatch[1].trim(),
-      state: cityStateZipMatch[2].toUpperCase(),
-      zip: cityStateZipMatch[3],
-    });
-  }
-
-  return withSanitizedZip({
-    address: parts.slice(0, -1).join(", "),
-    city: parts[parts.length - 1],
-    state: "",
-    zip: "",
-  });
+function normalizeAddressText(fullAddress) {
+  return String(fullAddress || "")
+    .replace(/[;\n\r]+/g, ", ")
+    .replace(/\s+/g, " ")
+    .replace(/,(?:\s*,)+/g, ",")
+    .trim();
 }
 
 function looksLikeAddressSegment(segment = "") {
@@ -323,6 +283,111 @@ function looksLikeAddressSegment(segment = "") {
     ) ||
     /\b[A-Za-z]{2}\s+\d{5}(?:-\d{4})?\b/.test(text)
   );
+}
+
+function looksLikeCityName(segment = "") {
+  const text = `${segment || ""}`.trim();
+  if (!text) return false;
+  if (looksLikeAddressSegment(text)) return false;
+  if (text.split(/\s+/).length > 4) return false;
+  return /^[A-Za-z][A-Za-z.'\- ]*$/.test(text);
+}
+
+export function parseUsAddress(fullAddress) {
+  const trimmed = normalizeAddressText(fullAddress);
+  if (!trimmed) {
+    return withSanitizedZip({ address: "", city: "", state: "", zip: "" });
+  }
+
+  const parts = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+
+  if (parts.length === 1) {
+    const inlineMatch = trimmed.match(
+      /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
+    );
+
+    if (inlineMatch) {
+      const remainder = inlineMatch[1].trim();
+      const state = inlineMatch[2].toUpperCase();
+      const zip = inlineMatch[3];
+
+      if (looksLikeCityName(remainder)) {
+        return withSanitizedZip({
+          address: "",
+          city: remainder,
+          state,
+          zip,
+        });
+      }
+
+      return withSanitizedZip({
+        address: remainder,
+        city: "",
+        state,
+        zip,
+      });
+    }
+
+    return withSanitizedZip({ address: trimmed, city: "", state: "", zip: "" });
+  }
+
+  const last = parts[parts.length - 1];
+  const stateZipMatch = last.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+
+  if (stateZipMatch) {
+    const state = stateZipMatch[1].toUpperCase();
+    const zip = stateZipMatch[2];
+    const cityCandidate = parts[parts.length - 2] || "";
+
+    if (looksLikeCityName(cityCandidate)) {
+      return withSanitizedZip({
+        address: parts.slice(0, -2).join(", "),
+        city: cityCandidate,
+        state,
+        zip,
+      });
+    }
+
+    return withSanitizedZip({
+      address: parts.slice(0, -1).join(", "),
+      city: "",
+      state,
+      zip,
+    });
+  }
+
+  const cityStateZipMatch = last.match(
+    /^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/
+  );
+
+  if (cityStateZipMatch) {
+    const cityCandidate = cityStateZipMatch[1].trim();
+    const state = cityStateZipMatch[2].toUpperCase();
+    const zip = cityStateZipMatch[3];
+
+    if (looksLikeCityName(cityCandidate)) {
+      return withSanitizedZip({
+        address: parts.slice(0, -1).join(", "),
+        city: cityCandidate,
+        state,
+        zip,
+      });
+    }
+
+    return withSanitizedZip({
+      address: [...parts.slice(0, -1), cityCandidate].filter(Boolean).join(", "),
+      city: "",
+      state,
+      zip,
+    });
+  }
+
+  return withSanitizedZip({
+    address: trimmed,
+    city: "",
+    state: "",
+    zip: "",
+  });
 }
 
 /**
@@ -526,7 +591,9 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
   const providerSplit = splitNameAndAddress(hints.companyName || "");
   const providerName = providerSplit.name || hints.companyName;
   const companyAddressSource =
-    providerSplit.address || hints.companyAddress || "";
+    providerSplit.address && looksLikeAddressSegment(providerSplit.address)
+      ? providerSplit.address
+      : hints.companyAddress || providerSplit.address || "";
 
   if (hints.providerId) {
     const matched =

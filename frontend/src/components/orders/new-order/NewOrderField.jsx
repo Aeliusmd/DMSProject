@@ -12,6 +12,7 @@ export default function NewOrderField({
   options = [],
   textarea = false,
   hint,
+  hintTone = "muted",
   inputMode,
   maxLength,
 }) {
@@ -91,7 +92,13 @@ export default function NewOrderField({
       )}
 
       {hint && !hasError && (
-        <p className="mt-[4px] text-[10px] text-[#94A3B8]">{hint}</p>
+        <p
+          className={`mt-[4px] text-[10px] ${
+            hintTone === "warning" ? "text-amber-700" : "text-[#94A3B8]"
+          }`}
+        >
+          {hint}
+        </p>
       )}
 
       {hasError && (
