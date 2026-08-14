@@ -392,7 +392,7 @@ export default function ReportsPage() {
               <button
                 type="button"
                 onClick={handleApplyFilters}
-                className="h-[34px] w-full whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+                className="inline-flex h-[34px] w-full items-center justify-center whitespace-nowrap rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#0086A0]"
               >
                 Apply Filters
               </button>
@@ -402,7 +402,7 @@ export default function ReportsPage() {
               <button
                 type="button"
                 onClick={handleReset}
-                className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC]"
+                className="inline-flex h-[34px] w-full items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-medium leading-none text-[#334155] hover:bg-[#F8FAFC]"
               >
                 Reset
               </button>
@@ -429,7 +429,7 @@ export default function ReportsPage() {
             <button
               type="button"
               onClick={handleSearch}
-              className="h-[34px] whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+              className="inline-flex h-[34px] items-center justify-center whitespace-nowrap rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold leading-none text-white hover:bg-[#0086A0]"
             >
               Search
             </button>

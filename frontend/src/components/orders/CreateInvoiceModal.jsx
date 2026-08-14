@@ -1012,7 +1012,7 @@ export default function CreateInvoiceModal({
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitting || loadingInvoice || isFormInvalid}
-                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-[36px] w-full items-center justify-center rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting
                   ? "Saving..."
@@ -1024,7 +1024,7 @@ export default function CreateInvoiceModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="mt-3 h-[30px] w-full rounded-[6px] text-[12px] font-semibold text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#475569]"
+                className="mt-3 inline-flex h-[30px] w-full items-center justify-center rounded-[6px] text-[12px] font-semibold leading-none text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#475569]"
               >
                 Cancel
               </button>

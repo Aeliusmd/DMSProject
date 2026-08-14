@@ -1564,9 +1564,13 @@ export default function OrdersTable({
                 padding-bottom: 8px !important;
                 width: auto !important;
               }
-              .orders-table-fit td,
-              .orders-table-fit td * {
-                white-space: normal !important;
+              .orders-table-fit td {
+                white-space: normal;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+              }
+              .orders-table-fit td *:not(button):not(button *) {
+                white-space: normal;
                 overflow-wrap: anywhere;
                 word-break: break-word;
               }
@@ -1578,7 +1582,7 @@ export default function OrdersTable({
               .orders-table-fit th:nth-child(2),
               .orders-table-fit td:nth-child(2) { width: 7% !important; }
               .orders-table-fit th:nth-child(3),
-              .orders-table-fit td:nth-child(3) { width: 11% !important; }
+              .orders-table-fit td:nth-child(3) { width: 10% !important; }
               .orders-table-fit th:nth-child(4),
               .orders-table-fit td:nth-child(4) { width: 9% !important; }
               .orders-table-fit th:nth-child(5),
@@ -1588,15 +1592,15 @@ export default function OrdersTable({
               .orders-table-fit th:nth-child(7),
               .orders-table-fit td:nth-child(7) { width: 9% !important; }
               .orders-table-fit th:nth-child(8),
-              .orders-table-fit td:nth-child(8) { width: 10% !important; }
+              .orders-table-fit td:nth-child(8) { width: 9% !important; }
               .orders-table-fit th:nth-child(9),
-              .orders-table-fit td:nth-child(9) { width: 10% !important; }
+              .orders-table-fit td:nth-child(9) { width: 9% !important; }
               .orders-table-fit th:nth-child(10),
-              .orders-table-fit td:nth-child(10) { width: 10% !important; }
+              .orders-table-fit td:nth-child(10) { width: 9% !important; }
               .orders-table-fit th:nth-child(11),
               .orders-table-fit td:nth-child(11) { width: 6% !important; }
               .orders-table-fit th:nth-child(12),
-              .orders-table-fit td:nth-child(12) { width: 5% !important; }
+              .orders-table-fit td:nth-child(12) { width: 9% !important; }
                   `
                   : `
               .orders-table-fit th:nth-child(1),
@@ -1608,7 +1612,7 @@ export default function OrdersTable({
               .orders-table-fit th:nth-child(4),
               .orders-table-fit td:nth-child(4) { width: 10% !important; }
               .orders-table-fit th:nth-child(5),
-              .orders-table-fit td:nth-child(5) { width: 11% !important; }
+              .orders-table-fit td:nth-child(5) { width: 9% !important; }
               .orders-table-fit th:nth-child(6),
               .orders-table-fit td:nth-child(6) { width: 10% !important; }
               .orders-table-fit th:nth-child(7),
@@ -1620,30 +1624,36 @@ export default function OrdersTable({
               .orders-table-fit th:nth-child(10),
               .orders-table-fit td:nth-child(10) { width: 7% !important; }
               .orders-table-fit th:nth-child(11),
-              .orders-table-fit td:nth-child(11) { width: 9% !important; }
+              .orders-table-fit td:nth-child(11) { width: 11% !important; }
                   `
               }
               .orders-table-fit .order-action-btn {
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                box-sizing: border-box;
                 width: 100%;
                 max-width: 100%;
                 min-width: 0;
-                height: 22px;
-                padding-left: 4px;
-                padding-right: 4px;
-                font-size: 9px;
-                line-height: 1.1;
-                gap: 3px;
+                height: 24px;
+                min-height: 24px;
+                padding: 0 6px;
+                font-size: 10px;
+                line-height: 1 !important;
+                gap: 4px;
                 white-space: nowrap !important;
+                overflow: hidden;
                 overflow-wrap: normal !important;
-                word-break: normal !important;
+                word-break: keep-all !important;
               }
               .orders-table-fit .order-action-btn svg {
                 width: 10px;
                 height: 10px;
                 flex-shrink: 0;
+                display: block;
               }
               .orders-table-fit .order-actions {
-                gap: 4px;
+                gap: 8px;
               }
             }
           `}</style>
@@ -2301,8 +2311,8 @@ export default function OrdersTable({
 
                     <td className={`align-top ${fitToWindow ? "px-1 py-3" : "px-4 py-5"}`}>
                       <div
-                        className={`order-actions flex flex-col ${
-                          fitToWindow ? "items-stretch" : "items-start gap-2"
+                        className={`order-actions flex flex-col gap-2 ${
+                          fitToWindow ? "items-stretch" : "items-start"
                         }`}
                       >
                         {!isInactiveOrderStatus(order.orderStatus) ? (
@@ -2310,10 +2320,10 @@ export default function OrdersTable({
                             <button
                               type="button"
                               onClick={() => openDeleteModal(order)}
-                              className={`order-action-btn inline-flex items-center justify-center rounded-[6px] border border-red-200 bg-red-50 font-semibold text-red-500 hover:bg-red-100 ${
+                              className={`order-action-btn inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 font-semibold leading-none text-red-500 hover:bg-red-100 ${
                                 fitToWindow
                                   ? ""
-                                  : "h-[28px] gap-2 whitespace-nowrap px-3 text-[11px]"
+                                  : "h-[28px] px-3 text-[11px]"
                               }`}
                             >
                               <TrashIcon />
@@ -2323,10 +2333,10 @@ export default function OrdersTable({
                             <button
                               type="button"
                               onClick={() => openCancelModal(order)}
-                              className={`order-action-btn inline-flex items-center justify-center rounded-[6px] font-semibold transition hover:opacity-85 ${
+                              className={`order-action-btn inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] font-semibold leading-none transition hover:opacity-85 ${
                                 fitToWindow
                                   ? ""
-                                  : "h-[28px] gap-2 whitespace-nowrap px-3 text-[11px]"
+                                  : "h-[28px] px-3 text-[11px]"
                               }`}
                               style={{
                                 border: "1px solid #FCD34D",
@@ -2342,10 +2352,10 @@ export default function OrdersTable({
                           <button
                             type="button"
                             onClick={() => openRestoreModal(order)}
-                            className={`order-action-btn inline-flex items-center justify-center rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] font-semibold text-[#0369A1] hover:bg-[#E0F2FE] ${
+                            className={`order-action-btn inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] font-semibold leading-none text-[#0369A1] hover:bg-[#E0F2FE] ${
                               fitToWindow
                                 ? ""
-                                : "h-[28px] gap-2 whitespace-nowrap px-3 text-[11px]"
+                                : "h-[28px] px-3 text-[11px]"
                             }`}
                           >
                             <RestoreIcon />
@@ -3783,7 +3793,7 @@ function RushBadge({ rush }) {
 
 function TrashIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+    <svg className="block shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none">
       <path
         d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"
         stroke="currentColor"
@@ -3797,7 +3807,7 @@ function TrashIcon() {
 
 function RestoreIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+    <svg className="block shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none">
       <path
         d="M3 12a9 9 0 1 0 2.6-6.4M3 4v5h5"
         stroke="currentColor"
@@ -3811,7 +3821,7 @@ function RestoreIcon() {
 
 function SmallCircleIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+    <svg className="block shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
     </svg>
   );

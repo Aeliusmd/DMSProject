@@ -392,7 +392,7 @@ export default function WriteOffInvoiceModal({
           <button
             type="button"
             onClick={onClose}
-            className="h-[36px] rounded-[6px] bg-[#F1F5F9] px-5 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+            className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#F1F5F9] px-5 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0]"
           >
             Cancel
           </button>
@@ -401,7 +401,7 @@ export default function WriteOffInvoiceModal({
             type="button"
             onClick={handleSubmit}
             disabled={submitting || isFormInvalid}
-            className="h-[36px] rounded-[6px] bg-red-500 px-5 text-[12px] font-semibold text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-red-500 px-5 text-[12px] font-semibold leading-none text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting
               ? "Processing..."

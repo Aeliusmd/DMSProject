@@ -181,7 +181,7 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
           <button
             type="button"
             onClick={onClose}
-            className="h-[34px] rounded-[6px] px-4 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
+            className="inline-flex h-[34px] items-center justify-center rounded-[6px] px-4 text-[12px] font-semibold leading-none text-[#64748B] hover:bg-[#F8FAFC]"
           >
             Cancel
           </button>
@@ -189,7 +189,7 @@ export default function OrderPickupModal({ isOpen, order, onClose, onConfirm }) 
             type="button"
             onClick={handleSubmit}
             disabled={submitting || isFormInvalid}
-            className="h-[34px] rounded-[6px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:opacity-60"
+            className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#111827] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#1F2937] disabled:opacity-60"
           >
             {submitting ? "Saving..." : "Confirm Pickup"}
           </button>

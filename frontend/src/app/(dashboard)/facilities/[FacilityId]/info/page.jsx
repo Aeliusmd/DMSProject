@@ -1461,7 +1461,7 @@ function EditDoctorModal({
           <button
             type="button"
             onClick={onCancel}
-            className="h-[36px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+            className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0]"
           >
             Cancel
           </button>
@@ -1469,7 +1469,7 @@ function EditDoctorModal({
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="h-[36px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold leading-none text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>

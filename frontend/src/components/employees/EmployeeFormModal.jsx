@@ -225,7 +225,7 @@ function EmployeeFormModalContent({ onClose, onCreate, onUpdate, mode, employee 
           <button
             type="button"
             onClick={onClose}
-            className="h-[34px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+            className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0]"
           >
             Cancel
           </button>
@@ -234,7 +234,7 @@ function EmployeeFormModalContent({ onClose, onCreate, onUpdate, mode, employee 
             type="button"
             onClick={handleSubmit}
             disabled={isSubmitting || isFormInvalid}
-            className="h-[34px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold leading-none text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmitting
               ? "Saving..."

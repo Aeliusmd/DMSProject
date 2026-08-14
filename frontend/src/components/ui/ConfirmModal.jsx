@@ -51,7 +51,7 @@ export default function ConfirmModal({
               <button
                 type="button"
                 onClick={onCancel}
-                className="h-[34px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+                className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0]"
               >
                 {cancelLabel}
               </button>
@@ -63,7 +63,7 @@ export default function ConfirmModal({
                   if (confirmDisabled) return;
                   onConfirm();
                 }}
-                className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold leading-none text-white disabled:cursor-not-allowed disabled:opacity-60"
                 style={{
                   backgroundColor: isDanger ? "#EF4444" : "#F59E0B",
                 }}
@@ -95,7 +95,7 @@ function WarningIcon() {
 
 function SmallCircleIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+    <svg className="block shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
     </svg>
   );
@@ -103,7 +103,7 @@ function SmallCircleIcon() {
 
 function TrashIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+    <svg className="block shrink-0" width="11" height="11" viewBox="0 0 24 24" fill="none">
       <path
         d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"
         stroke="currentColor"

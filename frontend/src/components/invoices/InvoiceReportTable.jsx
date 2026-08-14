@@ -970,7 +970,7 @@ function InvoiceRow({
               type="button"
               onClick={() => onOpenSingleWriteOffModal(group, row)}
               disabled={!canWriteOffInvoice(row)}
-              className="h-[28px] whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-[28px] inline-flex w-full items-center justify-center whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold leading-none text-red-500 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Writeoff
             </button>

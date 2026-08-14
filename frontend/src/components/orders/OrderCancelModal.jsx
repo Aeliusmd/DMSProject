@@ -88,7 +88,7 @@ export default function OrderCancelModal({
           <button
             type="button"
             onClick={onClose}
-            className="h-[34px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+            className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0]"
           >
             Close
           </button>
@@ -115,7 +115,7 @@ export default function OrderCancelModal({
               setStep("confirm");
             }}
             disabled={isReasonInvalid}
-            className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-[34px] items-center justify-center gap-2 rounded-[6px] px-4 text-[12px] font-semibold leading-none text-white disabled:cursor-not-allowed disabled:opacity-60"
             style={{ backgroundColor: "#F59E0B" }}
           >
             Continue
