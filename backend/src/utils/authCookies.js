@@ -140,17 +140,25 @@ function getBearerTokenFromHeader(req) {
 
 function getAccessTokenFromRequest(req, portal) {
   const names = PORTAL_COOKIES[portal];
-  if (!names) return getBearerTokenFromHeader(req);
+  const bearer = getBearerTokenFromHeader(req);
 
-  return req.cookies?.[names.access] || getBearerTokenFromHeader(req);
+  if (!names) return bearer;
+
+  // Prefer explicit Bearer tokens. Cross-origin clients (Vercel → ngrok) may
+  // still send a stale third-party cookie that would otherwise win and 401.
+  return bearer || req.cookies?.[names.access] || null;
 }
 
 function getRefreshTokenFromRequest(req, portal) {
   const names = PORTAL_COOKIES[portal];
   const cookieToken = names ? req.cookies?.[names.refresh] : null;
-  const bodyToken = req.body?.refreshToken;
+  const bodyToken =
+    typeof req.body?.refreshToken === "string"
+      ? req.body.refreshToken.trim()
+      : "";
 
-  return cookieToken || (typeof bodyToken === "string" ? bodyToken.trim() : "") || null;
+  // Prefer body token from cross-origin clients over a possibly stale cookie.
+  return bodyToken || cookieToken || null;
 }
 
 module.exports = {
