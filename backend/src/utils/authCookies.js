@@ -72,6 +72,8 @@ function getCookieBaseOptions() {
     httpOnly: true,
     secure: crossSite || config.nodeEnv === "production",
     sameSite: crossSite ? "none" : "lax",
+    // CHIPS: helps some Chromium browsers keep cross-site auth cookies.
+    ...(crossSite ? { partitioned: true } : {}),
     path: "/api",
   };
 }
@@ -91,8 +93,12 @@ function buildAuthPayload(result = {}) {
   const accessExpiresAt = getAccessExpiresAt(result.accessToken);
   const { accessToken, refreshToken, ...rest } = result;
 
+  // Include tokens in JSON so cross-origin clients (e.g. Vercel → ngrok) can
+  // authenticate with Authorization headers when third-party cookies are blocked.
   return {
     ...rest,
+    ...(accessToken ? { accessToken } : {}),
+    ...(refreshToken ? { refreshToken } : {}),
     ...(accessExpiresAt ? { accessExpiresAt } : {}),
   };
 }

@@ -86,6 +86,8 @@ export default function TwoFactorAuthModal({
 
       saveSessionFn({
         user: payload.user,
+        accessToken: payload.accessToken,
+        refreshToken: payload.refreshToken,
         accessExpiresAt: payload.accessExpiresAt,
       });
 

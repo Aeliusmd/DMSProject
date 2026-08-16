@@ -7,9 +7,22 @@ import { withCredentials } from "@/lib/auth/fetchCredentials";
 import {
   clearAuth,
   getAccessExpiresAt,
+  getAccessToken,
+  getRefreshToken,
   getStoredUser,
   setAuth,
 } from "./authStorage";
+
+function withAuthHeaders(headers = {}) {
+  const nextHeaders = { ...headers };
+  const accessToken = getAccessToken();
+
+  if (accessToken) {
+    nextHeaders.Authorization = `Bearer ${accessToken}`;
+  }
+
+  return nextHeaders;
+}
 
 export class ApiRequestError extends Error {
   constructor(message, status, errors = null) {
@@ -134,7 +147,10 @@ export function stopAuthAutoRefresh() {
 }
 
 export async function authFetch(path, options = {}, _isRetry = false) {
-  const response = await safeFetch(`${API_BASE_URL}${path}`, options);
+  const response = await safeFetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: withAuthHeaders(options?.headers || {}),
+  });
 
   if (response.status === 401 && !_isRetry && !path.startsWith("/auth/")) {
     try {
@@ -157,11 +173,9 @@ export async function request(
   const isFormData =
     typeof FormData !== "undefined" && body instanceof FormData;
 
-  const headers = {};
-
-  if (!isFormData) {
-    headers["Content-Type"] = "application/json";
-  }
+  const headers = withAuthHeaders(
+    !isFormData ? { "Content-Type": "application/json" } : {}
+  );
 
   let requestBody;
   if (body !== undefined && body !== null) {
@@ -233,13 +247,17 @@ export async function resendTwoFactor(sessionToken) {
 export async function refreshAccessToken() {
   const data = await request("/auth/refresh", {
     method: "POST",
-    body: {},
+    body: {
+      refreshToken: getRefreshToken() || undefined,
+    },
   });
 
   const payload = data?.data || {};
 
   setAuth({
     user: payload.user,
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
     accessExpiresAt: payload.accessExpiresAt,
   });
 
@@ -254,7 +272,9 @@ export async function logout() {
   try {
     await request("/auth/logout", {
       method: "POST",
-      body: {},
+      body: {
+        refreshToken: getRefreshToken() || undefined,
+      },
     });
   } catch {
     // Clear local session even if backend logout fails.
@@ -277,6 +297,8 @@ export async function getCurrentUser() {
 export function saveAuthSession(payload) {
   setAuth({
     user: payload.user,
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
     accessExpiresAt: payload.accessExpiresAt,
   });
 

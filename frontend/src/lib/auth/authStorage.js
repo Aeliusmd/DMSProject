@@ -1,3 +1,5 @@
+const ACCESS_TOKEN_KEY = "dms_access_token";
+const REFRESH_TOKEN_KEY = "dms_refresh_token";
 const LEGACY_ACCESS_TOKEN_KEY = "dms_access_token";
 const LEGACY_REFRESH_TOKEN_KEY = "dms_refresh_token";
 const USER_KEY = "dms_user";
@@ -7,22 +9,37 @@ function isBrowser() {
   return typeof window !== "undefined";
 }
 
-function clearLegacyTokenStorage() {
+function clearLegacyLocalTokenStorage() {
   if (!isBrowser()) return;
-  localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
-  localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
+  // Older builds stored tokens in localStorage; prefer sessionStorage.
+  try {
+    localStorage.removeItem(LEGACY_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 if (isBrowser()) {
-  clearLegacyTokenStorage();
+  clearLegacyLocalTokenStorage();
 }
 
 export function getAccessToken() {
-  return null;
+  if (!isBrowser()) return null;
+  try {
+    return sessionStorage.getItem(ACCESS_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
 }
 
 export function getRefreshToken() {
-  return null;
+  if (!isBrowser()) return null;
+  try {
+    return sessionStorage.getItem(REFRESH_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
 }
 
 export function getAccessExpiresAt() {
@@ -45,13 +62,23 @@ export function getStoredUser() {
   }
 }
 
-export function setAuth({ user, accessExpiresAt } = {}) {
+export function setAuth({ user, accessToken, refreshToken, accessExpiresAt } = {}) {
   if (!isBrowser()) return;
 
-  clearLegacyTokenStorage();
+  clearLegacyLocalTokenStorage();
 
   if (user) {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
+  }
+
+  // Only overwrite tokens when a non-empty string is provided so callers like
+  // profile update / getCurrentUser can refresh the user without wiping auth.
+  if (typeof accessToken === "string" && accessToken) {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  }
+
+  if (typeof refreshToken === "string" && refreshToken) {
+    sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
   }
 
   if (accessExpiresAt) {
@@ -76,9 +103,17 @@ export function clearAuth() {
     // Ignore storage failures.
   }
 
-  clearLegacyTokenStorage();
+  clearLegacyLocalTokenStorage();
+
+  try {
+    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+    sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    sessionStorage.removeItem(ACCESS_EXPIRES_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+
   localStorage.removeItem(USER_KEY);
-  sessionStorage.removeItem(ACCESS_EXPIRES_KEY);
 }
 
 export function isAuthenticated() {

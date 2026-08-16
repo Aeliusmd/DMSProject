@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   getCurrentUser,
+  refreshAccessToken,
   startAuthAutoRefresh,
   stopAuthAutoRefresh,
 } from "@/lib/auth/authApi";
@@ -27,7 +28,7 @@ export default function DashboardLayout({ children }) {
         }
       } catch {
         try {
-          await new Promise((resolve) => setTimeout(resolve, 200));
+          await refreshAccessToken();
           await getCurrentUser();
 
           if (isMounted) {
