@@ -10,6 +10,8 @@ import { registerCompany } from "@/lib/company-portal/companyPortalAuthApi";
 import {
   buildCompanyRegisterPayload,
   hasValidationErrors,
+  sanitizeCompanyRegisterField,
+  sanitizeEmail,
   validateCompanyRegisterForm,
 } from "@/lib/company-portal/companyPortalValidation";
 import {
@@ -46,7 +48,10 @@ export default function SubpoenaUploadRegisterPage() {
   const isFormValid = !hasValidationErrors(localErrors);
 
   const handleChange = (name, value) => {
-    setForm((prev) => ({ ...prev, [name]: value }));
+    setForm((prev) => ({
+      ...prev,
+      [name]: sanitizeCompanyRegisterField(name, value),
+    }));
     setApiFieldErrors((prev) => {
       if (!prev[name]) return prev;
       const next = { ...prev };

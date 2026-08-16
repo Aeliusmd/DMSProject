@@ -15,7 +15,7 @@ import {
 } from "@/lib/validations/personalRequestValidation";
 import {
   clearPersonalAuth,
-  getPersonalAccessToken,
+  isPersonalAuthenticated,
 } from "@/lib/personal-request/personalPortalAuthStorage";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 
@@ -57,7 +57,7 @@ export default function PersonalRequestStatusPage() {
   const [emailSaving, setEmailSaving] = useState(false);
 
   useEffect(() => {
-    if (!getPersonalAccessToken()) {
+    if (!isPersonalAuthenticated()) {
       clearPersonalAuth();
       router.replace("/personalrequest/login");
       return;

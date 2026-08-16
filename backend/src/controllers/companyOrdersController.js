@@ -2,8 +2,56 @@ const asyncHandler = require("../utils/asyncHandler");
 const ApiResponse = require("../utils/ApiResponse");
 const ApiError = require("../utils/ApiError");
 const CompanyPortalOrder = require("../models/CompanyPortalOrder");
+const Order = require("../models/Order");
 const companyPortalInternalSyncService = require("../services/companyPortalInternalSyncService");
 const orderService = require("../services/orderService");
+const activityLogService = require("../services/activityLogService");
+const { sanitizeZip } = require("../utils/zipUtils");
+
+function getInternalOrderLogContext(orderRow = {}) {
+  const facilityId = Number(orderRow.facility_id);
+  return {
+    facilityId: Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null,
+    companyName:
+      orderRow.facility_name ||
+      orderRow.serve_company_name ||
+      orderRow.company_name ||
+      "System",
+    orderNumber: orderRow.order_number || `#${orderRow.id || ""}`,
+  };
+}
+
+/**
+ * Write both the global Activity Log and the per-order Order Log for company
+ * portal status / facility actions. Failures are non-blocking.
+ */
+async function logCompanyOrderActivity(req, internalOrderId, { action, details }) {
+  try {
+    const order = await Order.findById(internalOrderId);
+    if (!order) return;
+
+    const logContext = getInternalOrderLogContext(order);
+    const taggedDetails = activityLogService.appendOrderId(details, order.id);
+
+    await activityLogService.recordFromRequest(req, {
+      context: "orders",
+      action,
+      details: taggedDetails,
+      facilityId: logContext.facilityId,
+      companyName: logContext.companyName,
+      targetEmployeeId: req.user?.id,
+    });
+
+    await orderService.addOrderActivityLog({
+      orderId: order.id,
+      actorId: req.user?.id,
+      authorName: req.user?.name || null,
+      note: details,
+    });
+  } catch (_error) {
+    // Logging must not fail the primary company-order action.
+  }
+}
 
 exports.getStats = asyncHandler(async (req, res) => {
   const stats = await CompanyPortalOrder.getGlobalStageStats();
@@ -29,6 +77,13 @@ exports.updateStage = asyncHandler(async (req, res) => {
     orderId,
     status
   );
+
+  const order = await Order.findById(orderId);
+  const logContext = getInternalOrderLogContext(order || {});
+  await logCompanyOrderActivity(req, orderId, {
+    action: "company_portal_stage",
+    details: `Company portal stage changed to "${status}" for order ${logContext.orderNumber}`,
+  });
 
   return ApiResponse.success(
     res,
@@ -81,7 +136,7 @@ exports.getNewFacilityRequest = asyncHandler(async (req, res) => {
           facilityAddress: newFacility.facility_address || "",
           facilityCity: newFacility.facility_city || "",
           facilityState: newFacility.facility_state || "",
-          facilityZip: newFacility.facility_zip || "",
+          facilityZip: sanitizeZip(newFacility.facility_zip || ""),
           treatingDoctor: newFacility.treating_doctor || "",
           searchFeeAmount: Number(newFacility.search_fee_amount) || 0,
           internalFacilityId: newFacility.internal_facility_id || null,
@@ -102,6 +157,13 @@ exports.linkFacility = asyncHandler(async (req, res) => {
     facilityId
   );
 
+  const order = await Order.findById(orderId);
+  const logContext = getInternalOrderLogContext(order || {});
+  await logCompanyOrderActivity(req, orderId, {
+    action: "company_portal_link_facility",
+    details: `Linked facility to company portal order ${logContext.orderNumber}`,
+  });
+
   return ApiResponse.success(
     res,
     result,
@@ -118,6 +180,13 @@ exports.markNoFacility = asyncHandler(async (req, res) => {
   const updated =
     await companyPortalInternalSyncService.markPortalOrderNoFacility(orderId);
 
+  const order = await Order.findById(orderId);
+  const logContext = getInternalOrderLogContext(order || {});
+  await logCompanyOrderActivity(req, orderId, {
+    action: "company_portal_no_facility",
+    details: `Changed company portal order ${logContext.orderNumber} status to No facility`,
+  });
+
   return ApiResponse.success(
     res,
     {
@@ -126,6 +195,33 @@ exports.markNoFacility = asyncHandler(async (req, res) => {
       internalOrderId: updated.internal_order_id,
     },
     "Order marked as No facility"
+  );
+});
+
+exports.restoreInProcess = asyncHandler(async (req, res) => {
+  const orderId = Number(req.params.orderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const updated =
+    await companyPortalInternalSyncService.restorePortalOrderInProcess(orderId);
+
+  const order = await Order.findById(orderId);
+  const logContext = getInternalOrderLogContext(order || {});
+  await logCompanyOrderActivity(req, orderId, {
+    action: "company_portal_restore_in_process",
+    details: `Restored company portal order ${logContext.orderNumber} from No facility back to In Process`,
+  });
+
+  return ApiResponse.success(
+    res,
+    {
+      companyPortalOrderId: updated.id,
+      companyPortalStatus: updated.status,
+      internalOrderId: updated.internal_order_id,
+    },
+    "Order restored to In Process"
   );
 });
 

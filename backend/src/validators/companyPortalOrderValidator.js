@@ -11,6 +11,18 @@ const {
   hasAnyRecordType,
   formatRecordTypesLabel,
 } = require("../utils/companyPortalRecordTypes");
+const {
+  addNoHtmlMarkupError,
+  addNoHtmlMarkupErrors,
+  addPersonNameFormatError,
+  addOrganizationNameFormatError,
+} = require("../utils/nameValidation");
+const {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+  sanitizeZipOrNull,
+} = require("../utils/zipUtils");
 
 function sanitizeField(value, maxLength) {
   return sanitizeText(value, { maxLength, allowEmpty: true });
@@ -24,12 +36,7 @@ function optionalDateOrNull(value) {
 }
 
 function normalizeZip(value) {
-  const digits = getDigits(value);
-  if (!digits) return null;
-  if (digits.length === 9) {
-    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
-  }
-  return digits;
+  return sanitizeZipOrNull(value);
 }
 
 function validateStateZipPair(errors, { state, zip, stateField, zipField, required }) {
@@ -39,16 +46,49 @@ function validateStateZipPair(errors, { state, zip, stateField, zipField, requir
     errors.push({ field: stateField, message: "State must be 2 letters" });
   }
 
-  const zipDigits = getDigits(zip);
-  if (required && !zipDigits) {
+  if (required && !getDigits(zip)) {
     errors.push({ field: zipField, message: "ZIP code is required" });
-  } else if (zipDigits && zipDigits.length !== 5 && zipDigits.length !== 9) {
-    errors.push({ field: zipField, message: "ZIP must be 5 digits" });
+  } else if (zip && !isValidZip(zip)) {
+    errors.push({ field: zipField, message: ZIP_VALIDATION_MESSAGE });
   }
 }
 
 function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true } = {}) {
   const errors = [];
+
+  addNoHtmlMarkupErrors(errors, body, [
+    "facilityName",
+    "treatingFacilityName",
+    "facilityAddress",
+    "treatingFacilityAddress",
+    "address",
+    "facilityCity",
+    "city",
+    "facilityState",
+    "state",
+    "facilityZip",
+    "zip",
+    "zipCode",
+    "companyName",
+    "companyAddress",
+    "companyCity",
+    "companyState",
+    "companyZip",
+    "treatingDoctor",
+    "specificDoctor",
+    "doctor",
+    "applicantName",
+    "caseName",
+    "caseNumber",
+    "orderNumber",
+    "recNumber",
+    "ssn",
+    "dateOfInjuryText",
+    "doctorAddress",
+    "requestedRecord",
+    "contactEmail",
+    "email",
+  ]);
 
   const facilityName = sanitizeField(
     body.facilityName || body.treatingFacilityName,
@@ -56,17 +96,17 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
   );
   const facilityAddress = sanitizeField(
     body.facilityAddress || body.treatingFacilityAddress || body.address,
-    500
+    255
   );
   const facilityCity = sanitizeField(body.facilityCity || body.city, 100);
   const facilityState = sanitizeField(body.facilityState || body.state, 2).toUpperCase();
-  const facilityZip = sanitizeField(body.facilityZip || body.zip || body.zipCode, 20);
+  const facilityZip = sanitizeZip(body.facilityZip || body.zip || body.zipCode);
 
   const companyName = sanitizeField(body.companyName, 255);
-  const companyAddress = sanitizeField(body.companyAddress, 500);
+  const companyAddress = sanitizeField(body.companyAddress, 255);
   const companyCity = sanitizeField(body.companyCity, 100);
   const companyState = sanitizeField(body.companyState, 2).toUpperCase();
-  const companyZip = sanitizeField(body.companyZip, 20);
+  const companyZip = sanitizeZip(body.companyZip);
 
   const treatingDoctor = sanitizeField(
     body.treatingDoctor || body.specificDoctor || body.doctor,
@@ -74,9 +114,9 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
   );
   const applicantName = sanitizeField(body.applicantName, 255);
   const caseName = sanitizeField(body.caseName, 255);
-  const caseNumber = sanitizeField(body.caseNumber || body.orderNumber, 100);
-  const recNumber = sanitizeField(body.recNumber, 100);
-  const ssn = sanitizeField(body.ssn, 50);
+  const caseNumber = sanitizeField(body.caseNumber || body.orderNumber, 50);
+  const recNumber = sanitizeField(body.recNumber, 50);
+  const ssn = sanitizeField(body.ssn, 11);
   const dateOfBirth = optionalDateOrNull(body.dateOfBirth);
   const dateOfInjury = optionalDateOrNull(body.dateOfInjury);
   const dateOfInjuryText = sanitizeField(body.dateOfInjuryText, 100);
@@ -183,12 +223,26 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
     });
   }
 
-  if (facilityName) addMaxLengthError(errors, "facilityName", facilityName, 255);
+  if (facilityName) {
+    addMaxLengthError(errors, "facilityName", facilityName, 255);
+    addOrganizationNameFormatError(errors, "facilityName", facilityName);
+  }
   if (facilityAddress) {
     addMaxLengthError(errors, "facilityAddress", facilityAddress, 500);
   }
   if (facilityCity) addMaxLengthError(errors, "facilityCity", facilityCity, 100);
-  if (companyName) addMaxLengthError(errors, "companyName", companyName, 255);
+  if (companyName) {
+    addMaxLengthError(errors, "companyName", companyName, 255);
+    addOrganizationNameFormatError(errors, "companyName", companyName);
+  }
+  if (treatingDoctor) {
+    addMaxLengthError(errors, "treatingDoctor", treatingDoctor, 255);
+    addPersonNameFormatError(errors, "treatingDoctor", treatingDoctor);
+  }
+  if (applicantName) {
+    addMaxLengthError(errors, "applicantName", applicantName, 255);
+    addPersonNameFormatError(errors, "applicantName", applicantName);
+  }
   if (companyAddress) {
     addMaxLengthError(errors, "companyAddress", companyAddress, 500);
   }

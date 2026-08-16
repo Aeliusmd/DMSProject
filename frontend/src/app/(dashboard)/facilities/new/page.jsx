@@ -6,7 +6,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { createFacility } from "@/lib/facilities/facilityApi";
-import { linkCompanyOrderFacility } from "@/lib/orders/orderApi";
+import {
+  linkCompanyOrderFacility,
+  linkPersonalOrderFacility,
+  getPersonalOrderNewFacility,
+} from "@/lib/orders/orderApi";
 import { ApiRequestError } from "@/lib/auth/authApi";
 import {
   mapApiErrors,
@@ -17,6 +21,12 @@ import {
   validateOrganizationName,
   validatePersonName,
 } from "@/lib/validations/nameValidation";
+import {
+  ZIP_MAX_CHARS,
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
 
 const initialFormData = {
   facilityName: "",
@@ -53,6 +63,8 @@ function NewFacilityPageContent() {
   const searchParams = useSearchParams();
 
   const linkOrderId = searchParams.get("linkOrderId") || "";
+  const linkSource = searchParams.get("linkSource") || "company";
+  const isPersonalLink = linkSource === "personal";
   const returnToOrderPath = getSafeOrderReturnPath(searchParams.get("returnTo"));
 
   const [formData, setFormData] = useState(initialFormData);
@@ -65,6 +77,28 @@ function NewFacilityPageContent() {
     open: false,
     facilityId: "",
   });
+  const [linkBlocked, setLinkBlocked] = useState(false);
+
+  useEffect(() => {
+    if (!linkOrderId || !isPersonalLink) return undefined;
+    let active = true;
+    getPersonalOrderNewFacility(linkOrderId)
+      .then((data) => {
+        if (!active) return;
+        if (data?.personalPortalStatus === "no_facility") {
+          setLinkBlocked(true);
+          setSubmitError(
+            "This personal order was ended (No facility). Restore it to In Process before adding a facility."
+          );
+        }
+      })
+      .catch(() => {
+        // Non-blocking — create/link will still be validated by the API.
+      });
+    return () => {
+      active = false;
+    };
+  }, [linkOrderId, isPersonalLink]);
 
   useEffect(() => {
     const prefill = {
@@ -75,7 +109,7 @@ function NewFacilityPageContent() {
         .replace(/[^a-zA-Z]/g, "")
         .toUpperCase()
         .slice(0, 2),
-      zipCode: (searchParams.get("zip") || "").replace(/\D/g, "").slice(0, 5),
+      zipCode: sanitizeZip(searchParams.get("zip") || ""),
     };
 
     const hasPrefill = Object.values(prefill).some((value) => value);
@@ -109,7 +143,7 @@ function NewFacilityPageContent() {
     }
 
     if (name === "zipCode") {
-      nextValue = value.replace(/\D/g, "").slice(0, 5);
+      nextValue = sanitizeZip(value);
     }
 
     if (name === "state") {
@@ -202,6 +236,13 @@ function NewFacilityPageContent() {
     setSubmitAttempted(true);
     setSubmitError("");
 
+    if (linkBlocked) {
+      setSubmitError(
+        "This personal order was ended (No facility). Restore it to In Process before adding a facility."
+      );
+      return;
+    }
+
     const validationErrors = validateFacilityForm(formData, managers);
     setErrors(validationErrors);
 
@@ -226,20 +267,33 @@ function NewFacilityPageContent() {
         officeManagers: managers,
       });
 
-      // When arriving from a company portal order whose facility was not in our
+      // When arriving from a portal order whose facility was not in our
       // system, link the newly created facility back to that order.
       if (linkOrderId && facility?.id) {
         try {
-          await linkCompanyOrderFacility(linkOrderId, facility.id);
+          if (isPersonalLink) {
+            await linkPersonalOrderFacility(linkOrderId, facility.id);
+          } else {
+            await linkCompanyOrderFacility(linkOrderId, facility.id);
+          }
         } catch (linkErr) {
           setSubmitError(
             linkErr?.message ||
-              "Facility created, but linking it to the order failed. Link it from Company Orders."
+              `Facility created, but linking it to the order failed. Link it from ${
+                isPersonalLink ? "Personal Orders" : "Company Orders"
+              }.`
           );
           setSaving(false);
           return;
         }
-        router.push("/company-orders");
+        if (returnToOrderPath) {
+          const separator = returnToOrderPath.includes("?") ? "&" : "?";
+          router.push(
+            `${returnToOrderPath}${separator}facilityRefresh=1&applyFacilityId=${encodeURIComponent(String(facility.id))}`
+          );
+          return;
+        }
+        router.push(isPersonalLink ? "/personal-orders" : "/company-orders");
         return;
       }
 
@@ -277,7 +331,7 @@ function NewFacilityPageContent() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-5 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto pr-1">
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-[18px] font-semibold text-[#111827]">
             Facility Information
@@ -367,6 +421,8 @@ function NewFacilityPageContent() {
                   onChange={handleChange}
                   error={getError("zipCode")}
                   inputMode="numeric"
+                  maxLength={ZIP_MAX_CHARS}
+                  placeholder="12345 or 12345-6789"
                 />
 
                 <FacilityField
@@ -705,8 +761,8 @@ function validateFacilityForm(data, managers) {
     if (nameError) errors[field] = nameError;
   });
 
-  if (data.zipCode && data.zipCode.length !== 5) {
-    errors.zipCode = "ZIP must be 5 digits";
+  if (data.zipCode && !isValidZip(data.zipCode)) {
+    errors.zipCode = ZIP_VALIDATION_MESSAGE;
   }
 
   if (data.state && data.state.length !== 2) {
@@ -766,8 +822,8 @@ function validateFacilityField(field, value) {
     return "Enter a valid email address";
   }
 
-  if (field === "zipCode" && value && value.length !== 5) {
-    return "ZIP must be 5 digits";
+  if (field === "zipCode" && value && !isValidZip(value)) {
+    return ZIP_VALIDATION_MESSAGE;
   }
 
   if (field === "state" && value && value.length !== 2) {

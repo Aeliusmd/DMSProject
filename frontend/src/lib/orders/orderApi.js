@@ -665,3 +665,44 @@ export async function markCompanyOrderNoFacility(orderId) {
   });
   return data?.data || {};
 }
+
+export async function restoreCompanyOrderInProcess(orderId) {
+  const data = await request(`/company-orders/${orderId}/restore-in-process`, {
+    method: "POST",
+    auth: true,
+  });
+  return data?.data || {};
+}
+
+export async function getPersonalOrderNewFacility(orderId) {
+  const data = await request(`/personal-orders/${orderId}/new-facility`, {
+    auth: true,
+    cache: "no-store",
+  });
+  return data?.data || {};
+}
+
+export async function linkPersonalOrderFacility(orderId, facilityId) {
+  const data = await request(`/personal-orders/${orderId}/link-facility`, {
+    method: "POST",
+    auth: true,
+    body: { facilityId },
+  });
+  return data?.data || {};
+}
+
+export async function markPersonalOrderNoFacility(orderId) {
+  const data = await request(`/personal-orders/${orderId}/no-facility`, {
+    method: "POST",
+    auth: true,
+  });
+  return data?.data || {};
+}
+
+export async function restorePersonalOrderInProcess(orderId) {
+  const data = await request(`/personal-orders/${orderId}/restore-in-process`, {
+    method: "POST",
+    auth: true,
+  });
+  return data?.data || {};
+}

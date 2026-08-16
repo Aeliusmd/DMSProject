@@ -7,7 +7,12 @@ const {
   enrichOrderHintsFromRow,
   resolveExtractionSchema,
 } = require("./extractionMapper");
-const { splitNameAndAddress, parseUsAddress } = require("./addressParseUtils");
+const {
+  splitNameAndAddress,
+  parseUsAddress,
+  looksLikeAddressSegment,
+} = require("./addressParseUtils");
+const { sanitizeZip } = require("./zipUtils");
 
 const ORDER_TYPE_KEYWORDS = {
   billing: ["billing"],
@@ -79,7 +84,7 @@ function applyParsedServeAddress(updates, fullAddress) {
   updates.address = parsed.address || String(fullAddress).trim();
   if (!updates.city && parsed.city) updates.city = parsed.city;
   if (!updates.state && parsed.state) updates.state = parsed.state;
-  if (!updates.zip && parsed.zip) updates.zip = parsed.zip;
+  if (!updates.zip && parsed.zip) updates.zip = sanitizeZip(parsed.zip);
 }
 
 function buildOrderPayloadFromExtractRow(extract, facilities = []) {
@@ -125,7 +130,9 @@ function buildOrderPayloadFromExtractRow(extract, facilities = []) {
   const companySplit = splitNameAndAddress(hints.companyName || "");
   const companyName = companySplit.name || hints.companyName;
   const companyAddressSource =
-    companySplit.address || hints.companyAddress || "";
+    companySplit.address && looksLikeAddressSegment(companySplit.address)
+      ? companySplit.address
+      : hints.companyAddress || companySplit.address || "";
 
   if (hints.providerId) {
     payload.providerId = String(hints.providerId);

@@ -143,7 +143,7 @@ export default function SuspendEmployeeModal({
                 type="button"
                 onClick={onClose}
                 disabled={isBusy}
-                className="h-[34px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0] disabled:opacity-60"
+                className="inline-flex h-[34px] items-center justify-center rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0] disabled:opacity-60"
               >
                 Cancel
               </button>

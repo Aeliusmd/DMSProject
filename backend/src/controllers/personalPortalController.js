@@ -150,9 +150,14 @@ exports.getPrepaymentReceipt = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Invalid request id");
   }
 
+  const forceDownload =
+    `${req.query.download || ""}`.trim() === "1" ||
+    `${req.query.download || ""}`.toLowerCase() === "true";
+
   const result = await personalPortalService.getPrepaymentReceiptPdf(
     requestId,
-    req.personalUser.id
+    req.personalUser.id,
+    { forcePdf: forceDownload }
   );
 
   if (result.kind === "redirect") {
@@ -163,10 +168,11 @@ exports.getPrepaymentReceipt = asyncHandler(async (req, res) => {
     );
   }
 
+  const fileName = result.fileName || "prepayment-receipt.pdf";
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `inline; filename="${encodeURIComponent(result.fileName || "prepayment-receipt.pdf")}"`
+    `${forceDownload ? "attachment" : "inline"}; filename="${encodeURIComponent(fileName)}"`
   );
   return res.send(result.buffer);
 });
@@ -177,9 +183,14 @@ exports.getInvoiceReceipt = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Invalid request id");
   }
 
+  const forceDownload =
+    `${req.query.download || ""}`.trim() === "1" ||
+    `${req.query.download || ""}`.toLowerCase() === "true";
+
   const result = await personalPortalService.getInvoiceReceiptPdf(
     requestId,
-    req.personalUser.id
+    req.personalUser.id,
+    { forcePdf: forceDownload }
   );
 
   if (result.kind === "redirect") {
@@ -190,10 +201,11 @@ exports.getInvoiceReceipt = asyncHandler(async (req, res) => {
     );
   }
 
+  const fileName = result.fileName || "invoice-receipt.pdf";
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `inline; filename="${encodeURIComponent(result.fileName || "invoice-receipt.pdf")}"`
+    `${forceDownload ? "attachment" : "inline"}; filename="${encodeURIComponent(fileName)}"`
   );
   return res.send(result.buffer);
 });
@@ -204,9 +216,14 @@ exports.getFacilityFeeReceipt = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Invalid request id");
   }
 
+  const forceDownload =
+    `${req.query.download || ""}`.trim() === "1" ||
+    `${req.query.download || ""}`.toLowerCase() === "true";
+
   const result = await personalPortalService.getFacilityFeeReceiptPdf(
     requestId,
-    req.personalUser.id
+    req.personalUser.id,
+    { forcePdf: forceDownload }
   );
 
   if (result.kind === "redirect") {
@@ -217,10 +234,11 @@ exports.getFacilityFeeReceipt = asyncHandler(async (req, res) => {
     );
   }
 
+  const fileName = result.fileName || "facility-fee-receipt.pdf";
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `inline; filename="${encodeURIComponent(result.fileName || "facility-fee-receipt.pdf")}"`
+    `${forceDownload ? "attachment" : "inline"}; filename="${encodeURIComponent(fileName)}"`
   );
   return res.send(result.buffer);
 });

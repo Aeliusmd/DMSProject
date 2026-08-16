@@ -21,6 +21,7 @@ import {
   QUICK_RECORDS_FEE,
   REQUEST_TOTAL_WITH_RECORDS_FEE,
   resolveFullFeeAmounts,
+  resolvePersonalPortalInvoiceAmounts,
   resolvePersistedInvoiceAmounts,
 } from "@/lib/orders/paymentUtils";
 import {
@@ -32,6 +33,7 @@ import {
   applyApiFieldErrors,
   getApiErrorMessage,
   hasValidationErrors,
+  shouldShowSubmitError,
 } from "@/lib/apiErrorUtils";
 import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
@@ -277,29 +279,88 @@ export default function CreateInvoiceModal({
     return toNumber(prepaymentAmount);
   }, [prepaymentAmount]);
 
+  const personalPortalLineItemsTotal = useMemo(() => {
+    const storageOnly =
+      isEditMode && billedFacilitySearchFee > 0
+        ? displayStorageFee
+        : fullFees.storageFee;
+
+    return (
+      pagesAmount +
+      clericalAmount +
+      toNumber(formData.shippingHandling) +
+      storageOnly
+    );
+  }, [
+    isEditMode,
+    billedFacilitySearchFee,
+    displayStorageFee,
+    fullFees.storageFee,
+    pagesAmount,
+    clericalAmount,
+    formData.shippingHandling,
+  ]);
+
+  const personalPortalFinancials = useMemo(() => {
+    if (!isPersonalPortalOrder) return null;
+
+    return resolvePersonalPortalInvoiceAmounts({
+      lineItemsTotal: personalPortalLineItemsTotal,
+      facilityFee: facilitySearchFee,
+      prepaymentPaid,
+      writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+    });
+  }, [
+    isPersonalPortalOrder,
+    personalPortalLineItemsTotal,
+    facilitySearchFee,
+    prepaymentPaid,
+    persistedInvoiceMeta?.writeoffAmount,
+  ]);
+
   // Flat $20 records fee is separate from the $15 witness prepayment — do not
-  // credit prepayment against the records-fee invoice due. Personal portal
-  // processing fee stays paid/kept — do not deduct it from the invoice due.
-  const skipPrepaymentCredit = isPersonalPortalOrder;
+  // credit prepayment against the records-fee invoice due.
   const amountPaid = useMemo(() => {
-    if (
-      skipPrepaymentCredit ||
-      quickRecordsFee ||
-      isQuickRecordsFeeInvoice(formData)
-    ) {
+    if (isPersonalPortalOrder) {
+      return personalPortalFinancials?.amountPaid ?? 0;
+    }
+
+    if (quickRecordsFee || isQuickRecordsFeeInvoice(formData)) {
       return 0;
     }
-    return prepaymentPaid;
-  }, [skipPrepaymentCredit, quickRecordsFee, formData, prepaymentPaid]);
 
-  const invoiceTotals = useMemo(
-    () =>
-      resolvePersistedInvoiceAmounts(totalAmount, amountPaid, {
-        writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
-        persistedStatus: persistedInvoiceMeta?.status || null,
-      }),
-    [totalAmount, amountPaid, persistedInvoiceMeta]
-  );
+    return prepaymentPaid;
+  }, [
+    isPersonalPortalOrder,
+    personalPortalFinancials,
+    quickRecordsFee,
+    formData,
+    prepaymentPaid,
+  ]);
+
+  const invoiceTotals = useMemo(() => {
+    if (isPersonalPortalOrder && personalPortalFinancials) {
+      return resolvePersistedInvoiceAmounts(
+        personalPortalFinancials.totalAmount,
+        personalPortalFinancials.amountPaid,
+        {
+          writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+          persistedStatus: persistedInvoiceMeta?.status || null,
+        }
+      );
+    }
+
+    return resolvePersistedInvoiceAmounts(totalAmount, amountPaid, {
+      writeoffAmount: persistedInvoiceMeta?.writeoffAmount || 0,
+      persistedStatus: persistedInvoiceMeta?.status || null,
+    });
+  }, [
+    isPersonalPortalOrder,
+    personalPortalFinancials,
+    totalAmount,
+    amountPaid,
+    persistedInvoiceMeta,
+  ]);
 
   const invoiceIdForValidation =
     order?.invoiceId || order?.invoice?.invoiceId;
@@ -311,12 +372,26 @@ export default function CreateInvoiceModal({
   const isCnrOrder = Boolean(order?.certificateNoRecords);
 
   const clientValidationErrors = useMemo(() => {
+    const displayedTotal = isPersonalPortalOrder
+      ? (personalPortalFinancials?.totalAmount ?? totalAmount)
+      : totalAmount;
+
     return validateInvoiceForm(formData, {
       // CNR invoices may be $0 (only the prior $15 witness fee applies).
+      // Personal unmatched-facility invoices may be the $5 search fee only.
       requirePositiveTotal: willCreateInvoice && !isCnrOrder,
       facilitySearchFee: pendingFacilityFeeAmount,
+      computedTotal: displayedTotal,
     });
-  }, [formData, willCreateInvoice, isCnrOrder, pendingFacilityFeeAmount]);
+  }, [
+    formData,
+    willCreateInvoice,
+    isCnrOrder,
+    pendingFacilityFeeAmount,
+    isPersonalPortalOrder,
+    personalPortalFinancials,
+    totalAmount,
+  ]);
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
 
   const { amountDue, overpayment, status: invoiceStatus, isOverpaid } =
@@ -331,22 +406,24 @@ export default function CreateInvoiceModal({
   const prepaymentDueForCnr = isCnrOrder ? witnessFeeShortfall : 0;
   // $20 quick records fee (+ unpaid witness when applicable) + any pending
   // facility search fee — facility fee always stacks onto records/other fees.
-  const quickWitnessDue = skipPrepaymentCredit
+  const quickWitnessDue = isPersonalPortalOrder
     ? 0
     : Math.max(0, witnessFeeRequired - loadedPrepaymentAmount);
   const quickCollectTotal = isQuickMode
     ? QUICK_RECORDS_FEE + quickWitnessDue + pendingFacilityFeeAmount
     : null;
   const requestTotalDisplay = isQuickMode
-    ? (skipPrepaymentCredit
-        ? QUICK_RECORDS_FEE + pendingFacilityFeeAmount
-        : REQUEST_TOTAL_WITH_RECORDS_FEE + pendingFacilityFeeAmount)
+    ? isPersonalPortalOrder
+      ? QUICK_RECORDS_FEE + pendingFacilityFeeAmount
+      : REQUEST_TOTAL_WITH_RECORDS_FEE + pendingFacilityFeeAmount
     : null;
-  const displayDue = isCnrOrder
-    ? prepaymentDueForCnr
-    : isQuickMode
-      ? quickCollectTotal
-      : amountDue;
+  const displayDue = isPersonalPortalOrder
+    ? (personalPortalFinancials?.amountDue ?? 0)
+    : isCnrOrder
+      ? prepaymentDueForCnr
+      : isQuickMode
+        ? quickCollectTotal
+        : amountDue;
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -469,9 +546,14 @@ export default function CreateInvoiceModal({
       !isEditMode && invoiceId && order.invoice?.createOnly;
     const willCreate = !((isEditMode || completingXrayOnlyStub) && invoiceId);
 
+    const displayedTotal = isPersonalPortalOrder
+      ? (personalPortalFinancials?.totalAmount ?? totalAmount)
+      : totalAmount;
+
     const validationErrors = validateInvoiceForm(formData, {
       requirePositiveTotal: willCreate && !isCnrOrder,
       facilitySearchFee: pendingFacilityFeeAmount,
+      computedTotal: displayedTotal,
     });
 
     setErrors(validationErrors);
@@ -510,15 +592,19 @@ export default function CreateInvoiceModal({
         setErrors((prev) => ({ ...prev, ...fieldErrors }));
       }
 
-      setSubmitError(message || getApiErrorMessage(error, "Failed to save invoice"));
+      const fallback = getApiErrorMessage(error, "Failed to save invoice");
+      setSubmitError(
+        message ||
+          (shouldShowSubmitError(fallback, fieldErrors) ? fallback : "")
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
-      <section className="flex max-h-[100dvh] w-full max-w-[880px] flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:max-h-[calc(100vh-42px)] sm:rounded-[10px]">
+    <div className="fixed inset-0 z-[9999] flex items-end justify-center overflow-y-auto bg-black/50 p-0 backdrop-blur-[2px] sm:items-center sm:p-4 sm:py-6">
+      <section className="flex h-[100dvh] max-h-[100dvh] w-full max-w-[880px] min-h-0 flex-col overflow-hidden rounded-t-[12px] bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-42px)] sm:rounded-[10px]">
         <div className="relative shrink-0 bg-gradient-to-r from-[#008AA3] via-[#0A96AA] to-[#56AFC0] px-4 py-4 text-white sm:px-5">
           <button
             type="button"
@@ -556,17 +642,19 @@ export default function CreateInvoiceModal({
             <MetaItem
               label="Invoiced"
               value={formatMoney(
-                isCnrOrder
-                  ? PAYMENT_CHARGE_AMOUNTS.prepayment
-                  : isQuickMode
-                    ? requestTotalDisplay
-                    : totalAmount
+                isPersonalPortalOrder
+                  ? (personalPortalFinancials?.totalAmount ?? totalAmount)
+                  : isCnrOrder
+                    ? PAYMENT_CHARGE_AMOUNTS.prepayment
+                    : isQuickMode
+                      ? requestTotalDisplay
+                      : totalAmount
               )}
             />
             <MetaItem
               label="Paid"
               value={formatMoney(
-                isCnrOrder || (isQuickMode && !skipPrepaymentCredit)
+                isCnrOrder || (isQuickMode && !isPersonalPortalOrder)
                   ? prepaymentPaid
                   : amountPaid
               )}
@@ -587,8 +675,8 @@ export default function CreateInvoiceModal({
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_200px]">
-          <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_200px] md:overflow-hidden">
+          <div className="min-h-0 px-4 py-4 sm:px-5 md:overflow-y-auto">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DateField
                 label="Invoice Date"
@@ -748,13 +836,13 @@ export default function CreateInvoiceModal({
             </div>
           </div>
 
-          <aside className="flex min-h-[210px] flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 md:border-l md:border-t-0 md:px-4">
+          <aside className="flex min-h-[210px] shrink-0 flex-col border-t border-[#E2E8F0] bg-[#F8FAFC] px-4 py-4 md:min-h-0 md:overflow-y-auto md:border-l md:border-t-0 md:px-4">
             <h3 className="mb-4 text-[12px] font-semibold text-[#334155]">
               Summary
             </h3>
 
             <div className="space-y-3">
-              {requestTotalDisplay != null && !skipPrepaymentCredit ? (
+              {requestTotalDisplay != null && !isPersonalPortalOrder ? (
                 <SummaryRow
                   label={
                     facilitySearchFee > 0
@@ -808,7 +896,11 @@ export default function CreateInvoiceModal({
               <SummaryRow
                 label="Invoice total"
                 value={formatMoney(
-                  isQuickMode ? quickCollectTotal : totalAmount
+                  isPersonalPortalOrder
+                    ? (personalPortalFinancials?.totalAmount ?? totalAmount)
+                    : isQuickMode
+                      ? quickCollectTotal
+                      : totalAmount
                 )}
               />
               {isCnrOrder ? (
@@ -833,11 +925,17 @@ export default function CreateInvoiceModal({
                 </>
               ) : isQuickMode ? (
                 <>
-                  {!skipPrepaymentCredit ? (
+                  {!isPersonalPortalOrder ? (
                     <SummaryRow
                       label={`Prepayment ${formatPaidBracket(witnessFeeRequired)}`}
                       value={formatMoney(loadedPrepaymentAmount)}
                       muted={loadedPrepaymentAmount >= witnessFeeRequired}
+                    />
+                  ) : personalPortalFinancials?.prepaymentCredit > 0 ? (
+                    <SummaryRow
+                      label="Prepayment"
+                      value={`-${formatMoney(personalPortalFinancials.prepaymentCredit)}`}
+                      muted
                     />
                   ) : null}
                   <SummaryRow
@@ -852,11 +950,16 @@ export default function CreateInvoiceModal({
                   ) : null}
                 </>
               ) : (
-                !skipPrepaymentCredit &&
-                prepaymentPaid > 0 && (
+                (isPersonalPortalOrder
+                  ? (personalPortalFinancials?.prepaymentCredit ?? 0) > 0
+                  : prepaymentPaid > 0) && (
                   <SummaryRow
                     label="Prepayment"
-                    value={`-${formatMoney(prepaymentPaid)}`}
+                    value={`-${formatMoney(
+                      isPersonalPortalOrder
+                        ? personalPortalFinancials.prepaymentCredit
+                        : prepaymentPaid
+                    )}`}
                     muted
                   />
                 )
@@ -893,8 +996,10 @@ export default function CreateInvoiceModal({
                   {formatMoney(displayDue)}
                 </span>
               </div>
-              {errors.totalAmount && (
-                <p className="mt-2 text-[11px] text-red-500">{errors.totalAmount}</p>
+              {(errors.totalAmount || clientValidationErrors.totalAmount) && (
+                <p className="mt-2 text-[11px] text-red-500">
+                  {errors.totalAmount || clientValidationErrors.totalAmount}
+                </p>
               )}
             </div>
 
@@ -907,7 +1012,7 @@ export default function CreateInvoiceModal({
                 type="button"
                 onClick={handleSubmit}
                 disabled={submitting || loadingInvoice || isFormInvalid}
-                className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-[36px] w-full items-center justify-center rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting
                   ? "Saving..."
@@ -919,7 +1024,7 @@ export default function CreateInvoiceModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="mt-3 h-[30px] w-full rounded-[6px] text-[12px] font-semibold text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#475569]"
+                className="mt-3 inline-flex h-[30px] w-full items-center justify-center rounded-[6px] text-[12px] font-semibold leading-none text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#475569]"
               >
                 Cancel
               </button>
@@ -1306,7 +1411,7 @@ function calculateInvoiceTotal(data, facilitySearchFee = 0) {
 
 function validateInvoiceForm(
   data,
-  { requirePositiveTotal = false, facilitySearchFee = 0 } = {}
+  { requirePositiveTotal = false, facilitySearchFee = 0, computedTotal = null } = {}
 ) {
   const errors = {};
 
@@ -1341,10 +1446,12 @@ function validateInvoiceForm(
     errors.clericalTimeHours = "Enter a valid clerical time (0 or greater)";
   }
 
-  if (
-    requirePositiveTotal &&
-    calculateInvoiceTotal(data, facilitySearchFee) <= 0
-  ) {
+  const invoiceTotal =
+    computedTotal == null
+      ? calculateInvoiceTotal(data, facilitySearchFee)
+      : toNumber(computedTotal);
+
+  if (requirePositiveTotal && invoiceTotal <= 0) {
     errors.totalAmount = "Invoice total must be greater than zero";
   }
 

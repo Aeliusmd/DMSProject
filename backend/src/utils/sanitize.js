@@ -18,16 +18,29 @@ function stripHtmlMarkup(value) {
 }
 
 /**
- * Normalize and bound free-text input before storage or logging.
+ * Strip XSS-sensitive characters only. Never truncate — use this for extract
+ * and form values so subpoena text is not silently cut.
  */
-function sanitizeText(value, { maxLength = DEFAULT_TEXT_MAX_LENGTH, allowEmpty = false } = {}) {
+function sanitizeXss(value, { allowEmpty = true } = {}) {
   const cleaned = stripHtmlMarkup(stripControlCharacters(value)).trim();
+  if (!cleaned && !allowEmpty) {
+    return "";
+  }
+  return cleaned;
+}
+
+/**
+ * Normalize and bound free-text input before storage or logging.
+ * Truncation is only for hard column/search caps, not XSS.
+ */
+function sanitizeText(value, { maxLength = DEFAULT_TEXT_MAX_LENGTH, allowEmpty = false, truncate = true } = {}) {
+  const cleaned = sanitizeXss(value, { allowEmpty: true });
 
   if (!cleaned && !allowEmpty) {
     return "";
   }
 
-  if (cleaned.length > maxLength) {
+  if (truncate && maxLength && cleaned.length > maxLength) {
     return cleaned.slice(0, maxLength);
   }
 
@@ -78,6 +91,7 @@ module.exports = {
   DEFAULT_SEARCH_MAX_LENGTH,
   stripControlCharacters,
   stripHtmlMarkup,
+  sanitizeXss,
   sanitizeText,
   sanitizeSearchText,
   sanitizeTrimOrNull,

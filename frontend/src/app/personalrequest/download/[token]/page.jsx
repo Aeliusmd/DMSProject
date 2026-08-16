@@ -9,7 +9,7 @@ export default function PersonalRequestDownloadPage() {
   const token = `${params?.token || ""}`;
 
   return (
-    <PersonalPortalDashboardShell title="Download Records">
+    <PersonalPortalDashboardShell title="Download Records" requireAuth={false}>
       <div className="flex justify-center py-6">
         <RecordsDownloadPanel token={token} />
       </div>

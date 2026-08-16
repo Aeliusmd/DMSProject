@@ -7,6 +7,7 @@ function normalizeFacilityName(text) {
 }
 
 function normalizeZip(zip) {
+  // Match on the 5-digit base ZIP so ZIP+4 extracts still find the facility.
   const digits = String(zip || "").replace(/\D/g, "");
   return digits.slice(0, 5) || "";
 }

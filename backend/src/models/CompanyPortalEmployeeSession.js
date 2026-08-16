@@ -31,7 +31,10 @@ class CompanyPortalEmployeeSession {
        INNER JOIN company_portal_employees e ON e.id = s.employee_id
        INNER JOIN company_portal_users u ON u.id = s.company_user_id
        WHERE s.id = :id
+         AND s.expires_at > NOW()
          AND e.deleted_at IS NULL
+         AND u.deleted_at IS NULL
+         AND u.is_active = 1
        LIMIT 1`,
       { id }
     );
@@ -50,6 +53,8 @@ class CompanyPortalEmployeeSession {
        WHERE s.session_token = :sessionToken
          AND s.expires_at > NOW()
          AND e.deleted_at IS NULL
+         AND u.deleted_at IS NULL
+         AND u.is_active = 1
        LIMIT 1`,
       { sessionToken }
     );
@@ -65,13 +70,13 @@ class CompanyPortalEmployeeSession {
     return result.affectedRows > 0;
   }
 
-  static async deleteBySessionToken(sessionToken, connection = null) {
+  static async deleteByEmployeeId(employeeId, connection = null) {
     const db = connection || getPool();
     const [result] = await db.execute(
-      `DELETE FROM company_portal_employee_sessions WHERE session_token = :sessionToken`,
-      { sessionToken }
+      `DELETE FROM company_portal_employee_sessions WHERE employee_id = :employeeId`,
+      { employeeId }
     );
-    return result.affectedRows > 0;
+    return result.affectedRows;
   }
 }
 

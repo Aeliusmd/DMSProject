@@ -19,6 +19,7 @@ const PersonalRequestStripePayment = require("../models/PersonalRequestStripePay
 const PersonalPortalUser = require("../models/PersonalPortalUser");
 const Order = require("../models/Order");
 const OrderRecord = require("../models/OrderRecord");
+const Facility = require("../models/Facility");
 const {
   areAllOrderInvoicesPaidFromRows,
   hasStandardInvoiceFields,
@@ -45,9 +46,11 @@ const PORTAL_STATUS_LABELS = {
   invoice: "Invoice",
   paid: "Paid",
   released: "Released",
+  no_facility: "No facility",
 };
 
 const STATUS_RANK = {
+  no_facility: -1,
   pending_payment: 0,
   in_process: 1,
   invoice: 2,
@@ -118,25 +121,273 @@ function mapRecordTypeFlags(recordTypes = []) {
   };
 }
 
-function buildOrderPayloadFromBundle(bundle, confirmationReference) {
+function formatFacilityAddress(facility) {
+  if (!facility) return "";
+  return (
+    [
+      facility.address,
+      [facility.city, facility.state, facility.zip_code].filter(Boolean).join(" "),
+    ]
+      .filter(Boolean)
+      .join(", ") || ""
+  );
+}
+
+/**
+ * If the requester typed a facility that already exists in DMS, link it and
+ * clear is_manual_lookup so staff do not see a false "not in system" badge.
+ */
+async function linkPersonalFacilityIfAlreadyInSystem(primaryFacility) {
+  if (!primaryFacility?.id) return primaryFacility;
+
+  const linkedId = Number(primaryFacility.facility_id);
+  if (Number.isFinite(linkedId) && linkedId > 0) {
+    if (Number(primaryFacility.is_manual_lookup)) {
+      await PersonalRequestFacility.markLinked(primaryFacility.id, {
+        facilityId: linkedId,
+        facilityName: primaryFacility.facility_name,
+        facilityAddress: primaryFacility.facility_address,
+      });
+      return {
+        ...primaryFacility,
+        facility_id: linkedId,
+        is_manual_lookup: 0,
+      };
+    }
+    return primaryFacility;
+  }
+
+  if (!Number(primaryFacility.is_manual_lookup)) {
+    return primaryFacility;
+  }
+
+  const facilityName = `${primaryFacility.facility_name || ""}`.trim();
+  if (!facilityName) return primaryFacility;
+
+  const match = await Facility.findBestMatch({
+    facilityName,
+    address: primaryFacility.facility_address || "",
+  });
+  if (!match?.id) return primaryFacility;
+
+  const address = formatFacilityAddress(match) || primaryFacility.facility_address;
+  await PersonalRequestFacility.markLinked(primaryFacility.id, {
+    facilityId: match.id,
+    facilityName: match.facility_name || facilityName,
+    facilityAddress: address,
+  });
+
+  return {
+    ...primaryFacility,
+    facility_id: match.id,
+    facility_name: match.facility_name || facilityName,
+    facility_address: address,
+    is_manual_lookup: 0,
+  };
+}
+
+/**
+ * After a personal DMS order has a real facility: match requested treating
+ * doctor if present, otherwise use the facility default. Never auto-create.
+ */
+async function applyPersonalPortalDoctorForOrder(
+  dmsOrderId,
+  facilityId,
+  treatingDoctor = ""
+) {
+  const orderId = Number(dmsOrderId);
+  const facilityIdNum = Number(facilityId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return null;
+  if (!Number.isFinite(facilityIdNum) || facilityIdNum <= 0) return null;
+
+  const facilityService = require("./facilityService");
+  const requested = `${treatingDoctor || ""}`.trim();
+  const result = await facilityService.resolveFacilityDoctor(facilityIdNum, {
+    doctorName: requested || undefined,
+    useDefaultWhenMissing: !requested,
+    allowCreate: false,
+  });
+
+  const nextDoctorName = `${result.doctorName || ""}`.trim();
+  const pool = getPool();
+  await pool.execute(
+    `UPDATE orders
+     SET specific_doctor = :specificDoctor,
+         specific_doctor_is_default = :isDefault,
+         updated_at = NOW()
+     WHERE id = :orderId`,
+    {
+      orderId,
+      specificDoctor: nextDoctorName || null,
+      isDefault: result.usedDefault ? 1 : 0,
+    }
+  );
+
+  return {
+    specificDoctor: nextDoctorName,
+    usedDefault: Boolean(result.usedDefault),
+    doctorMissing: Boolean(result.doctorMissing),
+    missingDefault: Boolean(result.missingDefault),
+  };
+}
+
+/**
+ * Block staff order update while a personal-request treating doctor is still
+ * missing from the facility, unless staff selects/creates a real facility
+ * doctor (including the facility default).
+ */
+async function assertPersonalPortalDoctorAllowsOrderUpdate(
+  internalOrderId,
+  data = {}
+) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+  if (requestOrder.portal_status === "no_facility") return;
+
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+  const requestedDoctor = `${primaryFacility?.treating_doctor || ""}`.trim();
+
+  const facilityId = Number(
+    data.facility || data.facilityId || primaryFacility?.facility_id
+  );
+  if (!Number.isFinite(facilityId) || facilityId <= 0) {
+    throw new ApiError(
+      400,
+      "Add the facility to the system (or select an existing facility) before updating this personal order."
+    );
+  }
+
+  const facility = await Facility.findById(facilityId);
+  if (
+    facility &&
+    `${facility.facility_name || ""}`.trim() === PERSONAL_PLACEHOLDER_FACILITY_NAME
+  ) {
+    throw new ApiError(
+      400,
+      "Add the facility to the system before updating this personal order."
+    );
+  }
+
+  const facilityService = require("./facilityService");
+  const submittedDoctor = `${data.specificDoctor || ""}`.trim();
+  const markedDefault = Boolean(data.specificDoctorIsDefault);
+
+  async function submittedIsExistingFacilityDoctor() {
+    if (!submittedDoctor) return false;
+    const submittedResult = await facilityService.resolveFacilityDoctor(
+      facilityId,
+      {
+        doctorName: submittedDoctor,
+        useDefaultWhenMissing: false,
+        allowCreate: false,
+      }
+    );
+    return Boolean(
+      !submittedResult.doctorMissing && submittedResult.doctor
+    );
+  }
+
+  // No treating doctor on the personal request → must use facility default
+  // (or another existing facility doctor). Empty default blocks update.
+  if (!requestedDoctor) {
+    if (await submittedIsExistingFacilityDoctor()) {
+      return;
+    }
+
+    const defaultResult = await facilityService.resolveFacilityDoctor(
+      facilityId,
+      {
+        useDefaultWhenMissing: true,
+        allowCreate: false,
+      }
+    );
+
+    if (defaultResult.doctor && !defaultResult.missingDefault) {
+      return;
+    }
+
+    throw new ApiError(
+      400,
+      "This facility has no default doctor. Add a default doctor on the facility profile before updating this personal order."
+    );
+  }
+
+  const requestedResult = await facilityService.resolveFacilityDoctor(
+    facilityId,
+    {
+      doctorName: requestedDoctor,
+      useDefaultWhenMissing: false,
+      allowCreate: false,
+    }
+  );
+
+  if (!requestedResult.doctorMissing) {
+    return;
+  }
+
+  if (await submittedIsExistingFacilityDoctor()) {
+    return;
+  }
+
+  if (markedDefault) {
+    const defaultResult = await facilityService.resolveFacilityDoctor(
+      facilityId,
+      {
+        useDefaultWhenMissing: true,
+        allowCreate: false,
+      }
+    );
+    if (defaultResult.doctor && !defaultResult.missingDefault) {
+      return;
+    }
+  }
+
+  throw new ApiError(
+    400,
+    `Requested treating doctor "${requestedDoctor}" is not on this facility. Add that doctor, or select/create a default doctor, before updating this order.`
+  );
+}
+
+function buildOrderPayloadFromBundle(bundle, confirmationReference, options = {}) {
   const { order, primaryFacility, recordTypes } = bundle;
   const flags = mapRecordTypeFlags(recordTypes);
+  const { placeholderFacilityId = null } = options;
+
+  const linkedFacilityId = Number(primaryFacility?.facility_id);
+  const hasLinkedFacility =
+    Number.isFinite(linkedFacilityId) && linkedFacilityId > 0;
+  const usePlaceholder =
+    !hasLinkedFacility &&
+    Number.isFinite(Number(placeholderFacilityId)) &&
+    Number(placeholderFacilityId) > 0;
 
   return {
     orderNumber: confirmationReference,
     firstName: order.first_name,
     lastName: order.last_name,
     dob: order.dob,
-    facility: primaryFacility?.facility_id
-      ? String(primaryFacility.facility_id)
-      : undefined,
-    facilityName: primaryFacility?.facility_name || "Personal Request Facility",
+    // Never invent a real DMS facility from a typed personal-portal name.
+    // Matched facilities keep their id; unmatched use the reserved placeholder.
+    ...(usePlaceholder
+      ? { facility: String(placeholderFacilityId), facilityName: "" }
+      : {
+          facility: hasLinkedFacility ? String(linkedFacilityId) : undefined,
+          facilityName:
+            primaryFacility?.facility_name || "Personal Request Facility",
+        }),
     facilityAddress: primaryFacility?.facility_address,
     fullAddress: primaryFacility?.facility_address,
     address: primaryFacility?.facility_address,
     email: order.email,
     serveCompanyName: "Personal Request Portal",
-    specificDoctor: "Records Department",
+    // Keep requester's treating doctor when provided. Empty means staff/default
+    // resolution later — never invent a placeholder doctor name.
+    specificDoctor: `${primaryFacility?.treating_doctor || ""}`.trim(),
     specificRecord: `Records ${formatIsoToDisplay(primaryFacility?.records_date_begin)} to ${formatIsoToDisplay(primaryFacility?.records_date_end)}`,
     injuryType: "cumulative",
     injuryDateBegin: primaryFacility?.records_date_begin,
@@ -147,6 +398,25 @@ function buildOrderPayloadFromBundle(bundle, confirmationReference) {
     mailAddress: order.mail_address,
     ...flags,
   };
+}
+
+const PERSONAL_PLACEHOLDER_FACILITY_NAME =
+  "Personal Portal - Pending Facility";
+
+/**
+ * Reserved facility for personal portal orders whose treating facility is not
+ * in DMS yet. Staff later create/link a real facility via Add Facility.
+ */
+async function resolvePersonalPlaceholderFacilityId() {
+  const facilityService = require("./facilityService");
+  const { facility } = await facilityService.findOrCreateFacility({
+    facilityName: PERSONAL_PLACEHOLDER_FACILITY_NAME,
+    address: "",
+    city: "",
+    state: "",
+    zipCode: "",
+  });
+  return facility?.id || null;
 }
 
 async function loadRequestBundle(orderId) {
@@ -443,7 +713,28 @@ async function fulfillPersonalPortalPayment(session) {
   let dmsOrderId = order.order_id || null;
 
   if (!dmsOrderId) {
-    const orderPayload = buildOrderPayloadFromBundle(bundle, confirmationReference);
+    // Match existing DMS facilities before create so typed names that already
+    // exist are linked (no false "facility not in system" after pay).
+    if (bundle.primaryFacility) {
+      bundle.primaryFacility = await linkPersonalFacilityIfAlreadyInSystem(
+        bundle.primaryFacility
+      );
+    }
+
+    const stillUnmatched =
+      Boolean(Number(bundle.primaryFacility?.is_manual_lookup)) ||
+      !Number(bundle.primaryFacility?.facility_id);
+
+    let placeholderFacilityId = null;
+    if (stillUnmatched) {
+      placeholderFacilityId = await resolvePersonalPlaceholderFacilityId();
+    }
+
+    const orderPayload = buildOrderPayloadFromBundle(
+      bundle,
+      confirmationReference,
+      { placeholderFacilityId }
+    );
     const dmsOrder = await orderService.createOrder(
       {
         ...orderPayload,
@@ -461,6 +752,21 @@ async function fulfillPersonalPortalPayment(session) {
       }
     );
     dmsOrderId = dmsOrder.id;
+
+    if (!stillUnmatched && Number(bundle.primaryFacility?.facility_id) > 0) {
+      try {
+        await applyPersonalPortalDoctorForOrder(
+          dmsOrderId,
+          bundle.primaryFacility.facility_id,
+          bundle.primaryFacility.treating_doctor
+        );
+      } catch (doctorError) {
+        logger.warn("Personal portal doctor resolve skipped after create", {
+          dmsOrderId,
+          message: doctorError.message,
+        });
+      }
+    }
   }
 
   const pool = getPool();
@@ -549,6 +855,11 @@ async function syncPortalStatusForDmsOrder(orderId, existingRequest = null) {
   const request =
     existingRequest || (await PersonalRequestOrder.findByOrderId(normalizedId));
   if (!request?.processing_fee_paid) return null;
+
+  // Staff-ended "No facility" orders stay terminal until explicitly restored.
+  if (request.portal_status === "no_facility") {
+    return "no_facility";
+  }
 
   const nextStatus = await computePortalStatusForLinkedOrder(
     normalizedId,
@@ -1177,7 +1488,11 @@ async function assertOwnedPersonalRequest(requestId, portalUserId) {
  * Stripe / portal receipt display for logged-in users — no email OTP or
  * emailed magic link required.
  */
-async function getPrepaymentReceiptPdf(requestId, portalUserId) {
+async function getPrepaymentReceiptPdf(
+  requestId,
+  portalUserId,
+  { forcePdf = false } = {}
+) {
   const requestOrder = await assertOwnedPersonalRequest(requestId, portalUserId);
   const payments =
     await PersonalRequestStripePayment.findByPersonalRequestOrderId(
@@ -1194,7 +1509,7 @@ async function getPrepaymentReceiptPdf(requestId, portalUserId) {
     throw new ApiError(404, "Prepayment receipt not found");
   }
 
-  if (prepayment.receipt_url) {
+  if (prepayment.receipt_url && !forcePdf) {
     return {
       kind: "redirect",
       url: prepayment.receipt_url,
@@ -1206,6 +1521,7 @@ async function getPrepaymentReceiptPdf(requestId, portalUserId) {
   const pdfBuffer = await buildReceiptPdf({
     ...prepayment,
     invoice_type: "personal_portal",
+    hideCompany: true,
     invoice_number:
       requestOrder.confirmation_reference || `PR-${requestOrder.id}`,
     amount: prepayment.amount,
@@ -1214,12 +1530,16 @@ async function getPrepaymentReceiptPdf(requestId, portalUserId) {
   return {
     kind: "pdf",
     buffer: pdfBuffer,
-    fileName: `prepayment-receipt-${requestOrder.confirmation_reference || requestOrder.id}.pdf`,
+    fileName: `${requestOrder.confirmation_reference || `PR-${requestOrder.id}`}-Prepayment.pdf`,
     label: "Prepayment receipt",
   };
 }
 
-async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
+async function getFacilityFeeReceiptPdf(
+  requestId,
+  portalUserId,
+  { forcePdf = false } = {}
+) {
   const requestOrder = await assertOwnedPersonalRequest(requestId, portalUserId);
   const payments =
     await PersonalRequestStripePayment.findByPersonalRequestOrderId(
@@ -1271,7 +1591,7 @@ async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
     }
   }
 
-  if (facilityFee.receipt_url) {
+  if (facilityFee.receipt_url && !forcePdf) {
     return {
       kind: "redirect",
       url: facilityFee.receipt_url,
@@ -1283,6 +1603,7 @@ async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
   const pdfBuffer = await buildReceiptPdf({
     ...facilityFee,
     invoice_type: "personal_portal",
+    hideCompany: true,
     invoice_number:
       requestOrder.confirmation_reference || `PR-${requestOrder.id}`,
     amount: facilityFee.amount,
@@ -1291,12 +1612,16 @@ async function getFacilityFeeReceiptPdf(requestId, portalUserId) {
   return {
     kind: "pdf",
     buffer: pdfBuffer,
-    fileName: `facility-fee-receipt-${requestOrder.confirmation_reference || requestOrder.id}.pdf`,
+    fileName: `${requestOrder.confirmation_reference || `PR-${requestOrder.id}`}-Invoice.pdf`,
     label: "Facility fee receipt",
   };
 }
 
-async function getInvoiceReceiptPdf(requestId, portalUserId) {
+async function getInvoiceReceiptPdf(
+  requestId,
+  portalUserId,
+  { forcePdf = false } = {}
+) {
   const requestOrder = await assertOwnedPersonalRequest(requestId, portalUserId);
   const dmsOrderId = Number(requestOrder.order_id);
   if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
@@ -1320,13 +1645,10 @@ async function getInvoiceReceiptPdf(requestId, portalUserId) {
 
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT s.*, o.order_number, o.case_number,
-            TRIM(CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name)) AS applicant_name,
-            COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
+    `SELECT s.*, o.order_number, o.case_number, o.creation_source,
+            TRIM(CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name)) AS applicant_name
      FROM stripe_online_payments s
      INNER JOIN orders o ON o.id = s.order_id
-     LEFT JOIN facilities f ON f.id = o.facility_id
-     LEFT JOIN providers p ON p.id = o.provider_id
      WHERE s.order_id = :orderId
        AND s.status = 'succeeded'
        AND s.invoice_type IN ('regular', 'personal_portal')
@@ -1340,7 +1662,7 @@ async function getInvoiceReceiptPdf(requestId, portalUserId) {
     throw new ApiError(404, "Stripe payment receipt not found for this invoice");
   }
 
-  if (payment.receipt_url) {
+  if (payment.receipt_url && !forcePdf) {
     return {
       kind: "redirect",
       url: payment.receipt_url,
@@ -1352,6 +1674,7 @@ async function getInvoiceReceiptPdf(requestId, portalUserId) {
   const pdfBuffer = await buildReceiptPdf({
     ...payment,
     invoice_type: payment.invoice_type || "regular",
+    hideCompany: true,
     invoice_number:
       payment.invoice_number ||
       invoice.invoice_number ||
@@ -1359,10 +1682,15 @@ async function getInvoiceReceiptPdf(requestId, portalUserId) {
       `INV-${dmsOrderId}`,
   });
 
+  const orderNo =
+    payment.order_number ||
+    requestOrder.confirmation_reference ||
+    `PR-${requestOrder.id}`;
+
   return {
     kind: "pdf",
     buffer: pdfBuffer,
-    fileName: `invoice-receipt-${payment.order_number || requestOrder.id}.pdf`,
+    fileName: `${orderNo}-Invoice.pdf`,
     label: "Invoice receipt",
   };
 }
@@ -1496,9 +1824,25 @@ async function backfillMissingDmsOrderLinks() {
     const feeAmount = getProcessingFeeAmount();
 
     try {
+      if (bundle.primaryFacility) {
+        bundle.primaryFacility = await linkPersonalFacilityIfAlreadyInSystem(
+          bundle.primaryFacility
+        );
+      }
+
+      const stillUnmatched =
+        Boolean(Number(bundle.primaryFacility?.is_manual_lookup)) ||
+        !Number(bundle.primaryFacility?.facility_id);
+
+      let placeholderFacilityId = null;
+      if (stillUnmatched) {
+        placeholderFacilityId = await resolvePersonalPlaceholderFacilityId();
+      }
+
       const orderPayload = buildOrderPayloadFromBundle(
         bundle,
-        confirmationReference
+        confirmationReference,
+        { placeholderFacilityId }
       );
       const dmsOrder = await orderService.createOrder(
         {
@@ -1516,6 +1860,18 @@ async function backfillMissingDmsOrderLinks() {
           creationSource: "personal_portal",
         }
       );
+
+      if (!stillUnmatched && Number(bundle.primaryFacility?.facility_id) > 0) {
+        try {
+          await applyPersonalPortalDoctorForOrder(
+            dmsOrder.id,
+            bundle.primaryFacility.facility_id,
+            bundle.primaryFacility.treating_doctor
+          );
+        } catch (_doctorError) {
+          // Non-blocking
+        }
+      }
 
       const pool = getPool();
       const connection = await pool.getConnection();
@@ -1685,16 +2041,20 @@ async function getPendingPersonalFacilitySearchFee(dmsOrderId) {
 
   const requestOrder = await PersonalRequestOrder.findByOrderId(normalizedId);
   if (!requestOrder || !requestOrder.processing_fee_paid) return null;
+  if (requestOrder.portal_status === "no_facility") return null;
 
   const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
     requestOrder.id
   );
-  if (!Boolean(Number(primaryFacility?.is_manual_lookup))) {
+  const isManualLookup = Boolean(Number(primaryFacility?.is_manual_lookup));
+  const status = requestOrder.research_fee_status || "none";
+
+  if (status === "paid" || status === "waived") {
     return null;
   }
 
-  const status = requestOrder.research_fee_status || "none";
-  if (status === "paid" || status === "waived") {
+  // Fee is owed while unmatched (manual) or after staff linked but before invoice billing.
+  if (!isManualLookup && status !== "pending") {
     return null;
   }
 
@@ -1704,7 +2064,474 @@ async function getPendingPersonalFacilitySearchFee(dmsOrderId) {
   return {
     personalRequestId: requestOrder.id,
     amount,
+    isManualLookup,
+    researchFeeStatus: status,
   };
+}
+
+/**
+ * True when the portal/user named a doctor who is not linked on the facility yet.
+ */
+async function resolvePersonalPortalDoctorNotInSystem({
+  requestOrder = null,
+  primaryFacility = null,
+  dmsOrder = null,
+  mappedOrder = null,
+} = {}) {
+  const requestedDoctor = `${primaryFacility?.treating_doctor || ""}`.trim() ||
+    `${dmsOrder?.specific_doctor || ""}`.trim() ||
+    `${mappedOrder?.specificDoctor || mappedOrder?.doctor || mappedOrder?.requestedTreatingDoctor || ""}`.trim();
+
+  if (!requestedDoctor) return false;
+  if (requestOrder?.portal_status === "no_facility") return false;
+
+  const isManualLookup = Boolean(Number(primaryFacility?.is_manual_lookup));
+  if (isManualLookup) {
+    return true;
+  }
+
+  const facilityId = Number(primaryFacility?.facility_id);
+  if (!Number.isFinite(facilityId) || facilityId <= 0) {
+    return false;
+  }
+
+  try {
+    const facilityService = require("./facilityService");
+    const doctorResult = await facilityService.resolveFacilityDoctor(facilityId, {
+      doctorName: requestedDoctor,
+      useDefaultWhenMissing: false,
+      allowCreate: false,
+    });
+    return Boolean(doctorResult.doctorMissing);
+  } catch (_doctorError) {
+    return true;
+  }
+}
+
+/**
+ * Staff list: personal-portal required-field completeness (always from dbId).
+ */
+async function applyPersonalOrderCompletenessFields(order) {
+  let dmsOrderId = Number(order.dbId);
+  if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
+    const rawId = `${order.id || ""}`.trim();
+    if (/^\d+$/.test(rawId)) {
+      dmsOrderId = Number(rawId);
+    }
+  }
+  if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
+    return;
+  }
+
+  const {
+    buildPersonalPortalRequiredFieldData,
+    computeMissingRequiredFields,
+  } = require("../utils/orderRequiredFields");
+  const OrderRecord = require("../models/OrderRecord");
+
+  let requestOrder = null;
+  let primaryFacility = null;
+  try {
+    requestOrder = await PersonalRequestOrder.findByOrderId(dmsOrderId);
+    if (requestOrder) {
+      primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+        requestOrder.id
+      );
+      order.driverLicenseNumber =
+        requestOrder.driver_license_number || order.driverLicenseNumber || "";
+      order.hasDriverLicenseDocument = Boolean(
+        requestOrder.driver_license_storage_path
+      );
+    }
+  } catch (_requestLoadError) {
+    // Continue with DMS row only
+  }
+
+  const dmsOrder = await Order.findById(dmsOrderId);
+  const orderRecords = await OrderRecord.findByOrderId(dmsOrderId);
+
+  try {
+    order.doctorNotInSystem = await resolvePersonalPortalDoctorNotInSystem({
+      requestOrder,
+      primaryFacility,
+      dmsOrder,
+      mappedOrder: order,
+    });
+  } catch (_doctorFlagError) {
+    order.doctorNotInSystem = Boolean(order.doctorNotInSystem);
+  }
+
+  const requiredData = buildPersonalPortalRequiredFieldData({
+    orderRow: dmsOrder || {},
+    mappedOrder: order,
+    requestOrder,
+    primaryFacility,
+    orderRecords,
+    documents: Array.isArray(order.documents) ? order.documents : [],
+  });
+
+  order.driverLicenseNumber = requiredData.driverLicenseNumber;
+  order.hasDriverLicenseDocument = requiredData.hasDriverLicenseDocument;
+  order.missingRequiredFields = computeMissingRequiredFields(
+    requiredData,
+    orderRecords
+  );
+  order.hasIncompleteRequiredFields = order.missingRequiredFields.length > 0;
+}
+
+/**
+ * Company-portal parity enrichment for staff Personal Orders list:
+ * - facilityNotInSystem while manual lookup is still pending
+ * - newFacilityRequest details for Add Facility / End Order modal
+ * - pendingFacilitySearchFee when $5 search fee still owed
+ */
+async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
+  const personalOrders = mappedOrders.filter(
+    (order) => order.creationSource === "personal_portal"
+  );
+  if (!personalOrders.length) return mappedOrders;
+
+  await Promise.all(
+    personalOrders.map(async (order) => {
+      const dmsOrderId = Number(order.dbId);
+      if (!Number.isFinite(dmsOrderId) || dmsOrderId <= 0) {
+        return;
+      }
+
+      try {
+        const requestOrder = await PersonalRequestOrder.findByOrderId(dmsOrderId);
+        if (!requestOrder) {
+          return;
+        }
+
+        order.personalPortalStatus = requestOrder.portal_status || null;
+        order.personalPortalRequestId = requestOrder.id;
+
+        const primaryFacility =
+          await PersonalRequestFacility.findPrimaryByOrderId(requestOrder.id);
+        let isManualLookup = Boolean(Number(primaryFacility?.is_manual_lookup));
+        const linkedFacilityId = Number(primaryFacility?.facility_id);
+        const hasLinkedFacility =
+          Number.isFinite(linkedFacilityId) && linkedFacilityId > 0;
+
+        // Heal stale flags when the personal row already has a facility_id.
+        if (isManualLookup && hasLinkedFacility && primaryFacility?.id) {
+          await PersonalRequestFacility.markLinked(primaryFacility.id, {
+            facilityId: linkedFacilityId,
+            facilityName: primaryFacility.facility_name,
+            facilityAddress: primaryFacility.facility_address,
+          });
+          isManualLookup = false;
+        }
+
+        // Heal when DMS already points at a real (non-placeholder) facility.
+        // Never treat the reserved pending placeholder as a linked facility.
+        if (isManualLookup && primaryFacility?.id) {
+          const dmsOrder = await Order.findById(dmsOrderId);
+          const dmsFacilityId = Number(dmsOrder?.facility_id);
+          if (Number.isFinite(dmsFacilityId) && dmsFacilityId > 0) {
+            const dmsFacility = await Facility.findById(dmsFacilityId);
+            const facilityName = `${dmsFacility?.facility_name || ""}`.trim();
+            const isPlaceholder =
+              facilityName === PERSONAL_PLACEHOLDER_FACILITY_NAME;
+            if (dmsFacility && !isPlaceholder) {
+              const isAutoCreated = Boolean(Number(dmsFacility.is_auto_created));
+              const facilityCreatedMs = dmsFacility.created_at
+                ? new Date(dmsFacility.created_at).getTime()
+                : NaN;
+              const orderCreatedMs = dmsOrder?.created_at
+                ? new Date(dmsOrder.created_at).getTime()
+                : NaN;
+              const existedBeforeOrder =
+                Number.isFinite(facilityCreatedMs) &&
+                Number.isFinite(orderCreatedMs) &&
+                facilityCreatedMs < orderCreatedMs - 5000;
+
+              if (!isAutoCreated || existedBeforeOrder) {
+                await PersonalRequestFacility.markLinked(primaryFacility.id, {
+                  facilityId: dmsFacilityId,
+                  facilityName:
+                    dmsFacility.facility_name || primaryFacility.facility_name,
+                  facilityAddress:
+                    formatFacilityAddress(dmsFacility) ||
+                    primaryFacility.facility_address,
+                });
+                isManualLookup = false;
+              }
+            }
+          }
+        }
+
+        const feeAmount = getResearchFeeAmount();
+        const researchStatus = requestOrder.research_fee_status || "none";
+
+        const facilityNotInSystem =
+          isManualLookup && requestOrder.portal_status !== "no_facility";
+
+        order.facilityNotInSystem = facilityNotInSystem;
+        if (
+          facilityNotInSystem &&
+          primaryFacility?.facility_name &&
+          (`${order.facilityName || ""}`.trim() ===
+            PERSONAL_PLACEHOLDER_FACILITY_NAME ||
+            !order.facilityName)
+        ) {
+          order.facilityName = primaryFacility.facility_name;
+          if (order.facilityInfo) {
+            order.facilityInfo = {
+              ...order.facilityInfo,
+              name: primaryFacility.facility_name,
+            };
+          }
+        }
+        order.newFacilityRequest = {
+          id: requestOrder.id,
+          status: facilityNotInSystem
+            ? "pending"
+            : researchStatus === "pending"
+              ? "linked"
+              : researchStatus === "paid" || researchStatus === "waived"
+                ? "billed"
+                : "none",
+          facilityName: primaryFacility?.facility_name || "",
+          facilityAddress: primaryFacility?.facility_address || "",
+          facilityCity: "",
+          facilityState: "",
+          facilityZip: "",
+          treatingDoctor: primaryFacility?.treating_doctor || "",
+          searchFeeAmount: feeAmount,
+          internalFacilityId: primaryFacility?.facility_id || null,
+          feeBilled: researchStatus === "paid" || researchStatus === "waived",
+          feePending:
+            researchStatus === "pending" ||
+            (isManualLookup &&
+              researchStatus !== "paid" &&
+              researchStatus !== "waived"),
+          source: "personal_portal",
+        };
+
+        const requestedDoctor =
+          `${primaryFacility?.treating_doctor || ""}`.trim() ||
+          `${order.doctor || ""}`.trim();
+        order.requestedTreatingDoctor = requestedDoctor;
+
+        order.doctorNotInSystem = await resolvePersonalPortalDoctorNotInSystem({
+          requestOrder,
+          primaryFacility,
+          dmsOrder: await Order.findById(dmsOrderId),
+          mappedOrder: order,
+        });
+
+        order.driverLicenseNumber =
+          requestOrder.driver_license_number || order.driverLicenseNumber || "";
+        order.facilityAddress =
+          primaryFacility?.facility_address ||
+          order.facilityAddress ||
+          order.fullAddress ||
+          "";
+        if (
+          !`${order.fullAddress || ""}`.trim() &&
+          `${order.facilityAddress || ""}`.trim()
+        ) {
+          order.fullAddress = order.facilityAddress;
+        }
+        order.hasDriverLicenseDocument = Boolean(
+          requestOrder.driver_license_storage_path
+        );
+        order.hasPersonalDocument = Boolean(
+          order.hasDriverLicenseDocument ||
+            (Array.isArray(order.documents) && order.documents.length > 0)
+        );
+
+        const pending = await getPendingPersonalFacilitySearchFee(dmsOrderId);
+        if (!(Number(order.pendingFacilitySearchFee) > 0)) {
+          order.pendingFacilitySearchFee = pending?.amount > 0 ? pending.amount : 0;
+        }
+      } catch (_error) {
+        // Non-blocking enrichment
+      } finally {
+        try {
+          await applyPersonalOrderCompletenessFields(order);
+        } catch (_completenessError) {
+          // Keep list row usable
+        }
+      }
+    })
+  );
+
+  return mappedOrders;
+}
+
+async function getNewFacilityContextForInternalOrder(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    throw new ApiError(400, "Invalid order id");
+  }
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) {
+    throw new ApiError(404, "Personal portal request not found for this order");
+  }
+
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+
+  return { requestOrder, primaryFacility };
+}
+
+async function linkFacilityToPersonalPortalOrder(internalOrderId, facilityId) {
+  const facilityIdNum = Number(facilityId);
+  if (!Number.isFinite(facilityIdNum) || facilityIdNum <= 0) {
+    throw new ApiError(400, "A valid facility is required");
+  }
+
+  const { requestOrder, primaryFacility } =
+    await getNewFacilityContextForInternalOrder(internalOrderId);
+
+  if (requestOrder.portal_status === "no_facility") {
+    throw new ApiError(
+      400,
+      "This order was ended with No facility status and cannot be linked"
+    );
+  }
+
+  await orderService.updateOrderFacility(Number(internalOrderId), {
+    facility: facilityIdNum,
+  });
+
+  const facility = await Facility.findById(facilityIdNum);
+
+  if (primaryFacility?.id) {
+    await PersonalRequestFacility.markLinked(primaryFacility.id, {
+      facilityId: facilityIdNum,
+      facilityName: facility?.facility_name || primaryFacility.facility_name,
+      facilityAddress:
+        [
+          facility?.address,
+          [facility?.city, facility?.state, facility?.zip_code]
+            .filter(Boolean)
+            .join(" "),
+        ]
+          .filter(Boolean)
+          .join(", ") || primaryFacility.facility_address,
+    });
+  }
+
+  let doctorResolve = null;
+  try {
+    doctorResolve = await applyPersonalPortalDoctorForOrder(
+      Number(internalOrderId),
+      facilityIdNum,
+      primaryFacility?.treating_doctor
+    );
+  } catch (doctorError) {
+    logger.warn("Personal portal doctor resolve skipped after facility link", {
+      internalOrderId,
+      facilityId: facilityIdNum,
+      message: doctorError.message,
+    });
+  }
+
+  const researchStatus = requestOrder.research_fee_status || "none";
+  if (researchStatus !== "paid" && researchStatus !== "waived") {
+    await PersonalRequestOrder.markResearchFeeRequested(requestOrder.id);
+  }
+
+  return {
+    internalOrderId: Number(internalOrderId),
+    personalRequestId: requestOrder.id,
+    facilityId: facilityIdNum,
+    facilitySearchFee: getResearchFeeAmount(),
+    doctor: doctorResolve,
+  };
+}
+
+async function markPersonalPortalOrderNoFacility(internalOrderId) {
+  const { requestOrder, primaryFacility } =
+    await getNewFacilityContextForInternalOrder(internalOrderId);
+
+  await PersonalRequestOrder.updatePortalStatus(requestOrder.id, "no_facility");
+
+  if (primaryFacility?.id && Boolean(Number(primaryFacility.is_manual_lookup))) {
+    await PersonalRequestFacility.markCancelledManualLookup(primaryFacility.id);
+  }
+
+  // Waive unpaid research fee — order ended, no further collection.
+  const researchStatus = requestOrder.research_fee_status || "none";
+  if (researchStatus === "none" || researchStatus === "pending") {
+    await PersonalRequestOrder.markResearchFeeWaived(requestOrder.id);
+  }
+
+  return {
+    personalRequestId: requestOrder.id,
+    portalStatus: "no_facility",
+    internalOrderId: Number(internalOrderId),
+  };
+}
+
+async function restorePersonalPortalOrderInProcess(internalOrderId) {
+  const { requestOrder, primaryFacility } =
+    await getNewFacilityContextForInternalOrder(internalOrderId);
+
+  if (requestOrder.portal_status !== "no_facility") {
+    throw new ApiError(
+      400,
+      "Only orders with No facility status can be restored to In Process"
+    );
+  }
+
+  await PersonalRequestOrder.updatePortalStatus(requestOrder.id, "in_process");
+
+  // Re-open unmatched facility workflow when staff never linked a real facility.
+  if (primaryFacility?.id && !primaryFacility.facility_id) {
+    await PersonalRequestFacility.markPendingManualLookup(primaryFacility.id);
+  }
+
+  if ((requestOrder.research_fee_status || "") === "waived") {
+    await PersonalRequestOrder.markResearchFeeRequested(requestOrder.id);
+  }
+
+  return {
+    personalRequestId: requestOrder.id,
+    portalStatus: "in_process",
+    internalOrderId: Number(internalOrderId),
+  };
+}
+
+async function assertPersonalPortalOrderAllowsInvoicing(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+
+  if (requestOrder.portal_status === "no_facility") {
+    throw new ApiError(
+      400,
+      "Invoice is unavailable because this personal portal order was ended with No facility"
+    );
+  }
+}
+
+/**
+ * Block creating / linking a new facility while the personal order is ended.
+ * Selecting an already-saved facility id is still allowed for read/update paths
+ * that do not invent a new facility row. Restore to In Process to re-enable.
+ */
+async function assertPersonalPortalOrderAllowsFacilityCreate(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+
+  if (requestOrder.portal_status === "no_facility") {
+    throw new ApiError(
+      400,
+      "Cannot create or add a facility while this personal order is ended (No facility). Restore it to In Process first."
+    );
+  }
 }
 
 /**
@@ -1721,8 +2548,6 @@ async function notifyPersonalUserAfterInvoiceSent(dmsOrderId) {
   const requestOrder = await PersonalRequestOrder.findByOrderId(normalizedId);
   if (!requestOrder) return null;
 
-  // Fee already folded into the invoice and marked billed → user pays via
-  // the invoice email / payment link only (no separate research-fee ask).
   if ((requestOrder.research_fee_status || "none") === "paid") {
     return { synced: true, separateFeeAsk: false, requestId: requestOrder.id };
   }
@@ -1732,7 +2557,6 @@ async function notifyPersonalUserAfterInvoiceSent(dmsOrderId) {
     return { synced: true, separateFeeAsk: false, requestId: requestOrder.id };
   }
 
-  // Edge case: fee due but not yet on an invoice — ask after send.
   return requestResearchFeeAfterFacilityVerification(normalizedId, {
     notify: true,
   });
@@ -1741,39 +2565,6 @@ async function notifyPersonalUserAfterInvoiceSent(dmsOrderId) {
 async function markPersonalFacilitySearchFeeBilled(personalRequestId) {
   if (!personalRequestId) return;
   await PersonalRequestOrder.markResearchFeePaid(personalRequestId);
-}
-
-async function enrichOrdersWithPersonalFacilitySearchFees(mappedOrders = []) {
-  const personalOrders = mappedOrders.filter(
-    (order) =>
-      order.creationSource === "personal_portal" &&
-      !(Number(order.pendingFacilitySearchFee) > 0)
-  );
-  if (!personalOrders.length) return mappedOrders;
-
-  await Promise.all(
-    personalOrders.map(async (order) => {
-      try {
-        const dmsOrderId = Number(order.dbId || order.id);
-        const pending = await getPendingPersonalFacilitySearchFee(dmsOrderId);
-        if (pending?.amount > 0) {
-          order.pendingFacilitySearchFee = pending.amount;
-          order.newFacilityRequest = {
-            id: pending.personalRequestId,
-            status: "linked",
-            searchFeeAmount: pending.amount,
-            feePending: true,
-            feeBilled: false,
-            source: "personal_portal",
-          };
-        }
-      } catch (_error) {
-        // Non-blocking enrichment
-      }
-    })
-  );
-
-  return mappedOrders;
 }
 
 async function createResearchFeeCheckout(personalRequestId, portalUserId) {
@@ -1967,6 +2758,44 @@ async function fulfillPersonalPortalResearchFeePayment(session) {
   }
 }
 
+/**
+ * Persist staff edits for personal-portal-only fields (DL #, facility name/address,
+ * records date range) onto personal_request_* tables.
+ */
+async function syncPersonalOrderDetailsFromStaffUpdate(internalOrderId, data = {}) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const requestOrder = await PersonalRequestOrder.findByOrderId(orderId);
+  if (!requestOrder) return;
+
+  const license = `${data.driverLicenseNumber || ""}`.trim();
+  if (license) {
+    await PersonalRequestOrder.updateDriverLicenseNumber(requestOrder.id, license);
+  }
+
+  const primaryFacility = await PersonalRequestFacility.findPrimaryByOrderId(
+    requestOrder.id
+  );
+  if (!primaryFacility?.id) return;
+
+  const facilityName = `${data.facilityName || ""}`.trim();
+  const facilityAddress = `${
+    data.facilityAddress || data.fullAddress || ""
+  }`.trim();
+  const recordsDateBegin = data.injuryDateBegin || null;
+  const recordsDateEnd = data.injuryDateEnd || null;
+  const treatingDoctor = `${data.specificDoctor || ""}`.trim() || null;
+
+  await PersonalRequestFacility.updateStaffDetails(primaryFacility.id, {
+    facilityName: facilityName || null,
+    facilityAddress: facilityAddress || null,
+    recordsDateBegin,
+    recordsDateEnd,
+    treatingDoctor,
+  });
+}
+
 module.exports = {
   sendEmailOtp,
   confirmEmailOtp,
@@ -1978,6 +2807,14 @@ module.exports = {
   markPersonalFacilitySearchFeeBilled,
   enrichOrdersWithPersonalFacilitySearchFees,
   notifyPersonalUserAfterInvoiceSent,
+  getNewFacilityContextForInternalOrder,
+  linkFacilityToPersonalPortalOrder,
+  markPersonalPortalOrderNoFacility,
+  restorePersonalPortalOrderInProcess,
+  assertPersonalPortalOrderAllowsInvoicing,
+  assertPersonalPortalOrderAllowsFacilityCreate,
+  assertPersonalPortalDoctorAllowsOrderUpdate,
+  syncPersonalOrderDetailsFromStaffUpdate,
   createResearchFeeCheckout,
   getCheckoutResult,
   lookupRequestStatus,

@@ -7,6 +7,11 @@ import {
   validateNoHtmlMarkup,
   addNoHtmlMarkupFieldErrors,
 } from "@/lib/validations/nameValidation";
+import {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
 
 const AUTO_PENDING_ORDER_PREFIX = "AUTO-PENDING-";
 
@@ -20,6 +25,27 @@ export const immediateRequiredFields = [
   "email",
   "specificDoctor",
 ];
+
+export const personalImmediateRequiredFields = [
+  "orderNumber",
+  "firstName",
+  "lastName",
+  "dob",
+  "facility",
+  "facilityName",
+  "specificDoctor",
+  "injuryDateBegin",
+  "injuryDateEnd",
+  "type",
+  "driverLicenseNumber",
+  "additionalDocumentFile",
+];
+
+export function getImmediateRequiredFields(data = {}) {
+  return data.creationSource === "personal_portal"
+    ? personalImmediateRequiredFields
+    : immediateRequiredFields;
+}
 
 export const emailFields = ["contact1Email", "contact2Email"];
 
@@ -45,8 +71,138 @@ export const moneyFields = [
 
 export const paymentPrefixes = ["prepayment", "xray"];
 
+function hasPersonalDocument(data = {}) {
+  if (data.hasDriverLicenseDocument || data.hasPersonalDocument) return true;
+  if (Array.isArray(data.documents) && data.documents.length > 0) return true;
+  if (data.additionalDocumentFile) return true;
+  return false;
+}
+
+function validatePersonalPortalOrderForm(data, fileErrors = {}) {
+  const errors = {};
+
+  if (!data.orderNumber?.trim()) {
+    errors.orderNumber = "Order number is required";
+  } else {
+    const orderNumberError = validateNoHtmlMarkup(data.orderNumber, {
+      fieldLabel: "Order number",
+    });
+    if (orderNumberError) errors.orderNumber = orderNumberError;
+    else if (data.orderNumber.trim().length > 50) {
+      errors.orderNumber = "Order number cannot be more than 50 characters";
+    }
+  }
+
+  if (!`${data.firstName || ""}`.trim()) {
+    errors.firstName = "First name is required";
+  } else {
+    const firstNameError = validatePersonName(data.firstName, {
+      fieldLabel: "First name",
+    });
+    if (firstNameError) errors.firstName = firstNameError;
+  }
+
+  if (!`${data.lastName || ""}`.trim()) {
+    errors.lastName = "Last name is required";
+  } else {
+    const lastNameError = validatePersonName(data.lastName, {
+      fieldLabel: "Last name",
+    });
+    if (lastNameError) errors.lastName = lastNameError;
+  }
+
+  if (!`${data.dob || ""}`.trim()) {
+    errors.dob = "Date of birth is required";
+  } else if (isFutureDate(data.dob)) {
+    errors.dob = "DOB cannot be in the future";
+  }
+
+  if (
+    !`${data.facilityName || ""}`.trim() &&
+    !`${data.facility || ""}`.trim()
+  ) {
+    errors.facilityName = "Treating facility is required";
+    errors.facility = "Treating facility is required";
+  }
+
+  if (!`${data.specificDoctor || ""}`.trim()) {
+    errors.specificDoctor = "Specific doctor is required";
+  } else {
+    const doctorError = validateOrganizationName(data.specificDoctor, {
+      fieldLabel: "Specific doctor",
+    });
+    if (doctorError) errors.specificDoctor = doctorError;
+    else if (data.doctorNotInSystem) {
+      errors.specificDoctor =
+        "Add this doctor to the facility to complete the order";
+    }
+  }
+
+  if (!`${data.injuryDateBegin || ""}`.trim()) {
+    errors.injuryDateBegin = "Start date is required";
+  }
+  if (!`${data.injuryDateEnd || ""}`.trim()) {
+    errors.injuryDateEnd = "End date is required";
+  } else if (
+    data.injuryDateBegin &&
+    data.injuryDateEnd &&
+    data.injuryDateEnd < data.injuryDateBegin
+  ) {
+    errors.injuryDateEnd = "End date must be on or after start date";
+  }
+
+  if (!hasFormRecordTypesSelected(data)) {
+    errors.type = "Select at least one record type";
+  }
+
+  if (!`${data.driverLicenseNumber || ""}`.trim()) {
+    errors.driverLicenseNumber = "Driver's licence number is required";
+  } else {
+    const licenseError = validateNoHtmlMarkup(data.driverLicenseNumber, {
+      fieldLabel: "Driver's licence number",
+    });
+    if (licenseError) errors.driverLicenseNumber = licenseError;
+  }
+
+  if (!hasPersonalDocument(data)) {
+    errors.additionalDocumentFile =
+      "Driver's licence / document is required";
+  }
+
+  if (data.ssn && !isValidSSN(data.ssn)) {
+    errors.ssn = "Enter SSN as XXX-XX-1234";
+  }
+
+  if (data.email?.trim() && !isValidEmail(data.email)) {
+    errors.email = "Enter a valid email address";
+  }
+
+  if (fileErrors.additionalDocumentFile) {
+    errors.additionalDocumentFile = fileErrors.additionalDocumentFile;
+  }
+  if (fileErrors.subpoenaFile) {
+    errors.subpoenaFile = fileErrors.subpoenaFile;
+  }
+
+  if (data.documentName && !data.additionalDocumentFile && !hasPersonalDocument(data)) {
+    errors.additionalDocumentFile = "Please choose a document file";
+  }
+
+  addNoHtmlMarkupFieldErrors(errors, data, {
+    specificRecord: "Specific record",
+    documentName: "Document name",
+  });
+
+  return errors;
+}
+
 export function validateNewOrderForm(data, fileErrors = {}) {
   const errors = {};
+  const isPersonalPortal = data.creationSource === "personal_portal";
+
+  if (isPersonalPortal) {
+    return validatePersonalPortalOrderForm(data, fileErrors);
+  }
 
   if (
     !data.orderNumber?.trim() ||
@@ -147,11 +303,8 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     errors.dob = "DOB cannot be in the future";
   }
 
-  if (data.zip) {
-    const zipDigits = getDigits(data.zip);
-    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-      errors.zip = "ZIP must be 5 digits or ZIP+4";
-    }
+  if (data.zip && !isValidZip(data.zip)) {
+    errors.zip = ZIP_VALIDATION_MESSAGE;
   }
 
   if (data.state && data.state.length !== 2) {
@@ -175,9 +328,13 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     const paidField = `${prefix}Paid`;
     const isPersonalPortalPrepayment =
       data.creationSource === "personal_portal" && prefix === "prepayment";
+    const isCompanyPortalPrepayment =
+      data.creationSource === "company_portal" && prefix === "prepayment";
 
+    // Company portal prepayment check may include letters / symbols.
     if (
       data[checkField] &&
+      !isCompanyPortalPrepayment &&
       !isPersonalPortalPrepayment &&
       !/^\d+$/.test(data[checkField])
     ) {
@@ -313,7 +470,15 @@ export function formatPhone(value) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
+export function formatZip(value) {
+  return sanitizeZip(value);
+}
+
 export function formatSSN(value) {
+  const trimmed = String(value || "").trim();
+  if (/^XXX-XX-\d{4}$/i.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
   const digits = getDigits(value).slice(0, 9);
 
   if (digits.length <= 3) return digits;

@@ -31,10 +31,15 @@ const navItems = [
   { label: "Settings", href: "/settings", icon: <SettingsIcon /> },
 ];
 
-export default function Sidebar({ isCollapsed }) {
+export default function Sidebar({
+  isCollapsed,
+  isMobile = false,
+  onNavigate,
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const showLabels = isMobile || !isCollapsed;
 
   const user = getStoredUser();
 
@@ -60,10 +65,16 @@ export default function Sidebar({ isCollapsed }) {
   return (
     <aside
       className={`fixed left-0 top-0 z-40 flex h-dvh shrink-0 flex-col border-r border-[#E2E8F0] bg-white transition-all duration-300 ${
-        isCollapsed ? "w-[72px]" : "w-[190px]"
-      } max-md:w-[72px]`}
+        isMobile
+          ? `w-[min(220px,85vw)] shadow-xl ${
+              isCollapsed ? "-translate-x-full" : "translate-x-0"
+            }`
+          : isCollapsed
+            ? "w-[72px]"
+            : "w-[190px]"
+      }`}
     >
-      <div className="flex h-[52px] items-center justify-center border-b border-[#E2E8F0]">
+      <div className="flex h-[52px] shrink-0 items-center justify-center border-b border-[#E2E8F0]">
         <Image
           src="/images/logo.png"
           alt="DMS Logo"
@@ -71,13 +82,11 @@ export default function Sidebar({ isCollapsed }) {
           height={34}
           priority
           style={{ height: "auto" }}
-          className={`transition-all ${
-            isCollapsed ? "w-[36px]" : "w-[54px]"
-          } max-md:w-[36px]`}
+          className={`transition-all ${showLabels ? "w-[54px]" : "w-[36px]"}`}
         />
       </div>
 
-      <nav className="flex-1 px-[10px] py-[16px]">
+      <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-[10px] py-[12px]">
         <div className="space-y-[7px]">
           {visibleNavItems.map((item) => {
             const isActive =
@@ -90,11 +99,12 @@ export default function Sidebar({ isCollapsed }) {
               <Link
                 key={item.label}
                 href={item.href}
-                title={isCollapsed ? item.label : ""}
-                className={`flex h-[41px] w-full items-center rounded-[6px] text-[13px] transition ${
-                  isCollapsed
-                    ? "justify-center px-0"
-                    : "gap-[12px] px-[12px] max-md:justify-center max-md:px-0"
+                title={showLabels ? "" : item.label}
+                onClick={onNavigate}
+                className={`flex h-[41px] w-full min-w-0 items-center rounded-[6px] text-[13px] transition ${
+                  showLabels
+                    ? "gap-[10px] px-[10px]"
+                    : "justify-center px-0"
                 } ${
                   isActive
                     ? "bg-[#E6F7FA] font-medium text-[#007F96]"
@@ -105,34 +115,32 @@ export default function Sidebar({ isCollapsed }) {
                   {item.icon}
                 </span>
 
-                {!isCollapsed && (
-                  <span className="max-md:hidden">{item.label}</span>
-                )}
+                {showLabels ? (
+                  <span className="min-w-0 truncate">{item.label}</span>
+                ) : null}
               </Link>
             );
           })}
         </div>
       </nav>
 
-      <div className="border-t border-[#E2E8F0] px-[10px] py-[16px]">
+      <div className="shrink-0 border-t border-[#E2E8F0] px-[10px] py-[12px]">
         <button
           type="button"
-          title={isCollapsed ? "Log out" : ""}
+          title={showLabels ? "" : "Log out"}
           onClick={handleLogout}
           disabled={isLoggingOut}
-          className={`flex h-[40px] w-full items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60 ${
-            isCollapsed
-              ? "justify-center"
-              : "gap-[12px] px-[12px] max-md:justify-center max-md:px-0"
+          className={`flex h-[40px] w-full min-w-0 items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60 ${
+            showLabels ? "gap-[10px] px-[10px]" : "justify-center"
           }`}
         >
           <LogoutIcon />
 
-          {!isCollapsed && (
-            <span className="max-md:hidden">
+          {showLabels ? (
+            <span className="min-w-0 truncate">
               {isLoggingOut ? "Logging out..." : "Log out"}
             </span>
-          )}
+          ) : null}
         </button>
       </div>
     </aside>

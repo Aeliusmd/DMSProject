@@ -98,6 +98,14 @@ exports.create = asyncHandler(async (req, res) => {
   if (Number.isFinite(orderId)) {
     const order = await Order.findById(orderId);
     allowZeroTotal = Boolean(order && Number(order.certificate_no_records));
+
+    // Line items can be $0 when the $5 unmatched-facility search fee is the
+    // only charge — createInvoice folds that fee in after this validation.
+    if (!allowZeroTotal) {
+      const pendingFee =
+        await invoiceService.resolvePendingFacilitySearchFee(orderId);
+      allowZeroTotal = Boolean(pendingFee?.amount > 0);
+    }
   }
 
   throwIfInvalid(validateCreateInvoice(req.body, { allowZeroTotal }));

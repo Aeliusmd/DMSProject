@@ -5,6 +5,12 @@ const {
   addMaxLengthError,
 } = require("./validationHelpers");
 const { sanitizeText } = require("../utils/sanitize");
+const { addNoHtmlMarkupError } = require("../utils/nameValidation");
+const {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} = require("../utils/zipUtils");
 
 const MAX_PASSWORD_LENGTH = 128;
 const MIN_PASSWORD_LENGTH = 8;
@@ -49,6 +55,18 @@ function validatePasswordPair(password, confirmPassword, errors) {
 function validateCompanyRegister(body = {}) {
   const errors = [];
 
+  addNoHtmlMarkupError(errors, "companyName", trimToString(body.companyName));
+  addNoHtmlMarkupError(errors, "email", trimToString(body.email || body.companyEmail));
+  addNoHtmlMarkupError(
+    errors,
+    "addressLine1",
+    trimToString(body.addressLine1 || body.address || body.companyAddress)
+  );
+  addNoHtmlMarkupError(errors, "addressLine2", trimToString(body.addressLine2));
+  addNoHtmlMarkupError(errors, "city", trimToString(body.city));
+  addNoHtmlMarkupError(errors, "state", trimToString(body.state));
+  addNoHtmlMarkupError(errors, "zip", trimToString(body.zip || body.zipCode));
+
   const companyName = sanitizeField(body.companyName, 255);
   const phoneRaw = sanitizeField(body.phone || body.companyPhone, 30);
   const email = sanitizeField(body.email || body.companyEmail, 255).toLowerCase();
@@ -66,7 +84,7 @@ function validateCompanyRegister(body = {}) {
   const addressLine2 = sanitizeField(body.addressLine2, 255);
   const city = sanitizeField(body.city, 100);
   const state = sanitizeField(body.state, 2).toUpperCase();
-  const zip = sanitizeField(body.zip || body.zipCode, 20);
+  const zip = sanitizeZip(body.zip || body.zipCode);
 
   if (!companyName) {
     errors.push({ field: "companyName", message: "Company name is required" });
@@ -119,11 +137,10 @@ function validateCompanyRegister(body = {}) {
     errors.push({ field: "state", message: "State must be 2 letters" });
   }
 
-  const zipDigits = getDigits(zip);
   if (!zip) {
     errors.push({ field: "zip", message: "ZIP code is required" });
-  } else if (zipDigits.length !== 5) {
-    errors.push({ field: "zip", message: "ZIP must be 5 digits" });
+  } else if (!isValidZip(zip, { required: true })) {
+    errors.push({ field: "zip", message: ZIP_VALIDATION_MESSAGE });
   }
 
   return {
@@ -138,13 +155,19 @@ function validateCompanyRegister(body = {}) {
       addressLine2: addressLine2 || null,
       city,
       state,
-      zip: zipDigits,
+      zip: sanitizeZip(zip),
     },
   };
 }
 
 function validateCompanyLogin(body = {}) {
   const errors = [];
+
+  addNoHtmlMarkupError(
+    errors,
+    "email",
+    trimToString(body.email || body.identifier)
+  );
 
   const email = sanitizeField(body.email || body.identifier, 255).toLowerCase();
   const password = typeof body.password === "string" ? body.password : "";
@@ -210,28 +233,31 @@ function validateCompanyResendTwoFactor(body = {}) {
 
 function validateCompanyRefresh(body = {}) {
   const errors = [];
+  const refreshToken = trimToString(body.refreshToken);
 
-  if (!trimToString(body.refreshToken)) {
+  if (!refreshToken) {
     errors.push({
       field: "refreshToken",
       message: "Refresh token is required",
     });
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, refreshToken };
 }
 
 function validateCompanyLogout(body = {}) {
   const errors = [];
+  const refreshToken = trimToString(body.refreshToken);
+  const sessionToken = trimToString(body.sessionToken);
 
-  if (!trimToString(body.refreshToken) && !trimToString(body.sessionToken)) {
+  if (!refreshToken && !sessionToken) {
     errors.push({
       field: "refreshToken",
       message: "Refresh token or session token is required",
     });
   }
 
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, refreshToken, sessionToken };
 }
 
 module.exports = {

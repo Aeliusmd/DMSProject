@@ -63,7 +63,7 @@ export default function DashboardPage() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] flex-col gap-5 overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-col gap-5">
         <DashboardOverview />
 
         <div className="flex flex-wrap items-center gap-3">

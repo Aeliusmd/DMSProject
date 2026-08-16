@@ -20,6 +20,12 @@ import {
   validatePersonName,
 } from "@/lib/validations/nameValidation";
 import {
+  ZIP_MAX_CHARS,
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
+import {
   createDoctors,
   deactivateDoctor,
   deleteFacilityDocument,
@@ -164,7 +170,7 @@ export default function FacilityDetailsPage() {
 
       const nextFormData = {
         ...facility,
-        zip: facility.zip || facility.zipCode || "",
+        zip: sanitizeZip(facility.zip || facility.zipCode || ""),
         officeManagers:
           facility.officeManagers?.length > 0
             ? facility.officeManagers
@@ -205,6 +211,23 @@ export default function FacilityDetailsPage() {
   useEffect(() => {
     if (focusSection !== "doctors" || loading) return undefined;
 
+    const doctorNamePrefill = `${searchParams.get("doctorName") || ""}`.trim();
+    if (doctorNamePrefill) {
+      const parts = doctorNamePrefill.split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || "";
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : "";
+      const middleName =
+        parts.length > 2 ? parts.slice(1, -1).join(" ") : "";
+      setDoctorInputs([
+        {
+          ...createEmptyDoctorInput(`doctor-input-${Date.now()}`),
+          firstName,
+          middleName,
+          lastName,
+        },
+      ]);
+    }
+
     const timer = setTimeout(() => {
       document
         .getElementById("facility-doctors")
@@ -212,7 +235,7 @@ export default function FacilityDetailsPage() {
     }, 150);
 
     return () => clearTimeout(timer);
-  }, [focusSection, loading]);
+  }, [focusSection, loading, searchParams]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -224,7 +247,7 @@ export default function FacilityDetailsPage() {
     }
 
     if (name === "zip") {
-      nextValue = value.replace(/\D/g, "").slice(0, 5);
+      nextValue = sanitizeZip(value);
     }
 
     if (name === "state") {
@@ -340,7 +363,7 @@ export default function FacilityDetailsPage() {
       middleName: data.middleName,
       lastName: data.lastName,
       address: data.address,
-      zipCode: data.zip,
+      zipCode: sanitizeZip(data.zip),
       city: data.city,
       state: data.state,
       phone: data.phone,
@@ -1005,6 +1028,8 @@ export default function FacilityDetailsPage() {
               value={formData.zip}
               onChange={handleChange}
               error={getError("zipCode")}
+              maxLength={ZIP_MAX_CHARS}
+              placeholder="12345 or 12345-6789"
             />
 
             <TextField
@@ -1436,7 +1461,7 @@ function EditDoctorModal({
           <button
             type="button"
             onClick={onCancel}
-            className="h-[36px] rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
+            className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#F8FAFC] px-4 text-[12px] font-semibold leading-none text-[#334155] hover:bg-[#E2E8F0]"
           >
             Cancel
           </button>
@@ -1444,7 +1469,7 @@ function EditDoctorModal({
             type="button"
             onClick={onSave}
             disabled={saving}
-            className="h-[36px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-[36px] items-center justify-center rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold leading-none text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>
@@ -1961,6 +1986,7 @@ function TextField({
   hint = "",
   type = "text",
   error = "",
+  maxLength,
 }) {
   return (
     <div className="min-w-0">
@@ -1977,6 +2003,7 @@ function TextField({
         value={value || ""}
         onChange={onChange}
         placeholder={placeholder}
+        maxLength={maxLength}
         className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
           error
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
@@ -2069,7 +2096,7 @@ function normalizeFacilityFormData(data) {
     middleName: data.middleName?.trim() || "",
     lastName: data.lastName?.trim() || "",
     address: data.address?.trim() || "",
-    zip: (data.zip || data.zipCode || "").trim(),
+    zip: sanitizeZip(data.zip || data.zipCode || ""),
     city: data.city?.trim() || "",
     state: data.state?.trim() || "",
     phone: data.phone?.trim() || "",
@@ -2130,8 +2157,8 @@ function validateFacilityForm(data) {
     if (nameError) errors[field] = nameError;
   });
 
-  if (data.zip && getDigits(data.zip).length !== 5) {
-    errors.zipCode = "ZIP must be 5 digits";
+  if (data.zip && !isValidZip(data.zip)) {
+    errors.zipCode = ZIP_VALIDATION_MESSAGE;
   }
 
   if (data.state && data.state.length !== 2) {
@@ -2195,8 +2222,8 @@ function validateFacilityField(field, value) {
     return "Enter a valid email address";
   }
 
-  if (field === "zip" && value && getDigits(value).length !== 5) {
-    return "ZIP must be 5 digits";
+  if (field === "zip" && value && !isValidZip(value)) {
+    return ZIP_VALIDATION_MESSAGE;
   }
 
   if (field === "state" && value && value.length !== 2) {

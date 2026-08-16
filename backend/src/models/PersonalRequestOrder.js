@@ -305,7 +305,7 @@ class PersonalRequestOrder {
     });
     try {
       const [rows] = await pool.execute(
-        `SELECT order_id, portal_status
+        `SELECT order_id, portal_status, driver_license_number, driver_license_storage_path
          FROM personal_request_orders
          WHERE order_id IN (${placeholders})`,
         params
@@ -424,6 +424,20 @@ class PersonalRequestOrder {
     return this.findById(id, connection);
   }
 
+  static async updateDriverLicenseNumber(id, driverLicenseNumber, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_orders
+       SET driver_license_number = :driverLicenseNumber, updated_at = NOW()
+       WHERE id = :id`,
+      {
+        id,
+        driverLicenseNumber: `${driverLicenseNumber || ""}`.trim(),
+      }
+    );
+    return this.findById(id, connection);
+  }
+
   static async updateEmailForPortalUser(portalUserId, email, connection = null) {
     const db = connection || getPool();
     await db.execute(
@@ -484,7 +498,7 @@ class PersonalRequestOrder {
            research_fee_checkout_session_id = COALESCE(:sessionId, research_fee_checkout_session_id),
            updated_at = NOW()
        WHERE id = :id
-         AND research_fee_status IN ('none', 'pending')`,
+         AND research_fee_status IN ('none', 'pending', 'waived')`,
       { id, sessionId }
     );
   }
@@ -495,6 +509,17 @@ class PersonalRequestOrder {
       `UPDATE personal_request_orders
        SET research_fee_status = 'paid',
            research_fee_paid_at = NOW(),
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async markResearchFeeWaived(id, connection = null) {
+    const executor = connection || getPool();
+    await executor.execute(
+      `UPDATE personal_request_orders
+       SET research_fee_status = 'waived',
            updated_at = NOW()
        WHERE id = :id`,
       { id }

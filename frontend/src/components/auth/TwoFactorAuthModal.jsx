@@ -85,12 +85,12 @@ export default function TwoFactorAuthModal({
       const payload = response?.data || {};
 
       saveSessionFn({
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken,
         user: payload.user,
+        accessExpiresAt: payload.accessExpiresAt,
       });
 
-      onSuccess?.();
+      // Keep the OTP screen up until the parent finishes routing.
+      await Promise.resolve(onSuccess?.());
     } catch (requestError) {
       const { fieldErrors, message } = applyApiFieldErrors(requestError, {
         code: "otp",
@@ -103,7 +103,6 @@ export default function TwoFactorAuthModal({
       );
       setOtp(["", "", "", "", "", ""]);
       inputRefs.current[0]?.focus();
-    } finally {
       setIsVerifying(false);
     }
   };

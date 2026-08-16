@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
 import DailyReminderPopup from "@/components/notifications/DailyReminderPopup";
+
+const MOBILE_QUERY = "(max-width: 767px)";
 
 /**
  * @param {{ children: import("react").ReactNode, lockScroll?: boolean }} props
@@ -11,6 +13,44 @@ import DailyReminderPopup from "@/components/notifications/DailyReminderPopup";
  */
 export default function DashboardShell({ children, lockScroll = false }) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia(MOBILE_QUERY);
+
+    const apply = () => {
+      const mobile = media.matches;
+      setIsMobile(mobile);
+      if (mobile) {
+        setIsSidebarCollapsed(true);
+      }
+    };
+
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile || isSidebarCollapsed) return undefined;
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setIsSidebarCollapsed(true);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isMobile, isSidebarCollapsed]);
+
+  const closeMobileSidebar = () => {
+    if (isMobile) setIsSidebarCollapsed(true);
+  };
+
+  const contentPadClass = isMobile
+    ? "pl-0"
+    : isSidebarCollapsed
+      ? "pl-[72px]"
+      : "pl-[190px]";
 
   return (
     <div
@@ -18,14 +58,29 @@ export default function DashboardShell({ children, lockScroll = false }) {
       style={{ background: "#F8FAFC" }}
     >
       <DailyReminderPopup />
-      <Sidebar isCollapsed={isSidebarCollapsed} />
+
+      {isMobile && !isSidebarCollapsed ? (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={closeMobileSidebar}
+        />
+      ) : null}
+
+      <Sidebar
+        isCollapsed={isSidebarCollapsed}
+        isMobile={isMobile}
+        onNavigate={closeMobileSidebar}
+      />
 
       <div
-        className={`flex h-full min-w-0 flex-col overflow-hidden transition-all duration-300 ${
-          isSidebarCollapsed ? "pl-[72px]" : "pl-[190px]"
-        } max-md:!pl-[72px]`}
+        className={`flex h-full min-w-0 flex-col overflow-hidden transition-all duration-300 ${contentPadClass}`}
       >
-        <Topbar onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)} />
+        <Topbar
+          onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
+          sidebarExpanded={!isSidebarCollapsed}
+        />
 
         <main
           className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5 lg:px-6"
@@ -35,7 +90,7 @@ export default function DashboardShell({ children, lockScroll = false }) {
             className={`mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col ${
               lockScroll
                 ? "overflow-hidden"
-                : "overflow-x-hidden overflow-y-auto"
+                : "overflow-x-hidden overflow-y-auto [&>*]:shrink-0"
             }`}
             style={{ background: "#F8FAFC" }}
           >

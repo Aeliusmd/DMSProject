@@ -1,13 +1,13 @@
 const ApiError = require("../utils/ApiError");
 const tokenService = require("../services/tokenService");
 const AuthSession = require("../models/AuthSession");
+const { getAccessTokenFromRequest } = require("../utils/authCookies");
 
 async function authenticate(req, _res, next) {
   try {
-    const authHeader = req.headers.authorization || "";
-    const [scheme, token] = authHeader.split(" ");
+    const token = getAccessTokenFromRequest(req, "internal");
 
-    if (scheme !== "Bearer" || !token) {
+    if (!token) {
       throw new ApiError(401, "Authentication required");
     }
 

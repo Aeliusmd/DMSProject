@@ -8,6 +8,11 @@ import { isCompanyAuthenticated } from "@/lib/company-portal/companyPortalAuthSt
 import { listCompanyPortalOrders } from "@/lib/company-portal/companyPortalOrderApi";
 import { mapDashboardOrderRow } from "@/lib/company-portal/companyPortalOrderStatus";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import {
+  hasHtmlMarkup,
+  htmlMarkupError,
+  sanitizeTrackOrderInput,
+} from "@/lib/company-portal/companyPortalValidation";
 
 const ORDERS_PAGE_SIZE = 10;
 
@@ -74,7 +79,11 @@ export default function CompanyPortalTrackEntryPage() {
 
   const handleTrack = (event) => {
     event.preventDefault();
-    const value = trackInput.trim().toUpperCase();
+    if (hasHtmlMarkup(trackInput)) {
+      setError(htmlMarkupError("orderNumber"));
+      return;
+    }
+    const value = sanitizeTrackOrderInput(trackInput);
     if (!value) {
       setError("Enter your order number to continue.");
       return;
@@ -106,7 +115,7 @@ export default function CompanyPortalTrackEntryPage() {
             type="text"
             value={trackInput}
             onChange={(event) => {
-              setTrackInput(event.target.value);
+              setTrackInput(sanitizeTrackOrderInput(event.target.value));
               if (error) setError("");
             }}
             placeholder="ORD-123456"

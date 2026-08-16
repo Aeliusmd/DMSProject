@@ -1,43 +1,51 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DashboardShell from "@/components/layout/DashboardShell";
 import OrderStatsGrid from "@/components/orders/OrderStatsGrid";
 import OrderActionButton from "@/components/orders/OrderActionButton";
-import OrderFilterBar from "@/components/orders/OrderFilterBar";
+import OrderFilterBar, {
+  defaultOrderFilters,
+} from "@/components/orders/OrderFilterBar";
 import OrdersTable from "@/components/orders/OrdersTable";
 import ReminderNotesModal from "@/components/orders/reminders/ReminderNotesModal";
+import {
+  isCompanyOrderSource,
+  isPersonalOrderSource,
+  toApiCreationSource,
+} from "@/lib/orders/orderFilterConstants";
+import { STAFF_PORTAL_ORDERS_HIDDEN } from "@/lib/portalNavigationVisibility";
 
 const BATCH_SCAN_FLASH_KEY = "dms.batchScanFlash";
 const BATCH_SCAN_FLASH_MS = 10000;
 
-const defaultFilters = {
-  facility: "",
-  company: "",
-  year: "",
-  period: "",
-  status: "",
-  search: "",
-};
-
 export default function OrdersPage() {
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
-  const [filters, setFilters] = useState(defaultFilters);
+  const [filters, setFilters] = useState(defaultOrderFilters);
   const [batchScanFlash, setBatchScanFlash] = useState(null);
+
+  const orderSource = filters.creationSource || "internal";
+  const companyPortalMode = isCompanyOrderSource(orderSource);
+  const personalMode = isPersonalOrderSource(orderSource);
+  const apiCreationSource = useMemo(
+    () => toApiCreationSource(orderSource) || null,
+    [orderSource]
+  );
 
   useEffect(() => {
     let message = "";
     let failedCount = 0;
     let duplicateCount = 0;
+    let shownAt = Date.now();
 
     try {
       const raw = window.sessionStorage.getItem(BATCH_SCAN_FLASH_KEY);
       if (raw) {
-        window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
         const parsed = JSON.parse(raw);
         message = `${parsed?.message || ""}`.trim();
         failedCount = Number(parsed?.failedCount) || 0;
         duplicateCount = Number(parsed?.duplicateCount) || 0;
+        shownAt = Number(parsed?.at) || Date.now();
       }
     } catch {
       message = "";
@@ -45,10 +53,17 @@ export default function OrdersPage() {
 
     if (!message) return undefined;
 
+    const remaining = BATCH_SCAN_FLASH_MS - (Date.now() - shownAt);
+    if (remaining <= 0) {
+      window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
+      return undefined;
+    }
+
     setBatchScanFlash({ message, failedCount, duplicateCount });
     const timer = window.setTimeout(() => {
+      window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
       setBatchScanFlash(null);
-    }, BATCH_SCAN_FLASH_MS);
+    }, remaining);
 
     return () => window.clearTimeout(timer);
   }, []);
@@ -108,9 +123,21 @@ export default function OrdersPage() {
           </div>
         </section>
 
-        <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
+        <OrderFilterBar
+          filters={filters}
+          onFiltersChange={setFilters}
+          showOrderSourceFilter={!STAFF_PORTAL_ORDERS_HIDDEN}
+        />
 
-        <OrdersTable filters={filters} fitToWindow useServerPagination />
+        <OrdersTable
+          filters={filters}
+          fitToWindow
+          useServerPagination
+          creationSource={apiCreationSource}
+          companyPortalMode={companyPortalMode}
+          personalMode={personalMode}
+          listReturnTo="orders"
+        />
       </div>
 
       <ReminderNotesModal

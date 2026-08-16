@@ -360,6 +360,11 @@ function mapManualPaymentRow(row) {
   };
 }
 
+function wantsExcludePortalOrders(query = {}) {
+  const raw = String(query.excludePortalOrders ?? "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 function resolveManualListFilters(query = {}) {
   const filters = {
     orderId: null,
@@ -367,6 +372,7 @@ function resolveManualListFilters(query = {}) {
     invoiceSearch: null,
     dateFrom: parseOptionalIsoDate(query.dateFrom, "dateFrom"),
     dateTo: parseOptionalIsoDate(query.dateTo, "dateTo"),
+    excludePortalOrders: wantsExcludePortalOrders(query),
   };
 
   if (query.orderId && Number.isFinite(Number(query.orderId)) && Number(query.orderId) > 0) {
@@ -436,6 +442,12 @@ function appendManualFilterConditions(conditions, params, alias, filters, invoic
   if (filters.dateTo) {
     conditions.push(`${alias}.payment_date <= :dateTo`);
     params.dateTo = filters.dateTo;
+  }
+
+  if (filters.excludePortalOrders) {
+    conditions.push(
+      "(o.creation_source IS NULL OR o.creation_source NOT IN ('company_portal', 'personal_portal'))"
+    );
   }
 }
 

@@ -1,5 +1,6 @@
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { getFacility, resolveFacility } from "@/lib/facilities/facilityApi";
+import { sanitizeZip } from "@/lib/validations/zipUtils";
 
 const DRAFT_FORM_OMIT_KEYS = new Set([
   "subpoenaFile",
@@ -55,6 +56,28 @@ export function serializeFormForDraft(formData = {}) {
   }
 
   return snapshot;
+}
+
+/** Personal portal: licence # and document flags come from personal_request_orders, not DMS orders. */
+export function mergePersonalPortalFieldsFromOrder(form = {}, order = {}) {
+  if (`${order.creationSource || ""}`.trim() !== "personal_portal") {
+    return form;
+  }
+
+  const license = `${order.driverLicenseNumber || order.driver_license_number || ""}`.trim();
+
+  return {
+    ...form,
+    driverLicenseNumber: license || `${form.driverLicenseNumber || ""}`.trim(),
+    hasDriverLicenseDocument: Boolean(
+      order.hasDriverLicenseDocument ?? form.hasDriverLicenseDocument
+    ),
+    hasPersonalDocument: Boolean(
+      order.hasPersonalDocument ??
+        order.hasDriverLicenseDocument ??
+        form.hasPersonalDocument
+    ),
+  };
 }
 
 export function hasDraftableOrderContent(formData = {}) {
@@ -209,6 +232,7 @@ export async function resolvePendingFacility({
   state = "",
   zip = "",
   zipCode = "",
+  allowCreate = true,
 } = {}) {
   const trimmedName = `${facilityName || ""}`.trim();
   const existingId = `${facilityId || ""}`.trim();
@@ -248,13 +272,22 @@ export async function resolvePendingFacility({
     };
   }
 
+  if (!allowCreate) {
+    return {
+      facilityId: "",
+      facilityName: trimmedName,
+      facilityCreated: false,
+      facilityProfileIncomplete: false,
+    };
+  }
+
   const { facility, created } = await resolveFacility({
     facilityName: trimmedName,
     address: `${address || ""}`.trim() || undefined,
     city: `${city || ""}`.trim() || undefined,
     state: `${state || ""}`.trim() || undefined,
-    zipCode: `${zipCode || zip || ""}`.trim() || undefined,
-    zip: `${zip || zipCode || ""}`.trim() || undefined,
+    zipCode: sanitizeZip(`${zipCode || zip || ""}`) || undefined,
+    zip: sanitizeZip(`${zip || zipCode || ""}`) || undefined,
   });
 
   return {

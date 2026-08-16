@@ -19,6 +19,7 @@ function Field({
   error,
   type = "text",
   placeholder,
+  maxLength,
 }) {
   return (
     <div>
@@ -34,6 +35,7 @@ function Field({
         name={name}
         value={value}
         placeholder={placeholder}
+        maxLength={maxLength}
         onChange={(event) => onChange(name, event.target.value)}
         className={`h-10 w-full rounded-[8px] border bg-[#F8FAFC] px-3 text-[13px] text-[#0F172A] outline-none transition focus:bg-white focus:ring-2 ${
           error
@@ -57,6 +59,7 @@ export default function CompanyOrderVerifyStep({
   onClearNewFacility,
   onBack,
   onContinue,
+  onCancel,
   saving,
 }) {
   const [showAddFacilityModal, setShowAddFacilityModal] = useState(false);
@@ -254,7 +257,8 @@ export default function CompanyOrderVerifyStep({
             value={form.companyZip}
             onChange={onChange}
             error={errors.companyZip}
-            placeholder="91723"
+            placeholder="12345 or 12345-6789"
+            maxLength={10}
           />
         </div>
 
@@ -276,6 +280,14 @@ export default function CompanyOrderVerifyStep({
       </div>
 
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onCancel}
+          className="inline-flex h-11 items-center justify-center rounded-[8px] border border-[#E2E8F0] bg-white px-5 text-[13px] font-medium text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Cancel
+        </button>
         <button
           type="button"
           onClick={onBack}

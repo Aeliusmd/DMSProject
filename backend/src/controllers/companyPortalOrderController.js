@@ -135,13 +135,27 @@ exports.confirmInvoicePayment = asyncHandler(async (req, res) => {
 exports.getOrder = asyncHandler(async (req, res) => {
   const order = await companyPortalOrderService.getOrder(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
   return ApiResponse.success(res, { order });
 });
 
 exports.validateOrderNumber = asyncHandler(async (req, res) => {
-  const caseNumber = `${req.body?.caseNumber || req.body?.orderNumber || ""}`.trim();
+  const { sanitizeText } = require("../utils/sanitize");
+  const { hasHtmlMarkup } = require("../utils/nameValidation");
+
+  const rawCaseNumber = `${req.body?.caseNumber || req.body?.orderNumber || ""}`;
+  if (hasHtmlMarkup(rawCaseNumber)) {
+    throw new ApiError(400, "Validation failed", [
+      {
+        field: "caseNumber",
+        message: "Order number cannot contain angle brackets or HTML tags",
+      },
+    ]);
+  }
+
+  const caseNumber = sanitizeText(rawCaseNumber, { maxLength: 100 });
 
   if (!caseNumber) {
     throw new ApiError(400, "Order number is required", [
@@ -217,7 +231,8 @@ exports.confirmPayment = asyncHandler(async (req, res) => {
 exports.getSubpoenaFile = asyncHandler(async (req, res) => {
   const file = await companyPortalOrderService.getSubpoenaFile(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
 
   res.setHeader("Content-Type", "application/pdf");
@@ -233,7 +248,8 @@ exports.getSubpoenaFile = asyncHandler(async (req, res) => {
 exports.downloadReleasedDocuments = asyncHandler(async (req, res) => {
   const payload = await companyPortalOrderService.getReleasedDocuments(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
 
   const companyPortalActivityLogService = require("../services/companyPortalActivityLogService");
@@ -298,7 +314,8 @@ exports.downloadReleasedDocuments = asyncHandler(async (req, res) => {
 exports.downloadPaymentReceipt = asyncHandler(async (req, res) => {
   const pdfBuffer = await companyPortalOrderService.generatePaymentReceiptPdf(
     Number(req.params.orderId),
-    req.companyUser.id
+    req.companyUser.id,
+    { employeeId: req.companyUser.employeeId || null }
   );
 
   const orderId = Number(req.params.orderId);

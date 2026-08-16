@@ -19,6 +19,7 @@ const OfficeManager = require("../models/OfficeManager");
 const FacilityDoctor = require("../models/FacilityDoctor");
 const { getPool } = require("../config/database");
 const { sanitizeSearchText, sanitizeText } = require("../utils/sanitize");
+const { sanitizeZip, sanitizeZipOrNull } = require("../utils/zipUtils");
 
 function formatDoctorName(doctor) {
   return [doctor.first_name, doctor.middle_name, doctor.last_name]
@@ -104,7 +105,7 @@ function mapFacilityRow(row) {
     facilityName: row.facility_name,
     address: row.address || "",
     city: row.city || "",
-    zip: row.zip_code || "",
+    zip: sanitizeZip(row.zip_code || ""),
     state: row.state || "",
     email: sanitizeFacilityEmail(row.email),
     isAutoCreated: Boolean(Number(row.is_auto_created)),
@@ -116,7 +117,7 @@ function formatFacilityAddress(row = {}) {
   const street = `${row.address || ""}`.trim();
   const city = `${row.city || ""}`.trim();
   const state = `${row.state || ""}`.trim();
-  const zip = `${row.zip_code || row.zip || ""}`.trim();
+  const zip = sanitizeZip(row.zip_code || row.zip || "");
   const cityStateZip = [city, [state, zip].filter(Boolean).join(" ")]
     .filter(Boolean)
     .join(", ");
@@ -132,7 +133,7 @@ function mapPublicFacilitySearchRow(row) {
     streetAddress: row.address || "",
     city: row.city || "",
     state: row.state || "",
-    zip: row.zip_code || "",
+    zip: sanitizeZip(row.zip_code || ""),
   };
 }
 
@@ -151,7 +152,7 @@ function mapFacilityListRow(row) {
     id: row.id,
     facility: row.facility_name,
     city: row.city || "",
-    zip: row.zip_code || "",
+    zip: sanitizeZip(row.zip_code || ""),
     isAutoCreated: Boolean(Number(row.is_auto_created)),
     isProfileIncomplete: isFacilityProfileIncomplete(row),
   };
@@ -165,8 +166,8 @@ function mapFacilityDetail(row, managers = [], doctors = []) {
     middleName: row.contact_middle_name || "",
     lastName: row.contact_last_name || "",
     address: row.address || "",
-    zip: row.zip_code || "",
-    zipCode: row.zip_code || "",
+    zip: sanitizeZip(row.zip_code || ""),
+    zipCode: sanitizeZip(row.zip_code || ""),
     city: row.city || "",
     state: row.state || "",
     phone: row.phone || "",
@@ -225,7 +226,7 @@ async function findOrCreateFacility(data, connection = null) {
         address: data.address || "",
         city: data.city || "",
         state: data.state || "",
-        zipCode: data.zipCode || data.zip || "",
+        zipCode: sanitizeZip(data.zipCode || data.zip || ""),
       },
       connection
     );
@@ -243,7 +244,7 @@ async function findOrCreateFacility(data, connection = null) {
         address: data.address || "",
         city: data.city || "",
         state: data.state || "",
-        zipCode: data.zipCode || data.zip || "",
+        zipCode: sanitizeZip(data.zipCode || data.zip || ""),
         isAutoCreated: true,
       },
       { userName, passwordHash }
@@ -295,12 +296,13 @@ async function resolveFacilityFromHints(
       "",
     city: hints.facilityCity || parsed.city || hints.city || "",
     state: hints.facilityState || parsed.state || hints.state || "",
-    zipCode:
+    zipCode: sanitizeZip(
       hints.facilityZip ||
-      parsed.zip ||
-      hints.zip ||
-      hints.zipCode ||
-      "",
+        parsed.zip ||
+        hints.zip ||
+        hints.zipCode ||
+        ""
+    ),
   };
 
   if (!allowCreate) {
@@ -337,9 +339,7 @@ function buildFacilityDbPayload(data, credentials = null) {
     contactMiddleName: sanitizeText(data.middleName, { maxLength: 100, allowEmpty: true }) || null,
     contactLastName: sanitizeText(data.lastName, { maxLength: 100, allowEmpty: true }) || null,
     address: sanitizeText(data.address, { maxLength: 255, allowEmpty: true }) || null,
-    zipCode:
-      sanitizeText(data.zipCode || data.zip, { maxLength: 20, allowEmpty: true }) ||
-      null,
+    zipCode: sanitizeZipOrNull(data.zipCode || data.zip),
     city: sanitizeText(data.city, { maxLength: 100, allowEmpty: true }) || null,
     state: sanitizeText(data.state, { maxLength: 2, allowEmpty: true }) || null,
     phone: sanitizeText(data.phone, { maxLength: 20, allowEmpty: true }) || null,
@@ -803,7 +803,7 @@ async function resolveFacilityDoctor(
     doctorName,
     doctorId,
     useDefaultWhenMissing = true,
-    allowCreate = false,
+    allowCreate = true,
   } = {}
 ) {
   const id = Number(facilityId);
@@ -835,6 +835,7 @@ async function resolveFacilityDoctor(
         created: false,
         usedDefault: false,
         missingDefault: false,
+        doctorMissing: false,
       };
     }
   }
@@ -851,6 +852,18 @@ async function resolveFacilityDoctor(
         created: false,
         usedDefault: false,
         missingDefault: false,
+        doctorMissing: false,
+      };
+    }
+
+    if (!allowCreate) {
+      return {
+        doctor: null,
+        doctorName: trimmedName,
+        created: false,
+        usedDefault: false,
+        missingDefault: false,
+        doctorMissing: true,
       };
     }
 
@@ -901,6 +914,7 @@ async function resolveFacilityDoctor(
         created: true,
         usedDefault: false,
         missingDefault: false,
+        doctorMissing: false,
       };
     } catch (error) {
       await connection.rollback();
@@ -917,6 +931,7 @@ async function resolveFacilityDoctor(
       created: false,
       usedDefault: false,
       missingDefault: false,
+      doctorMissing: false,
     };
   }
 
@@ -929,6 +944,7 @@ async function resolveFacilityDoctor(
       created: false,
       usedDefault: false,
       missingDefault: true,
+      doctorMissing: false,
     };
   }
 
@@ -938,6 +954,7 @@ async function resolveFacilityDoctor(
     created: false,
     usedDefault: true,
     missingDefault: false,
+    doctorMissing: false,
   };
 }
 

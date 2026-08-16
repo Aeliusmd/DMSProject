@@ -98,6 +98,18 @@ class CompanyPortalNewFacility {
     );
   }
 
+  static async markPending(id, connection = null) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE company_portal_new_facility
+       SET status = 'pending',
+           internal_facility_id = NULL,
+           updated_at = NOW()
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
   static async markInvoiceBilled(id, connection = null) {
     const db = connection || getPool();
     await db.execute(

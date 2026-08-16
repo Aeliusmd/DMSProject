@@ -7,7 +7,7 @@ import {
   startAuthAutoRefresh,
   stopAuthAutoRefresh,
 } from "@/lib/auth/authApi";
-import { clearAuth, getAccessToken } from "@/lib/auth/authStorage";
+import { clearAuth } from "@/lib/auth/authStorage";
 import RoleRouteGuard from "@/components/auth/RoleRouteGuard";
 
 export default function DashboardLayout({ children }) {
@@ -18,25 +18,26 @@ export default function DashboardLayout({ children }) {
     let isMounted = true;
 
     async function verifySession() {
-      const accessToken = getAccessToken();
-
-      if (!accessToken) {
-        router.replace("/login");
-        return;
-      }
-
       try {
         await getCurrentUser();
 
         if (isMounted) {
           setIsAuthorized(true);
-          // Keep active users signed in by silently refreshing the access
-          // token before it expires (falls back to lazy refresh when idle).
           startAuthAutoRefresh();
         }
       } catch {
-        clearAuth();
-        router.replace("/login");
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          await getCurrentUser();
+
+          if (isMounted) {
+            setIsAuthorized(true);
+            startAuthAutoRefresh();
+          }
+        } catch {
+          clearAuth();
+          router.replace("/login");
+        }
       }
     }
 

@@ -89,11 +89,9 @@ export default function LoginPage() {
     setMaskedEmail("");
   };
 
-  const handleTwoFactorSuccess = () => {
+  const handleTwoFactorSuccess = async () => {
     clearAllDraftOrderSessions();
-    setIsTwoFactorOpen(false);
-    setSessionToken("");
-    router.push("/dashboard");
+    await router.replace("/dashboard");
   };
 
   return (

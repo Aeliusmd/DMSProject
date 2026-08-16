@@ -72,6 +72,7 @@ export async function resolveFacilityDoctor(facilityId, payload = {}) {
     created: Boolean(data?.data?.created),
     usedDefault: Boolean(data?.data?.usedDefault),
     missingDefault: Boolean(data?.data?.missingDefault),
+    doctorMissing: Boolean(data?.data?.doctorMissing),
   };
 }
 

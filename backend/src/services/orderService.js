@@ -39,6 +39,7 @@ const {
   parseOptionalCursor,
 } = require("../lib/reportQueryParser");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
+const { sanitizeZip, sanitizeZipOrNull } = require("../utils/zipUtils");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
@@ -415,7 +416,7 @@ function buildOrderDbPayload(data) {
     ...buildInjuryDatePayload(data),
     serveCompanyName: trimOrNull(data.serveCompanyName, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
     serveAddress: trimOrNull(data.address, { maxLength: FIELD_LIMITS.VARCHAR_255 }),
-    serveZip: trimOrNull(data.zip, { maxLength: 20 }),
+    serveZip: sanitizeZipOrNull(data.zip),
     serveCity: trimOrNull(data.city, { maxLength: FIELD_LIMITS.VARCHAR_100 }),
     serveState: trimOrNull(data.state, { maxLength: 2 }),
     servePhone: trimOrNull(data.phone, { maxLength: 20 }),
@@ -930,7 +931,21 @@ function mapOrderListRow(
     portalStatusLabel: extras.portalStatusLabel || null,
   };
 
-  return appendOrderCompletenessFields(mapped, row, orderRecords);
+  if (extras.personalRequest) {
+    const personalRequest = extras.personalRequest;
+    mapped.driverLicenseNumber = personalRequest.driver_license_number || "";
+    mapped.hasDriverLicenseDocument = Boolean(
+      personalRequest.driver_license_storage_path
+    );
+    mapped.hasPersonalDocument = mapped.hasDriverLicenseDocument;
+  }
+
+  return appendOrderCompletenessFields(
+    mapped,
+    row,
+    orderRecords,
+    extras.personalRequest || null
+  );
 }
 
 function mapDocument(doc) {
@@ -1080,7 +1095,8 @@ function mapOrderDetail(
   notes = [],
   invoiceRow = null,
   xrayRow = null,
-  orderRecords = []
+  orderRecords = [],
+  personalRequest = null
 ) {
   const paymentSummary = invoiceService.mapOrderPaymentsSummary(payments);
   const paymentForm = enrichPaymentDueFields(
@@ -1096,6 +1112,7 @@ function mapOrderDetail(
 
   const mapped = {
     id: row.id,
+    dbId: row.id,
     orderNumber: row.order_number || "",
     status: writeOffState.status,
     statusBeforeInactive: row.status_before_inactive || "",
@@ -1150,7 +1167,7 @@ function mapOrderDetail(
 
     serveCompanyName: row.serve_company_name || "",
     address: row.serve_address || "",
-    zip: row.serve_zip || "",
+    zip: sanitizeZip(row.serve_zip || ""),
     city: row.serve_city || "",
     state: row.serve_state || "",
     phone: row.serve_phone || "",
@@ -1195,6 +1212,12 @@ function mapOrderDetail(
     specificDoctor: row.specific_doctor || "",
     specificDoctorIsDefault: Boolean(Number(row.specific_doctor_is_default)),
     fullAddress: row.full_address || "",
+    driverLicenseNumber: personalRequest?.driver_license_number || "",
+    hasDriverLicenseDocument: Boolean(personalRequest?.driver_license_storage_path),
+    hasPersonalDocument: Boolean(
+      personalRequest?.driver_license_storage_path ||
+        (Array.isArray(documents) && documents.length > 0)
+    ),
 
     certificateNoRecords: Boolean(row.certificate_no_records),
     cnrReason: row.cnr_reason || "",
@@ -1208,7 +1231,12 @@ function mapOrderDetail(
     invoiceFees: invoiceService.mapOrderInvoiceFees(invoiceRow, xrayRow, payments),
   };
 
-  return appendOrderCompletenessFields(mapped, row, orderRecords);
+  return appendOrderCompletenessFields(
+    mapped,
+    row,
+    orderRecords,
+    personalRequest
+  );
 }
 
 function parseExcludeCompleted(value) {
@@ -1226,6 +1254,7 @@ async function getAllOrders(query = {}) {
   if (creationSource === "company_portal") {
     filters.creationSource = "company_portal";
     // Best-effort: ensure paid portal orders have internal rows for tooling.
+    // Only runs when the company-portal list is explicitly requested.
     try {
       const companyPortalInternalSyncService = require("./companyPortalInternalSyncService");
       await companyPortalInternalSyncService.backfillUnlinkedPaidPortalOrders({
@@ -1241,13 +1270,11 @@ async function getAllOrders(query = {}) {
         error.message || error
       );
     }
-  } else {
-    // Keep internal Orders page free of external company portal work.
-    filters.excludeCreationSource = "company_portal";
-  }
-
-  if (`${query.creationSource || ""}`.trim() === "personal_portal") {
+  } else if (creationSource === "personal_portal") {
     filters.creationSource = "personal_portal";
+  } else {
+    // Default / "internal": keep Orders & Reports free of portal work.
+    filters.excludeCreationSource = "company_portal";
   }
 
   if (query.facility) {
@@ -1265,11 +1292,23 @@ async function getAllOrders(query = {}) {
     "released",
     "pending_payment",
   ]);
+  const COMPANY_PORTAL_STATUS_MAP = {
+    in_process: "In Process",
+    invoice: "Invoice",
+    paid: "Paid",
+    released: "Released",
+    no_facility: "No facility",
+  };
   const statusRaw = `${query.portalStatus || query.status || ""}`.trim();
+  const statusKey = statusRaw.toLowerCase();
 
   if (filters.creationSource === "personal_portal") {
-    if (PERSONAL_PORTAL_STATUSES.has(statusRaw)) {
-      filters.portalStatus = statusRaw;
+    if (PERSONAL_PORTAL_STATUSES.has(statusKey)) {
+      filters.portalStatus = statusKey;
+    }
+  } else if (filters.creationSource === "company_portal") {
+    if (COMPANY_PORTAL_STATUS_MAP[statusKey]) {
+      filters.companyPortalStatus = COMPANY_PORTAL_STATUS_MAP[statusKey];
     }
   } else if (query.status === "ready") {
     filters.readyFilter = true;
@@ -1278,7 +1317,11 @@ async function getAllOrders(query = {}) {
   }
 
   if (parseExcludeCompleted(query.excludeCompleted)) {
-    filters.excludeCompleted = true;
+    // Company portal "Released" is mirrored as internal "Completed". When staff
+    // explicitly filters Released, keep those rows visible on Reports.
+    if (filters.companyPortalStatus !== "Released") {
+      filters.excludeCompleted = true;
+    }
   }
 
   const rushRaw = `${query.rushLevel || ""}`.trim();
@@ -1429,6 +1472,7 @@ async function getAllOrders(query = {}) {
         hasActiveReminder: Boolean(activeReminderByOrderId[row.id]),
         portalStatus,
         portalStatusLabel,
+        personalRequest: portal,
       }
     );
   });
@@ -1545,7 +1589,7 @@ async function getAllOrders(query = {}) {
           facilityAddress: row.facility_address || "",
           facilityCity: row.facility_city || "",
           facilityState: row.facility_state || "",
-          facilityZip: row.facility_zip || "",
+          facilityZip: sanitizeZip(row.facility_zip || ""),
           treatingDoctor: row.treating_doctor || "",
           searchFeeAmount,
           internalFacilityId: row.internal_facility_id || null,
@@ -1595,6 +1639,15 @@ async function getOrderStats() {
 async function resolvePersonalPortalPrepaymentReceipt(orderId, payments = []) {
   const prepayment = payments.find((row) => row.payment_type === "prepayment");
   const currentCheck = `${prepayment?.check_number || ""}`.trim();
+  const paidAmount = Number(prepayment?.amount);
+  const isPaid =
+    Number(prepayment?.is_paid) === 1 ||
+    (Number.isFinite(paidAmount) && paidAmount > 0);
+
+  // Unpaid personal orders should leave Receipt Number empty.
+  if (!prepayment || !isPaid) {
+    return "";
+  }
 
   if (currentCheck && currentCheck !== "STRIPE-PORTAL") {
     return currentCheck;
@@ -1656,6 +1709,11 @@ async function getOrderById(id) {
   const xrayRow = await InvoiceXray.findByOrderId(order.id);
   const orderRecords = await OrderRecord.findByOrderId(order.id);
 
+  let personalRequest = null;
+  if (order.creation_source === "personal_portal") {
+    personalRequest = await PersonalRequestOrder.findByOrderId(order.id);
+  }
+
   const mapped = mapOrderDetail(
     order,
     payments,
@@ -1664,7 +1722,8 @@ async function getOrderById(id) {
     notes,
     invoiceRow,
     xrayRow,
-    orderRecords
+    orderRecords,
+    personalRequest
   );
 
   if (mapped.creationSource === "personal_portal") {
@@ -1675,23 +1734,22 @@ async function getOrderById(id) {
 
     try {
       const personalPortalService = require("./personalPortalService");
-      const pending =
-        await personalPortalService.getPendingPersonalFacilitySearchFee(
-          order.id
-        );
-      if (pending?.amount > 0) {
-        mapped.pendingFacilitySearchFee = pending.amount;
-        mapped.newFacilityRequest = {
-          id: pending.personalRequestId,
-          status: "linked",
-          searchFeeAmount: pending.amount,
-          feePending: true,
-          feeBilled: false,
-          source: "personal_portal",
-        };
-      }
+      await personalPortalService.enrichOrdersWithPersonalFacilitySearchFees([
+        mapped,
+      ]);
     } catch (_feeError) {
       // Non-blocking
+    }
+
+    if (personalRequest) {
+      const license = `${personalRequest.driver_license_number || ""}`.trim();
+      if (license) {
+        mapped.driverLicenseNumber = license;
+      }
+      if (personalRequest.driver_license_storage_path) {
+        mapped.hasDriverLicenseDocument = true;
+        mapped.hasPersonalDocument = true;
+      }
     }
   }
 
@@ -2177,7 +2235,8 @@ async function resolveProviderId(connection, data) {
   return provider.id;
 }
 
-async function resolveFacilityId(connection, data) {
+async function resolveFacilityId(connection, data, options = {}) {
+  const { allowCreate = true } = options;
   const facilityId = Number(data.facility);
   const facilityName = trimOrNull(data.facilityName);
 
@@ -2199,9 +2258,40 @@ async function resolveFacilityId(connection, data) {
     return Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null;
   }
 
-  // Order create/update requests must select a real facility. Only the
-  // batch-extraction path is allowed to auto-create an incomplete profile.
+  if (!allowCreate) {
+    const existing = await Facility.findBestMatch(
+      {
+        facilityName,
+        address: data.facilityAddress || "",
+        city: data.facilityCity || "",
+        state: data.facilityState || "",
+        zipCode: sanitizeZip(data.facilityZip || ""),
+      },
+      connection
+    );
+    if (existing?.id) return existing.id;
+    throw new ApiError(
+      400,
+      "Cannot create a new facility for this ended personal order. Restore it to In Process first, or select an existing facility."
+    );
+  }
+
+  // Order create/update must pick an existing facility. Batch scan creates
+  // facilities on its own path; do not auto-create incomplete profiles here.
   return null;
+}
+
+async function shouldBlockFacilityCreateForOrder(orderRow) {
+  // Personal portal orders never auto-create facilities from typed names.
+  // Staff must select an existing facility or use Add Facility.
+  return orderRow?.creation_source === "personal_portal";
+}
+
+function isPersonalPortalPlaceholderFacility(facility) {
+  return (
+    `${facility?.facility_name || ""}`.trim() ===
+    "Personal Portal - Pending Facility"
+  );
 }
 
 function assertFacilityProfileComplete(facility) {
@@ -2233,14 +2323,32 @@ async function assertDoctorBelongsToFacility(facilityId, doctorName) {
   return resolved;
 }
 
-function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
+function appendOrderCompletenessFields(
+  mappedOrder,
+  row,
+  orderRecords = [],
+  personalRequest = null
+) {
+  const creationSource = row.creation_source || "manual";
+  const isAutoCreated = creationSource === "auto";
   const requiredFieldData = mapOrderRowToRequiredFieldData(row, orderRecords);
+  requiredFieldData.creationSource = creationSource;
+
+  if (creationSource === "personal_portal" && personalRequest) {
+    const license = `${personalRequest.driver_license_number || ""}`.trim();
+    if (license) {
+      requiredFieldData.driverLicenseNumber = license;
+    }
+    if (personalRequest.driver_license_storage_path) {
+      requiredFieldData.hasDriverLicenseDocument = true;
+      requiredFieldData.hasPersonalDocument = true;
+    }
+  }
+
   const missingRequiredFields = [
     ...computeMissingRequiredFields(requiredFieldData, orderRecords),
     ...(mappedOrder.facilityProfileIncomplete ? ["Facility profile"] : []),
   ];
-  const creationSource = row.creation_source || "manual";
-  const isAutoCreated = creationSource === "auto";
 
   return {
     ...mappedOrder,
@@ -2258,7 +2366,8 @@ function appendOrderCompletenessFields(mappedOrder, row, orderRecords = []) {
 async function createOrder(data, actorId, files, options = {}) {
   const { allowIncomplete = false, creationSource = "manual" } = options;
   const canAllowIncomplete =
-    allowIncomplete === true && creationSource === "auto";
+    allowIncomplete === true &&
+    (creationSource === "auto" || creationSource === "personal_portal");
   const orderInput = {
     ...data,
     creationSource,
@@ -2274,7 +2383,9 @@ async function createOrder(data, actorId, files, options = {}) {
   try {
     await connection.beginTransaction();
 
-    const resolvedFacilityId = await resolveFacilityId(connection, orderInput);
+    const resolvedFacilityId = await resolveFacilityId(connection, orderInput, {
+      allowCreate: creationSource !== "personal_portal",
+    });
 
     if (!resolvedFacilityId) {
       throw new ApiError(400, "Selected facility does not exist");
@@ -2552,13 +2663,17 @@ async function updateOrderFacility(id, data, actorId) {
   const existing = await Order.findById(id);
   assertOrderEditable(existing);
 
+  const blockCreate = await shouldBlockFacilityCreateForOrder(existing);
+
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const resolvedFacilityId = await resolveFacilityId(connection, data);
+    const resolvedFacilityId = await resolveFacilityId(connection, data, {
+      allowCreate: !blockCreate,
+    });
 
     if (!resolvedFacilityId) {
       throw new ApiError(400, "Selected facility does not exist");
@@ -2570,7 +2685,14 @@ async function updateOrderFacility(id, data, actorId) {
       throw new ApiError(400, "Selected facility does not exist");
     }
 
-    assertFacilityProfileComplete(facility);
+    if (
+      !(
+        existing.creation_source === "personal_portal" &&
+        isPersonalPortalPlaceholderFacility(facility)
+      )
+    ) {
+      assertFacilityProfileComplete(facility);
+    }
 
     await connection.execute(
       `UPDATE orders
@@ -2600,13 +2722,22 @@ async function updateOrder(id, data, actorId, files) {
   const existing = await Order.findById(id);
   assertOrderEditable(existing);
 
+  if (existing.creation_source === "personal_portal") {
+    // Personal required fields are validated in orderValidator (portal-specific).
+    // Facility/doctor link helpers remain available in the UI but do not block update.
+  }
+
+  const blockCreate = await shouldBlockFacilityCreateForOrder(existing);
+
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    const resolvedFacilityId = await resolveFacilityId(connection, data);
+    const resolvedFacilityId = await resolveFacilityId(connection, data, {
+      allowCreate: !blockCreate,
+    });
 
     if (!resolvedFacilityId) {
       throw new ApiError(400, "Selected facility does not exist");
@@ -2620,13 +2751,20 @@ async function updateOrder(id, data, actorId, files) {
       throw new ApiError(400, "Selected facility does not exist");
     }
 
-    assertFacilityProfileComplete(facility);
-    const doctor = await assertDoctorBelongsToFacility(
-      resolvedFacilityId,
-      data.specificDoctor
-    );
-    data.specificDoctor = doctor.doctorName;
-    data.specificDoctorIsDefault = Boolean(doctor.usedDefault);
+    if (
+      !(
+        existing.creation_source === "personal_portal" &&
+        isPersonalPortalPlaceholderFacility(facility)
+      )
+    ) {
+      assertFacilityProfileComplete(facility);
+      const doctor = await assertDoctorBelongsToFacility(
+        resolvedFacilityId,
+        data.specificDoctor
+      );
+      data.specificDoctor = doctor.doctorName;
+      data.specificDoctorIsDefault = Boolean(doctor.usedDefault);
+    }
 
     const rawOrderNumber = trimOrNull(data.orderNumber);
     if (!rawOrderNumber) {
@@ -2706,6 +2844,26 @@ async function updateOrder(id, data, actorId, files) {
     });
 
     await connection.commit();
+
+    if (existing.creation_source === "personal_portal") {
+      try {
+        const personalPortalService = require("./personalPortalService");
+        await personalPortalService.syncPersonalOrderDetailsFromStaffUpdate(
+          existing.id,
+          {
+            ...data,
+            facilityName: data.facilityName || facility?.facility_name,
+            facilityAddress:
+              data.facilityAddress || data.fullAddress || facility?.address,
+          }
+        );
+      } catch (syncError) {
+        console.warn(
+          "[personal-portal] Failed to sync staff personal fields:",
+          syncError.message || syncError
+        );
+      }
+    }
 
     await maybeSendCnrMemoEmail(existing.id, data, existing, actorId);
 

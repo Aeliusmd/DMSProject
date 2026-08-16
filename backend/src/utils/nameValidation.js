@@ -1,7 +1,7 @@
 const HTML_MARKUP_PATTERN = /[<>]/;
 
 // Person names: letters, spaces, hyphen, apostrophe, period (O'Brien, Mary-Jane, Jr.)
-const PERSON_NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}'.\- ]*$/u;
+const PERSON_NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M}',.\- ]*$/u;
 
 // Organizations / facilities / providers: letters, digits, common business punctuation
 const ORGANIZATION_NAME_PATTERN =

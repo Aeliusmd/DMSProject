@@ -563,6 +563,15 @@ async function getOnlinePayments(query = {}) {
     }
   }
 
+  const excludePortal = String(query.excludePortalOrders ?? "")
+    .trim()
+    .toLowerCase();
+  if (excludePortal === "1" || excludePortal === "true" || excludePortal === "yes") {
+    conditions.push(
+      "(o.creation_source IS NULL OR o.creation_source NOT IN ('company_portal', 'personal_portal'))"
+    );
+  }
+
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
   const [rows] = await pool.execute(
@@ -1207,7 +1216,7 @@ async function generatePaymentReceiptPdf(sessionId, token) {
 
   const pool = getPool();
   const [rows] = await pool.execute(
-    `SELECT s.*, o.order_number, o.case_number,
+    `SELECT s.*, o.order_number, o.case_number, o.creation_source,
             TRIM(CONCAT_WS(' ', o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name)) AS applicant_name,
             COALESCE(p.company_name, o.serve_company_name, f.facility_name, '—') AS company_name
      FROM stripe_online_payments s
@@ -1226,7 +1235,12 @@ async function generatePaymentReceiptPdf(sessionId, token) {
   }
 
   const { generatePaymentReceiptPdf: buildReceiptPdf } = require("../utils/paymentReceiptPdf");
-  return buildReceiptPdf(payment);
+  return buildReceiptPdf({
+    ...payment,
+    hideCompany:
+      payment.creation_source === "personal_portal" ||
+      payment.invoice_type === "personal_portal",
+  });
 }
 
 async function recordPersonalPortalStripePayment(session) {

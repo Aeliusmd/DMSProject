@@ -2,6 +2,16 @@ import {
   hasFormRecordTypesSelected,
   formatSelectedRecordTypesLabel,
 } from "@/lib/orders/recordTypeUtils";
+import {
+  hasHtmlMarkup,
+  htmlMarkupError,
+  sanitizeCompanyOrderForm,
+} from "@/lib/company-portal/companyPortalValidation";
+import {
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+  sanitizeZip,
+} from "@/lib/validations/zipUtils";
 
 export const COMPANY_ORDER_STEPS = [
   { id: 1, key: "upload", label: "Upload" },
@@ -60,7 +70,7 @@ export function mapOrderToForm(order = {}) {
     facilityAddress: order.facilityAddress || "",
     facilityCity: order.facilityCity || "",
     facilityState: order.facilityState || "",
-    facilityZip: order.facilityZip || "",
+    facilityZip: sanitizeZip(order.facilityZip || ""),
     treatingDoctor: order.treatingDoctor || "",
     applicantName: order.applicantName || "",
     caseName: order.caseName || "",
@@ -74,7 +84,7 @@ export function mapOrderToForm(order = {}) {
     companyAddress: order.companyAddress || "",
     companyCity: order.companyCity || "",
     companyState: order.companyState || "",
-    companyZip: order.companyZip || "",
+    companyZip: sanitizeZip(order.companyZip || ""),
     doctorAddress: order.doctorAddress || "",
     medicalRecords: Boolean(order.medicalRecords),
     billingRecords: Boolean(order.billingRecords),
@@ -129,9 +139,38 @@ export function calculateCompanyPortalOrderTotal() {
 
 export function validateCompanyOrderForm(form) {
   const errors = {};
-  const mode = `${form.facilitySelectionMode || ""}`.trim().toLowerCase();
-  const requestNew = Boolean(form.requestNewFacilitySearch);
-  const facilityId = Number(form.internalFacilityId);
+  const sanitized = sanitizeCompanyOrderForm(form);
+  const mode = `${sanitized.facilitySelectionMode || ""}`.trim().toLowerCase();
+  const requestNew = Boolean(sanitized.requestNewFacilitySearch);
+  const facilityId = Number(sanitized.internalFacilityId);
+
+  const htmlFields = [
+    "facilityName",
+    "facilityAddress",
+    "facilityCity",
+    "facilityState",
+    "facilityZip",
+    "treatingDoctor",
+    "applicantName",
+    "caseName",
+    "caseNumber",
+    "recNumber",
+    "companyName",
+    "companyAddress",
+    "companyCity",
+    "companyState",
+    "companyZip",
+    "doctorAddress",
+    "requestedRecord",
+    "dateOfInjuryText",
+    "contactEmail",
+  ];
+
+  htmlFields.forEach((field) => {
+    if (form[field] && hasHtmlMarkup(form[field])) {
+      errors[field] = htmlMarkupError(field);
+    }
+  });
 
   if (requestNew || mode === "new") {
     if (requestNew && mode === "existing" && facilityId > 0) {
@@ -139,26 +178,25 @@ export function validateCompanyOrderForm(form) {
         "Choose either an existing facility or request a new facility search";
     }
 
-    if (!`${form.facilityAddress || ""}`.trim()) {
-      errors.facilityAddress = "Street address is required";
+    if (!`${sanitized.facilityAddress || ""}`.trim()) {
+      errors.facilityAddress = errors.facilityAddress || "Street address is required";
     }
 
-    if (!`${form.facilityCity || ""}`.trim()) {
-      errors.facilityCity = "City is required";
+    if (!`${sanitized.facilityCity || ""}`.trim()) {
+      errors.facilityCity = errors.facilityCity || "City is required";
     }
 
-    const state = `${form.facilityState || ""}`.trim().toUpperCase();
+    const state = `${sanitized.facilityState || ""}`.trim().toUpperCase();
     if (!state) {
       errors.facilityState = "State is required";
     } else if (!/^[A-Z]{2}$/.test(state)) {
       errors.facilityState = "State must be 2 letters";
     }
 
-    const zipDigits = `${form.facilityZip || ""}`.replace(/\D/g, "");
-    if (!zipDigits) {
-      errors.facilityZip = "ZIP code is required";
-    } else if (zipDigits.length !== 5 && zipDigits.length !== 9) {
-      errors.facilityZip = "ZIP must be 5 digits";
+    if (!isValidZip(sanitized.facilityZip, { required: true })) {
+      errors.facilityZip = sanitized.facilityZip
+        ? ZIP_VALIDATION_MESSAGE
+        : "ZIP code is required";
     }
   } else if (mode === "existing" || facilityId > 0) {
     if (requestNew) {
@@ -172,29 +210,24 @@ export function validateCompanyOrderForm(form) {
       "Select an existing facility or request a new facility search";
   }
 
-  if (!hasFormRecordTypesSelected(form)) {
+  if (!hasFormRecordTypesSelected(sanitized)) {
     errors.type = "Select at least one record type";
   }
 
-  if (!`${form.caseNumber || ""}`.trim()) {
-    errors.caseNumber = "Order number is required";
+  if (!`${sanitized.caseNumber || ""}`.trim()) {
+    errors.caseNumber = errors.caseNumber || "Order number is required";
   }
 
-  const companyState = `${form.companyState || ""}`.trim().toUpperCase();
+  const companyState = `${sanitized.companyState || ""}`.trim().toUpperCase();
   if (companyState && !/^[A-Z]{2}$/.test(companyState)) {
     errors.companyState = "State must be 2 letters";
   }
 
-  const companyZipDigits = `${form.companyZip || ""}`.replace(/\D/g, "");
-  if (
-    companyZipDigits &&
-    companyZipDigits.length !== 5 &&
-    companyZipDigits.length !== 9
-  ) {
-    errors.companyZip = "ZIP must be 5 digits";
+  if (sanitized.companyZip && !isValidZip(sanitized.companyZip)) {
+    errors.companyZip = ZIP_VALIDATION_MESSAGE;
   }
 
-  return errors;
+  return { errors, sanitized };
 }
 
 export function getRecordTypesSummary(form = {}) {

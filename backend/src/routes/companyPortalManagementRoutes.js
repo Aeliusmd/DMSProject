@@ -26,11 +26,21 @@ router.post(
   requireCompanyAdmin,
   companyPortalManagementController.createEmployee
 );
+router.patch(
+  "/employees/:id/status",
+  requireCompanyAdmin,
+  companyPortalManagementController.setEmployeeStatus
+);
 
 router.get(
   "/wallet",
   requireCompanyAdmin,
   companyPortalManagementController.getWalletSummary
+);
+router.get(
+  "/wallet/transactions",
+  requireCompanyAdmin,
+  companyPortalManagementController.listWalletTransactions
 );
 router.post(
   "/wallet/topup",

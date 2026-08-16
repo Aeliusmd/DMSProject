@@ -52,7 +52,7 @@ export default function CompanyOrdersPage() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-[calc(100vh-92px)] flex-col gap-4">
+      <div className="flex min-h-[calc(100vh-92px)] min-w-0 flex-col gap-4">
         <div>
           <h1 className="text-[18px] font-semibold text-[#111827] sm:text-[20px]">
             Company Orders
@@ -72,7 +72,7 @@ export default function CompanyOrdersPage() {
           <StatCard label="Released" value={stats.released} />
         </section>
 
-        <OrderFilterBar filters={filters} onFiltersChange={setFilters} />
+        <OrderFilterBar filters={filters} onFiltersChange={setFilters} statusOptionsVariant="company" />
 
         <OrdersTable
           filters={filters}
@@ -80,6 +80,7 @@ export default function CompanyOrdersPage() {
           useServerPagination
           creationSource="company_portal"
           companyPortalMode
+          listReturnTo="company-orders"
         />
       </div>
     </DashboardShell>

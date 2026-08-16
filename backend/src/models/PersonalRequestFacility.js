@@ -71,6 +71,75 @@ class PersonalRequestFacility {
     );
     return rows[0] || null;
   }
+
+  static async markLinked(id, { facilityId, facilityName, facilityAddress }) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE personal_request_facilities
+       SET facility_id = :facilityId,
+           facility_name = COALESCE(:facilityName, facility_name),
+           facility_address = COALESCE(:facilityAddress, facility_address),
+           is_manual_lookup = 0
+       WHERE id = :id`,
+      {
+        id,
+        facilityId,
+        facilityName: facilityName || null,
+        facilityAddress: facilityAddress || null,
+      }
+    );
+  }
+
+  static async markCancelledManualLookup(id) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE personal_request_facilities
+       SET is_manual_lookup = 0
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async markPendingManualLookup(id) {
+    const pool = getPool();
+    await pool.execute(
+      `UPDATE personal_request_facilities
+       SET is_manual_lookup = 1
+       WHERE id = :id`,
+      { id }
+    );
+  }
+
+  static async updateStaffDetails(
+    id,
+    {
+      facilityName,
+      facilityAddress,
+      recordsDateBegin,
+      recordsDateEnd,
+      treatingDoctor,
+    } = {},
+    connection = null
+  ) {
+    const db = connection || getPool();
+    await db.execute(
+      `UPDATE personal_request_facilities
+       SET facility_name = COALESCE(:facilityName, facility_name),
+           facility_address = COALESCE(:facilityAddress, facility_address),
+           records_date_begin = COALESCE(:recordsDateBegin, records_date_begin),
+           records_date_end = COALESCE(:recordsDateEnd, records_date_end),
+           treating_doctor = COALESCE(:treatingDoctor, treating_doctor)
+       WHERE id = :id`,
+      {
+        id,
+        facilityName: facilityName || null,
+        facilityAddress: facilityAddress || null,
+        recordsDateBegin: recordsDateBegin || null,
+        recordsDateEnd: recordsDateEnd || null,
+        treatingDoctor: treatingDoctor || null,
+      }
+    );
+  }
 }
 
 module.exports = PersonalRequestFacility;

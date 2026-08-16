@@ -14,6 +14,7 @@ const INDEX_STATEMENTS = [
   "CREATE INDEX idx_orders_status_created_id ON orders (status, created_at, id)",
   "CREATE INDEX idx_orders_facility_created_id ON orders (facility_id, created_at, id)",
   "CREATE INDEX idx_orders_serve_company ON orders (serve_company_name)",
+  "CREATE INDEX idx_orders_creation_source_created_id ON orders (creation_source, created_at, id)",
 ];
 
 async function main() {

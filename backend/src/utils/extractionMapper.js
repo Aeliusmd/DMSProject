@@ -1,4 +1,16 @@
 const { toSqlDateOnly, toInputDate } = require("./dateUtils");
+const { sanitizeText } = require("./sanitize");
+const { EXTRACT_FIELD_LIMITS } = require("./fieldLimits");
+
+function sanitizeExtractText(value, columnMax) {
+  if (value == null) return null;
+  const cleaned = sanitizeText(value, {
+    maxLength: columnMax,
+    allowEmpty: true,
+    truncate: Boolean(columnMax),
+  });
+  return cleaned || null;
+}
 
 const DATE_OF_INJURY_FIELD_ALIASES = [
   "DateOfInjury",
@@ -161,28 +173,67 @@ function mapSchemaToExtractRow(schema) {
   const dateOfInjuryText = getDateOfInjuryText(schema);
 
   return {
-    applicant_name: getFieldText(schema, "ApplicantName"),
-    case_name: getFieldText(schema, "CaseName"),
-    order_number: getFieldText(schema, "OrderNumber"),
-    rec_number: getFieldText(schema, "RecNumber"),
-    ssn: getFieldText(schema, "SSN"),
+    applicant_name: sanitizeExtractText(
+      getFieldText(schema, "ApplicantName"),
+      EXTRACT_FIELD_LIMITS.applicant_name
+    ),
+    case_name: sanitizeExtractText(
+      getFieldText(schema, "CaseName"),
+      EXTRACT_FIELD_LIMITS.case_name
+    ),
+    order_number: sanitizeExtractText(
+      getFieldText(schema, "OrderNumber"),
+      EXTRACT_FIELD_LIMITS.order_number
+    ),
+    rec_number: sanitizeExtractText(
+      getFieldText(schema, "RecNumber"),
+      EXTRACT_FIELD_LIMITS.rec_number
+    ),
+    ssn: sanitizeExtractText(getFieldText(schema, "SSN"), EXTRACT_FIELD_LIMITS.ssn),
     date_of_birth: toSqlDateOnly(getFieldDateText(schema, ["DateOfBirth"])),
     date_of_injury: toSqlDateOnly(dateOfInjuryText),
-    customer: getFieldText(schema, "Customer"),
-    company_name: getFieldText(schema, "CompanyName"),
-    company_address: getFieldText(schema, "CompanyAddress"),
-    specific_doctor: getFieldText(schema, "SpecificDoctor"),
-    doctor_address: getFieldText(schema, "DoctorAddress"),
-    record_type: getFieldText(schema, "RecordType"),
-    requested_record: getFieldText(schema, "RequestedRecord"),
+    customer: sanitizeExtractText(
+      getFieldText(schema, "Customer"),
+      EXTRACT_FIELD_LIMITS.customer
+    ),
+    company_name: sanitizeExtractText(
+      getFieldText(schema, "CompanyName"),
+      EXTRACT_FIELD_LIMITS.company_name
+    ),
+    company_address: sanitizeExtractText(
+      getFieldText(schema, "CompanyAddress"),
+      EXTRACT_FIELD_LIMITS.company_address
+    ),
+    specific_doctor: sanitizeExtractText(
+      getFieldText(schema, "SpecificDoctor"),
+      EXTRACT_FIELD_LIMITS.specific_doctor
+    ),
+    doctor_address: sanitizeExtractText(
+      getFieldText(schema, "DoctorAddress"),
+      EXTRACT_FIELD_LIMITS.doctor_address
+    ),
+    record_type: sanitizeExtractText(
+      getFieldText(schema, "RecordType"),
+      EXTRACT_FIELD_LIMITS.record_type
+    ),
+    requested_record: sanitizeExtractText(
+      getFieldText(schema, "RequestedRecord"),
+      EXTRACT_FIELD_LIMITS.requested_record
+    ),
     subpoena_date: toSqlDateOnly(
       getFieldDateText(schema, ["Date", "DateRequested"])
     ),
     date_requested: toSqlDateOnly(getFieldDateText(schema, ["DateRequested"])),
     depo_due_date: toSqlDateOnly(getFieldDateText(schema, ["DePoDueDate"])),
-    amount: getFieldText(schema, "Amount"),
+    amount: sanitizeExtractText(
+      getFieldText(schema, "Amount"),
+      EXTRACT_FIELD_LIMITS.amount
+    ),
     cheque_date: toSqlDateOnly(getFieldDateText(schema, ["ChequeDate"])),
-    cheque_number: getFieldText(schema, "ChequeNumber"),
+    cheque_number: sanitizeExtractText(
+      getFieldText(schema, "ChequeNumber"),
+      EXTRACT_FIELD_LIMITS.cheque_number
+    ),
     extraction_confidence: buildConfidenceMap(schema),
     raw_extraction: schema || {},
   };

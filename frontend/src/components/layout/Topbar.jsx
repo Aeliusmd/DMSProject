@@ -5,7 +5,7 @@ import NotificationsModal from "@/components/layout/NotificationsModal";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { getNotifications } from "@/lib/notifications/notificationsApi";
 
-export default function Topbar({ onToggleSidebar }) {
+export default function Topbar({ onToggleSidebar, sidebarExpanded = false }) {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -38,6 +38,8 @@ export default function Topbar({ onToggleSidebar }) {
       <button
         type="button"
         onClick={onToggleSidebar}
+        aria-label={sidebarExpanded ? "Collapse navigation" : "Open navigation"}
+        aria-expanded={sidebarExpanded}
         className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[6px] text-[#0097B2] hover:bg-[#E6F7FA]"
       >
         <MenuIcon />

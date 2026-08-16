@@ -14,6 +14,7 @@ const {
   formatRecordTypesLabel,
 } = require("../utils/companyPortalRecordTypes");
 const { getPool } = require("../config/database");
+const { sanitizeZip } = require("../utils/zipUtils");
 
 const COMPANY_PORTAL_STAGES = [
   "In Process",
@@ -160,7 +161,7 @@ function buildInternalOrderPayload(portalOrder, options = {}) {
     facilityAddress: portalOrder.facility_address || "",
     facilityCity: portalOrder.facility_city || "",
     facilityState: portalOrder.facility_state || "",
-    facilityZip: portalOrder.facility_zip || "",
+    facilityZip: sanitizeZip(portalOrder.facility_zip || ""),
     fullAddress: [
       portalOrder.facility_address,
       portalOrder.facility_city,
@@ -181,7 +182,7 @@ function buildInternalOrderPayload(portalOrder, options = {}) {
     serveAddress: portalOrder.company_address || "",
     serveCity: portalOrder.company_city || "",
     serveState: portalOrder.company_state || "",
-    serveZip: portalOrder.company_zip || "",
+    serveZip: sanitizeZip(portalOrder.company_zip || ""),
     serveEmail: portalOrder.contact_email || "",
     servePhone: portalOrder.contact_phone || "",
     subpoenaDate: toDateOnly(portalOrder.subpoena_date),
@@ -702,7 +703,9 @@ async function linkFacilityToPortalOrder(internalOrderId, facilityId) {
       facilityAddress: facility.address || portalOrder.facility_address,
       facilityCity: facility.city ?? portalOrder.facility_city,
       facilityState: facility.state ?? portalOrder.facility_state,
-      facilityZip: facility.zip_code ?? portalOrder.facility_zip,
+      facilityZip: sanitizeZip(
+        facility.zip_code ?? portalOrder.facility_zip ?? ""
+      ),
     });
   }
 
@@ -738,6 +741,58 @@ async function markPortalOrderNoFacility(internalOrderId) {
   }
 
   return updated;
+}
+
+/**
+ * Restore a "No facility" company portal order back to "In Process" so staff
+ * can continue (e.g. add a facility). Re-opens a cancelled new-facility
+ * request when one exists and was never linked.
+ */
+async function restorePortalOrderInProcess(internalOrderId) {
+  const { portalOrder, newFacility } =
+    await getNewFacilityContextForInternalOrder(internalOrderId);
+
+  if (portalOrder.status !== "No facility") {
+    throw new ApiError(
+      400,
+      "Only orders with No facility status can be restored to In Process"
+    );
+  }
+
+  const updated = await CompanyPortalOrder.updateStatus(
+    portalOrder.id,
+    "In Process"
+  );
+
+  if (
+    newFacility &&
+    newFacility.status === "cancelled" &&
+    !newFacility.internal_facility_id
+  ) {
+    await CompanyPortalNewFacility.markPending(newFacility.id);
+  }
+
+  return updated;
+}
+
+/**
+ * Block invoice tooling when a company portal order was ended with No facility.
+ * No-ops for non-company-portal orders.
+ */
+async function assertCompanyPortalOrderAllowsInvoicing(internalOrderId) {
+  const orderId = Number(internalOrderId);
+  if (!Number.isFinite(orderId) || orderId <= 0) return;
+
+  const { portalOrder } =
+    await resolveCompanyPortalOrderForInternalOrder(orderId);
+  if (!portalOrder) return;
+
+  if (portalOrder.status === "No facility") {
+    throw new ApiError(
+      400,
+      "Invoices cannot be created for company portal orders with No facility status"
+    );
+  }
 }
 
 /**
@@ -808,6 +863,8 @@ module.exports = {
   getNewFacilityContextForInternalOrder,
   linkFacilityToPortalOrder,
   markPortalOrderNoFacility,
+  restorePortalOrderInProcess,
+  assertCompanyPortalOrderAllowsInvoicing,
   getPendingFacilitySearchFee,
   markFacilitySearchFeeBilled,
   resolvePlaceholderFacilityId,

@@ -7,6 +7,11 @@ const {
   addMaxLengthError,
 } = require("./validationHelpers");
 const { addOrganizationNameFormatError, addNoHtmlMarkupErrors } = require("../utils/nameValidation");
+const {
+  ZIP_MAX_CHARS,
+  ZIP_VALIDATION_MESSAGE,
+  isValidZip,
+} = require("../utils/zipUtils");
 
 function validateUpdateProvider(body = {}) {
   const errors = [];
@@ -33,14 +38,13 @@ function validateUpdateProvider(body = {}) {
 
   const zip = trimToString(body.zipCode ?? body.zip);
   if (zip) {
-    const zipDigits = getDigits(zip);
-    if (zipDigits.length !== 5 && zipDigits.length !== 9) {
+    if (!isValidZip(zip)) {
       errors.push({
         field: "zipCode",
-        message: "ZIP must be 5 digits or ZIP+4",
+        message: ZIP_VALIDATION_MESSAGE,
       });
     } else {
-      addMaxLengthError(errors, "zipCode", zip, 20);
+      addMaxLengthError(errors, "zipCode", zip, ZIP_MAX_CHARS);
     }
   }
 

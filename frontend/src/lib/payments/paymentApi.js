@@ -1,5 +1,6 @@
 import { PAYMENT_TYPE_LABELS } from "./paymentMockData";
 import { request, authFetch } from "@/lib/auth/authApi";
+import { STAFF_PORTAL_ORDERS_HIDDEN } from "@/lib/portalNavigationVisibility";
 
 function formatMoney(value) {
   const amount = Number(value);
@@ -211,6 +212,7 @@ export async function getPayments({
   if (dateTo) params.set("dateTo", dateTo);
   if (orderSearch?.trim()) params.set("orderSearch", orderSearch.trim());
   if (invoiceSearch?.trim()) params.set("invoiceSearch", invoiceSearch.trim());
+  if (STAFF_PORTAL_ORDERS_HIDDEN) params.set("excludePortalOrders", "1");
 
   const path =
     channel === "manual"
