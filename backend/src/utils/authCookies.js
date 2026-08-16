@@ -37,11 +37,41 @@ function durationToMs(value, fallbackMs) {
   return amount * multipliers[unit];
 }
 
+function isLocalHostname(hostname) {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1"
+  );
+}
+
+/**
+ * Vercel (or any HTTPS frontend) calling a separate API host (ngrok/API)
+ * is cross-site. Browsers only send those cookies with SameSite=None; Secure.
+ * Localhost frontends talking to localhost APIs remain same-site (lax is fine).
+ */
+function needsCrossSiteCookies() {
+  const forced = String(process.env.AUTH_COOKIE_CROSS_SITE || "")
+    .trim()
+    .toLowerCase();
+  if (forced === "true" || forced === "1") return true;
+  if (forced === "false" || forced === "0") return false;
+
+  try {
+    const client = new URL(config.clientUrl);
+    return client.protocol === "https:" && !isLocalHostname(client.hostname);
+  } catch {
+    return false;
+  }
+}
+
 function getCookieBaseOptions() {
+  const crossSite = needsCrossSiteCookies();
+
   return {
     httpOnly: true,
-    secure: config.nodeEnv === "production",
-    sameSite: "lax",
+    secure: crossSite || config.nodeEnv === "production",
+    sameSite: crossSite ? "none" : "lax",
     path: "/api",
   };
 }
