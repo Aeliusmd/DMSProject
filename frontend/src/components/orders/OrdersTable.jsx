@@ -48,6 +48,11 @@ import {
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import {
+  cleanupPdfPrintFrame,
+  downloadPdfFromUrl,
+  printPdfFromUrl,
+} from "@/lib/utils/pdfPrintUtils";
+import {
   getCompletedDeliveryActions,
   getDeliveryStatus,
 } from "@/lib/orders/deliveryActions";
@@ -2723,11 +2728,14 @@ function OrderPdfPreviewModal({
   const [src, setSrc] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [printError, setPrintError] = useState("");
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !order?.dbId) {
       setSrc("");
       setError("");
+      setPrintError("");
       setLoading(false);
       return undefined;
     }
@@ -2737,6 +2745,7 @@ function OrderPdfPreviewModal({
 
     setLoading(true);
     setError("");
+    setPrintError("");
 
     fetchPdf(order.dbId)
       .then((blob) => {
@@ -2763,12 +2772,36 @@ function OrderPdfPreviewModal({
     };
   }, [isOpen, order?.dbId, fetchPdf, previewKey]);
 
+  useEffect(() => cleanupPdfPrintFrame, []);
+
+  const handleClose = () => {
+    cleanupPdfPrintFrame();
+    onClose();
+  };
+
+  const handlePrint = async () => {
+    if (!src || printing) return;
+
+    setPrintError("");
+    setPrinting(true);
+
+    try {
+      await printPdfFromUrl(src);
+    } catch (err) {
+      setPrintError(err?.message || "Unable to open the print dialog.");
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   if (!isOpen) return null;
+
+  const canPrint = Boolean(src) && !loading && !error;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="flex max-h-[92vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[10px] bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
+        <div className="flex items-center justify-between gap-3 border-b border-[#E2E8F0] px-4 py-3">
           <div>
             <h2 className="text-[14px] font-semibold text-[#111827]">{title}</h2>
             <p className="text-[11px] text-[#64748B]">
@@ -2776,18 +2809,46 @@ function OrderPdfPreviewModal({
             </p>
             {headerExtra}
           </div>
-    <button
-      type="button"
-            onClick={onClose}
-            className="rounded-[6px] px-3 py-1.5 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
-          >
-            Close
-          </button>
+
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={!canPrint || printing}
+              className="inline-flex h-[30px] items-center justify-center gap-2 rounded-[6px] bg-[#111827] px-3 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <PrintIcon />
+              {printing ? "Preparing..." : "Print"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => downloadPdfFromUrl(src, fileName)}
+              disabled={!canPrint}
+              className="inline-flex h-[30px] items-center justify-center rounded-[6px] border border-[#CBD5E1] px-3 text-[12px] font-semibold text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Download
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded-[6px] px-3 py-1.5 text-[12px] font-semibold text-[#64748B] hover:bg-[#F8FAFC]"
+            >
+              Close
+            </button>
+          </div>
         </div>
+
+        {printError ? (
+          <p className="border-b border-[#FEE2E2] bg-[#FEF2F2] px-4 py-2 text-[11px] font-medium text-red-500">
+            {printError}
+          </p>
+        ) : null}
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
           {loading ? (
-            <p className="text-[12px] text-[#64748B]">{loadingLabel}</p>
+            <PdfPreviewSkeleton label={loadingLabel} />
           ) : error ? (
             <p className="text-[12px] font-medium text-red-500">{error}</p>
           ) : (
@@ -2796,6 +2857,102 @@ function OrderPdfPreviewModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Mirrors the SubpoenaPreviewContent layout so the modal does not resize once the PDF arrives. */
+function PdfPreviewSkeleton({ label }) {
+  return (
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="mb-4 flex shrink-0 items-center justify-between gap-3 rounded-[8px] bg-[#F8FAFC] px-3 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="h-[30px] w-[30px] shrink-0 animate-pulse rounded-[6px] bg-[#E2E8F0]" />
+
+          <div className="min-w-0">
+            <span className="block h-3 w-28 animate-pulse rounded bg-[#E2E8F0]" />
+            <p className="mt-[6px] text-[11px] text-[#94A3B8]">{label}</p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="h-[28px] w-[28px] animate-pulse rounded-[6px] bg-[#E2E8F0]" />
+          <span className="h-[28px] w-[46px] animate-pulse rounded-[6px] bg-[#F1F5F9]" />
+          <span className="h-[28px] w-[28px] animate-pulse rounded-[6px] bg-[#E2E8F0]" />
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-hidden rounded-[8px] border border-[#E2E8F0] bg-[#F8FAFC] p-4">
+        <div className="mx-auto h-[760px] w-[520px] max-w-full rounded-[4px] border border-[#CBD5E1] bg-white px-8 py-9 shadow-sm">
+          <div className="flex flex-col items-center gap-2">
+            <span className="h-4 w-40 animate-pulse rounded bg-[#E2E8F0]" />
+            <span className="h-2 w-56 animate-pulse rounded bg-[#F1F5F9]" />
+            <span className="h-2 w-44 animate-pulse rounded bg-[#F1F5F9]" />
+          </div>
+
+          <span className="mt-6 block h-px w-full bg-[#E2E8F0]" />
+
+          <div className="mt-6 flex justify-between gap-8">
+            {[0, 1].map((column) => (
+              <div key={column} className="flex-1 space-y-2">
+                <span className="block h-2.5 w-20 animate-pulse rounded bg-[#E2E8F0]" />
+                <span className="block h-2 w-full animate-pulse rounded bg-[#F1F5F9]" />
+                <span className="block h-2 w-[70%] animate-pulse rounded bg-[#F1F5F9]" />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 space-y-3">
+            <div className="flex items-center gap-3 rounded-[4px] bg-[#F8FAFC] px-3 py-2">
+              <span className="h-2.5 flex-1 animate-pulse rounded bg-[#E2E8F0]" />
+              <span className="h-2.5 w-14 animate-pulse rounded bg-[#E2E8F0]" />
+              <span className="h-2.5 w-16 animate-pulse rounded bg-[#E2E8F0]" />
+            </div>
+
+            {[0, 1, 2, 3, 4].map((row) => (
+              <div key={row} className="flex items-center gap-3 px-3">
+                <span className="h-2 flex-1 animate-pulse rounded bg-[#F1F5F9]" />
+                <span className="h-2 w-14 animate-pulse rounded bg-[#F1F5F9]" />
+                <span className="h-2 w-16 animate-pulse rounded bg-[#F1F5F9]" />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-8 ml-auto w-[45%] space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="h-2 w-16 animate-pulse rounded bg-[#F1F5F9]" />
+              <span className="h-2 w-14 animate-pulse rounded bg-[#F1F5F9]" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="h-2.5 w-20 animate-pulse rounded bg-[#E2E8F0]" />
+              <span className="h-2.5 w-16 animate-pulse rounded bg-[#E2E8F0]" />
+            </div>
+          </div>
+
+          <div className="mt-10 space-y-2">
+            <span className="block h-2 w-full animate-pulse rounded bg-[#F1F5F9]" />
+            <span className="block h-2 w-[80%] animate-pulse rounded bg-[#F1F5F9]" />
+            <span className="block h-2 w-[55%] animate-pulse rounded bg-[#F1F5F9]" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrintIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M7 14h10v7H7v-7Z" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
   );
 }
 
