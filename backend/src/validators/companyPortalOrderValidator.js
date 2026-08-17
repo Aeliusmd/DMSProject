@@ -4,6 +4,7 @@ const {
   isValidEmail,
   addMaxLengthError,
   isBlank,
+  getSsnValidationError,
 } = require("./validationHelpers");
 const { sanitizeText } = require("../utils/sanitize");
 const {
@@ -262,6 +263,13 @@ function validateCompanyPortalOrderDetails(body = {}, { requireFacility = true }
   }
   if (body.subpoenaDate && !subpoenaDate) {
     errors.push({ field: "subpoenaDate", message: "Enter a valid date" });
+  }
+
+  if (ssn) {
+    const ssnError = getSsnValidationError(ssn);
+    if (ssnError) {
+      errors.push({ field: "ssn", message: ssnError });
+    }
   }
 
   return {

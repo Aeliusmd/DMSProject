@@ -169,8 +169,9 @@ function validatePersonalPortalOrderForm(data, fileErrors = {}) {
       "Driver's licence / document is required";
   }
 
-  if (data.ssn && !isValidSSN(data.ssn)) {
-    errors.ssn = "Enter SSN as XXX-XX-1234";
+  if (data.ssn) {
+    const ssnError = getSsnValidationError(data.ssn);
+    if (ssnError) errors.ssn = ssnError;
   }
 
   if (data.email?.trim() && !isValidEmail(data.email)) {
@@ -295,8 +296,9 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     xrayMemo: "X-Ray memo",
   });
 
-  if (data.ssn && !isValidSSN(data.ssn)) {
-    errors.ssn = "Enter SSN as 123-45-6789";
+  if (data.ssn) {
+    const ssnError = getSsnValidationError(data.ssn);
+    if (ssnError) errors.ssn = ssnError;
   }
 
   if (data.dob && isFutureDate(data.dob)) {
@@ -438,9 +440,33 @@ export function isValidEmail(email) {
 }
 
 export function isValidSSN(ssn) {
+  return getSsnValidationError(ssn) === null;
+}
+
+export function getSsnValidationError(
+  ssn,
+  { maskedExample = "XXX-XX-1234" } = {}
+) {
   const trimmed = String(ssn || "").trim();
-  if (/^XXX-XX-\d{4}$/i.test(trimmed)) return true;
-  return /^\d{3}-\d{2}-\d{4}$/.test(trimmed);
+  if (!trimmed) return null;
+
+  if (/^XXX-XX-\d{4}$/i.test(trimmed)) return null;
+  if (/^\d{3}-\d{2}-\d{4}$/.test(trimmed)) return null;
+  if (/^\d{4}$/.test(trimmed)) return null;
+
+  const digits = getDigits(trimmed);
+  if (digits.length > 0 && digits.length < 4) {
+    return "SSN must include at least the last 4 digits";
+  }
+
+  if (
+    /^\d{1,3}(-\d{0,2}(-\d{0,4})?)?$/.test(trimmed) ||
+    (digits.length >= 5 && digits.length < 9)
+  ) {
+    return `Enter the complete SSN (123-45-6789 or ${maskedExample})`;
+  }
+
+  return `Enter SSN as 123-45-6789 or ${maskedExample}`;
 }
 
 export function isValidMoney(value) {

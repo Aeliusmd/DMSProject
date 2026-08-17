@@ -7,6 +7,7 @@ const {
   isValidIsoDate,
   isFutureDate,
   isValidSSN,
+  getSsnValidationError,
   isValidMoney,
   addMaxLengthError,
   addOptionalIsoDateError,
@@ -212,8 +213,11 @@ function validatePersonalPortalOrderPayload(body = {}, options = {}) {
   if (!isBlank(body.email) && !isValidEmail(trimToString(body.email))) {
     errors.push({ field: "email", message: "Enter a valid email address" });
   }
-  if (!isBlank(body.ssn) && !isValidSSN(body.ssn)) {
-    errors.push({ field: "ssn", message: "Enter SSN as XXX-XX-1234" });
+  if (!isBlank(body.ssn)) {
+    const ssnError = getSsnValidationError(body.ssn);
+    if (ssnError) {
+      errors.push({ field: "ssn", message: ssnError });
+    }
   }
 
   if (!isBlank(body.serveCompanyName)) {
@@ -358,8 +362,11 @@ function validateOrderPayload(body = {}, options = {}) {
   addNoHtmlMarkupErrors(errors, body, ORDER_FREE_TEXT_FIELDS);
   addNoHtmlMarkupError(errors, "documentName", body.documentName);
 
-  if (!isBlank(body.ssn) && !isValidSSN(body.ssn)) {
-    errors.push({ field: "ssn", message: "Enter SSN as 123-45-6789" });
+  if (!isBlank(body.ssn)) {
+    const ssnError = getSsnValidationError(body.ssn);
+    if (ssnError) {
+      errors.push({ field: "ssn", message: ssnError });
+    }
   }
 
   if (!isBlank(body.dob)) {
