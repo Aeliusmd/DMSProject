@@ -74,6 +74,7 @@ function formatActionLabel(action, context) {
   const labels = {
     login: "Login",
     logout: "Logout",
+    impersonate: "Signed In As User",
     create:
       context === "employees"
         ? "Employee Added"

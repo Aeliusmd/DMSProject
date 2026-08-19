@@ -8,7 +8,7 @@ import {
   startAuthAutoRefresh,
   stopAuthAutoRefresh,
 } from "@/lib/auth/authApi";
-import { clearAuth } from "@/lib/auth/authStorage";
+import { clearAuth, isImpersonating } from "@/lib/auth/authStorage";
 import RoleRouteGuard from "@/components/auth/RoleRouteGuard";
 
 export default function DashboardLayout({ children }) {
@@ -36,8 +36,9 @@ export default function DashboardLayout({ children }) {
             startAuthAutoRefresh();
           }
         } catch {
+          const wasImpersonating = isImpersonating();
           clearAuth();
-          router.replace("/login");
+          router.replace(wasImpersonating ? "/login-as?ended=1" : "/login");
         }
       }
     }

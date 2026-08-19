@@ -5,8 +5,54 @@ const Employee = require("../models/Employee");
 const AuthSession = require("../models/AuthSession");
 const { sendTwoFactorCode } = require("./emailService");
 const twoFactorStore = require("./twoFactorStore");
+const impersonationTicketStore = require("./impersonationTicketStore");
+const passwordResetStore = require("./passwordResetStore");
 const tokenService = require("./tokenService");
 const { formatUser } = require("../views/responses");
+
+const IMPERSONATION_SESSION_HOURS = 4;
+const IMPERSONATION_TICKET_TTL_MS = impersonationTicketStore.DEFAULT_TTL_MS;
+
+function isAdminRole(role) {
+  return String(role || "").trim().toLowerCase() === "admin";
+}
+
+function assertEmployeeCanBeImpersonated(employee) {
+  if (!employee || employee.deleted_at) {
+    throw new ApiError(404, "Employee not found");
+  }
+
+  if (isAdminRole(employee.role)) {
+    throw new ApiError(403, "Admin accounts cannot be signed into this way");
+  }
+
+  if (employee.is_terminated) {
+    throw new ApiError(403, "This account is terminated");
+  }
+
+  if (employee.is_suspended) {
+    throw new ApiError(403, "This account is suspended");
+  }
+}
+
+async function attachImpersonationUser(user, impersonatorId) {
+  if (!impersonatorId) {
+    return user;
+  }
+
+  const impersonator = await Employee.findById(impersonatorId, {
+    includeDeleted: true,
+  });
+
+  return {
+    ...user,
+    impersonated: true,
+    impersonatedBy: {
+      id: impersonator?.id || impersonatorId,
+      name: impersonator?.name || "Admin",
+    },
+  };
+}
 
 async function login({ identifier, password, ipAddress, userAgent }) {
   const employee = await Employee.findByEmailOrLogonForAuth(identifier.trim());
@@ -207,23 +253,29 @@ async function refreshTokens({ refreshToken }) {
     throw new ApiError(401, "Two-factor authentication required");
   }
 
+  const impersonatorId = decoded.impersonatorId || null;
   const accessToken = tokenService.generateAccessToken({
     employeeId: session.employee_id,
     role: session.role,
     sessionId: session.id,
+    impersonatorId,
   });
 
   return {
     accessToken,
     refreshToken,
     expiresIn: tokenService.getAccessTokenExpiresInSeconds(),
-    user: formatUser({
-      id: session.employee_id,
-      name: session.name,
-      email: session.email,
-      logon: session.logon,
-      role: session.role,
-    }),
+    impersonated: Boolean(impersonatorId),
+    user: await attachImpersonationUser(
+      formatUser({
+        id: session.employee_id,
+        name: session.name,
+        email: session.email,
+        logon: session.logon,
+        role: session.role,
+      }),
+      impersonatorId
+    ),
   };
 }
 
@@ -236,6 +288,7 @@ async function logout({ refreshToken, sessionToken }) {
       return {
         message: "Logged out successfully",
         employeeId: decoded.sub,
+        impersonated: Boolean(decoded.impersonatorId),
       };
     } catch {
       // Fall through to session token logout
@@ -260,20 +313,299 @@ async function logout({ refreshToken, sessionToken }) {
   throw new ApiError(400, "Refresh token or session token is required");
 }
 
-async function getCurrentUser(employeeId) {
+async function getCurrentUser(employeeId, { impersonatorId } = {}) {
   const employee = await Employee.findById(employeeId);
 
   if (!employee) {
     throw new ApiError(404, "User not found");
   }
 
-  return formatUser({
-    id: employee.id,
-    name: employee.name,
-    email: employee.email,
-    logon: employee.logon,
-    role: employee.role,
+  return attachImpersonationUser(
+    formatUser({
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      logon: employee.logon,
+      role: employee.role,
+    }),
+    impersonatorId
+  );
+}
+
+async function startImpersonation({
+  adminId,
+  adminRole,
+  alreadyImpersonating,
+  employeeId,
+}) {
+  if (alreadyImpersonating) {
+    throw new ApiError(403, "Exit the current user session before signing in as another user");
+  }
+
+  if (!isAdminRole(adminRole)) {
+    throw new ApiError(403, "Only administrators can sign in as another user");
+  }
+
+  if (Number(adminId) === Number(employeeId)) {
+    throw new ApiError(400, "You are already signed in as this user");
+  }
+
+  const employee = await Employee.findById(employeeId);
+  assertEmployeeCanBeImpersonated(employee);
+
+  const exchangeToken = impersonationTicketStore.create(
+    {
+      employeeId: employee.id,
+      impersonatorId: adminId,
+    },
+    IMPERSONATION_TICKET_TTL_MS
+  );
+
+  return {
+    exchangeToken,
+    expiresInSeconds: Math.floor(IMPERSONATION_TICKET_TTL_MS / 1000),
+    user: formatUser({
+      id: employee.id,
+      name: employee.name,
+      email: employee.email,
+      logon: employee.logon,
+      role: employee.role,
+    }),
+  };
+}
+
+async function exchangeImpersonation({ exchangeToken, ipAddress, userAgent }) {
+  const ticket = impersonationTicketStore.consume(exchangeToken);
+
+  if (!ticket?.employeeId || !ticket?.impersonatorId) {
+    throw new ApiError(401, "This sign-in link is invalid or has expired");
+  }
+
+  const employee = await Employee.findById(ticket.employeeId);
+  assertEmployeeCanBeImpersonated(employee);
+
+  const impersonator = await Employee.findById(ticket.impersonatorId, {
+    includeDeleted: true,
   });
+
+  if (!impersonator || !isAdminRole(impersonator.role)) {
+    throw new ApiError(403, "This sign-in link is no longer valid");
+  }
+
+  const sessionToken = tokenService.generateSessionToken();
+  const expiresAt = new Date(
+    Date.now() + IMPERSONATION_SESSION_HOURS * 60 * 60 * 1000
+  );
+  const auditUserAgent = `[impersonation by ${ticket.impersonatorId}] ${
+    userAgent || ""
+  }`.slice(0, 500);
+
+  const session = await AuthSession.create({
+    employeeId: employee.id,
+    sessionToken,
+    ipAddress,
+    userAgent: auditUserAgent,
+    expiresAt,
+    twoFactorVerified: true,
+  });
+
+  const accessToken = tokenService.generateAccessToken({
+    employeeId: employee.id,
+    role: employee.role,
+    sessionId: session.id,
+    impersonatorId: ticket.impersonatorId,
+  });
+
+  const refreshToken = tokenService.generateRefreshToken({
+    employeeId: employee.id,
+    sessionId: session.id,
+    sessionToken,
+    impersonatorId: ticket.impersonatorId,
+  });
+
+  return {
+    accessToken,
+    refreshToken,
+    sessionToken,
+    expiresIn: tokenService.getAccessTokenExpiresInSeconds(),
+    impersonated: true,
+    user: await attachImpersonationUser(
+      formatUser({
+        id: employee.id,
+        name: employee.name,
+        email: employee.email,
+        logon: employee.logon,
+        role: employee.role,
+      }),
+      ticket.impersonatorId
+    ),
+    impersonator: {
+      id: impersonator.id,
+      name: impersonator.name,
+    },
+    ipAddress,
+    userAgent,
+  };
+}
+
+function passwordResetOtpKey(sessionToken) {
+  return `password-reset:${sessionToken}`;
+}
+
+async function assertEmployeeCanResetPassword(employee) {
+  if (!employee || employee.deleted_at) {
+    throw new ApiError(404, "No account found for this email address");
+  }
+
+  if (employee.is_terminated) {
+    throw new ApiError(
+      403,
+      "Your account has been terminated. Please contact the administrator."
+    );
+  }
+
+  if (employee.is_suspended) {
+    const dueForReactivation =
+      employee.reactivated_date &&
+      new Date(employee.reactivated_date).getTime() <= Date.now();
+
+    if (dueForReactivation) {
+      await Employee.unsuspend(employee.id);
+    } else {
+      throw new ApiError(
+        403,
+        "Your account has been suspended. Please contact the administrator."
+      );
+    }
+  }
+}
+
+async function sendPasswordResetCode(employee, sessionToken) {
+  const otpCode = tokenService.generateOtpCode();
+  const otpExpiresAt =
+    Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
+
+  twoFactorStore.set(
+    passwordResetOtpKey(sessionToken),
+    otpCode,
+    otpExpiresAt
+  );
+
+  const emailResult = await sendTwoFactorCode({
+    to: employee.email,
+    name: employee.name,
+    code: otpCode,
+    purpose: "password_reset",
+  });
+
+  return emailResult;
+}
+
+async function requestPasswordReset({ email, password }) {
+  const employee = await Employee.findByEmailOrLogonForAuth(email);
+
+  await assertEmployeeCanResetPassword(employee);
+
+  const isSamePassword = await bcrypt.compare(password, employee.password_hash);
+
+  if (isSamePassword) {
+    throw new ApiError(400, "Validation failed", [
+      {
+        field: "password",
+        message: "New password must be different from current password",
+      },
+    ]);
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  const sessionToken = tokenService.generateSessionToken();
+  const expiresAt =
+    Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
+
+  passwordResetStore.set(
+    sessionToken,
+    {
+      employeeId: employee.id,
+      passwordHash,
+    },
+    expiresAt
+  );
+
+  const emailResult = await sendPasswordResetCode(employee, sessionToken);
+
+  return {
+    requiresTwoFactor: true,
+    sessionToken,
+    email: tokenService.maskEmail(employee.email),
+    expiresInMinutes: config.twoFactor.expiresMinutes,
+    resendCooldownSeconds: config.twoFactor.resendCooldownSeconds,
+    devCodeLogged: emailResult.devLogged === true,
+  };
+}
+
+async function verifyPasswordReset({ sessionToken, code }) {
+  const pending = passwordResetStore.get(sessionToken);
+
+  if (!pending) {
+    throw new ApiError(401, "Invalid or expired password reset session");
+  }
+
+  const isValidCode = twoFactorStore.verify(
+    passwordResetOtpKey(sessionToken),
+    code
+  );
+
+  if (!isValidCode) {
+    throw new ApiError(401, "Invalid or expired verification code");
+  }
+
+  const employee = await Employee.findById(pending.employeeId);
+  await assertEmployeeCanResetPassword(employee);
+
+  await Employee.updatePassword(employee.id, pending.passwordHash);
+  await AuthSession.deleteAllByEmployeeId(employee.id);
+  passwordResetStore.consume(sessionToken);
+
+  return {
+    message: "Password updated successfully",
+    employeeId: employee.id,
+    employeeName: employee.name,
+  };
+}
+
+async function resendPasswordReset({ sessionToken }) {
+  const pending = passwordResetStore.get(sessionToken);
+
+  if (!pending) {
+    throw new ApiError(401, "Invalid or expired password reset session");
+  }
+
+  const lastSentAt = twoFactorStore.getLastSentAt(
+    passwordResetOtpKey(sessionToken)
+  );
+  const cooldownMs = config.twoFactor.resendCooldownSeconds * 1000;
+
+  if (lastSentAt && Date.now() - lastSentAt < cooldownMs) {
+    const waitSeconds = Math.ceil(
+      (cooldownMs - (Date.now() - lastSentAt)) / 1000
+    );
+    throw new ApiError(
+      429,
+      `Please wait ${waitSeconds} seconds before requesting a new code`
+    );
+  }
+
+  const employee = await Employee.findById(pending.employeeId);
+  await assertEmployeeCanResetPassword(employee);
+
+  const emailResult = await sendPasswordResetCode(employee, sessionToken);
+
+  return {
+    message: "Verification code resent",
+    email: tokenService.maskEmail(employee.email),
+    expiresInMinutes: config.twoFactor.expiresMinutes,
+    devCodeLogged: emailResult.devLogged === true,
+  };
 }
 
 module.exports = {
@@ -283,4 +615,9 @@ module.exports = {
   refreshTokens,
   logout,
   getCurrentUser,
+  startImpersonation,
+  exchangeImpersonation,
+  requestPasswordReset,
+  verifyPasswordReset,
+  resendPasswordReset,
 };

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import AuthInput from "@/components/ui/AuthInput";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
+import ForgotPasswordModal from "@/components/auth/ForgotPasswordModal";
 import { login } from "@/lib/auth/authApi";
 import { isAuthenticated } from "@/lib/auth/authStorage";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
@@ -19,6 +20,7 @@ export default function LoginPage() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isTwoFactorOpen, setIsTwoFactorOpen] = useState(false);
+  const [isForgotPasswordOpen, setIsForgotPasswordOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [apiFieldErrors, setApiFieldErrors] = useState({});
@@ -98,7 +100,7 @@ export default function LoginPage() {
     <>
       <main
         className={`flex min-h-screen items-center justify-center px-4 transition ${
-          isTwoFactorOpen ? "blur-[2px]" : ""
+          isTwoFactorOpen || isForgotPasswordOpen ? "blur-[2px]" : ""
         }`}
         style={{
           background:
@@ -205,6 +207,7 @@ export default function LoginPage() {
 
                 <button
                   type="button"
+                  onClick={() => setIsForgotPasswordOpen(true)}
                   className="text-[12px] font-medium text-[#0097B2] hover:underline"
                 >
                   Forgot password?
@@ -234,6 +237,12 @@ export default function LoginPage() {
         onSuccess={handleTwoFactorSuccess}
         email={maskedEmail || email}
         sessionToken={sessionToken}
+      />
+
+      <ForgotPasswordModal
+        isOpen={isForgotPasswordOpen}
+        onClose={() => setIsForgotPasswordOpen(false)}
+        initialEmail={email}
       />
     </>
   );

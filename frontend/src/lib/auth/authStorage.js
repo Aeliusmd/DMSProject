@@ -4,6 +4,8 @@ const LEGACY_ACCESS_TOKEN_KEY = "dms_access_token";
 const LEGACY_REFRESH_TOKEN_KEY = "dms_refresh_token";
 const USER_KEY = "dms_user";
 const ACCESS_EXPIRES_KEY = "dms_access_expires_at";
+const IMPERSONATION_FLAG_KEY = "dms_impersonating";
+const SESSION_USER_KEY = "dms_session_user";
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -22,6 +24,15 @@ function clearLegacyLocalTokenStorage() {
 
 if (isBrowser()) {
   clearLegacyLocalTokenStorage();
+}
+
+export function isImpersonating() {
+  if (!isBrowser()) return false;
+  try {
+    return sessionStorage.getItem(IMPERSONATION_FLAG_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function getAccessToken() {
@@ -49,10 +60,7 @@ export function getAccessExpiresAt() {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export function getStoredUser() {
-  if (!isBrowser()) return null;
-
-  const raw = localStorage.getItem(USER_KEY);
+function parseUser(raw) {
   if (!raw) return null;
 
   try {
@@ -62,13 +70,33 @@ export function getStoredUser() {
   }
 }
 
+export function getStoredUser() {
+  if (!isBrowser()) return null;
+
+  if (isImpersonating()) {
+    try {
+      return parseUser(sessionStorage.getItem(SESSION_USER_KEY));
+    } catch {
+      return null;
+    }
+  }
+
+  return parseUser(localStorage.getItem(USER_KEY));
+}
+
 export function setAuth({ user, accessToken, refreshToken, accessExpiresAt } = {}) {
   if (!isBrowser()) return;
 
   clearLegacyLocalTokenStorage();
 
   if (user) {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    const serialized = JSON.stringify(user);
+
+    if (isImpersonating()) {
+      sessionStorage.setItem(SESSION_USER_KEY, serialized);
+    } else {
+      localStorage.setItem(USER_KEY, serialized);
+    }
   }
 
   // Only overwrite tokens when a non-empty string is provided so callers like
@@ -86,8 +114,22 @@ export function setAuth({ user, accessToken, refreshToken, accessExpiresAt } = {
   }
 }
 
+export function beginImpersonationSession({
+  user,
+  accessToken,
+  refreshToken,
+  accessExpiresAt,
+} = {}) {
+  if (!isBrowser()) return;
+
+  sessionStorage.setItem(IMPERSONATION_FLAG_KEY, "1");
+  setAuth({ user, accessToken, refreshToken, accessExpiresAt });
+}
+
 export function clearAuth() {
   if (!isBrowser()) return;
+
+  const impersonating = isImpersonating();
 
   // Wipe order drafts with the auth session so the next user on this tab
   // cannot restore another person's unsaved edit.
@@ -109,11 +151,15 @@ export function clearAuth() {
     sessionStorage.removeItem(ACCESS_TOKEN_KEY);
     sessionStorage.removeItem(REFRESH_TOKEN_KEY);
     sessionStorage.removeItem(ACCESS_EXPIRES_KEY);
+    sessionStorage.removeItem(IMPERSONATION_FLAG_KEY);
+    sessionStorage.removeItem(SESSION_USER_KEY);
   } catch {
     // Ignore storage failures.
   }
 
-  localStorage.removeItem(USER_KEY);
+  if (!impersonating) {
+    localStorage.removeItem(USER_KEY);
+  }
 }
 
 export function isAuthenticated() {

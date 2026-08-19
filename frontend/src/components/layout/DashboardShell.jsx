@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
+import ImpersonationBanner from "@/components/layout/ImpersonationBanner";
 import DailyReminderPopup from "@/components/notifications/DailyReminderPopup";
 
 const MOBILE_QUERY = "(max-width: 767px)";
@@ -81,6 +82,7 @@ export default function DashboardShell({ children, lockScroll = false }) {
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
           sidebarExpanded={!isSidebarCollapsed}
         />
+        <ImpersonationBanner />
 
         <main
           className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5 lg:px-6"

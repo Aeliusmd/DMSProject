@@ -145,7 +145,7 @@ function logDevCode(to, code) {
   });
 }
 
-async function sendTwoFactorCode({ to, name, code, subtitle }) {
+async function sendTwoFactorCode({ to, name, code, subtitle, purpose }) {
   if (config.twoFactor.devLogCode) {
     logDevCode(to, code);
     return { delivered: false, devLogged: true };
@@ -162,12 +162,16 @@ async function sendTwoFactorCode({ to, name, code, subtitle }) {
     throw new ApiError(503, "Email service is not configured");
   }
 
-  const subject = "Your DMS verification code";
+  const subject =
+    purpose === "password_reset"
+      ? "Your DMS password reset code"
+      : "Your DMS verification code";
   const { text, html } = renderTwoFactorEmail({
     name: name || "User",
     code,
     expiresInMinutes: config.twoFactor.expiresMinutes,
     subtitle: subtitle || "Legal Practice Management Portal",
+    purpose,
   });
 
   const mailOptions = buildMailOptions({ to, subject, text, html });

@@ -21,6 +21,10 @@ export default function TwoFactorAuthModal({
   resendFn = defaultResendTwoFactor,
   saveSessionFn = defaultSaveAuthSession,
   subtitle = "Legal Practice Management Portal",
+  title = "Two-Factor Authentication",
+  description,
+  showTrustDevice = true,
+  persistSession = true,
 }) {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [countdown, setCountdown] = useState(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
@@ -84,15 +88,21 @@ export default function TwoFactorAuthModal({
 
       const payload = response?.data || {};
 
-      saveSessionFn({
-        user: payload.user,
-        accessToken: payload.accessToken,
-        refreshToken: payload.refreshToken,
-        accessExpiresAt: payload.accessExpiresAt,
-      });
+      if (persistSession) {
+        saveSessionFn({
+          user: payload.user,
+          accessToken: payload.accessToken,
+          refreshToken: payload.refreshToken,
+          accessExpiresAt: payload.accessExpiresAt,
+        });
+      }
 
       // Keep the OTP screen up until the parent finishes routing.
       await Promise.resolve(onSuccess?.());
+
+      if (!persistSession) {
+        setIsVerifying(false);
+      }
     } catch (requestError) {
       const { fieldErrors, message } = applyApiFieldErrors(requestError, {
         code: "otp",
@@ -227,12 +237,16 @@ export default function TwoFactorAuthModal({
           </div>
 
           <h2 className="text-[17px] font-semibold text-[#111827]">
-            Two-Factor Authentication
+            {title}
           </h2>
 
           <p className="mt-[8px] text-[13px] text-[#64748B]">
-            Enter the 6-digit code sent to{" "}
-            <span className="font-medium text-[#334155]">{email}</span>
+            {description || (
+              <>
+                Enter the 6-digit code sent to{" "}
+                <span className="font-medium text-[#334155]">{email}</span>
+              </>
+            )}
           </p>
 
           <div className="mt-[22px] flex justify-center gap-[10px]">
@@ -263,6 +277,7 @@ export default function TwoFactorAuthModal({
             <p className="mt-4 text-[12px] text-[#64748B]">Verifying code...</p>
           )}
 
+          {showTrustDevice ? (
           <label className="mt-[22px] flex items-center justify-center gap-[8px] text-[13px] text-[#475569]">
             <input
               type="checkbox"
@@ -273,6 +288,7 @@ export default function TwoFactorAuthModal({
             />
             Trust this device for 30 days
           </label>
+          ) : null}
 
           <div className="mt-[20px] text-[13px]">
             {countdown > 0 ? (

@@ -7,6 +7,7 @@ class AuthSession {
     ipAddress,
     userAgent,
     expiresAt,
+    twoFactorVerified = false,
   }) {
     const pool = getPool();
 
@@ -15,10 +16,11 @@ class AuthSession {
         (employee_id, session_token, trust_device, two_factor_verified,
          ip_address, user_agent, expires_at, created_at)
        VALUES
-        (:employeeId, :sessionToken, 0, 0, :ipAddress, :userAgent, :expiresAt, NOW())`,
+        (:employeeId, :sessionToken, 0, :twoFactorVerified, :ipAddress, :userAgent, :expiresAt, NOW())`,
       {
         employeeId,
         sessionToken,
+        twoFactorVerified: twoFactorVerified ? 1 : 0,
         ipAddress: ipAddress || null,
         userAgent: userAgent || null,
         expiresAt,

@@ -1,4 +1,5 @@
 const { trimToString, addMaxLengthError } = require("./validationHelpers");
+const { validatePasswordComplexity } = require("../utils/passwordValidation");
 
 function validateLogin(body = {}) {
   const errors = [];
@@ -85,10 +86,75 @@ function validateLogout(body = {}) {
   return { valid: errors.length === 0, errors, refreshToken, sessionToken };
 }
 
+function validateImpersonate(body = {}) {
+  const errors = [];
+  const employeeId = Number(body.employeeId);
+
+  if (!Number.isInteger(employeeId) || employeeId <= 0) {
+    errors.push({
+      field: "employeeId",
+      message: "A valid employee is required",
+    });
+  }
+
+  return { valid: errors.length === 0, errors, employeeId };
+}
+
+function validateImpersonateExchange(body = {}) {
+  const errors = [];
+  const exchangeToken = trimToString(body.exchangeToken);
+
+  if (!exchangeToken || !/^[a-f0-9]{64}$/i.test(exchangeToken)) {
+    errors.push({
+      field: "exchangeToken",
+      message: "A valid exchange token is required",
+    });
+  }
+
+  return { valid: errors.length === 0, errors, exchangeToken };
+}
+
+function validateForgotPassword(body = {}) {
+  const errors = [];
+  const email = trimToString(body.email);
+  const password = typeof body.password === "string" ? body.password : "";
+  const confirmPassword =
+    typeof body.confirmPassword === "string" ? body.confirmPassword : "";
+
+  if (!email) {
+    errors.push({ field: "email", message: "Email is required" });
+  } else {
+    addMaxLengthError(errors, "email", email, 255);
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      errors.push({ field: "email", message: "Enter a valid email address" });
+    }
+  }
+
+  errors.push(...validatePasswordComplexity(password, "password"));
+
+  if (!confirmPassword.trim()) {
+    errors.push({
+      field: "confirmPassword",
+      message: "Confirm password is required",
+    });
+  } else if (password !== confirmPassword) {
+    errors.push({
+      field: "confirmPassword",
+      message: "Passwords do not match",
+    });
+  }
+
+  return { valid: errors.length === 0, errors, email, password };
+}
+
 module.exports = {
   validateLogin,
   validateTwoFactor,
   validateResendTwoFactor,
   validateRefresh,
   validateLogout,
+  validateImpersonate,
+  validateImpersonateExchange,
+  validateForgotPassword,
 };

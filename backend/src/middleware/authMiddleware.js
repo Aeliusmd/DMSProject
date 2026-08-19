@@ -26,6 +26,8 @@ async function authenticate(req, _res, next) {
       id: decoded.sub,
       role: decoded.role,
       sessionId: decoded.sessionId,
+      impersonatorId: decoded.impersonatorId || null,
+      impersonated: Boolean(decoded.imp && decoded.impersonatorId),
     };
 
     req.session = session;
