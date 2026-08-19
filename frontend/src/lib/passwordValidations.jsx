@@ -1,4 +1,5 @@
 export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_LENGTH = 128;
 
 export function validateNewPassword(password) {
   const value = password || "";
@@ -9,6 +10,10 @@ export function validateNewPassword(password) {
 
   if (value.length < PASSWORD_MIN_LENGTH) {
     return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+  }
+
+  if (value.length > PASSWORD_MAX_LENGTH) {
+    return `Password must be ${PASSWORD_MAX_LENGTH} characters or less`;
   }
 
   if (!/[A-Z]/.test(value)) {
@@ -70,6 +75,34 @@ export function validatePasswordChangeForm(data) {
     data.currentPassword === data.newPassword
   ) {
     errors.newPassword = "New password must be different from current password";
+  }
+
+  return errors;
+}
+
+export function validateForgotPasswordForm(data) {
+  const errors = {};
+  const email = (data.email || "").trim();
+
+  if (!email) {
+    errors.email = "Email is required";
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    errors.email = "Enter a valid email address";
+  }
+
+  const newPasswordError = validateNewPassword(data.password);
+
+  if (newPasswordError) {
+    errors.password = newPasswordError.replace("New password", "Password");
+  }
+
+  const confirmPasswordError = validateConfirmPassword(
+    data.password,
+    data.confirmPassword || ""
+  );
+
+  if (confirmPasswordError) {
+    errors.confirmPassword = confirmPasswordError;
   }
 
   return errors;

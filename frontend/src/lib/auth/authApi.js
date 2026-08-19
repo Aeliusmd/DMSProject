@@ -5,11 +5,13 @@ import {
 } from "@/lib/networkErrors";
 import { withCredentials } from "@/lib/auth/fetchCredentials";
 import {
+  beginImpersonationSession,
   clearAuth,
   getAccessExpiresAt,
   getAccessToken,
   getRefreshToken,
   getStoredUser,
+  isImpersonating,
   setAuth,
 } from "./authStorage";
 
@@ -244,6 +246,27 @@ export async function resendTwoFactor(sessionToken) {
   });
 }
 
+export async function requestPasswordReset({ email, password, confirmPassword }) {
+  return request("/auth/forgot-password", {
+    method: "POST",
+    body: { email, password, confirmPassword },
+  });
+}
+
+export async function verifyForgotPassword({ sessionToken, code }) {
+  return request("/auth/forgot-password/verify", {
+    method: "POST",
+    body: { sessionToken, code },
+  });
+}
+
+export async function resendForgotPassword(sessionToken) {
+  return request("/auth/forgot-password/resend", {
+    method: "POST",
+    body: { sessionToken },
+  });
+}
+
 export async function refreshAccessToken() {
   const data = await request("/auth/refresh", {
     method: "POST",
@@ -303,4 +326,50 @@ export function saveAuthSession(payload) {
   });
 
   startAuthAutoRefresh();
+}
+
+export async function startImpersonation(employeeId) {
+  return request(`/employees/${employeeId}/impersonate`, {
+    method: "POST",
+    auth: true,
+  });
+}
+
+export async function exchangeImpersonation(exchangeToken) {
+  return request("/auth/impersonate/exchange", {
+    method: "POST",
+    body: { exchangeToken },
+  });
+}
+
+export function saveImpersonationSession(payload) {
+  beginImpersonationSession({
+    user: payload.user,
+    accessToken: payload.accessToken,
+    refreshToken: payload.refreshToken,
+    accessExpiresAt: payload.accessExpiresAt,
+  });
+
+  startAuthAutoRefresh();
+}
+
+export async function exitImpersonationSession() {
+  if (!isImpersonating()) {
+    return logout();
+  }
+
+  stopAuthAutoRefresh();
+
+  try {
+    await request("/auth/logout", {
+      method: "POST",
+      body: {
+        refreshToken: getRefreshToken() || undefined,
+      },
+    });
+  } catch {
+    // Clear local impersonation session even if backend logout fails.
+  }
+
+  clearAuth();
 }

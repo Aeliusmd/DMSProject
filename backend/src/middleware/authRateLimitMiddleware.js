@@ -100,12 +100,26 @@ const authRefreshRateLimit = createAuthRateLimiter({
   keyGenerator: (req, res) => ipKeyGenerator(req.ip, 56),
 });
 
+const authImpersonateRateLimit = createAuthRateLimiter({
+  windowMs: FIFTEEN_MINUTES_MS,
+  max: 20,
+  keyGenerator: (req, res) => ipKeyGenerator(req.ip, 56),
+});
+
+const authImpersonateExchangeRateLimit = createAuthRateLimiter({
+  windowMs: FIFTEEN_MINUTES_MS,
+  max: 30,
+  keyGenerator: (req, res) => ipKeyGenerator(req.ip, 56),
+});
+
 module.exports = {
   authLoginRateLimit,
   authRegisterRateLimit,
   authTwoFactorVerifyRateLimit,
   authTwoFactorResendRateLimit,
   authRefreshRateLimit,
+  authImpersonateRateLimit,
+  authImpersonateExchangeRateLimit,
   FIFTEEN_MINUTES_MS,
   ONE_HOUR_MS,
 };

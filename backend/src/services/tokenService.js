@@ -7,6 +7,17 @@ function generateSessionToken() {
   return crypto.randomBytes(48).toString("hex");
 }
 
+function impersonationClaims(payload = {}) {
+  if (!payload.impersonatorId) {
+    return {};
+  }
+
+  return {
+    impersonatorId: payload.impersonatorId,
+    imp: true,
+  };
+}
+
 function generateAccessToken(payload) {
   return jwt.sign(
     {
@@ -14,6 +25,7 @@ function generateAccessToken(payload) {
       role: payload.role,
       sessionId: payload.sessionId,
       type: "access",
+      ...impersonationClaims(payload),
     },
     config.jwt.accessSecret,
     { expiresIn: config.jwt.accessExpiresIn }
@@ -27,6 +39,7 @@ function generateRefreshToken(payload) {
       sessionId: payload.sessionId,
       sessionToken: payload.sessionToken,
       type: "refresh",
+      ...impersonationClaims(payload),
     },
     config.jwt.refreshSecret,
     { expiresIn: config.jwt.refreshExpiresIn }

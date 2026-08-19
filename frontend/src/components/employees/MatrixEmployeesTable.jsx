@@ -5,7 +5,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import SuspendEmployeeModal from "@/components/employees/SuspendEmployeeModal";
 import EmployeeMilestoneModal from "@/components/employees/EmployeeMilestoneModal";
-import { ApiRequestError } from "@/lib/auth/authApi";
+import { ApiRequestError, startImpersonation } from "@/lib/auth/authApi";
 
 function isAdminRole(role) {
   return String(role || "").trim().toLowerCase() === "admin";
@@ -91,6 +91,15 @@ export default function MatrixEmployeesTable({
     closeSuspendModal();
   };
 
+  const openLoginAsModal = (employee) => {
+    setActionError("");
+    setConfirmModal({
+      open: true,
+      action: "login",
+      employee,
+    });
+  };
+
   const closeConfirmModal = () => {
     setConfirmModal({
       open: false,
@@ -104,6 +113,29 @@ export default function MatrixEmployeesTable({
 
     if (!employee || actionLoading) return;
 
+    let popup = null;
+
+    if (action === "login") {
+      popup = window.open("", "_blank");
+
+      if (!popup) {
+        setActionError(
+          "Please allow pop-ups for this site so the user account can open in a new window."
+        );
+        return;
+      }
+
+      try {
+        popup.opener = null;
+        popup.document.write(
+          "<!doctype html><title>Opening account</title><p style=\"font-family:Arial,sans-serif;padding:24px;color:#64748B\">Opening this account...</p>"
+        );
+        popup.document.close();
+      } catch {
+        // Ignore document write failures; the URL replace still proceeds.
+      }
+    }
+
     setActionLoading(true);
     setActionError("");
 
@@ -116,12 +148,27 @@ export default function MatrixEmployeesTable({
         await onDeleteEmployee?.(employee);
       }
 
+      if (action === "login") {
+        const response = await startImpersonation(employee.id);
+        const exchangeToken = response?.data?.exchangeToken;
+
+        if (!exchangeToken) {
+          throw new Error("Unable to start this user session");
+        }
+
+        const loginAsUrl = `${window.location.origin}/login-as?token=${encodeURIComponent(
+          exchangeToken
+        )}`;
+        popup.location.replace(loginAsUrl);
+      }
+
       closeConfirmModal();
     } catch (error) {
+      popup?.close();
       setActionError(
         error instanceof ApiRequestError
           ? error.message
-          : "Unable to complete this action"
+          : error?.message || "Unable to complete this action"
       );
     } finally {
       setActionLoading(false);
@@ -162,12 +209,16 @@ export default function MatrixEmployeesTable({
   const modalTitle =
     confirmModal.action === "delete"
       ? "Delete Employee"
-      : "Terminate Employee";
+      : confirmModal.action === "login"
+        ? "Login as Employee"
+        : "Terminate Employee";
 
   const modalMessage =
     confirmModal.action === "delete"
       ? `Are you sure you want to delete ${confirmModal.employee?.name}? This action cannot be undone.`
-      : `Are you sure you want to terminate ${confirmModal.employee?.name}? Their account will be marked as terminated and they will no longer be able to log in.`;
+      : confirmModal.action === "login"
+        ? `Open a new window signed in as ${confirmModal.employee?.name}? Your admin session in this tab will stay active.`
+        : `Are you sure you want to terminate ${confirmModal.employee?.name}? Their account will be marked as terminated and they will no longer be able to log in.`;
 
   return (
     <>
@@ -277,6 +328,15 @@ export default function MatrixEmployeesTable({
                         <div className="mx-auto flex w-[118px] flex-col gap-2">
                           <button
                             type="button"
+                            onClick={() => openLoginAsModal(employee)}
+                            className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] px-3 text-[11px] font-semibold text-[#0369A1] transition hover:bg-[#E0F2FE]"
+                          >
+                            <LoginIcon />
+                            Login
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => openSuspendModal(employee)}
                             className="inline-flex h-[28px] w-full items-center justify-center gap-2 whitespace-nowrap rounded-[6px] px-3 text-[11px] font-semibold transition hover:opacity-85"
                             style={{
@@ -360,7 +420,13 @@ export default function MatrixEmployeesTable({
         title={modalTitle}
         message={modalMessage}
         variant={confirmModal.action === "delete" ? "danger" : "warning"}
-        confirmLabel={actionLoading ? "Processing..." : "Confirm"}
+        confirmLabel={
+          actionLoading
+            ? "Processing..."
+            : confirmModal.action === "login"
+              ? "Open account"
+              : "Confirm"
+        }
         cancelLabel="Cancel"
         onCancel={closeConfirmModal}
         onConfirm={handleConfirmAction}
@@ -400,6 +466,26 @@ export default function MatrixEmployeesTable({
         onClose={() => setMilestoneEmployee(null)}
       />
     </>
+  );
+}
+
+function LoginIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M10 17l5-5-5-5M15 12H3"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M21 3v18"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 

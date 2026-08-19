@@ -4,8 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { logout } from "@/lib/auth/authApi";
-import { getStoredUser } from "@/lib/auth/authStorage";
+import { exitImpersonationSession, logout } from "@/lib/auth/authApi";
+import { getStoredUser, isImpersonating } from "@/lib/auth/authStorage";
 import { canAccessNavItem } from "@/lib/auth/roles";
 import { isStaffPortalOrdersNavHidden } from "@/lib/portalNavigationVisibility";
 
@@ -49,15 +49,24 @@ export default function Sidebar({
       canAccessNavItem(user, item.href)
   );
 
+  const impersonating = isImpersonating();
+
   const handleLogout = async () => {
     if (isLoggingOut) return;
 
     setIsLoggingOut(true);
 
     try {
+      if (impersonating) {
+        await exitImpersonationSession();
+        window.close();
+        router.replace("/login-as?ended=1");
+        return;
+      }
+
       await logout();
-    } finally {
       router.push("/login");
+    } finally {
       setIsLoggingOut(false);
     }
   };
@@ -127,7 +136,7 @@ export default function Sidebar({
       <div className="shrink-0 border-t border-[#E2E8F0] px-[10px] py-[12px]">
         <button
           type="button"
-          title={showLabels ? "" : "Log out"}
+          title={showLabels ? "" : impersonating ? "Exit user session" : "Log out"}
           onClick={handleLogout}
           disabled={isLoggingOut}
           className={`flex h-[40px] w-full min-w-0 items-center rounded-[6px] text-[13px] text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -138,7 +147,13 @@ export default function Sidebar({
 
           {showLabels ? (
             <span className="min-w-0 truncate">
-              {isLoggingOut ? "Logging out..." : "Log out"}
+              {isLoggingOut
+                ? impersonating
+                  ? "Exiting..."
+                  : "Logging out..."
+                : impersonating
+                  ? "Exit user session"
+                  : "Log out"}
             </span>
           ) : null}
         </button>
