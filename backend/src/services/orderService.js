@@ -845,6 +845,10 @@ function mapOrderListRow(
   extras = {}
 ) {
   const orderYear = extractYear(row.subpoena_date) || extractYear(row.created_at) || "";
+  const orderDateDisplay =
+    formatDobDisplay(row.subpoena_date) ||
+    formatDobDisplay(row.created_at) ||
+    "";
   const dob = formatDobDisplay(row.dob);
   const ssn = formatSsnLastFourDisplay(row.ssn_last_four);
   const doiDisplay = formatDoiDisplay(row);
@@ -861,6 +865,7 @@ function mapOrderListRow(
     doctor: row.specific_doctor || "",
     facilityInfo: buildFacilityBlock(row),
     year: orderYear,
+    orderDateDisplay,
     status: writeOffState.status,
     statusBeforeInactive: row.status_before_inactive || "",
     cancelReason: row.cancel_reason || "",

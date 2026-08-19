@@ -26,6 +26,59 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/*
+  Tailwind v4 no longer sets cursor:pointer on buttons, so Windows shows an arrow.
+  Keep these unlayered and use !important so they are not dropped or overridden by
+  @layer base/preflight.
+*/
+a[href],
+button,
+[type="button"],
+[type="submit"],
+[type="reset"],
+[type="checkbox"],
+[type="radio"],
+[type="file"],
+[type="image"],
+[type="color"],
+[type="range"],
+select,
+summary,
+label,
+[role="button"],
+[role="link"],
+[role="tab"],
+[role="menuitem"],
+[role="option"],
+[role="checkbox"],
+[role="radio"],
+[role="switch"],
+[role="combobox"] {
+  cursor: pointer !important;
+}
+
+a[aria-disabled="true"],
+button:disabled,
+[type="button"]:disabled,
+[type="submit"]:disabled,
+[type="reset"]:disabled,
+[type="checkbox"]:disabled,
+[type="radio"]:disabled,
+[type="file"]:disabled,
+select:disabled,
+[disabled],
+[aria-disabled="true"] {
+  cursor: not-allowed !important;
+}
+
+.cursor-help {
+  cursor: help !important;
+}
+
+.cursor-default {
+  cursor: default !important;
+}
+
 @keyframes bell-unread-glow {
   0%,
   100% {

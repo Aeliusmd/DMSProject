@@ -560,6 +560,34 @@ function formatShortDate(dateValue) {
   return `${month}/${day}/${year.slice(2)}`;
 }
 
+function formatFullDate(dateValue) {
+  if (!dateValue) return "";
+
+  if (dateValue instanceof Date) {
+    if (Number.isNaN(dateValue.getTime())) return "";
+    const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+    const day = String(dateValue.getDate()).padStart(2, "0");
+    return `${month}/${day}/${dateValue.getFullYear()}`;
+  }
+
+  const value = String(dateValue).trim();
+  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  }
+
+  return "";
+}
+
+function getOrderIdColumnDate(order) {
+  return (
+    order.orderDateDisplay ||
+    formatFullDate(order.subpoenaDate) ||
+    formatFullDate(order.createdAt) ||
+    ""
+  );
+}
+
 function formatReportDate(order, displayKey, rawKey) {
   return order[displayKey] || formatShortDate(order[rawKey]);
 }
@@ -741,6 +769,7 @@ function toRenderOrder(order, companyPortalMode = false) {
     pickupPersonName: order.pickupPersonName || "",
     cnrDateSent: order.cnrDateSent || "",
     year: order.year || "",
+    orderDateDisplay: order.orderDateDisplay || "",
     dob: order.dob || "",
     ssn: order.ssn || "",
     dobSsn: order.dobSsn || [],
@@ -1749,6 +1778,7 @@ export default function OrdersTable({
                   const incompleteTooltip = buildIncompleteOrderTooltip(
                     order.missingRequiredFields
                   );
+                  const idColumnDate = getOrderIdColumnDate(order);
 
                   return (
                   <tr
@@ -1871,11 +1901,11 @@ export default function OrdersTable({
                             </div>
                           )}
 
-                        {order.year && (
+                        {idColumnDate ? (
                           <p className="mt-1 text-[10px] font-medium text-[#64748B]">
-                            {order.year}
+                            {idColumnDate}
                           </p>
-                        )}
+                        ) : null}
                       </div>
 
                       {order.dateRequestedDisplay || order.dateRequested ? (
