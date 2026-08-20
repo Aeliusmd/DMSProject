@@ -1,9 +1,9 @@
 const MAX_NAME_LENGTH = 150;
 const MAX_LOGON_LENGTH = 100;
 const MAX_EMAIL_LENGTH = 255;
-const MAX_PASSWORD_LENGTH = 128;
 const ALLOWED_ROLES = new Set(["Manager", "Employee"]);
 const { addPersonNameFormatError } = require("../utils/nameValidation");
+const { validatePasswordComplexity } = require("../utils/passwordValidation");
 
 function trimToString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -36,10 +36,10 @@ function validateCreateEmployee(body = {}) {
       field: "logon",
       message: `Username must be ${MAX_LOGON_LENGTH} characters or less`,
     });
-  } else if (!/^[A-Za-z0-9._-]+$/.test(logon)) {
+  } else if (!/^[A-Za-z0-9._\- ]+$/.test(logon)) {
     errors.push({
       field: "logon",
-      message: "Username can contain only letters, numbers, dot, underscore, and hyphen",
+      message: "Username can contain only letters, numbers, spaces, dot, underscore, and hyphen",
     });
   }
 
@@ -54,19 +54,7 @@ function validateCreateEmployee(body = {}) {
     errors.push({ field: "email", message: "Enter a valid email address" });
   }
 
-  if (!password) {
-    errors.push({ field: "password", message: "Password is required" });
-  } else if (password.length < 8) {
-    errors.push({
-      field: "password",
-      message: "Password must be at least 8 characters",
-    });
-  } else if (password.length > MAX_PASSWORD_LENGTH) {
-    errors.push({
-      field: "password",
-      message: `Password must be ${MAX_PASSWORD_LENGTH} characters or less`,
-    });
-  }
+  errors.push(...validatePasswordComplexity(password, "password"));
 
   if (!role) {
     errors.push({ field: "role", message: "Role is required" });
@@ -108,10 +96,10 @@ function validateUpdateEmployee(body = {}) {
       field: "logon",
       message: `Username must be ${MAX_LOGON_LENGTH} characters or less`,
     });
-  } else if (!/^[A-Za-z0-9._-]+$/.test(logon)) {
+  } else if (!/^[A-Za-z0-9._\- ]+$/.test(logon)) {
     errors.push({
       field: "logon",
-      message: "Username can contain only letters, numbers, dot, underscore, and hyphen",
+      message: "Username can contain only letters, numbers, spaces, dot, underscore, and hyphen",
     });
   }
 
@@ -127,16 +115,8 @@ function validateUpdateEmployee(body = {}) {
   }
 
   // Password is optional on update; validate only when provided.
-  if (password.length > 0 && password.length < 8) {
-    errors.push({
-      field: "password",
-      message: "Password must be at least 8 characters",
-    });
-  } else if (password.length > MAX_PASSWORD_LENGTH) {
-    errors.push({
-      field: "password",
-      message: `Password must be ${MAX_PASSWORD_LENGTH} characters or less`,
-    });
+  if (password.length > 0) {
+    errors.push(...validatePasswordComplexity(password, "password"));
   }
 
   if (!role) {

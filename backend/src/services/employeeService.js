@@ -4,6 +4,7 @@ const Employee = require("../models/Employee");
 const EmployeeMilestoneEvent = require("../models/EmployeeMilestoneEvent");
 const EmployeeSettings = require("../models/EmployeeSettings");
 const AuthSession = require("../models/AuthSession");
+const { sendInternalEmployeeCredentials } = require("./emailService");
 const { isAdminOrManager } = require("../utils/roles");
 const { formatEmployee } = require("../views/responses");
 const { sanitizeSearchText } = require("../utils/sanitize");
@@ -160,6 +161,24 @@ async function createEmployee({ name, logon, email, password, role }) {
   });
 
   await EmployeeSettings.ensureForEmployee(employee.id);
+
+  try {
+    await sendInternalEmployeeCredentials({
+      to: email,
+      name,
+      email,
+      userName: logon,
+      password,
+    });
+  } catch (error) {
+    // Keep account creation successful even if SMTP is unavailable.
+    // Admin can still share or reset credentials manually.
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[employees] Failed to email new employee credentials:",
+      error.message || error
+    );
+  }
 
   return mapEmployeeRow(employee);
 }

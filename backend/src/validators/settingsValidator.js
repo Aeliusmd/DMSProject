@@ -10,6 +10,8 @@ const {
   addOrganizationNameFormatError,
 } = require("../utils/nameValidation");
 
+const { validatePasswordComplexity } = require("../utils/passwordValidation");
+
 function validateUpdateProfile(body = {}) {
   const errors = [];
   const firstName = trimToString(body.firstName);
@@ -90,22 +92,7 @@ function validateChangePassword(body = {}) {
     });
   }
 
-  if (!newPassword) {
-    errors.push({
-      field: "newPassword",
-      message: "Password must be at least 8 characters",
-    });
-  } else if (newPassword.length < 8) {
-    errors.push({
-      field: "newPassword",
-      message: "Password must be at least 8 characters",
-    });
-  } else if (newPassword.length > 128) {
-    errors.push({
-      field: "newPassword",
-      message: "Password must be 128 characters or less",
-    });
-  }
+  errors.push(...validatePasswordComplexity(newPassword, "newPassword"));
 
   if (
     currentPassword &&

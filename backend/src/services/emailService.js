@@ -973,6 +973,70 @@ async function sendCompanyEmployeeCredentials({ to, name, email, password }) {
   }
 }
 
+async function sendInternalEmployeeCredentials({
+  to,
+  name,
+  email,
+  userName,
+  password,
+}) {
+  const portalUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/login`;
+  const subject = "Your DMS staff account";
+  const text = [
+    `Hello ${name},`,
+    "",
+    "An administrator created a staff account for you in DMS.",
+    "",
+    `Login page: ${portalUrl}`,
+    `Email: ${email}`,
+    `Username: ${userName}`,
+    `Password: ${password}`,
+    "",
+    "Keep these credentials secure.",
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#0F172A;line-height:1.6;max-width:560px;">
+      <h2 style="color:#0097B2;">DMS Staff Account</h2>
+      <p>Hello ${escapeHtml(name)},</p>
+      <p>An administrator created a staff account for you in DMS.</p>
+      <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:16px;margin:16px 0;">
+        <p style="margin:0 0 8px;"><strong>Login page:</strong> <a href="${escapeHtml(portalUrl)}">${escapeHtml(portalUrl)}</a></p>
+        <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(email)}</p>
+        <p style="margin:0 0 8px;"><strong>Username:</strong> ${escapeHtml(userName)}</p>
+        <p style="margin:0;"><strong>Password:</strong> ${escapeHtml(password)}</p>
+      </div>
+      <p style="color:#64748B;font-size:13px;">Keep these credentials secure.</p>
+    </div>`;
+
+  const mailTransporter = getTransporter();
+
+  if (!mailTransporter) {
+    logger.warn("[DEV] Internal employee credentials", {
+      to,
+      email,
+      userName,
+      password,
+      hint: "Set SMTP credentials in .env to send real emails",
+    });
+    return { devLogged: true };
+  }
+
+  try {
+    await mailTransporter.sendMail(
+      buildMailOptions({ to, subject, text, html })
+    );
+    logger.info("Internal employee credentials email sent", { to });
+    return { delivered: true };
+  } catch (error) {
+    logger.error("Failed to send internal employee credentials", {
+      to,
+      error: error.message,
+    });
+    throwEmailDeliveryError(error);
+  }
+}
+
 async function sendPersonalPortalResearchFeeRequest({
   to,
   name,
@@ -1051,4 +1115,5 @@ module.exports = {
   sendPersonalPortalConfirmation,
   sendPersonalPortalResearchFeeRequest,
   sendCompanyEmployeeCredentials,
+  sendInternalEmployeeCredentials,
 };

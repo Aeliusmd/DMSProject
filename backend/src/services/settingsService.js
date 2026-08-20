@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const ApiError = require("../utils/ApiError");
 const Employee = require("../models/Employee");
+const { validatePasswordComplexity } = require("../utils/passwordValidation");
 const EmployeeSettings = require("../models/EmployeeSettings");
 const { formatUser } = require("../views/responses");
 
@@ -162,13 +163,9 @@ async function changePassword(employeeId, { currentPassword, newPassword }) {
     ]);
   }
 
-  if (!newPassword || newPassword.length < 8) {
-    throw new ApiError(400, "Validation failed", [
-      {
-        field: "newPassword",
-        message: "Password must be at least 8 characters",
-      },
-    ]);
+  const passwordErrors = validatePasswordComplexity(newPassword, "newPassword");
+  if (passwordErrors.length > 0) {
+    throw new ApiError(400, "Validation failed", passwordErrors);
   }
 
   const passwordMatches = await bcrypt.compare(
