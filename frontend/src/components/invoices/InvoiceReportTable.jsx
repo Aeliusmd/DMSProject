@@ -76,6 +76,7 @@ export default function InvoiceReportTable({
   const router = useRouter();
   const [groups, setGroups] = useState(invoiceGroups);
   const [companyPageState, setCompanyPageState] = useState({});
+  const [collapsedCompanies, setCollapsedCompanies] = useState({});
   const [selectedRows, setSelectedRows] = useState({});
   const [selectedInvoiceOrder, setSelectedInvoiceOrder] = useState(null);
   const [writeOffInvoices, setWriteOffInvoices] = useState([]);
@@ -594,16 +595,25 @@ export default function InvoiceReportTable({
                   group.companyGroupKey,
                   group
                 );
+                const companyKey = group.companyGroupKey ?? group.company;
+                const isCollapsed = Boolean(collapsedCompanies[companyKey]);
 
                 return (
                   <InvoiceGroup
-                    key={group.companyGroupKey ?? group.company}
+                    key={companyKey}
                     group={group}
                     selectedIds={selectedIds}
                     allSelected={allSelected}
                     sendingCompany={sendingCompany}
                     resendingId={resendingId}
                     mode={mode}
+                    isCollapsed={isCollapsed}
+                    onToggleCollapsed={() =>
+                      setCollapsedCompanies((prev) => ({
+                        ...prev,
+                        [companyKey]: !prev[companyKey],
+                      }))
+                    }
                     companyPage={companyState.currentPage}
                     companyLoading={companyState.loading}
                     onCompanyPrevious={() => handleCompanyPrevious(group)}
@@ -680,6 +690,8 @@ function InvoiceGroup({
   sendingCompany = null,
   resendingId = null,
   mode = "send",
+  isCollapsed = false,
+  onToggleCollapsed,
   companyPage = 1,
   companyLoading = false,
   onCompanyPrevious,
@@ -725,7 +737,21 @@ function InvoiceGroup({
   return (
     <>
       <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC]">
-        <td className="px-4 py-4 align-top"></td>
+        <td className="px-4 py-4 align-top">
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-expanded={!isCollapsed}
+            aria-label={
+              isCollapsed
+                ? `Expand invoices for ${group.company}`
+                : `Collapse invoices for ${group.company}`
+            }
+            className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-[4px] text-[#64748B] hover:bg-[#E2E8F0] hover:text-[#0F172A]"
+          >
+            <CompanyExpandIcon expanded={!isCollapsed} />
+          </button>
+        </td>
 
         <td className="px-4 py-4 align-top">
           <p className="max-w-[170px] text-[12px] font-semibold leading-[20px] text-[#111827]">
@@ -742,7 +768,8 @@ function InvoiceGroup({
         <td colSpan={6}></td>
       </tr>
 
-      {group.rows.map((row) => (
+      {!isCollapsed &&
+        group.rows.map((row) => (
         <InvoiceRow
           key={row.id}
           group={group}
@@ -759,6 +786,7 @@ function InvoiceGroup({
         />
       ))}
 
+      {!isCollapsed && (
       <tr className="border-b border-[#CBD5E1] bg-white">
         <td className="px-4 py-4 align-middle">
           <InvoiceCheckbox
@@ -853,6 +881,7 @@ function InvoiceGroup({
 
         <td className="px-4 py-4"></td>
       </tr>
+      )}
     </>
   );
 }
@@ -978,6 +1007,27 @@ function InvoiceRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+function CompanyExpandIcon({ expanded }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      className={`transition-transform ${expanded ? "rotate-90" : ""}`}
+      aria-hidden="true"
+    >
+      <path
+        d="M9 6l6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
