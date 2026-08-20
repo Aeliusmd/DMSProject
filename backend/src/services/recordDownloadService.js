@@ -51,11 +51,14 @@ async function resolveOrderRecordFiles(order) {
     }
 
     const typeSuffix = record.record_type || "records";
+    const originalName = `${record.original_file_name || ""}`.trim();
     recordLabels.push(RECORD_TITLES[record.record_type] || "Records");
     files.push({
       recordType: record.record_type,
       label: RECORD_TITLES[record.record_type] || "Records",
-      filename: `${safeOrderNumber}-${typeSuffix}.pdf`,
+      filename: originalName
+        ? `${safeOrderNumber}-${record.id}-${originalName}`
+        : `${safeOrderNumber}-${typeSuffix}-${record.id}.pdf`,
       path: absolutePath,
     });
   }

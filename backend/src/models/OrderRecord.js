@@ -1,5 +1,7 @@
 /**
- * Per-type scanned records for an order (order_records table).
+ * Scanned records for an order (order_records table).
+ * Multiple rows per (order_id, record_type) are allowed — one PDF per row, no merging.
+ * A row with NULL storage_path means the type is requested but no file is uploaded yet.
  */
 
 const fs = require("fs");
@@ -7,6 +9,9 @@ const path = require("path");
 const { getPool } = require("../config/database");
 const fileStorage = require("../utils/fileStorage");
 const { ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
+
+const RECORD_COLUMNS = `id, order_id, record_type, storage_path, original_file_name,
+              uploaded_by, uploaded_at, created_at, updated_at`;
 
 function resolveStorageAbsolutePath(storagePath) {
   const normalized = String(storagePath || "").replace(/\\/g, "/");
@@ -19,16 +24,25 @@ function resolveStorageAbsolutePath(storagePath) {
   return fileStorage.resolveAbsolutePath(normalized);
 }
 
+function deleteStoredFile(storagePath) {
+  if (!storagePath) return;
+
+  const absolutePath = resolveStorageAbsolutePath(storagePath);
+  if (absolutePath && fs.existsSync(absolutePath)) {
+    fs.unlinkSync(absolutePath);
+  }
+}
+
 class OrderRecord {
   static async findByOrderId(orderId, connection = null) {
     const db = connection || getPool();
 
     const [rows] = await db.execute(
-      `SELECT id, order_id, record_type, storage_path, uploaded_by, uploaded_at,
-              created_at, updated_at
+      `SELECT ${RECORD_COLUMNS}
        FROM order_records
        WHERE order_id = :orderId
-       ORDER BY FIELD(record_type, 'medical', 'billing', 'employment', 'xrays', 'other')`,
+       ORDER BY FIELD(record_type, 'medical', 'billing', 'employment', 'xrays', 'other'),
+                id ASC`,
       { orderId }
     );
 
@@ -46,30 +60,51 @@ class OrderRecord {
     }, {});
 
     const [rows] = await db.execute(
-      `SELECT id, order_id, record_type, storage_path, uploaded_by, uploaded_at,
-              created_at, updated_at
+      `SELECT ${RECORD_COLUMNS}
        FROM order_records
        WHERE order_id IN (${placeholders})
-       ORDER BY order_id, FIELD(record_type, 'medical', 'billing', 'employment', 'xrays', 'other')`,
+       ORDER BY order_id,
+                FIELD(record_type, 'medical', 'billing', 'employment', 'xrays', 'other'),
+                id ASC`,
       params
     );
 
     return rows;
   }
 
+  static async findById(recordId, connection = null) {
+    const db = connection || getPool();
+    const [rows] = await db.execute(
+      `SELECT ${RECORD_COLUMNS}
+       FROM order_records
+       WHERE id = :recordId
+       LIMIT 1`,
+      { recordId }
+    );
+    return rows[0] || null;
+  }
+
   static async findByOrderAndType(orderId, recordType, connection = null) {
+    const rows = await OrderRecord.findByOrderAndTypeAll(
+      orderId,
+      recordType,
+      connection
+    );
+    return rows.find((row) => row.storage_path) || rows[0] || null;
+  }
+
+  static async findByOrderAndTypeAll(orderId, recordType, connection = null) {
     const db = connection || getPool();
 
     const [rows] = await db.execute(
-      `SELECT id, order_id, record_type, storage_path, uploaded_by, uploaded_at,
-              created_at, updated_at
+      `SELECT ${RECORD_COLUMNS}
        FROM order_records
        WHERE order_id = :orderId AND record_type = :recordType
-       LIMIT 1`,
+       ORDER BY id ASC`,
       { orderId, recordType }
     );
 
-    return rows[0] || null;
+    return rows;
   }
 
   static async syncForOrder(connection, orderId, recordTypes = []) {
@@ -81,12 +116,7 @@ class OrderRecord {
     );
 
     for (const record of removed) {
-      if (!record.storage_path) continue;
-
-      const absolutePath = resolveStorageAbsolutePath(record.storage_path);
-      if (absolutePath && fs.existsSync(absolutePath)) {
-        fs.unlinkSync(absolutePath);
-      }
+      deleteStoredFile(record.storage_path);
     }
 
     if (!normalized.length) {
@@ -110,42 +140,88 @@ class OrderRecord {
       params
     );
 
+    const remaining = await OrderRecord.findByOrderId(orderId, connection);
+    const existingTypes = new Set(remaining.map((row) => row.record_type));
+
     for (const recordType of normalized) {
+      if (existingTypes.has(recordType)) continue;
+
       await connection.execute(
         `INSERT INTO order_records (order_id, record_type, created_at, updated_at)
-         VALUES (:orderId, :recordType, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE updated_at = NOW()`,
+         VALUES (:orderId, :recordType, NOW(), NOW())`,
         { orderId, recordType }
       );
     }
   }
 
-  static async upsertScan(
+  static async insertScan(
     connection,
-    { orderId, recordType, storagePath, uploadedBy }
+    { orderId, recordType, storagePath, originalFileName, uploadedBy }
   ) {
+    const existing = await OrderRecord.findByOrderAndTypeAll(
+      orderId,
+      recordType,
+      connection
+    );
+    const placeholder = existing.find((row) => !row.storage_path);
+
+    if (placeholder) {
+      await connection.execute(
+        `UPDATE order_records
+         SET storage_path = :storagePath,
+             original_file_name = :originalFileName,
+             uploaded_by = :uploadedBy,
+             uploaded_at = NOW(),
+             updated_at = NOW()
+         WHERE id = :id`,
+        {
+          id: placeholder.id,
+          storagePath,
+          originalFileName: originalFileName || null,
+          uploadedBy: uploadedBy || null,
+        }
+      );
+      return;
+    }
+
     await connection.execute(
       `INSERT INTO order_records (
-         order_id, record_type, storage_path, uploaded_by, uploaded_at, created_at, updated_at
+         order_id, record_type, storage_path, original_file_name,
+         uploaded_by, uploaded_at, created_at, updated_at
        ) VALUES (
-         :orderId, :recordType, :storagePath, :uploadedBy, NOW(), NOW(), NOW()
-       )
-       ON DUPLICATE KEY UPDATE
-         storage_path = VALUES(storage_path),
-         uploaded_by = VALUES(uploaded_by),
-         uploaded_at = VALUES(uploaded_at),
-         updated_at = NOW()`,
-      { orderId, recordType, storagePath, uploadedBy: uploadedBy || null }
+         :orderId, :recordType, :storagePath, :originalFileName,
+         :uploadedBy, NOW(), NOW(), NOW()
+       )`,
+      {
+        orderId,
+        recordType,
+        storagePath,
+        originalFileName: originalFileName || null,
+        uploadedBy: uploadedBy || null,
+      }
     );
   }
 
   static async clearScan(connection, orderId, recordType) {
-    const existing = await OrderRecord.findByOrderAndType(orderId, recordType, connection);
+    const existing = await OrderRecord.findByOrderAndTypeAll(
+      orderId,
+      recordType,
+      connection
+    );
+
+    for (const row of existing) {
+      deleteStoredFile(row.storage_path);
+    }
 
     await connection.execute(
-      `UPDATE order_records
-       SET storage_path = NULL, uploaded_by = NULL, uploaded_at = NULL, updated_at = NOW()
+      `DELETE FROM order_records
        WHERE order_id = :orderId AND record_type = :recordType`,
+      { orderId, recordType }
+    );
+
+    await connection.execute(
+      `INSERT INTO order_records (order_id, record_type, created_at, updated_at)
+       VALUES (:orderId, :recordType, NOW(), NOW())`,
       { orderId, recordType }
     );
 

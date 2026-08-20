@@ -241,24 +241,24 @@ exports.getSubpoenaFile = asyncHandler(async (req, res) => {
 });
 
 exports.scanMedicalRecords = asyncHandler(async (req, res) => {
+  const files = req.files?.length ? req.files : req.file ? [req.file] : [];
   throwIfInvalid(
-    validateScanMedicalRecords(req.body, req.query, req.file)
+    validateScanMedicalRecords(req.body, req.query, files)
   );
 
-  const replace = req.query.replace === "true";
   const recordType = req.query.recordType || req.body?.recordType || "medical";
 
   const order = await orderService.scanMedicalRecords(
     req.params.id,
-    req.file,
+    files,
     req.user.id,
-    { replace, recordType }
+    { recordType }
   );
 
   return ApiResponse.success(
     res,
     { order },
-    replace ? "Records replaced successfully" : "Records uploaded successfully"
+    "Records uploaded successfully"
   );
 });
 
@@ -305,8 +305,10 @@ exports.getMedicalRecordsFile = asyncHandler(async (req, res) => {
   throwIfInvalid(validateMedicalRecordTypeQuery(req.query));
 
   const recordType = req.query.recordType || "medical";
+  const recordId = req.query.recordId || null;
   const fileInfo = await orderService.getOrderMedicalRecordsFile(req.params.id, {
     recordType,
+    recordId,
   });
 
   res.setHeader("Content-Type", "application/pdf");

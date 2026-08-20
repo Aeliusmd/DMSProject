@@ -105,25 +105,28 @@ export default function ScanMedicalRecordsPage() {
     if (input) input.value = "";
   };
 
-  const validateAndSetFile = (recordType, file) => {
+  const validateAndSetFiles = (recordType, fileList) => {
     setError("");
     setSuccessMessage("");
 
-    if (!file) return false;
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return false;
 
-    if (file.type !== "application/pdf") {
-      clearSelectedFile(recordType);
-      setError("Only PDF files are allowed.");
-      return false;
+    for (const file of files) {
+      if (file.type !== "application/pdf") {
+        clearSelectedFile(recordType);
+        setError("Only PDF files are allowed.");
+        return false;
+      }
+
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        clearSelectedFile(recordType);
+        setError(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
+        return false;
+      }
     }
 
-    if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-      clearSelectedFile(recordType);
-      setError(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
-      return false;
-    }
-
-    setSelectedFiles((prev) => ({ ...prev, [recordType]: file }));
+    setSelectedFiles((prev) => ({ ...prev, [recordType]: files }));
     return true;
   };
 
@@ -132,16 +135,13 @@ export default function ScanMedicalRecordsPage() {
   };
 
   const handleFileChange = (recordType, event) => {
-    const file = event.target.files?.[0];
-    validateAndSetFile(recordType, file);
+    validateAndSetFiles(recordType, event.target.files);
   };
 
   const handleDrop = (recordType, event) => {
     event.preventDefault();
     setDraggingType("");
-
-    const file = event.dataTransfer.files?.[0];
-    validateAndSetFile(recordType, file);
+    validateAndSetFiles(recordType, event.dataTransfer.files);
   };
 
   const refreshOrder = async () => {
@@ -151,19 +151,13 @@ export default function ScanMedicalRecordsPage() {
   };
 
   const selectedUploadSlots = recordSlots.filter((slot) => {
-    if (!selectedFiles[slot.recordType]) return false;
-    if (!isEditMode && slot.hasFile) return false;
-    return true;
+    const files = selectedFiles[slot.recordType];
+    return Array.isArray(files) && files.length > 0;
   });
 
   const hasSelectedFiles = selectedUploadSlots.length > 0;
 
-  const getUploadQueue = () =>
-    recordSlots.filter((slot) => {
-      if (!selectedFiles[slot.recordType]) return false;
-      if (!isEditMode && slot.hasFile) return false;
-      return true;
-    });
+  const getUploadQueue = () => selectedUploadSlots;
 
   const handleUploadAll = async () => {
     const queue = getUploadQueue();
@@ -173,17 +167,20 @@ export default function ScanMedicalRecordsPage() {
     setSuccessMessage("");
     setUploading(true);
 
+    const wasComplete = allOrderRecordSlotsUploaded(order);
+
     try {
       let latest = order;
+      let uploadedFileCount = 0;
 
       for (const slot of queue) {
-        const selectedFile = selectedFiles[slot.recordType];
-        if (!selectedFile) continue;
+        const files = selectedFiles[slot.recordType] || [];
+        if (!files.length) continue;
 
-        latest = await uploadMedicalRecordsScan(orderId, selectedFile, {
-          replace: isEditMode && slot.hasFile,
+        latest = await uploadMedicalRecordsScan(orderId, files, {
           recordType: slot.recordType,
         });
+        uploadedFileCount += files.length;
 
         if (latest) {
           setOrder(latest);
@@ -206,19 +203,21 @@ export default function ScanMedicalRecordsPage() {
 
       const uploadedLabels = queue.map((slot) => slot.label).join(", ");
       latest = latest || (await refreshOrder());
+      const fileLabel =
+        uploadedFileCount === 1 ? "file" : "files";
 
-      if (allOrderRecordSlotsUploaded(latest) && !isEditMode) {
+      if (
+        allOrderRecordSlotsUploaded(latest) &&
+        !wasComplete &&
+        !isEditMode
+      ) {
         setSuccessMessage(
-          queue.length > 1
-            ? `${uploadedLabels} uploaded. All record types are complete.`
-            : `${queue[0].label} uploaded. All record types are complete.`
+          `${uploadedFileCount} ${fileLabel} uploaded for ${uploadedLabels}. All record types are complete.`
         );
         setTimeout(() => router.push(returnPath), 1500);
       } else {
         setSuccessMessage(
-          queue.length > 1
-            ? `${uploadedLabels} uploaded.`
-            : `${queue[0].label} uploaded.`
+          `${uploadedFileCount} ${fileLabel} uploaded for ${uploadedLabels}.`
         );
       }
     } catch (err) {
@@ -408,12 +407,26 @@ export default function ScanMedicalRecordsPage() {
                       {uploadedSlots.map((slot) => (
                         <li
                           key={slot.recordType}
-                          className="flex items-center justify-between gap-2 rounded-[4px] bg-white px-2 py-1.5 text-[10px]"
+                          className="rounded-[4px] bg-white px-2 py-1.5 text-[10px]"
                         >
-                          <span className="font-medium text-[#166534]">
-                            {slot.label}
-                          </span>
-                          <span className="text-[#64748B]">PDF uploaded</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-[#166534]">
+                              {slot.label}
+                            </span>
+                            <span className="text-[#64748B]">
+                              {slot.files?.length || 1} PDF
+                              {(slot.files?.length || 1) === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                          {(slot.files || []).length > 0 ? (
+                            <ul className="mt-1 space-y-0.5 text-[#475569]">
+                              {slot.files.map((file) => (
+                                <li key={file.id || file.storagePath} className="truncate">
+                                  {file.originalFileName || "records.pdf"}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -463,14 +476,12 @@ export default function ScanMedicalRecordsPage() {
               } ${!canUpload ? "opacity-50" : ""}`}
             >
               {recordSlots.map((slot) => {
-                const selectedFile = selectedFiles[slot.recordType];
+                const selectedSlotFiles = selectedFiles[slot.recordType] || [];
                 const isRemoving = removingType === slot.recordType;
                 const isDragging = draggingType === slot.recordType;
                 const uploadDisabled =
-                  !canUpload ||
-                  uploading ||
-                  Boolean(removingType) ||
-                  (!isEditMode && slot.hasFile);
+                  !canUpload || uploading || Boolean(removingType);
+                const uploadedFileCount = slot.files?.length || 0;
 
                 const uploadPanel = (
                   <>
@@ -496,10 +507,10 @@ export default function ScanMedicalRecordsPage() {
                       } ${uploadDisabled ? "pointer-events-none opacity-60" : ""}`}
                     >
                       <p className="text-[11px] font-medium text-[#334155]">
-                        Drop PDF here
+                        Drop PDF files here
                       </p>
                       <p className="mt-0.5 text-[10px] text-[#94A3B8]">
-                        Max {MAX_FILE_SIZE_MB}MB
+                        Multiple PDFs allowed · Max {MAX_FILE_SIZE_MB}MB each
                       </p>
                       <p className="mt-0.5 text-[10px] text-[#94A3B8]">or</p>
                       <button
@@ -516,6 +527,7 @@ export default function ScanMedicalRecordsPage() {
                         }}
                         type="file"
                         accept="application/pdf,.pdf"
+                        multiple
                         onChange={(event) =>
                           handleFileChange(slot.recordType, event)
                         }
@@ -523,48 +535,49 @@ export default function ScanMedicalRecordsPage() {
                       />
                     </div>
 
-                    {selectedFile && (
-                      <p
-                        className={`mt-2 truncate text-[10px] font-medium text-[#007F96] ${
+                    {selectedSlotFiles.length > 0 && (
+                      <ul
+                        className={`mt-2 space-y-0.5 text-[10px] font-medium text-[#007F96] ${
                           isMultiType ? "text-left" : "text-center"
                         }`}
                       >
-                        Selected: {selectedFile.name}
-                      </p>
+                        {selectedSlotFiles.map((file) => (
+                          <li key={file.name + file.size} className="truncate">
+                            Selected: {file.name}
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </>
                 );
 
                 if (!isMultiType) {
-                  if (!slot.hasFile || isEditMode) {
-                    return (
-                      <div key={slot.recordType} className="w-full text-center">
-                        {isEditMode && slot.hasFile && (
-                          <div className="mb-3 flex items-center justify-between rounded-[6px] border border-[#E2E8F0] bg-white px-3 py-2 text-left">
-                            <span className="text-[11px] font-medium text-[#059669]">
-                              Current file uploaded
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setConfirmAction({
-                                  type: "remove",
-                                  recordType: slot.recordType,
-                                })
-                              }
-                              disabled={uploading || isRemoving}
-                              className="text-[10px] font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {isRemoving ? "Removing..." : "Remove"}
-                            </button>
-                          </div>
-                        )}
-                        {uploadPanel}
-                      </div>
-                    );
-                  }
-
-                  return null;
+                  return (
+                    <div key={slot.recordType} className="w-full text-center">
+                      {slot.hasFile && (
+                        <div className="mb-3 flex items-center justify-between rounded-[6px] border border-[#E2E8F0] bg-white px-3 py-2 text-left">
+                          <span className="text-[11px] font-medium text-[#059669]">
+                            {uploadedFileCount} file
+                            {uploadedFileCount === 1 ? "" : "s"} uploaded
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmAction({
+                                type: "remove",
+                                recordType: slot.recordType,
+                              })
+                            }
+                            disabled={uploading || isRemoving}
+                            className="text-[10px] font-medium text-red-500 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isRemoving ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
+                      )}
+                      {uploadPanel}
+                    </div>
+                  );
                 }
 
                 return (
@@ -582,15 +595,12 @@ export default function ScanMedicalRecordsPage() {
                             slot.hasFile ? "text-[#059669]" : "text-[#94A3B8]"
                           }`}
                         >
-                          {slot.hasFile ? "Complete" : "Pending"}
+                          {slot.hasFile
+                            ? `${uploadedFileCount} file${uploadedFileCount === 1 ? "" : "s"} uploaded`
+                            : "Pending"}
                         </p>
                       </div>
-                      {slot.hasFile && !isEditMode ? (
-                        <span className="shrink-0 rounded-[4px] bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-semibold text-[#166534]">
-                          Uploaded
-                        </span>
-                      ) : null}
-                      {isEditMode && slot.hasFile && (
+                      {slot.hasFile ? (
                         <button
                           type="button"
                           onClick={() =>
@@ -604,22 +614,16 @@ export default function ScanMedicalRecordsPage() {
                         >
                           {isRemoving ? "..." : "Remove"}
                         </button>
-                      )}
+                      ) : null}
                     </div>
 
-                    {slot.hasFile && !isEditMode ? (
-                      <p className="mt-2 text-[10px] font-medium text-[#64748B]">
-                        PDF uploaded for this record type.
-                      </p>
-                    ) : null}
-
-                    {(!slot.hasFile || isEditMode) && uploadPanel}
+                    {uploadPanel}
                   </div>
                 );
               })}
             </div>
 
-            {canUpload && !allUploaded && (
+            {canUpload && (
               <button
                 type="button"
                 onClick={() => setConfirmAction({ type: "upload" })}
@@ -642,10 +646,10 @@ export default function ScanMedicalRecordsPage() {
               </p>
             )}
 
-            {isMultiType && canUpload && !isEditMode && !allUploaded && (
+            {isMultiType && canUpload && (
               <p className="mt-4 text-[10px] text-[#64748B]">
-                Upload each record type separately. Completed types stay marked
-                as uploaded until all required types are done.
+                You can upload multiple PDFs per record type. Files are stored
+                separately and are not merged.
               </p>
             )}
           </div>
@@ -654,17 +658,17 @@ export default function ScanMedicalRecordsPage() {
 
       <ConfirmModal
         open={confirmAction?.type === "upload"}
-        title={
-          uploadQueue.some((slot) => slot.hasFile)
-            ? "Replace Records"
-            : "Upload Records"
-        }
+        title="Upload Records"
         message={
           uploadQueue.length > 1
-            ? `Upload PDFs for ${uploadQueue.map((slot) => slot.label).join(", ")}?`
-            : uploadQueue[0]?.hasFile
-              ? `Replace the existing ${uploadQueue[0].label} file with this PDF?`
-              : `Upload ${uploadQueue[0]?.label || "records"} for this order?`
+            ? `Upload the selected PDFs for ${uploadQueue.map((slot) => slot.label).join(", ")}? Files will be saved separately and will not be merged.`
+            : `Upload ${
+                (selectedFiles[uploadQueue[0]?.recordType] || []).length || 1
+              } PDF file${
+                ((selectedFiles[uploadQueue[0]?.recordType] || []).length || 1) === 1
+                  ? ""
+                  : "s"
+              } for ${uploadQueue[0]?.label || "records"}? Files will be saved separately and will not be merged.`
         }
         variant="warning"
         confirmLabel={uploading ? "Uploading..." : "Upload"}
@@ -677,7 +681,7 @@ export default function ScanMedicalRecordsPage() {
       <ConfirmModal
         open={confirmAction?.type === "remove"}
         title={`Remove ${pendingConfirmSlot?.label || "Records"}`}
-        message={`Remove the uploaded ${pendingConfirmSlot?.label || "records"} file for this order?`}
+        message={`Remove all uploaded ${pendingConfirmSlot?.label || "records"} files for this order?`}
         variant="danger"
         confirmLabel={removingType ? "Removing..." : "Remove"}
         cancelLabel="Cancel"

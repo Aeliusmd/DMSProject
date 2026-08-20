@@ -8,7 +8,7 @@ const INVOICE_SELECT = `
          o.case_number,
          o.defendant,
          (SELECT GROUP_CONCAT(
-            r.record_type
+            DISTINCT r.record_type
             ORDER BY FIELD(r.record_type, 'medical', 'billing', 'employment', 'xrays', 'other')
             SEPARATOR ','
           )

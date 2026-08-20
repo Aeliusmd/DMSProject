@@ -215,7 +215,7 @@ const uploadMedicalRecordsScan = multer({
   limits: {
     fileSize: Number(process.env.UPLOAD_MAX_FILE_SIZE_MB || 50) * 1024 * 1024,
   },
-}).single("file");
+}).array("file", 20);
 
 function toRelativeStoragePath(file) {
   if (!file) return null;
