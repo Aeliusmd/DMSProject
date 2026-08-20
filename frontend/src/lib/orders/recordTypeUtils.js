@@ -71,18 +71,33 @@ export function getOrderRecordSlots(order = {}) {
   for (const record of recordRows) {
     if (!record?.recordType) continue;
 
-    const existing = recordsByType.get(record.recordType);
+    const existing = recordsByType.get(record.recordType) || {
+      recordType: record.recordType,
+      label: getOrderTypeLabel(record.recordType),
+      hasFile: false,
+      storagePath: null,
+      storageUrl: null,
+      files: [],
+    };
     const hasFile = Boolean(record.hasFile || record.storagePath);
 
-    if (!existing || hasFile) {
-      recordsByType.set(record.recordType, {
+    if (hasFile && !existing.files.some((file) => file.id && file.id === record.id)) {
+      existing.files.push({
+        id: record.id,
         recordType: record.recordType,
-        label: getOrderTypeLabel(record.recordType),
-        hasFile: existing?.hasFile || hasFile,
-        storagePath: record.storagePath || existing?.storagePath || null,
-        storageUrl: record.storageUrl || existing?.storageUrl || null,
+        originalFileName: record.originalFileName || "",
+        storagePath: record.storagePath || null,
+        storageUrl: record.storageUrl || null,
+        hasFile: true,
       });
     }
+
+    recordsByType.set(record.recordType, {
+      ...existing,
+      hasFile: existing.hasFile || hasFile,
+      storagePath: existing.storagePath || record.storagePath || null,
+      storageUrl: existing.storageUrl || record.storageUrl || null,
+    });
   }
 
   const flagSlots = ORDER_RECORD_TYPES.filter((recordType) =>
@@ -93,6 +108,7 @@ export function getOrderRecordSlots(order = {}) {
     hasFile: false,
     storagePath: null,
     storageUrl: null,
+    files: [],
   }));
 
   const orderIndex = Object.fromEntries(

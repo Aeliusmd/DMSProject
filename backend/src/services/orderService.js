@@ -161,6 +161,7 @@ function mapOrderRecordRow(row = {}) {
     id: row.id,
     recordType: row.record_type,
     storagePath: row.storage_path || null,
+    originalFileName: row.original_file_name || null,
     storageUrl: buildSubpoenaUrl(row.storage_path),
     uploadedAt: row.uploaded_at || null,
     hasFile: Boolean(row.storage_path),
@@ -176,11 +177,13 @@ function getPrimaryRecordType(orderRecords = []) {
 }
 
 function resolveOrderTypeForForm(_row, orderRecords = []) {
-  const types = orderRecords.map((row) => row.record_type);
+  const types = [
+    ...new Set(orderRecords.map((row) => row.record_type).filter(Boolean)),
+  ];
   if (types.length === 1) {
     return types[0];
   }
-  return getPrimaryRecordType(orderRecords);
+  return types[0] || getPrimaryRecordType(orderRecords);
 }
 
 function hasAnyRecordsRequested(orderRecords = []) {
@@ -189,7 +192,14 @@ function hasAnyRecordsRequested(orderRecords = []) {
 
 function allOrderRecordsUploaded(orderRecords = []) {
   if (!orderRecords.length) return false;
-  return orderRecords.every((row) => Boolean(row.storage_path));
+
+  const types = [
+    ...new Set(orderRecords.map((row) => row.record_type).filter(Boolean)),
+  ];
+
+  return types.every((type) =>
+    orderRecords.some((row) => row.record_type === type && row.storage_path)
+  );
 }
 
 function anyOrderRecordUploaded(orderRecords = []) {
@@ -1139,7 +1149,9 @@ function mapOrderDetail(
     providerId: row.provider_id ? String(row.provider_id) : "",
     providerName: row.provider_name || "",
     type: resolveOrderTypeForForm(row, orderRecords),
-    recordTypes: orderRecords.map((record) => record.record_type),
+    recordTypes: [
+      ...new Set(orderRecords.map((record) => record.record_type).filter(Boolean)),
+    ],
     orderRecords: mappedRecords,
     allRecordsUploaded: allOrderRecordsUploaded(orderRecords),
     court: row.court || "",
@@ -3052,11 +3064,12 @@ function deleteStoredMedicalRecordsFile(storagePath) {
 
 async function scanMedicalRecords(
   orderId,
-  file,
+  files,
   actorId,
-  { replace = false, recordType = "medical" } = {}
+  { recordType = "medical" } = {}
 ) {
-  if (!file) {
+  const fileList = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  if (!fileList.length) {
     throw new ApiError(400, "Records PDF is required");
   }
 
@@ -3089,29 +3102,21 @@ async function scanMedicalRecords(
     );
   }
 
-  const hasExistingFile = Boolean(targetRecord.storage_path);
-
-  if (hasExistingFile && !replace) {
-    throw new ApiError(409, "Records were already uploaded for this record type");
-  }
-
-  const storagePath = toRelativeStoragePath(file);
   const pool = getPool();
   const connection = await pool.getConnection();
 
   try {
     await connection.beginTransaction();
 
-    if (hasExistingFile) {
-      deleteStoredMedicalRecordsFile(targetRecord.storage_path);
+    for (const file of fileList) {
+      await OrderRecord.insertScan(connection, {
+        orderId,
+        recordType: normalizedType,
+        storagePath: toRelativeStoragePath(file),
+        originalFileName: file.originalname || null,
+        uploadedBy: actorId || null,
+      });
     }
-
-    await OrderRecord.upsertScan(connection, {
-      orderId,
-      recordType: normalizedType,
-      storagePath,
-      uploadedBy: actorId || null,
-    });
 
     const refreshedRecords = await OrderRecord.findByOrderId(orderId, connection);
     const reviewStatus = allOrderRecordsUploaded(refreshedRecords)
@@ -3212,9 +3217,12 @@ async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {
   try {
     await connection.beginTransaction();
 
-    for (const target of targets) {
-      deleteStoredMedicalRecordsFile(target.storage_path);
-      await OrderRecord.clearScan(connection, orderId, target.record_type);
+    const typesToClear = [
+      ...new Set(targets.map((target) => target.record_type)),
+    ];
+
+    for (const type of typesToClear) {
+      await OrderRecord.clearScan(connection, orderId, type);
     }
 
     await Order.upsertWorkflowStage(
@@ -3243,7 +3251,10 @@ async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {
   return getOrderById(orderId);
 }
 
-async function getOrderMedicalRecordsFile(orderId, { recordType = "medical" } = {}) {
+async function getOrderMedicalRecordsFile(
+  orderId,
+  { recordType = "medical", recordId = null } = {}
+) {
   const order = await Order.findById(orderId);
   if (!order) {
     throw new ApiError(404, "Order not found");
@@ -3254,7 +3265,23 @@ async function getOrderMedicalRecordsFile(orderId, { recordType = "medical" } = 
     throw new ApiError(400, "Invalid record type");
   }
 
-  const targetRecord = await OrderRecord.findByOrderAndType(orderId, normalizedType);
+  let targetRecord = null;
+
+  if (recordId) {
+    const byId = await OrderRecord.findById(recordId);
+    if (
+      byId &&
+      Number(byId.order_id) === Number(orderId) &&
+      byId.record_type === normalizedType
+    ) {
+      targetRecord = byId;
+    }
+  }
+
+  if (!targetRecord) {
+    targetRecord = await OrderRecord.findByOrderAndType(orderId, normalizedType);
+  }
+
   if (!targetRecord?.storage_path) {
     throw new ApiError(404, "Records file not found for this order");
   }
@@ -3277,7 +3304,8 @@ async function getOrderMedicalRecordsFile(orderId, { recordType = "medical" } = 
 
   return {
     absolutePath,
-    fileName: path.basename(absolutePath),
+    fileName:
+      targetRecord.original_file_name || path.basename(absolutePath),
   };
 }
 
@@ -3321,9 +3349,13 @@ async function resolveOrderRecordsAttachments(order) {
     }
 
     const typeSuffix = record.record_type || "records";
+    const originalName = `${record.original_file_name || ""}`.trim();
+    const uniqueName = originalName
+      ? `${safeOrderNumber}-${record.id}-${originalName}`
+      : `${safeOrderNumber}-${typeSuffix}-${record.id}.pdf`;
     recordLabels.push(RECORD_TITLES[record.record_type] || "Records");
     attachments.push({
-      filename: `${safeOrderNumber}-${typeSuffix}.pdf`,
+      filename: uniqueName,
       path: absolutePath,
     });
   }

@@ -2990,57 +2990,77 @@ function UploadedRecordsPreviewModal({ isOpen, order, onClose }) {
   const uploadedRecords = getOrderRecordSlots(order || {}).filter(
     (record) => record.hasFile
   );
-  const [activeType, setActiveType] = useState("");
+  const uploadedFiles = uploadedRecords.flatMap((slot) => {
+    const files = slot.files?.length
+      ? slot.files
+      : [
+          {
+            id: null,
+            recordType: slot.recordType,
+            originalFileName: `${slot.label}.pdf`,
+            hasFile: true,
+          },
+        ];
+
+    return files.map((file, index) => ({
+      ...file,
+      recordType: slot.recordType,
+      label: slot.label,
+      tabKey: `${slot.recordType}-${file.id || index}`,
+    }));
+  });
+  const [activeKey, setActiveKey] = useState("");
 
   useEffect(() => {
     if (!isOpen) {
-      setActiveType("");
+      setActiveKey("");
       return;
     }
 
-    const firstType = uploadedRecords[0]?.recordType || "medical";
-    setActiveType(firstType);
+    setActiveKey(uploadedFiles[0]?.tabKey || "");
   }, [isOpen, order?.dbId]);
 
-  const activeRecord =
-    uploadedRecords.find((record) => record.recordType === activeType) ||
-    uploadedRecords[0];
-  const recordType = activeRecord?.recordType || "medical";
-  const title = getOrderTypeLabel(recordType) || "Uploaded Records";
-  const fileName = `${title}.pdf`;
+  const activeFile =
+    uploadedFiles.find((file) => file.tabKey === activeKey) || uploadedFiles[0];
+  const recordType = activeFile?.recordType || "medical";
+  const title = activeFile?.originalFileName || getOrderTypeLabel(recordType) || "Uploaded Records";
+  const fileName = title.endsWith(".pdf") ? title : `${title}.pdf`;
 
   return (
     <OrderPdfPreviewModal
       isOpen={isOpen}
       order={order}
       onClose={onClose}
-      title={uploadedRecords.length > 1 ? "Uploaded Records" : title}
+      title={uploadedFiles.length > 1 ? "Uploaded Records" : title}
       fileName={fileName}
       fetchPdf={(orderId) =>
-        fetchOrderMedicalRecordsPdf(orderId, { recordType })
+        fetchOrderMedicalRecordsPdf(orderId, {
+          recordType,
+          recordId: activeFile?.id || null,
+        })
       }
       loadingLabel="Loading records..."
       headerExtra={
-        uploadedRecords.length > 1 ? (
+        uploadedFiles.length > 1 ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {uploadedRecords.map((record) => (
+            {uploadedFiles.map((file) => (
               <button
-                key={record.recordType}
+                key={file.tabKey}
                 type="button"
-                onClick={() => setActiveType(record.recordType)}
+                onClick={() => setActiveKey(file.tabKey)}
                 className={`rounded-[5px] px-2 py-1 text-[10px] font-semibold ${
-                  activeType === record.recordType
+                  activeKey === file.tabKey
                     ? "bg-[#0097B2] text-white"
                     : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
                 }`}
               >
-                {getOrderTypeLabel(record.recordType)}
+                {file.originalFileName || getOrderTypeLabel(file.recordType)}
               </button>
             ))}
           </div>
         ) : null
       }
-      previewKey={recordType}
+      previewKey={activeFile?.tabKey || recordType}
     />
   );
 }

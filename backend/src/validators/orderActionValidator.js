@@ -175,10 +175,13 @@ function validateRecordFax(body = {}) {
   return { valid: errors.length === 0, errors };
 }
 
-function validateScanMedicalRecords(body = {}, query = {}, file = null) {
+function validateScanMedicalRecords(body = {}, query = {}, files = null) {
   const errors = [];
+  const fileList = (Array.isArray(files) ? files : files ? [files] : []).filter(
+    Boolean
+  );
 
-  if (!file) {
+  if (!fileList.length) {
     errors.push({ field: "file", message: "PDF file is required" });
   }
 

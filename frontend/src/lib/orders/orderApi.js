@@ -352,14 +352,17 @@ export async function uploadBatchScan(file) {
 
 export async function uploadMedicalRecordsScan(
   orderId,
-  file,
-  { replace = false, recordType = "medical" } = {}
+  files,
+  { recordType = "medical" } = {}
 ) {
   const formData = new FormData();
-  formData.append("file", file);
+  const fileList = (Array.isArray(files) ? files : [files]).filter(Boolean);
+
+  for (const file of fileList) {
+    formData.append("file", file);
+  }
 
   const params = new URLSearchParams();
-  if (replace) params.set("replace", "true");
   if (recordType) params.set("recordType", recordType);
   const query = params.toString() ? `?${params.toString()}` : "";
 
@@ -444,9 +447,13 @@ export async function fetchOrderSubpoenaPdf(orderId) {
   return response.blob();
 }
 
-export async function fetchOrderMedicalRecordsPdf(orderId, { recordType = "medical" } = {}) {
+export async function fetchOrderMedicalRecordsPdf(
+  orderId,
+  { recordType = "medical", recordId = null } = {}
+) {
   const params = new URLSearchParams();
   if (recordType) params.set("recordType", recordType);
+  if (recordId) params.set("recordId", String(recordId));
   const query = params.toString() ? `?${params.toString()}` : "";
   const response = await authFetch(
     `/orders/${orderId}/medical-records/file${query}`
