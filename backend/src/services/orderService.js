@@ -1317,6 +1317,9 @@ async function getAllOrders(query = {}) {
     }
   } else if (query.status === "ready") {
     filters.readyFilter = true;
+  } else if (statusKey === "unpaid" || statusKey === "paid") {
+    // Invoice due-amount filters — not orders.status values.
+    filters.paymentDueFilter = statusKey;
   } else if (query.status && STATUS_FILTER_MAP[query.status]) {
     filters.status = STATUS_FILTER_MAP[query.status];
   }

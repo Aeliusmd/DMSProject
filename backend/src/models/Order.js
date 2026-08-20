@@ -147,6 +147,25 @@ const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
 const NON_DELETED_ORDER_ALIAS = `(o.status <> 'Deleted')`;
+// Combined remaining balance: standard invoice.amount_due + x-ray (payment - paid - writeoff).
+// Unique indexes on invoices.order_id and invoice_xray_details.order_id keep these EXISTS lookups O(1).
+const ORDER_HAS_AMOUNT_DUE = `(
+  EXISTS (
+    SELECT 1 FROM invoices i
+    WHERE i.order_id = o.id
+      AND COALESCE(i.amount_due, 0) > 0
+  )
+  OR EXISTS (
+    SELECT 1 FROM invoice_xray_details x
+    WHERE x.order_id = o.id
+      AND GREATEST(
+        0,
+        COALESCE(x.payment, 0)
+          - COALESCE(x.amount_paid, 0)
+          - COALESCE(x.writeoff_amount, 0)
+      ) > 0
+  )
+)`;
 const ORDER_COLUMNS = `
   order_number, rec_number, facility_id, provider_id, status, court,
   case_number, order_ref, ssn_last_four, dob,
@@ -359,6 +378,12 @@ function buildFindAllWhere(filters = {}) {
     params.status = filters.status;
   } else {
     conditions.push(NON_DELETED_ORDER_ALIAS);
+  }
+
+  if (filters.paymentDueFilter === "unpaid") {
+    conditions.push(ORDER_HAS_AMOUNT_DUE);
+  } else if (filters.paymentDueFilter === "paid") {
+    conditions.push(`NOT ${ORDER_HAS_AMOUNT_DUE}`);
   }
 
   if (filters.excludeCompleted) {
