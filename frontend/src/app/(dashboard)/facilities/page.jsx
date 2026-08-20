@@ -8,10 +8,13 @@ import {
   deleteFacility,
   getFacilitiesPaginated,
 } from "@/lib/facilities/facilityApi";
+import { getStoredUser } from "@/lib/auth/authStorage";
+import { canDeleteFacilities } from "@/lib/auth/roles";
 
 const FACILITIES_PER_PAGE = 10;
 
 export default function FacilitiesPage() {
+  const canDelete = canDeleteFacilities(getStoredUser());
   const [facilities, setFacilities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -97,6 +100,8 @@ export default function FacilitiesPage() {
   }, [loadFacilities]);
 
   const handleDeleteFacility = async (facility) => {
+    if (!canDelete) return;
+
     try {
       await deleteFacility(facility.id);
       await loadFacilities();
@@ -174,6 +179,7 @@ export default function FacilitiesPage() {
           <FacilityTable
             facilities={facilities}
             onDelete={handleDeleteFacility}
+            canDelete={canDelete}
           />
         )}
 

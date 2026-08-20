@@ -10,17 +10,16 @@ const router = express.Router();
 
 router.use(authenticate);
 
-const employeeWriteGuard = denyRoles("Employee");
+const employeeDeleteGuard = denyRoles("Employee");
 
 router.get("/", facilityController.getAll);
 router.get("/search", facilityController.search);
 router.post("/resolve", facilityController.resolve);
-router.post("/", employeeWriteGuard, facilityController.create);
+router.post("/", facilityController.create);
 
 router.get("/:id/documents", facilityDocumentController.listDocuments);
 router.post(
   "/:id/documents",
-  employeeWriteGuard,
   facilityDocumentUpload.single("file"),
   facilityDocumentController.uploadDocument
 );
@@ -34,14 +33,12 @@ router.get(
 );
 router.delete(
   "/:id/documents/:documentId",
-  employeeWriteGuard,
   facilityDocumentController.deleteDocument
 );
 
 router.get("/:id/notes", facilityNoteController.listNotes);
 router.post(
   "/:id/notes",
-  employeeWriteGuard,
   facilityNoteAttachmentUpload.array("attachments", 10),
   facilityNoteController.createNote
 );
@@ -51,29 +48,22 @@ router.get(
 );
 
 router.get("/:id", facilityController.getById);
-router.put("/:id", employeeWriteGuard, facilityController.update);
-router.delete("/:id", employeeWriteGuard, facilityController.remove);
+router.put("/:id", facilityController.update);
+router.delete("/:id", employeeDeleteGuard, facilityController.remove);
 
 router.post("/:id/doctors/resolve", facilityController.resolveDoctor);
-router.post("/:id/doctors", employeeWriteGuard, facilityController.createDoctors);
-router.put(
-  "/:id/doctors/:doctorId",
-  employeeWriteGuard,
-  facilityController.updateDoctor
-);
+router.post("/:id/doctors", facilityController.createDoctors);
+router.put("/:id/doctors/:doctorId", facilityController.updateDoctor);
 router.patch(
   "/:id/doctors/:doctorId/deactivate",
-  employeeWriteGuard,
   facilityController.deactivateDoctor
 );
 router.patch(
   "/:id/doctors/:doctorId/reactivate",
-  employeeWriteGuard,
   facilityController.reactivateDoctor
 );
 router.patch(
   "/:id/doctors/:doctorId/default",
-  employeeWriteGuard,
   facilityController.setDefaultDoctor
 );
 
