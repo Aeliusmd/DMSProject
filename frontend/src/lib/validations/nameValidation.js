@@ -97,6 +97,36 @@ export function validatePersonName(
   return "";
 }
 
+const USERNAME_PATTERN = /^[\p{L}\p{M}]+(?: [\p{L}\p{M}]+)*$/u;
+
+export function normalizeUsernameInput(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+export function isValidUsername(value) {
+  const trimmed = normalizeUsernameInput(value);
+  if (!trimmed || HTML_MARKUP_PATTERN.test(trimmed)) return false;
+  return USERNAME_PATTERN.test(trimmed);
+}
+
+export function usernameFormatError(fieldLabel = "User name") {
+  return `${fieldLabel} can only contain letters and spaces`;
+}
+
+export function validateUsername(
+  value,
+  { required = false, fieldLabel = "User name", allowLegacyValue = "" } = {}
+) {
+  const trimmed = normalizeUsernameInput(value);
+  if (!trimmed) return required ? `${fieldLabel} is required` : "";
+  if (allowLegacyValue && trimmed === normalizeUsernameInput(allowLegacyValue)) {
+    return "";
+  }
+  if (hasHtmlMarkup(trimmed)) return htmlMarkupError(fieldLabel);
+  if (!isValidUsername(trimmed)) return usernameFormatError(fieldLabel);
+  return "";
+}
+
 export function validateOrganizationName(
   value,
   { required = false, fieldLabel = "Name" } = {}
