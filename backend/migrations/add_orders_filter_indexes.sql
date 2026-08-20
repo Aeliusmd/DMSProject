@@ -18,3 +18,8 @@ CREATE INDEX idx_orders_facility_created_id ON orders (facility_id, created_at, 
 
 -- Company dropdown filter on serve_company_name
 CREATE INDEX idx_orders_serve_company ON orders (serve_company_name);
+
+-- Paid/Unpaid due-amount filters (EXISTS by order_id; covering amount_due)
+CREATE INDEX idx_invoices_order_amount_due ON invoices (order_id, amount_due);
+CREATE INDEX idx_invoice_xray_order_due_parts
+  ON invoice_xray_details (order_id, payment, amount_paid, writeoff_amount);
