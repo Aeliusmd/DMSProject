@@ -20,7 +20,7 @@ export default function TwoFactorAuthModal({
   verifyFn = defaultVerifyTwoFactor,
   resendFn = defaultResendTwoFactor,
   saveSessionFn = defaultSaveAuthSession,
-  subtitle = "Legal Practice Management Portal",
+  subtitle = "Document Management System",
   title = "Two-Factor Authentication",
   description,
   showTrustDevice = true,
@@ -286,7 +286,7 @@ export default function TwoFactorAuthModal({
               onChange={(e) => setTrustDevice(e.target.checked)}
               className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
             />
-            Trust this device for 30 days
+            Keep me signed in on this device for 30 days
           </label>
           ) : null}
 

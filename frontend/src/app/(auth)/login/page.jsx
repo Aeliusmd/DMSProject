@@ -122,7 +122,7 @@ export default function LoginPage() {
             </div>
 
             <p className="text-[12px] text-[#64748B]">
-              Legal Practice Management Portal
+              Document Management System
             </p>
           </div>
 
@@ -196,15 +196,7 @@ export default function LoginPage() {
                 </p>
               )}
 
-              <div className="mt-[15px] flex items-center justify-between">
-                <label className="flex items-center gap-[8px] text-[12px] text-[#64748B]">
-                  <input
-                    type="checkbox"
-                    className="h-[12px] w-[12px] rounded border-[#CBD5E1] accent-[#0097B2]"
-                  />
-                  Remember me
-                </label>
-
+              <div className="mt-[15px] flex justify-end">
                 <button
                   type="button"
                   onClick={() => setIsForgotPasswordOpen(true)}

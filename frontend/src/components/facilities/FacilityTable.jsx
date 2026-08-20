@@ -8,7 +8,11 @@ import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
 import FacilityAddNoteModal from "@/components/facilities/FacilityAddNoteModal";
 import { uploadFacilityDocument } from "@/lib/facilities/facilityApi";
 
-export default function FacilitiesTable({ facilities, onDelete }) {
+export default function FacilitiesTable({
+  facilities,
+  onDelete,
+  canDelete = true,
+}) {
   const [deleteModal, setDeleteModal] = useState({
     open: false,
     facility: null,
@@ -141,7 +145,9 @@ export default function FacilitiesTable({ facilities, onDelete }) {
                 <th className="w-[110px] px-5 py-3">Zip</th>
                 <th className="w-[110px] px-5 py-3 text-center">Notes</th>
                 <th className="w-[110px] px-5 py-3 text-center">Upload</th>
-                <th className="w-[110px] px-5 py-3 text-center">Delete</th>
+                {canDelete ? (
+                  <th className="w-[110px] px-5 py-3 text-center">Delete</th>
+                ) : null}
               </tr>
             </thead>
 
@@ -194,23 +200,25 @@ export default function FacilitiesTable({ facilities, onDelete }) {
                     </button>
                   </td>
 
-                  <td className="px-5 py-4 text-center">
-                    <button
-                      type="button"
-                      onClick={() => openDeleteModal(facility)}
-                      className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
-                    >
-                      <TrashIcon />
-                      Delete
-                    </button>
-                  </td>
+                  {canDelete ? (
+                    <td className="px-5 py-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() => openDeleteModal(facility)}
+                        className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-red-200 bg-red-50 px-3 text-[11px] font-semibold text-red-500 hover:bg-red-100"
+                      >
+                        <TrashIcon />
+                        Delete
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
 
               {facilities.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={canDelete ? 7 : 6}
                     className="px-5 py-12 text-center text-[13px] text-[#94A3B8]"
                   >
                     No facilities found.

@@ -9,6 +9,7 @@ const EMPLOYEE_ALLOWED_PATH_PREFIXES = [
   "/orders",
   "/company-orders",
   "/personal-orders",
+  "/facilities",
   "/activity-log",
   "/notifications",
 ];
@@ -42,6 +43,10 @@ export function canManageEmployees(user) {
 
 export function canAccessEmployeesPage(user) {
   return isAdmin(user) || isManager(user);
+}
+
+export function canDeleteFacilities(user) {
+  return !isEmployee(user);
 }
 
 export function usesOwnActivityLogsOnly(user) {
