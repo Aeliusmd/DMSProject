@@ -147,6 +147,31 @@ const INACTIVE_ORDER_STATUSES = ["Cancelled", "Deleted"];
 const ACTIVE_ORDER = `(status NOT IN ('Cancelled', 'Deleted'))`;
 const ACTIVE_ORDER_ALIAS = `(o.status NOT IN ('Cancelled', 'Deleted'))`;
 const NON_DELETED_ORDER_ALIAS = `(o.status <> 'Deleted')`;
+// Billable activity exists only after an order reaches standard or x-ray invoicing.
+// This prevents brand-new uninvoiced orders from being treated as "paid" just
+// because no due balance exists yet.
+const ORDER_HAS_BILLABLE_ACTIVITY = `(
+  EXISTS (
+    SELECT 1 FROM invoices i
+    WHERE i.order_id = o.id
+      AND (
+        i.total_amount > 0
+        OR i.amount_paid > 0
+        OR i.writeoff_amount > 0
+        OR i.status IN ('Paid', 'Partial', 'Unpaid', 'Written Off')
+      )
+  )
+  OR EXISTS (
+    SELECT 1 FROM invoice_xray_details x
+    WHERE x.order_id = o.id
+      AND (
+        x.payment > 0
+        OR x.amount_paid > 0
+        OR x.writeoff_amount > 0
+        OR x.status IN ('Paid', 'Partial', 'Unpaid', 'Written Off')
+      )
+  )
+)`;
 // Combined remaining balance: standard invoice.amount_due + x-ray (payment - paid - writeoff).
 // Unique indexes on invoices.order_id and invoice_xray_details.order_id keep these EXISTS lookups O(1).
 const ORDER_HAS_AMOUNT_DUE = `(
@@ -381,8 +406,10 @@ function buildFindAllWhere(filters = {}) {
   }
 
   if (filters.paymentDueFilter === "unpaid") {
+    conditions.push(ORDER_HAS_BILLABLE_ACTIVITY);
     conditions.push(ORDER_HAS_AMOUNT_DUE);
   } else if (filters.paymentDueFilter === "paid") {
+    conditions.push(ORDER_HAS_BILLABLE_ACTIVITY);
     conditions.push(`NOT ${ORDER_HAS_AMOUNT_DUE}`);
   }
 
