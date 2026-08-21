@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getOrders } from "@/lib/orders/orderApi";
-import { resolveRushLabel } from "@/lib/orders/rushUtils";
+import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils";
 
 const RECENT_LIMIT = 8;
 
@@ -134,7 +134,7 @@ export default function DashboardRecentOrders() {
                   </td>
 
                   <td className="px-4 py-3">
-                    <RushBadge rush={resolveRushLabel(order)} />
+                    <RushBadge rush={resolveRushLabel(order)} order={order} />
                   </td>
 
                   <td className="px-4 py-3">
@@ -192,7 +192,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function RushBadge({ rush }) {
+function RushBadge({ rush, order }) {
   if (!rush) {
     return <span className="text-[11px] text-[#CBD5E1]">—</span>;
   }
@@ -203,9 +203,13 @@ function RushBadge({ rush }) {
     "Rush 3": "border-[#FCA5A5] bg-[#FEE2E2] text-[#DC2626]",
   };
 
+  const tooltip = buildRushBadgeTooltip(order, rush);
+
   return (
     <span
-      className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
+      title={tooltip}
+      aria-label={tooltip || rush}
+      className={`inline-flex h-[22px] cursor-help items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
         styles[rush] || "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
       }`}
     >

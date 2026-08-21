@@ -46,6 +46,42 @@ function getOrderAgeDays(createdAt) {
   return diffDays < 0 ? null : diffDays;
 }
 
+export function getOrderAgeInDays(orderOrDate) {
+  if (!orderOrDate) return null;
+
+  if (
+    typeof orderOrDate === "string" ||
+    orderOrDate instanceof Date ||
+    typeof orderOrDate === "number"
+  ) {
+    return getOrderAgeDays(orderOrDate);
+  }
+
+  return getOrderAgeDays(getOrderAgeDate(orderOrDate));
+}
+
+export function buildRushBadgeTooltip(orderOrDate, rushLabel = null) {
+  const days = getOrderAgeInDays(orderOrDate);
+  const rush =
+    formatRushLevel(rushLabel) ||
+    (typeof orderOrDate === "object" && !(orderOrDate instanceof Date)
+      ? resolveRushLabel(orderOrDate)
+      : calculateOrderRushLevel(orderOrDate));
+
+  if (!rush && days == null) return "";
+
+  const dayLabel =
+    days == null
+      ? ""
+      : days === 1
+        ? "1 day since order created"
+        : `${days} days since order created`;
+
+  if (rush && dayLabel) return `${rush} — ${dayLabel}`;
+  if (rush) return rush;
+  return dayLabel;
+}
+
 export function calculateOrderRushLevel(createdAt) {
   const diffDays = getOrderAgeDays(createdAt);
   if (diffDays == null) return null;

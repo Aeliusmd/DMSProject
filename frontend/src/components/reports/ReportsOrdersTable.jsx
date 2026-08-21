@@ -5,6 +5,7 @@ import CreateInvoiceModal from "@/components/orders/CreateInvoiceModal";
 import { API_BASE_URL } from "@/config/api";
 import {
   resolveRushLabel,
+  buildRushBadgeTooltip,
   RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
 
@@ -387,7 +388,7 @@ export default function ReportsOrdersTable({
 
                     {isVisible("rush") && (
                       <td className="px-2 py-2 text-center align-middle">
-                        <RushBadge rush={rushLabel} />
+                        <RushBadge rush={rushLabel} order={order} />
                       </td>
                     )}
                   </tr>
@@ -575,14 +576,18 @@ function ReportCell({ children, bold = false, danger = false }) {
   );
 }
 
-function RushBadge({ rush }) {
+function RushBadge({ rush, order }) {
   if (!rush) {
     return <span className="text-[10px] text-[#94A3B8]">–</span>;
   }
 
+  const tooltip = buildRushBadgeTooltip(order, rush);
+
   return (
     <span
-      className={`inline-flex h-[20px] min-w-[46px] items-center justify-center rounded-[3px] border px-2 text-[9px] font-bold leading-none ${
+      title={tooltip}
+      aria-label={tooltip || rush}
+      className={`inline-flex h-[20px] min-w-[46px] cursor-help items-center justify-center rounded-[3px] border px-2 text-[9px] font-bold leading-none ${
         RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
       }`}
     >
