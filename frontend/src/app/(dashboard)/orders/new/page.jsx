@@ -3648,6 +3648,8 @@ function PaymentForm({
         paidAmount={formData.prepaymentPaid}
         showPaidField
         autoDueOnPaidChange
+        capPaidToDue={!isPersonalPortalOrder && !isCompanyPortalOrder}
+        paymentType="prepayment"
         theme="green"
         prefix="prepayment"
         formData={formData}

@@ -8,6 +8,7 @@ import {
   parsePaymentAmount,
   resolvePaymentDue,
   resolvePaymentCharge,
+  PAID_EXCEEDS_DUE_MESSAGE,
 } from "@/lib/orders/paymentUtils";
 
 const paymentThemes = {
@@ -150,7 +151,7 @@ export default function PaymentChargeCard({
         rawPaid
       );
       nextPaid = paidValue;
-      setPaidCapError(capped ? "Paid cannot exceed due" : "");
+      setPaidCapError(capped ? PAID_EXCEEDS_DUE_MESSAGE : "");
     } else {
       setPaidCapError("");
     }
