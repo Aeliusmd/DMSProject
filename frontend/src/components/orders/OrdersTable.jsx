@@ -70,6 +70,7 @@ import {
 import {
   deriveDisplayOrderStatus,
   resolveRushLabel,
+  buildRushBadgeTooltip,
   RUSH_LEVEL_STYLES,
 } from "@/lib/orders/rushUtils";
 import SubpoenaPreviewContent from "@/components/orders/new-order/SubpoenaPreviewContent";
@@ -2011,7 +2012,7 @@ export default function OrdersTable({
                         <div className="mb-2 flex flex-wrap items-center gap-2">
                           <OrderStatusBadge status={order.displayOrderStatus} />
                           {order.rushLabel ? (
-                            <RushBadge rush={order.rushLabel} />
+                            <RushBadge rush={order.rushLabel} order={order} />
                           ) : null}
                         </div>
                       ) : null}
@@ -3984,12 +3985,16 @@ function formatLastUpdatedLabel(date) {
   });
 }
 
-function RushBadge({ rush }) {
+function RushBadge({ rush, order }) {
   if (!rush) return null;
+
+  const tooltip = buildRushBadgeTooltip(order, rush);
 
   return (
     <span
-      className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
+      title={tooltip}
+      aria-label={tooltip || rush}
+      className={`inline-flex h-[22px] cursor-help items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
         RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
       }`}
     >
