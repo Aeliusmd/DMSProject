@@ -145,6 +145,9 @@ export function getPaymentTotalOwed(type, invoiceFees = {}, storedDue = "") {
   return dueAmountFromFee(charge, 0);
 }
 
+export const PAID_EXCEEDS_DUE_MESSAGE =
+  "Paid amount cannot exceed the outstanding due amount.";
+
 export function capPaymentPaidEntry(
   type,
   invoiceFees = {},
@@ -152,7 +155,7 @@ export function capPaymentPaidEntry(
   storedDue = "",
   rawValue = ""
 ) {
-  if (type !== "custodian" && type !== "xray") {
+  if (type !== "custodian" && type !== "xray" && type !== "prepayment") {
     return { paidValue: rawValue, capped: false };
   }
 
@@ -160,7 +163,10 @@ export function capPaymentPaidEntry(
     return { paidValue: "", capped: false };
   }
 
-  const totalOwed = getPaymentTotalOwed(type, invoiceFees, storedDue);
+  const totalOwed =
+    type === "prepayment"
+      ? PAYMENT_CHARGE_AMOUNTS.prepayment
+      : getPaymentTotalOwed(type, invoiceFees, storedDue);
   const entered = parsePaymentAmount(rawValue);
 
   if (entered <= totalOwed) {
@@ -178,6 +184,14 @@ export function validateOrderPaymentAmounts(data = {}, invoiceFees = {}) {
 
   validatePaymentPaidCap(errors, "xray", data, invoiceFees);
 
+  const isPortalOrder =
+    data.creationSource === "personal_portal" ||
+    data.creationSource === "company_portal";
+
+  if (!isPortalOrder) {
+    validatePaymentPaidCap(errors, "prepayment", data, invoiceFees);
+  }
+
   return errors;
 }
 
@@ -190,14 +204,13 @@ function validatePaymentPaidCap(errors, prefix, data, invoiceFees) {
   }
 
   const paid = parsePaymentAmount(rawPaid);
-  const totalOwed = getPaymentTotalOwed(
-    prefix,
-    invoiceFees,
-    data[`${prefix}Due`]
-  );
+  const totalOwed =
+    prefix === "prepayment"
+      ? PAYMENT_CHARGE_AMOUNTS.prepayment
+      : getPaymentTotalOwed(prefix, invoiceFees, data[`${prefix}Due`]);
 
   if (paid > totalOwed) {
-    errors[paidField] = "Paid cannot exceed due";
+    errors[paidField] = PAID_EXCEEDS_DUE_MESSAGE;
   }
 }
 
@@ -226,11 +239,24 @@ export function resolvePaymentDue(type, invoiceFees = {}, paidValue = 0) {
 
 export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFees || {}) {
   const next = { ...formData };
+  const isPortalOrder =
+    formData.creationSource === "personal_portal" ||
+    formData.creationSource === "company_portal";
 
   const prepaymentCharge = getPaymentChargeForType("prepayment", invoiceFees);
-  next.prepaymentDue = dueAmountFromFee(
+  let prepaymentPaid = parsePaymentAmount(formData.prepaymentPaid);
+
+  if (!isPortalOrder && prepaymentPaid > prepaymentCharge) {
+    prepaymentPaid = prepaymentCharge;
+    next.prepaymentPaid =
+      `${formData.prepaymentPaid || ""}`.trim() === ""
+        ? ""
+        : prepaymentPaid.toFixed(2);
+  }
+
+  next.prepaymentDue = Math.min(
     prepaymentCharge,
-    formData.prepaymentPaid
+    dueAmountFromFee(prepaymentCharge, next.prepaymentPaid ?? prepaymentPaid)
   ).toFixed(2);
 
   if (!formData.certificateNoRecords && invoiceFees?.hasXrayInvoice) {

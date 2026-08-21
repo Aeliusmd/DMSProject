@@ -547,15 +547,31 @@ function buildPaymentPayload(data, prefix) {
     return null;
   }
 
-  const amount = rawAmount !== null ? Number(rawAmount) : null;
-  const dueAmount = rawDue !== null ? Number(rawDue) : null;
+  let amount = rawAmount !== null ? Number(rawAmount) : null;
+  let dueAmount = rawDue !== null ? Number(rawDue) : null;
+
+  if (Number.isNaN(amount)) amount = null;
+  if (Number.isNaN(dueAmount)) dueAmount = null;
+
+  const isPortalOrder =
+    data.creationSource === "personal_portal" ||
+    data.creationSource === "company_portal";
+
+  if (prefix === "prepayment" && !isPortalOrder) {
+    if (amount != null) {
+      amount = Math.min(Math.max(0, amount), DEFAULT_PREPAYMENT_CHARGE);
+    }
+    if (dueAmount != null) {
+      dueAmount = Math.min(Math.max(0, dueAmount), DEFAULT_PREPAYMENT_CHARGE);
+    }
+  }
 
   return {
     paymentType: prefix,
     checkNumber,
     paymentDate,
-    amount: Number.isNaN(amount) ? null : amount,
-    dueAmount: Number.isNaN(dueAmount) ? null : dueAmount,
+    amount,
+    dueAmount,
     isPaid: amount && amount > 0 ? 1 : 0,
     memo,
   };
@@ -569,26 +585,44 @@ function collectPayments(data) {
 
 function resolvePrepaymentDueAmount(data) {
   const paid = parsePaymentAmount(trimOrNull(data.prepaymentPaid));
+  const isPortalOrder =
+    data.creationSource === "personal_portal" ||
+    data.creationSource === "company_portal";
+  const maxCharge = DEFAULT_PREPAYMENT_CHARGE;
+  const cappedPaid = isPortalOrder ? paid : Math.min(paid, maxCharge);
   const rawDue = trimOrNull(data.prepaymentDue);
 
   if (rawDue !== null) {
     const due = Number(rawDue);
     if (!Number.isNaN(due)) {
-      return Math.max(0, due);
+      const normalized = Math.max(0, due);
+      return isPortalOrder ? normalized : Math.min(normalized, maxCharge);
     }
   }
 
-  return Math.max(0, DEFAULT_PREPAYMENT_CHARGE - paid);
+  return Math.max(0, maxCharge - cappedPaid);
 }
 
 async function ensurePrepaymentPayment(connection, orderId, data) {
   const payment = buildPaymentPayload(data, "prepayment");
   const dueAmount = resolvePrepaymentDueAmount(data);
   const paid = parsePaymentAmount(trimOrNull(data.prepaymentPaid));
+  const isPortalOrder =
+    data.creationSource === "personal_portal" ||
+    data.creationSource === "company_portal";
+  const cappedPaid = isPortalOrder
+    ? paid
+    : Math.min(paid, DEFAULT_PREPAYMENT_CHARGE);
 
   if (payment) {
     await Order.upsertPayment(connection, {
       ...payment,
+      amount:
+        payment.amount == null
+          ? null
+          : isPortalOrder
+            ? payment.amount
+            : Math.min(Number(payment.amount) || 0, DEFAULT_PREPAYMENT_CHARGE),
       orderId,
       dueAmount: payment.dueAmount ?? dueAmount,
     });
@@ -600,9 +634,9 @@ async function ensurePrepaymentPayment(connection, orderId, data) {
     paymentType: "prepayment",
     checkNumber: null,
     paymentDate: null,
-    amount: paid > 0 ? paid : null,
+    amount: cappedPaid > 0 ? cappedPaid : null,
     dueAmount,
-    isPaid: paid > 0 ? 1 : 0,
+    isPaid: cappedPaid > 0 ? 1 : 0,
     memo: null,
   });
 }
@@ -670,9 +704,16 @@ function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = [])
     payments
   );
   const prepaymentPaid = parsePaymentAmount(paymentForm.prepaymentPaid);
+  const cappedPrepaymentPaid = Math.min(
+    prepaymentPaid,
+    DEFAULT_PREPAYMENT_CHARGE
+  );
+  if (prepaymentPaid > DEFAULT_PREPAYMENT_CHARGE) {
+    paymentForm.prepaymentPaid = cappedPrepaymentPaid.toFixed(2);
+  }
   paymentForm.prepaymentDue = Math.max(
     0,
-    DEFAULT_PREPAYMENT_CHARGE - prepaymentPaid
+    DEFAULT_PREPAYMENT_CHARGE - cappedPrepaymentPaid
   ).toFixed(2);
 
   const targets = [

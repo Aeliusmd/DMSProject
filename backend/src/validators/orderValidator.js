@@ -438,6 +438,28 @@ function validateOrderPayload(body = {}, options = {}) {
       errors.push({ field: paidField, message: "Enter a valid amount" });
     }
 
+    const paidAmount = isBlank(body[paidField])
+      ? null
+      : Number(String(body[paidField]).replace(/[^\d.]/g, ""));
+    const creationSource = trimToString(body.creationSource);
+    const isPortalOrder =
+      creationSource === "personal_portal" ||
+      creationSource === "company_portal";
+
+    if (
+      prefix === "prepayment" &&
+      !isPortalOrder &&
+      paidAmount != null &&
+      !Number.isNaN(paidAmount) &&
+      paidAmount > 15
+    ) {
+      errors.push({
+        field: paidField,
+        message:
+          "Paid amount cannot exceed the outstanding due amount.",
+      });
+    }
+
     addMaxLengthError(errors, checkField, body[checkField], 50);
     addOptionalIsoDateError(errors, `${prefix}Date`, body[`${prefix}Date`]);
     const memoField = `${prefix}Memo`;
