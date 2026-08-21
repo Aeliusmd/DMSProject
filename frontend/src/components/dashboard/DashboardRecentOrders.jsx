@@ -209,7 +209,7 @@ function RushBadge({ rush, order }) {
     <span
       title={tooltip}
       aria-label={tooltip || rush}
-      className={`inline-flex h-[22px] cursor-help items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
+      className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
         styles[rush] || "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
       }`}
     >

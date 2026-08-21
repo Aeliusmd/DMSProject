@@ -587,7 +587,7 @@ function RushBadge({ rush, order }) {
     <span
       title={tooltip}
       aria-label={tooltip || rush}
-      className={`inline-flex h-[20px] min-w-[46px] cursor-help items-center justify-center rounded-[3px] border px-2 text-[9px] font-bold leading-none ${
+      className={`inline-flex h-[20px] min-w-[46px] items-center justify-center rounded-[3px] border px-2 text-[9px] font-bold leading-none ${
         RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
       }`}
     >
