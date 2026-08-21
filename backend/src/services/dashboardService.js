@@ -3,10 +3,10 @@
  */
 
 const { getPool } = require("../config/database");
-const { RUSH_1_MAX_DAYS, ORDER_AGE_SQL } = require("../utils/rushUtils");
+const { RUSH_2_MIN_DAYS, ORDER_AGE_SQL } = require("../utils/rushUtils");
 
-/** Dashboard rush count = orders past Rush 1 (Rush 2 and Rush 3). */
-const RUSH_ESCALATED_MIN_DAYS = RUSH_1_MAX_DAYS;
+/** Dashboard rush count = Rush 2 and Rush 3 (age >= 22 days). */
+const RUSH_ESCALATED_MIN_DAYS = RUSH_2_MIN_DAYS;
 
 /** Outstanding invoices older than this are counted as overdue */
 const OVERDUE_INVOICE_DAYS = 30;
@@ -186,7 +186,7 @@ async function getDashboardStats() {
        FROM orders
        WHERE status NOT IN ('Cancelled', 'Deleted', 'Write Offs')
          AND (creation_source IS NULL OR creation_source <> 'company_portal')
-         AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL}) > :minDays`,
+         AND DATEDIFF(CURDATE(), ${ORDER_AGE_SQL}) >= :minDays`,
       { minDays: RUSH_ESCALATED_MIN_DAYS }
     ),
     Promise.all([getStandardInvoiceFinancials(pool), getXrayInvoiceFinancials(pool)]),

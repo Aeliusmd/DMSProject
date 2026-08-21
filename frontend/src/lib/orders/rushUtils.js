@@ -1,11 +1,16 @@
 /**
  * Rush levels are based on order created_at (calendar days, local date).
- * Rush 1: creation through 14 days (inclusive)
- * Rush 2: more than 14 days and up to 21 days (inclusive)
- * Rush 3: more than 21 days
+ * Rush 1: 15 through 21 days
+ * Rush 2: 22 through 28 days
+ * Rush 3: 29 days or more
+ * Before 15 days: no rush level
  */
-export const RUSH_1_MAX_DAYS = 14;
-export const RUSH_2_MAX_DAYS = 21;
+export const RUSH_1_MIN_DAYS = 15;
+export const RUSH_2_MIN_DAYS = 22;
+export const RUSH_3_MIN_DAYS = 29;
+
+export const RUSH_1_MAX_DAYS = RUSH_2_MIN_DAYS - 1; // 21
+export const RUSH_2_MAX_DAYS = RUSH_3_MIN_DAYS - 1; // 28
 
 function parseOrderDate(value) {
   if (!value) return null;
@@ -45,9 +50,10 @@ export function calculateOrderRushLevel(createdAt) {
   const diffDays = getOrderAgeDays(createdAt);
   if (diffDays == null) return null;
 
-  if (diffDays > RUSH_2_MAX_DAYS) return "Rush 3";
-  if (diffDays > RUSH_1_MAX_DAYS) return "Rush 2";
-  return "Rush 1";
+  if (diffDays >= RUSH_3_MIN_DAYS) return "Rush 3";
+  if (diffDays >= RUSH_2_MIN_DAYS) return "Rush 2";
+  if (diffDays >= RUSH_1_MIN_DAYS) return "Rush 1";
+  return null;
 }
 
 export function getOrderAgeDate(order) {

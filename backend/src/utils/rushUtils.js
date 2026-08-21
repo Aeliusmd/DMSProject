@@ -1,14 +1,20 @@
 /**
  * Rush levels are based on order created_at (calendar days, local date).
- * Rush 1: creation through 14 days (inclusive)
- * Rush 2: more than 14 days and up to 21 days (inclusive)
- * Rush 3: more than 21 days
+ * Rush 1: 15 through 21 days
+ * Rush 2: 22 through 28 days
+ * Rush 3: 29 days or more
+ * Before 15 days: no rush level
  */
-const RUSH_1_MAX_DAYS = 14;
-const RUSH_2_MAX_DAYS = 21;
+const RUSH_1_MIN_DAYS = 15;
+const RUSH_2_MIN_DAYS = 22;
+const RUSH_3_MIN_DAYS = 29;
 
-/** Active orders past Rush 1 are treated as Ready (matches deriveDisplayOrderStatus). */
-const RUSH_READY_MIN_DAYS = RUSH_1_MAX_DAYS + 1;
+/** Last inclusive day of each band (for SQL filters). */
+const RUSH_1_MAX_DAYS = RUSH_2_MIN_DAYS - 1; // 21
+const RUSH_2_MAX_DAYS = RUSH_3_MIN_DAYS - 1; // 28
+
+/** Active orders at Rush 2+ are treated as Ready (matches deriveDisplayOrderStatus). */
+const RUSH_READY_MIN_DAYS = RUSH_2_MIN_DAYS;
 
 const ORDER_AGE_SQL = "DATE(created_at)";
 const ORDER_AGE_SQL_ALIAS = "DATE(o.created_at)";
@@ -63,15 +69,19 @@ function calculateOrderRushLevel(createdAt) {
     return { level: null, label: null };
   }
 
-  if (diffDays > RUSH_2_MAX_DAYS) {
+  if (diffDays >= RUSH_3_MIN_DAYS) {
     return { level: 3, label: "Rush 3" };
   }
 
-  if (diffDays > RUSH_1_MAX_DAYS) {
+  if (diffDays >= RUSH_2_MIN_DAYS) {
     return { level: 2, label: "Rush 2" };
   }
 
-  return { level: 1, label: "Rush 1" };
+  if (diffDays >= RUSH_1_MIN_DAYS) {
+    return { level: 1, label: "Rush 1" };
+  }
+
+  return { level: null, label: null };
 }
 
 /** @deprecated Use calculateOrderRushLevel */
@@ -80,6 +90,9 @@ function calculateRushLevel(createdAt) {
 }
 
 module.exports = {
+  RUSH_1_MIN_DAYS,
+  RUSH_2_MIN_DAYS,
+  RUSH_3_MIN_DAYS,
   RUSH_1_MAX_DAYS,
   RUSH_2_MAX_DAYS,
   RUSH_READY_MIN_DAYS,

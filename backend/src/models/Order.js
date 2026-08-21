@@ -4,6 +4,9 @@
 
 const { getPool } = require("../config/database");
 const {
+  RUSH_1_MIN_DAYS,
+  RUSH_2_MIN_DAYS,
+  RUSH_3_MIN_DAYS,
   RUSH_1_MAX_DAYS,
   RUSH_2_MAX_DAYS,
   RUSH_READY_MIN_DAYS,
@@ -298,23 +301,26 @@ function appendRushLevelFilter(conditions, params, rushLevel) {
   const ageExpr = `DATEDIFF(CURDATE(), ${ORDER_AGE_SQL_ALIAS})`;
 
   if (normalized === "Rush 1") {
-    conditions.push(`(${ageExpr} IS NOT NULL AND ${ageExpr} <= :rush1MaxDays)`);
+    conditions.push(
+      `(${ageExpr} IS NOT NULL AND ${ageExpr} >= :rush1MinDays AND ${ageExpr} <= :rush1MaxDays)`
+    );
+    params.rush1MinDays = RUSH_1_MIN_DAYS;
     params.rush1MaxDays = RUSH_1_MAX_DAYS;
     return;
   }
 
   if (normalized === "Rush 2") {
     conditions.push(
-      `(${ageExpr} IS NOT NULL AND ${ageExpr} > :rush1MaxDays AND ${ageExpr} <= :rush2MaxDays)`
+      `(${ageExpr} IS NOT NULL AND ${ageExpr} >= :rush2MinDays AND ${ageExpr} <= :rush2MaxDays)`
     );
-    params.rush1MaxDays = RUSH_1_MAX_DAYS;
+    params.rush2MinDays = RUSH_2_MIN_DAYS;
     params.rush2MaxDays = RUSH_2_MAX_DAYS;
     return;
   }
 
   if (normalized === "Rush 3") {
-    conditions.push(`(${ageExpr} IS NOT NULL AND ${ageExpr} > :rush2MaxDays)`);
-    params.rush2MaxDays = RUSH_2_MAX_DAYS;
+    conditions.push(`(${ageExpr} IS NOT NULL AND ${ageExpr} >= :rush3MinDays)`);
+    params.rush3MinDays = RUSH_3_MIN_DAYS;
   }
 }
 
