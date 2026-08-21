@@ -3994,7 +3994,7 @@ function RushBadge({ rush, order }) {
     <span
       title={tooltip}
       aria-label={tooltip || rush}
-      className={`inline-flex h-[22px] cursor-help items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
+      className={`inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-full border px-3 text-[10px] font-semibold ${
         RUSH_LEVEL_STYLES[rush] || RUSH_LEVEL_STYLES["Rush 1"]
       }`}
     >
