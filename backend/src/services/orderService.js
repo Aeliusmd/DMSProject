@@ -558,8 +558,8 @@ function buildPaymentPayload(data, prefix) {
     data.creationSource === "company_portal";
 
   if (prefix === "prepayment" && !isPortalOrder) {
-    if (amount != null) {
-      amount = Math.min(Math.max(0, amount), DEFAULT_PREPAYMENT_CHARGE);
+    if (amount != null && amount > DEFAULT_PREPAYMENT_CHARGE) {
+      amount = 0;
     }
     if (dueAmount != null) {
       dueAmount = Math.min(Math.max(0, dueAmount), DEFAULT_PREPAYMENT_CHARGE);
@@ -589,7 +589,8 @@ function resolvePrepaymentDueAmount(data) {
     data.creationSource === "personal_portal" ||
     data.creationSource === "company_portal";
   const maxCharge = DEFAULT_PREPAYMENT_CHARGE;
-  const cappedPaid = isPortalOrder ? paid : Math.min(paid, maxCharge);
+  const cappedPaid =
+    !isPortalOrder && paid > maxCharge ? 0 : paid;
   const rawDue = trimOrNull(data.prepaymentDue);
 
   if (rawDue !== null) {
@@ -612,17 +613,22 @@ async function ensurePrepaymentPayment(connection, orderId, data) {
     data.creationSource === "company_portal";
   const cappedPaid = isPortalOrder
     ? paid
-    : Math.min(paid, DEFAULT_PREPAYMENT_CHARGE);
+    : paid > DEFAULT_PREPAYMENT_CHARGE
+      ? 0
+      : paid;
 
   if (payment) {
+    const paymentAmount =
+      payment.amount == null
+        ? null
+        : isPortalOrder
+          ? payment.amount
+          : Number(payment.amount) > DEFAULT_PREPAYMENT_CHARGE
+            ? 0
+            : Number(payment.amount) || 0;
     await Order.upsertPayment(connection, {
       ...payment,
-      amount:
-        payment.amount == null
-          ? null
-          : isPortalOrder
-            ? payment.amount
-            : Math.min(Number(payment.amount) || 0, DEFAULT_PREPAYMENT_CHARGE),
+      amount: paymentAmount,
       orderId,
       dueAmount: payment.dueAmount ?? dueAmount,
     });
@@ -704,12 +710,10 @@ function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = [])
     payments
   );
   const prepaymentPaid = parsePaymentAmount(paymentForm.prepaymentPaid);
-  const cappedPrepaymentPaid = Math.min(
-    prepaymentPaid,
-    DEFAULT_PREPAYMENT_CHARGE
-  );
+  const cappedPrepaymentPaid =
+    prepaymentPaid > DEFAULT_PREPAYMENT_CHARGE ? 0 : prepaymentPaid;
   if (prepaymentPaid > DEFAULT_PREPAYMENT_CHARGE) {
-    paymentForm.prepaymentPaid = cappedPrepaymentPaid.toFixed(2);
+    paymentForm.prepaymentPaid = "0";
   }
   paymentForm.prepaymentDue = Math.max(
     0,
