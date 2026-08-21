@@ -173,6 +173,11 @@ export function capPaymentPaidEntry(
     return { paidValue: rawValue, capped: false };
   }
 
+  // Prepayment: over max clears paid to 0 instead of capping at $15.
+  if (type === "prepayment") {
+    return { paidValue: "0", capped: true };
+  }
+
   return {
     paidValue: totalOwed > 0 ? totalOwed.toFixed(2) : "0.00",
     capped: true,
@@ -247,11 +252,8 @@ export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFe
   let prepaymentPaid = parsePaymentAmount(formData.prepaymentPaid);
 
   if (!isPortalOrder && prepaymentPaid > prepaymentCharge) {
-    prepaymentPaid = prepaymentCharge;
-    next.prepaymentPaid =
-      `${formData.prepaymentPaid || ""}`.trim() === ""
-        ? ""
-        : prepaymentPaid.toFixed(2);
+    next.prepaymentPaid = "0";
+    prepaymentPaid = 0;
   }
 
   next.prepaymentDue = Math.min(
