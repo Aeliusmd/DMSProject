@@ -3249,6 +3249,25 @@ function WorkflowStageItem({
     );
   }
 
+  if (stage.showResend) {
+    return (
+      <div
+        className={`flex w-full flex-nowrap items-center gap-1.5 text-[10px] font-semibold ${style.text}`}
+      >
+        <WorkflowStageIcon status={stage.status} />
+        <span className="min-w-0">{stage.label}</span>
+        <button
+          type="button"
+          onClick={onResend}
+          disabled={resending || !onResend}
+          className="shrink-0 text-[#007F96] underline hover:text-[#00667A] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {resending ? "Sending..." : "Resend"}
+        </button>
+      </div>
+    );
+  }
+
   const className = `flex w-full items-center justify-between gap-2 text-left text-[10px] font-semibold ${style.text} ${
     href ? "hover:underline" : ""
   }`;
@@ -3267,31 +3286,15 @@ function WorkflowStageItem({
     </>
   );
 
-  const stageRow = href ? (
-    <Link href={href} className={className}>
-      {content}
-    </Link>
-  ) : (
-    <div className={className}>{content}</div>
-  );
-
-  if (!stage.showResend) {
-    return stageRow;
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {content}
+      </Link>
+    );
   }
 
-  return (
-    <div className="space-y-0.5">
-      {stageRow}
-      <button
-        type="button"
-        onClick={onResend}
-        disabled={resending || !onResend}
-        className="ml-4 block text-[9px] italic text-[#2563EB] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {resending ? "sending..." : "resend"}
-      </button>
-    </div>
-  );
+  return <div className={className}>{content}</div>;
 }
 
 function WorkflowStageIcon({ status }) {

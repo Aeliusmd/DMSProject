@@ -64,6 +64,7 @@ export default function CreateInvoiceModal({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [loadingInvoice, setLoadingInvoice] = useState(false);
   const [paymentLines, setPaymentLines] = useState([]);
   const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
@@ -85,6 +86,8 @@ export default function CreateInvoiceModal({
       const isCnr = Boolean(order?.certificateNoRecords);
       setFormData(getInitialInvoiceFormData(order, isEditMode, isCnr));
       setErrors({});
+      setSubmitError("");
+      setSuccessMessage("");
       // CNR: fees locked at $0. Normal create: start detailed; user clicks $20 button.
       setQuickRecordsFee(
         isEditMode && !isCnr
@@ -575,6 +578,7 @@ export default function CreateInvoiceModal({
 
     setSubmitting(true);
     setSubmitError("");
+    setSuccessMessage("");
 
     try {
       if ((isEditMode || completingXrayOnlyStub) && invoiceId) {
@@ -584,7 +588,17 @@ export default function CreateInvoiceModal({
       }
 
       onSaved?.();
-      onClose();
+
+      if (!isEditMode) {
+        setSuccessMessage(
+          "Custodian invoice was generated successfully."
+        );
+        window.setTimeout(() => {
+          onClose();
+        }, 1400);
+      } else {
+        onClose();
+      }
     } catch (error) {
       const { fieldErrors, message } = applyApiFieldErrors(error);
 
@@ -1008,10 +1022,21 @@ export default function CreateInvoiceModal({
                 <p className="mb-3 text-[11px] text-red-500">{submitError}</p>
               )}
 
+              {successMessage ? (
+                <p className="mb-3 rounded-[6px] border border-[#86EFAC] bg-[#ECFDF5] px-3 py-2 text-[11px] font-medium text-[#059669]">
+                  {successMessage}
+                </p>
+              ) : null}
+
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || loadingInvoice || isFormInvalid}
+                disabled={
+                  submitting ||
+                  loadingInvoice ||
+                  isFormInvalid ||
+                  Boolean(successMessage)
+                }
                 className="inline-flex h-[36px] w-full items-center justify-center rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting
@@ -1024,7 +1049,8 @@ export default function CreateInvoiceModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="mt-3 inline-flex h-[30px] w-full items-center justify-center rounded-[6px] text-[12px] font-semibold leading-none text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#475569]"
+                disabled={Boolean(successMessage)}
+                className="mt-3 inline-flex h-[30px] w-full items-center justify-center rounded-[6px] text-[12px] font-semibold leading-none text-[#94A3B8] hover:bg-[#E2E8F0] hover:text-[#475569] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Cancel
               </button>
