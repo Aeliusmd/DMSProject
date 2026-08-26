@@ -23,6 +23,7 @@ const initialFormData = {
   xrayPaidEarlier: "0.00",
   checkNumber: "",
   description: "",
+  writeoffAmount: 0,
 };
 
 export default function CreateXrayInvoiceModal({
@@ -76,6 +77,7 @@ export default function CreateXrayInvoiceModal({
           xrayPaidEarlier,
           checkNumber: xray?.checkNumber ?? "",
           description: xray?.description || "",
+          writeoffAmount: toNumber(xray?.writeoffAmount),
         });
       } catch {
         if (!cancelled) {
@@ -114,7 +116,9 @@ export default function CreateXrayInvoiceModal({
     return viewsAmount - toNumber(formData.xrayPaidEarlier);
   }, [viewsAmount, formData.xrayPaidEarlier]);
 
-  const balanceDue = totalInvoiced;
+  const balanceDue = useMemo(() => {
+    return Math.max(0, totalInvoiced - toNumber(formData.writeoffAmount));
+  }, [totalInvoiced, formData.writeoffAmount]);
 
   const clientValidationErrors = useMemo(
     () => validateXrayInvoiceForm(formData),
@@ -370,6 +374,14 @@ export default function CreateXrayInvoiceModal({
                 value={formatMoney(totalInvoiced)}
                 danger={totalInvoiced < 0}
               />
+
+              {toNumber(formData.writeoffAmount) > 0 ? (
+                <SummaryRow
+                  label="Written Off"
+                  value={`-${formatMoney(toNumber(formData.writeoffAmount))}`}
+                  danger
+                />
+              ) : null}
 
               <div className="rounded-[8px] border border-[#E2E8F0] bg-white px-3 py-3">
                 <div className="flex items-center justify-between gap-3">

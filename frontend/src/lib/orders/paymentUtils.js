@@ -262,7 +262,23 @@ export function syncPaymentDueFields(formData, invoiceFees = formData?.invoiceFe
   ).toFixed(2);
 
   if (!formData.certificateNoRecords && invoiceFees?.hasXrayInvoice) {
-    next.xrayDue = resolveXrayDue(invoiceFees, formData.xrayPaid).toFixed(2);
+    const invoicePaid = parsePaymentAmount(invoiceFees.xrayPaid);
+    const formPaid = parsePaymentAmount(formData.xrayPaid);
+    const paid = Math.max(invoicePaid, formPaid);
+
+    if (paid > 0) {
+      next.xrayPaid = paid.toFixed(2);
+    }
+
+    if (
+      invoiceFees.xrayDue !== undefined &&
+      invoiceFees.xrayDue !== null &&
+      `${invoiceFees.xrayDue}` !== ""
+    ) {
+      next.xrayDue = parsePaymentAmount(invoiceFees.xrayDue).toFixed(2);
+    } else {
+      next.xrayDue = resolveXrayDue(invoiceFees, paid).toFixed(2);
+    }
   } else if (formData.xrayDue === "" || formData.xrayDue === undefined) {
     const charge = resolvePaymentCharge(
       "xray",
@@ -294,11 +310,11 @@ export function deriveInvoiceStatusLabel(totalAmount, amountPaid, writeoffAmount
     return paid > 0 ? "Paid" : writeoff > 0 ? "Written Off" : "Unpaid";
   }
 
-  if (paid <= 0) {
-    return "Unpaid";
+  if (paid > 0 || writeoff > 0) {
+    return "Partial";
   }
 
-  return "Partial";
+  return "Unpaid";
 }
 
 export function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 0) {

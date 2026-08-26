@@ -997,11 +997,11 @@ function deriveInvoiceStatus(totalAmount, amountPaid, writeoffAmount = 0) {
     return paid > 0 ? "Paid" : writeoff > 0 ? "Written Off" : "Unpaid";
   }
 
-  if (paid <= 0) {
-    return "Unpaid";
+  if (paid > 0 || writeoff > 0) {
+    return "Partial";
   }
 
-  return "Partial";
+  return "Unpaid";
 }
 
 function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 0) {
@@ -1036,10 +1036,14 @@ function mapXrayDetail(row, orderPayments = []) {
       checkNumber: "",
       description: "",
       recipientEmail: "",
+      writeoffAmount: 0,
+      amountPaid: 0,
+      amountDue: 0,
     };
   }
 
   const payment = getXrayPayment(row);
+  const financials = resolveXrayRowFinancials(row, orderPayments);
 
   return {
     invoiceNumber: resolveXrayInvoiceNumber(row),
@@ -1053,6 +1057,9 @@ function mapXrayDetail(row, orderPayments = []) {
     checkNumber: row.check_number || "",
     description: row.description || "",
     recipientEmail: trimOrNull(row.recipient_emails) || "",
+    writeoffAmount: financials.writeoffAmount,
+    amountPaid: financials.amountPaid,
+    amountDue: financials.amountDue,
   };
 }
 
@@ -1400,7 +1407,12 @@ function buildPrintXrayInvoicePdfData(xrayRow, orderRow, orderPayments = []) {
 }
 
 function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
-  const xrayPayment = xrayRow ? toNumber(xrayRow.payment) : 0;
+  const xrayFinancials = xrayRow
+    ? resolveXrayRowFinancials(xrayRow, orderPayments)
+    : null;
+  const xrayPayment = xrayFinancials ? xrayFinancials.totalAmount : 0;
+  const xrayPaid = xrayFinancials ? xrayFinancials.amountPaid : 0;
+  const xrayDue = xrayFinancials ? xrayFinancials.amountDue : 0;
 
   if (!invoiceRow) {
     return {
@@ -1410,6 +1422,8 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
       prepaymentPaid: 0,
       writeoffAmount: 0,
       xrayFee: xrayPayment,
+      xrayPaid,
+      xrayDue,
     };
   }
 
@@ -1435,6 +1449,8 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
     prepaymentPaid: getOrderPaymentAmount(orderPayments, "prepayment"),
     writeoffAmount: toNumber(invoiceRow.writeoff_amount),
     xrayFee: xrayPayment,
+    xrayPaid,
+    xrayDue,
     storageFee: getStorageFee(invoiceRow),
   };
 }
@@ -1543,8 +1559,42 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {
   const payments = await Order.findPaymentsByOrderId(orderId, connection);
 
   if (xrayRow) {
-    const xrayDue = resolveXrayPaymentDue(xrayRow, payments);
-    await upsertOrderPaymentDue(connection, orderId, "xray", xrayDue, payments);
+    const financials = resolveXrayRowFinancials(xrayRow, payments);
+    const existing = payments.find((row) => row.payment_type === "xray");
+    const nextAmount =
+      financials.amountPaid > 0
+        ? financials.amountPaid
+        : existing?.amount != null
+          ? toNumber(existing.amount)
+          : null;
+
+    if (existing) {
+      await connection.execute(
+        `UPDATE order_payments
+         SET amount = :amount,
+             due_amount = :dueAmount,
+             is_paid = :isPaid,
+             updated_at = NOW()
+         WHERE id = :id`,
+        {
+          amount: nextAmount,
+          dueAmount: financials.amountDue,
+          isPaid: financials.amountDue <= 0 && financials.amountPaid > 0 ? 1 : 0,
+          id: existing.id,
+        }
+      );
+    } else {
+      await Order.upsertPayment(connection, {
+        orderId,
+        paymentType: "xray",
+        checkNumber: null,
+        paymentDate: null,
+        amount: nextAmount,
+        dueAmount: financials.amountDue,
+        isPaid: financials.amountDue <= 0 && financials.amountPaid > 0 ? 1 : 0,
+        memo: null,
+      });
+    }
   }
 
   if (invoice) {

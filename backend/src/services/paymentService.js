@@ -288,6 +288,9 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
           recordedBy: userId || null,
         }
       );
+
+      const { syncOrderPaymentDuesFromInvoice } = require("./invoiceService");
+      await syncOrderPaymentDuesFromInvoice(connection, orderId);
     }
 
     await connection.commit();

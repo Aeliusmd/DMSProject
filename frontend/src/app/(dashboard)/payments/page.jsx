@@ -461,7 +461,9 @@ function GlobalIdSearch({
     }
   };
 
-  const hasValue = Boolean(orderValue || invoiceValue);
+  const canReset = Boolean(
+    `${orderValue || ""}`.trim() || `${invoiceValue || ""}`.trim()
+  );
 
   return (
     <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
@@ -509,23 +511,22 @@ function GlobalIdSearch({
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            {hasValue ? (
-              <button
-                type="button"
-                onClick={onClear}
-                className="h-[38px] shrink-0 rounded-[6px] bg-[#F1F5F9] px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0]"
-              >
-                Clear
-              </button>
-            ) : null}
-
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={onSearch}
-              className="h-[38px] shrink-0 rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
+              className="h-[38px] min-w-[88px] rounded-[6px] bg-[#0097B2] px-5 text-[12px] font-semibold text-white hover:bg-[#0086A0]"
             >
               Search
+            </button>
+
+            <button
+              type="button"
+              onClick={onClear}
+              disabled={!canReset}
+              className="h-[38px] min-w-[88px] rounded-[6px] bg-[#F1F5F9] px-5 text-[12px] font-semibold text-[#334155] hover:bg-[#E2E8F0] disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8] disabled:hover:bg-[#F8FAFC]"
+            >
+              Reset
             </button>
           </div>
         </div>

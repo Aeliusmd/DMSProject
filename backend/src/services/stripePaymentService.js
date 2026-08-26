@@ -745,6 +745,9 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
      WHERE order_id = :orderId`,
     { orderId, amountPaid: total }
   );
+
+  const { syncOrderPaymentDuesFromInvoice } = require("./invoiceService");
+  await syncOrderPaymentDuesFromInvoice(connection, orderId);
 }
 
 async function updatePaymentRecord(connection, paymentRecordId, fields) {

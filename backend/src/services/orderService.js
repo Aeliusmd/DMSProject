@@ -720,22 +720,23 @@ function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = [])
     DEFAULT_PREPAYMENT_CHARGE - cappedPrepaymentPaid
   ).toFixed(2);
 
-  const targets = [
-    ["xray", invoiceFees.hasXrayInvoice, Number(invoiceFees.xrayFee) || 0],
-  ];
+  if (invoiceFees.hasXrayInvoice) {
+    const fromInvoicePaid = Number(invoiceFees.xrayPaid) || 0;
+    const fromFormPaid = parsePaymentAmount(paymentForm.xrayPaid);
+    const paid = Math.max(fromInvoicePaid, fromFormPaid);
 
-  targets.forEach(([prefix, hasFee, fee]) => {
-    const paid = parsePaymentAmount(paymentForm[`${prefix}Paid`]);
-
-    if (hasFee && fee > 0) {
-      paymentForm[`${prefix}Due`] = Math.max(0, fee - paid).toFixed(2);
-      return;
+    if (paid > 0) {
+      paymentForm.xrayPaid = paid.toFixed(2);
     }
 
-    if (paymentForm[`${prefix}Due`] === "") {
-      paymentForm[`${prefix}Due`] = "0";
-    }
-  });
+    paymentForm.xrayDue = (
+      Number.isFinite(Number(invoiceFees.xrayDue))
+        ? Math.max(0, Number(invoiceFees.xrayDue))
+        : Math.max(0, (Number(invoiceFees.xrayFee) || 0) - paid)
+    ).toFixed(2);
+  } else if (paymentForm.xrayDue === "") {
+    paymentForm.xrayDue = "0";
+  }
 
   return paymentForm;
 }

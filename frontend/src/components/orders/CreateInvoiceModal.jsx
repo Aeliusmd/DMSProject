@@ -420,12 +420,15 @@ export default function CreateInvoiceModal({
       ? QUICK_RECORDS_FEE + pendingFacilityFeeAmount
       : REQUEST_TOTAL_WITH_RECORDS_FEE + pendingFacilityFeeAmount
     : null;
+  const writeoffAmt = Number(persistedInvoiceMeta?.writeoffAmount) || 0;
+  // Quick/CNR Due paths are computed from fee rules and must still net write-offs
+  // (detailed mode already uses amountDue which includes writeoffAmount).
   const displayDue = isPersonalPortalOrder
     ? (personalPortalFinancials?.amountDue ?? 0)
     : isCnrOrder
-      ? prepaymentDueForCnr
+      ? Math.max(0, prepaymentDueForCnr - writeoffAmt)
       : isQuickMode
-        ? quickCollectTotal
+        ? Math.max(0, quickCollectTotal - writeoffAmt)
         : amountDue;
 
   if (!mounted || !isOpen || !order) return null;
