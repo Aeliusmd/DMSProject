@@ -1567,6 +1567,21 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {
         : existing?.amount != null
           ? toNumber(existing.amount)
           : null;
+    const invoiceCheckNumber = trimOrNull(xrayRow.payment_check_number);
+    const invoicePaymentDate = xrayRow.payment_date
+      ? toInputDate(xrayRow.payment_date)
+      : null;
+    const fromManualOrOnline =
+      xrayRow.payment_method === "manual" || xrayRow.payment_method === "online";
+    const nextCheckNumber = fromManualOrOnline
+      ? invoiceCheckNumber || existing?.check_number || null
+      : existing?.check_number || invoiceCheckNumber || null;
+    const nextPaymentDate = fromManualOrOnline
+      ? invoicePaymentDate ||
+        (existing?.payment_date ? toInputDate(existing.payment_date) : null)
+      : existing?.payment_date
+        ? toInputDate(existing.payment_date)
+        : invoicePaymentDate;
 
     if (existing) {
       await connection.execute(
@@ -1574,12 +1589,16 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {
          SET amount = :amount,
              due_amount = :dueAmount,
              is_paid = :isPaid,
+             check_number = :checkNumber,
+             payment_date = :paymentDate,
              updated_at = NOW()
          WHERE id = :id`,
         {
           amount: nextAmount,
           dueAmount: financials.amountDue,
           isPaid: financials.amountDue <= 0 && financials.amountPaid > 0 ? 1 : 0,
+          checkNumber: nextCheckNumber,
+          paymentDate: nextPaymentDate,
           id: existing.id,
         }
       );
@@ -1587,8 +1606,8 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {
       await Order.upsertPayment(connection, {
         orderId,
         paymentType: "xray",
-        checkNumber: null,
-        paymentDate: null,
+        checkNumber: nextCheckNumber,
+        paymentDate: nextPaymentDate,
         amount: nextAmount,
         dueAmount: financials.amountDue,
         isPaid: financials.amountDue <= 0 && financials.amountPaid > 0 ? 1 : 0,

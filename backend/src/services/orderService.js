@@ -734,6 +734,24 @@ function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = [])
         ? Math.max(0, Number(invoiceFees.xrayDue))
         : Math.max(0, (Number(invoiceFees.xrayFee) || 0) - paid)
     ).toFixed(2);
+
+    // Manual/online X-ray payment stores check on invoice_xray_details;
+    // surface those on edit-order when order_payments check fields are empty.
+    if (xrayRow) {
+      const invoiceCheck = `${xrayRow.payment_check_number || ""}`.trim();
+      const invoiceDate = toInputDate(xrayRow.payment_date);
+      const fromManualOrOnline =
+        xrayRow.payment_method === "manual" ||
+        xrayRow.payment_method === "online";
+
+      if (invoiceCheck && (fromManualOrOnline || !`${paymentForm.xrayCheck || ""}`.trim())) {
+        paymentForm.xrayCheck = invoiceCheck;
+      }
+
+      if (invoiceDate && (fromManualOrOnline || !`${paymentForm.xrayDate || ""}`.trim())) {
+        paymentForm.xrayDate = invoiceDate;
+      }
+    }
   } else if (paymentForm.xrayDue === "") {
     paymentForm.xrayDue = "0";
   }
