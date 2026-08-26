@@ -1413,6 +1413,10 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
   const xrayPayment = xrayFinancials ? xrayFinancials.totalAmount : 0;
   const xrayPaid = xrayFinancials ? xrayFinancials.amountPaid : 0;
   const xrayDue = xrayFinancials ? xrayFinancials.amountDue : 0;
+  const xrayPaymentMethod =
+    xrayRow?.payment_method === "manual" || xrayRow?.payment_method === "online"
+      ? xrayRow.payment_method
+      : "";
 
   if (!invoiceRow) {
     return {
@@ -1424,6 +1428,7 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
       xrayFee: xrayPayment,
       xrayPaid,
       xrayDue,
+      xrayPaymentMethod,
     };
   }
 
@@ -1451,6 +1456,7 @@ function mapOrderInvoiceFees(invoiceRow, xrayRow = null, orderPayments = []) {
     xrayFee: xrayPayment,
     xrayPaid,
     xrayDue,
+    xrayPaymentMethod,
     storageFee: getStorageFee(invoiceRow),
   };
 }

@@ -138,6 +138,12 @@ export default function PaymentChargeCard({
     parsePaymentAmount(dueDisplayValue) <= 0;
   const checkFieldsDisabled = Boolean(lockCheck || zeroBalance);
   const dateFieldsDisabled = Boolean(lockFields || zeroBalance);
+  const xrayPaymentMethod = `${invoiceFees?.xrayPaymentMethod || ""}`.toLowerCase();
+  const showXrayPaymentMethodLabel =
+    type === "xray" &&
+    (xrayPaymentMethod === "manual" || xrayPaymentMethod === "online") &&
+    paid > 0 &&
+    parsePaymentAmount(dueDisplayValue) <= 0;
 
   const emitValues = (updates) => {
     if (onValuesChange) {
@@ -206,12 +212,11 @@ export default function PaymentChargeCard({
           </p>
         </div>
 
-        <button
-          type="button"
-          className={`text-[12px] font-semibold ${colors.title}`}
-        >
-          New
-        </button>
+        {showXrayPaymentMethodLabel ? (
+          <span className={`shrink-0 text-[12px] font-semibold ${colors.title}`}>
+            {xrayPaymentMethod === "online" ? "Online" : "Manual"}
+          </span>
+        ) : null}
       </div>
 
       <div className="space-y-3">
