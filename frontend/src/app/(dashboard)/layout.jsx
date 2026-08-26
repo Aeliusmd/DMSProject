@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ensureStaffClientSession,
   getCurrentUser,
   refreshAccessToken,
   startAuthAutoRefresh,
@@ -19,7 +20,18 @@ export default function DashboardLayout({ children }) {
     let isMounted = true;
 
     async function verifySession() {
+      const wasImpersonating = isImpersonating();
+
       try {
+        // Tab close clears sessionStorage; cookies alone must not keep the user in.
+        const hasClientSession = await ensureStaffClientSession();
+        if (!hasClientSession) {
+          if (isMounted) {
+            router.replace(wasImpersonating ? "/login-as?ended=1" : "/login");
+          }
+          return;
+        }
+
         await getCurrentUser();
 
         if (isMounted) {
@@ -36,7 +48,6 @@ export default function DashboardLayout({ children }) {
             startAuthAutoRefresh();
           }
         } catch {
-          const wasImpersonating = isImpersonating();
           clearAuth();
           router.replace(wasImpersonating ? "/login-as?ended=1" : "/login");
         }

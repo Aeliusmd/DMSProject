@@ -7,8 +7,12 @@ import AuthInput from "@/components/ui/AuthInput";
 import PrimaryButton from "@/components/ui/PrimaryButton";
 import TwoFactorAuthModal from "@/components/auth/TwoFactorAuthModal";
 import ForgotPasswordModal from "@/components/auth/ForgotPasswordModal";
-import { login } from "@/lib/auth/authApi";
-import { isAuthenticated } from "@/lib/auth/authStorage";
+import { ensureStaffClientSession, login } from "@/lib/auth/authApi";
+import {
+  getAccessToken,
+  getRefreshToken,
+  isAuthenticated,
+} from "@/lib/auth/authStorage";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { clearAllDraftOrderSessions } from "@/lib/orders/facilityOrderUtils";
 
@@ -34,9 +38,27 @@ export default function LoginPage() {
   });
 
   useEffect(() => {
-    if (isAuthenticated()) {
-      router.replace("/dashboard");
+    let cancelled = false;
+
+    async function hydrateLogin() {
+      if (getAccessToken() || getRefreshToken()) {
+        if (!cancelled) router.replace("/dashboard");
+        return;
+      }
+
+      // After tab close, localStorage user can remain while sessionStorage is gone.
+      // End leftover cookie session unless another open tab still has tokens.
+      if (!isAuthenticated()) return;
+
+      const ok = await ensureStaffClientSession();
+      if (cancelled) return;
+      if (ok) router.replace("/dashboard");
     }
+
+    hydrateLogin();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const emailError = apiFieldErrors.email || validateEmail(email);

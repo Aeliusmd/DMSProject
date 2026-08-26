@@ -69,6 +69,9 @@ function refreshOnce() {
 const REFRESH_SKEW_MS = 60 * 1000;
 const ACTIVITY_WINDOW_MS = 15 * 60 * 1000;
 const INACTIVE_RECHECK_MS = 60 * 1000;
+/** Log out after this much continuous idle time (no mouse/keyboard/scroll/touch). */
+const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+const IDLE_CHECK_MS = 60 * 1000;
 const ACTIVITY_EVENTS = [
   "mousedown",
   "keydown",
@@ -78,11 +81,166 @@ const ACTIVITY_EVENTS = [
 ];
 
 let refreshTimer = null;
+let idleCheckTimer = null;
+let idleLogoutInProgress = false;
 let activityListenersBound = false;
 let lastActivityAt = Date.now();
+let staffAuthChannel = null;
+
+const STAFF_AUTH_CHANNEL = "dms-staff-auth";
+const TOKEN_HANDOFF_MS = 300;
 
 function markActivity() {
   lastActivityAt = Date.now();
+}
+
+function hasStaffClientTokens() {
+  return Boolean(getAccessToken() || getRefreshToken());
+}
+
+function bindStaffAuthChannel() {
+  if (typeof window === "undefined") return;
+  if (typeof BroadcastChannel === "undefined") return;
+  if (staffAuthChannel) return;
+
+  staffAuthChannel = new BroadcastChannel(STAFF_AUTH_CHANNEL);
+  staffAuthChannel.onmessage = (event) => {
+    if (event?.data?.type !== "auth-tokens-request") return;
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return;
+
+    staffAuthChannel.postMessage({
+      type: "auth-tokens",
+      accessToken: getAccessToken(),
+      refreshToken,
+      accessExpiresAt: getAccessExpiresAt(),
+      user: getStoredUser(),
+    });
+  };
+}
+
+function unbindStaffAuthChannel() {
+  if (!staffAuthChannel) return;
+  try {
+    staffAuthChannel.close();
+  } catch {
+    // Ignore channel close failures.
+  }
+  staffAuthChannel = null;
+}
+
+function requestTokensFromOtherTabs() {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") {
+      resolve(false);
+      return;
+    }
+
+    const channel = new BroadcastChannel(STAFF_AUTH_CHANNEL);
+    const timer = setTimeout(() => {
+      try {
+        channel.close();
+      } catch {
+        // Ignore channel close failures.
+      }
+      resolve(false);
+    }, TOKEN_HANDOFF_MS);
+
+    channel.onmessage = (event) => {
+      if (event?.data?.type !== "auth-tokens") return;
+      if (!event.data.refreshToken) return;
+
+      clearTimeout(timer);
+      setAuth({
+        user: event.data.user || undefined,
+        accessToken: event.data.accessToken || undefined,
+        refreshToken: event.data.refreshToken,
+        accessExpiresAt: event.data.accessExpiresAt || undefined,
+      });
+
+      try {
+        channel.close();
+      } catch {
+        // Ignore channel close failures.
+      }
+      resolve(true);
+    };
+
+    channel.postMessage({ type: "auth-tokens-request" });
+  });
+}
+
+/**
+ * Staff auth is tab-scoped via sessionStorage. Closing the tab clears tokens,
+ * but httpOnly cookies can otherwise restore the session. Require client tokens
+ * (or a handoff from another open tab); otherwise end the cookie/server session.
+ * Company/personal portals are unaffected.
+ */
+export async function ensureStaffClientSession() {
+  if (typeof window === "undefined") return false;
+
+  if (hasStaffClientTokens()) {
+    bindStaffAuthChannel();
+    return true;
+  }
+
+  const recovered = await requestTokensFromOtherTabs();
+  if (recovered && hasStaffClientTokens()) {
+    bindStaffAuthChannel();
+    return true;
+  }
+
+  try {
+    await logout();
+  } catch {
+    clearAuth();
+  }
+
+  return false;
+}
+
+function clearIdleCheckTimer() {
+  if (idleCheckTimer) {
+    clearTimeout(idleCheckTimer);
+    idleCheckTimer = null;
+  }
+}
+
+function scheduleIdleCheck() {
+  if (typeof window === "undefined") return;
+
+  clearIdleCheckTimer();
+  if (!getStoredUser()) return;
+
+  idleCheckTimer = setTimeout(() => {
+    void checkIdleTimeout();
+  }, IDLE_CHECK_MS);
+}
+
+async function checkIdleTimeout() {
+  if (typeof window === "undefined") return;
+  if (!getStoredUser()) return;
+  if (idleLogoutInProgress) return;
+
+  const idleForMs = Date.now() - lastActivityAt;
+
+  if (idleForMs < IDLE_TIMEOUT_MS) {
+    scheduleIdleCheck();
+    return;
+  }
+
+  idleLogoutInProgress = true;
+  const wasImpersonating = isImpersonating();
+
+  try {
+    await logout();
+  } catch {
+    clearAuth();
+  } finally {
+    idleLogoutInProgress = false;
+  }
+
+  window.location.replace(wasImpersonating ? "/login-as?ended=1" : "/login");
 }
 
 async function autoRefreshTick() {
@@ -130,8 +288,10 @@ export function startAuthAutoRefresh() {
     activityListenersBound = true;
   }
 
+  bindStaffAuthChannel();
   markActivity();
   scheduleTokenRefresh();
+  scheduleIdleCheck();
 }
 
 export function stopAuthAutoRefresh() {
@@ -139,6 +299,8 @@ export function stopAuthAutoRefresh() {
 
   clearTimeout(refreshTimer);
   refreshTimer = null;
+  clearIdleCheckTimer();
+  unbindStaffAuthChannel();
 
   if (activityListenersBound) {
     ACTIVITY_EVENTS.forEach((event) =>
