@@ -31,6 +31,7 @@ export default function LoginPage() {
 
   const [sessionToken, setSessionToken] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
+  const [trustedDeviceDays, setTrustedDeviceDays] = useState(7);
 
   const [touched, setTouched] = useState({
     email: false,
@@ -88,6 +89,13 @@ export default function LoginPage() {
 
       const payload = response?.data || {};
 
+      if (!payload.requiresTwoFactor && payload.accessToken) {
+        clearAllDraftOrderSessions();
+        await router.replace("/dashboard");
+        return;
+      }
+
+      setTrustedDeviceDays(Number(payload.trustedDeviceDays) || 7);
       setSessionToken(payload.sessionToken || "");
       setMaskedEmail(payload.email || email.trim());
       setIsTwoFactorOpen(true);
@@ -251,6 +259,7 @@ export default function LoginPage() {
         onSuccess={handleTwoFactorSuccess}
         email={maskedEmail || email}
         sessionToken={sessionToken}
+        trustedDeviceDays={trustedDeviceDays}
       />
 
       <ForgotPasswordModal

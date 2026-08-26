@@ -483,14 +483,21 @@ async function sendEmailOtp(email) {
   const expiresMinutes = config.twoFactor?.expiresMinutes || 10;
   const expiresAt = Date.now() + expiresMinutes * 60 * 1000;
 
-  const lastSentAt = twoFactorStore.getLastSentAt(otpSessionKey(sessionToken));
+  const lastSentAt = await twoFactorStore.getLastSentAt(
+    otpSessionKey(sessionToken)
+  );
   const cooldownMs = (config.twoFactor?.resendCooldownSeconds || 60) * 1000;
 
   if (lastSentAt && Date.now() - lastSentAt < cooldownMs) {
     throw new ApiError(429, "Please wait before requesting another code.");
   }
 
-  twoFactorStore.set(otpSessionKey(sessionToken), code, expiresAt);
+  await twoFactorStore.set(
+    otpSessionKey(sessionToken),
+    code,
+    expiresAt,
+    email
+  );
 
   await emailService.sendTwoFactorCode({
     to: email,
@@ -511,7 +518,7 @@ async function sendEmailOtp(email) {
 }
 
 async function confirmEmailOtp(sessionToken, code, email) {
-  const isValid = twoFactorStore.verify(otpSessionKey(sessionToken), code);
+  const isValid = await twoFactorStore.verify(otpSessionKey(sessionToken), code);
 
   if (!isValid) {
     throw new ApiError(400, "Invalid or expired verification code.");

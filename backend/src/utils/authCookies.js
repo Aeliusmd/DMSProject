@@ -5,6 +5,7 @@ const PORTAL_COOKIES = {
   internal: {
     access: "dms_access",
     refresh: "dms_refresh",
+    deviceTrust: "dms_device_trust",
   },
   company: {
     access: "dms_company_access",
@@ -132,6 +133,36 @@ function clearPortalAuthCookies(res, portal) {
   res.clearCookie(names.refresh, options);
 }
 
+function getDeviceTrustTokenFromRequest(req) {
+  const cookieToken = req.cookies?.[PORTAL_COOKIES.internal.deviceTrust] || "";
+  const bodyToken =
+    typeof req.body?.deviceTrustToken === "string"
+      ? req.body.deviceTrustToken.trim()
+      : "";
+
+  return bodyToken || cookieToken || null;
+}
+
+function setDeviceTrustCookie(res, deviceTrustToken, expiresAt) {
+  if (!deviceTrustToken) return;
+
+  const maxAge = Math.max(
+    0,
+    new Date(expiresAt).getTime() - Date.now()
+  );
+
+  if (!maxAge) return;
+
+  res.cookie(PORTAL_COOKIES.internal.deviceTrust, deviceTrustToken, {
+    ...getCookieBaseOptions(),
+    maxAge,
+  });
+}
+
+function clearDeviceTrustCookie(res) {
+  res.clearCookie(PORTAL_COOKIES.internal.deviceTrust, getCookieBaseOptions());
+}
+
 function getBearerTokenFromHeader(req) {
   const authHeader = req.headers.authorization || "";
   const [scheme, token] = authHeader.split(" ");
@@ -166,6 +197,9 @@ module.exports = {
   buildAuthPayload,
   setPortalAuthCookies,
   clearPortalAuthCookies,
+  getDeviceTrustTokenFromRequest,
+  setDeviceTrustCookie,
+  clearDeviceTrustCookie,
   getAccessTokenFromRequest,
   getRefreshTokenFromRequest,
   getAccessExpiresAt,

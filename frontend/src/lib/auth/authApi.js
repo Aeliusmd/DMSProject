@@ -7,12 +7,15 @@ import { withCredentials } from "@/lib/auth/fetchCredentials";
 import {
   beginImpersonationSession,
   clearAuth,
+  clearDeviceTrustToken,
   getAccessExpiresAt,
   getAccessToken,
+  getDeviceTrustToken,
   getRefreshToken,
   getStoredUser,
   isImpersonating,
   setAuth,
+  setDeviceTrustToken,
 } from "./authStorage";
 
 function withAuthHeaders(headers = {}) {
@@ -384,14 +387,39 @@ export async function request(
 }
 
 export async function login({ email, password }) {
-  return request("/auth/login", {
+  const data = await request("/auth/login", {
     method: "POST",
-    body: { email, password },
+    body: {
+      email,
+      password,
+      deviceTrustToken: getDeviceTrustToken() || undefined,
+    },
   });
+
+  const payload = data?.data || {};
+
+  if (payload.clearDeviceTrust) {
+    clearDeviceTrustToken();
+  }
+
+  if (payload.deviceTrustToken) {
+    setDeviceTrustToken(payload.deviceTrustToken);
+  }
+
+  if (!payload.requiresTwoFactor && payload.accessToken) {
+    saveAuthSession({
+      user: payload.user,
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+      accessExpiresAt: payload.accessExpiresAt,
+    });
+  }
+
+  return data;
 }
 
 export async function verifyTwoFactor({ sessionToken, code, trustDevice }) {
-  return request("/auth/verify-2fa", {
+  const data = await request("/auth/verify-2fa", {
     method: "POST",
     body: {
       sessionToken,
@@ -399,6 +427,16 @@ export async function verifyTwoFactor({ sessionToken, code, trustDevice }) {
       trustDevice,
     },
   });
+
+  const payload = data?.data || {};
+
+  if (trustDevice && payload.deviceTrustToken) {
+    setDeviceTrustToken(payload.deviceTrustToken);
+  } else if (!trustDevice) {
+    clearDeviceTrustToken();
+  }
+
+  return data;
 }
 
 export async function resendTwoFactor(sessionToken) {

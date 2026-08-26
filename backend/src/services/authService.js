@@ -1,8 +1,10 @@
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const config = require("../config");
 const ApiError = require("../utils/ApiError");
 const Employee = require("../models/Employee");
 const AuthSession = require("../models/AuthSession");
+const AuthTrustedDevice = require("../models/AuthTrustedDevice");
 const { sendTwoFactorCode } = require("./emailService");
 const twoFactorStore = require("./twoFactorStore");
 const impersonationTicketStore = require("./impersonationTicketStore");
@@ -54,7 +56,60 @@ async function attachImpersonationUser(user, impersonatorId) {
   };
 }
 
-async function login({ identifier, password, ipAddress, userAgent }) {
+async function issueAuthTokens({
+  employee,
+  session,
+  sessionToken,
+  trustDevice = false,
+  deviceTrustToken = null,
+  deviceTrustExpiresAt = null,
+  ipAddress,
+  userAgent,
+}) {
+  const employeeId = employee.employee_id || employee.id;
+  const role = employee.role || session.role;
+
+  const accessToken = tokenService.generateAccessToken({
+    employeeId,
+    role,
+    sessionId: session.id,
+  });
+
+  const refreshToken = tokenService.generateRefreshToken({
+    employeeId,
+    sessionId: session.id,
+    sessionToken,
+  });
+
+  return {
+    requiresTwoFactor: false,
+    accessToken,
+    refreshToken,
+    sessionToken,
+    expiresIn: tokenService.getAccessTokenExpiresInSeconds(),
+    user: formatUser({
+      id: employeeId,
+      name: employee.name || session.name,
+      email: employee.email || session.email,
+      logon: employee.logon || session.logon,
+      role,
+    }),
+    trustDevice: Boolean(trustDevice),
+    deviceTrustToken: deviceTrustToken || undefined,
+    deviceTrustExpiresAt: deviceTrustExpiresAt || undefined,
+    trustedDeviceDays: config.session.trustedDeviceDays,
+    ipAddress,
+    userAgent,
+  };
+}
+
+async function login({
+  identifier,
+  password,
+  ipAddress,
+  userAgent,
+  deviceTrustToken = null,
+}) {
   const employee = await Employee.findByEmailOrLogonForAuth(identifier.trim());
 
   if (!employee) {
@@ -96,6 +151,41 @@ async function login({ identifier, password, ipAddress, userAgent }) {
     }
   }
 
+  const trustedDevice = await AuthTrustedDevice.findValidByToken(deviceTrustToken);
+
+  if (trustedDevice && Number(trustedDevice.employee_id) === Number(employee.id)) {
+    const sessionToken = tokenService.generateSessionToken();
+    const expiresAt = tokenService.getSessionExpiryDate(false);
+
+    const session = await AuthSession.create({
+      employeeId: employee.id,
+      sessionToken,
+      ipAddress,
+      userAgent,
+      expiresAt,
+      twoFactorVerified: true,
+      trustDevice: true,
+    });
+
+    await Employee.updateLastLogin(employee.id);
+
+    return issueAuthTokens({
+      employee,
+      session,
+      sessionToken,
+      trustDevice: true,
+      deviceTrustToken,
+      deviceTrustExpiresAt: trustedDevice.expires_at,
+      ipAddress,
+      userAgent,
+    });
+  }
+
+  if (deviceTrustToken) {
+    // Stale / wrong-account trust token — drop it from DB if present.
+    await AuthTrustedDevice.deleteByToken(deviceTrustToken);
+  }
+
   const sessionToken = tokenService.generateSessionToken();
   const expiresAt = tokenService.getSessionExpiryDate(false);
 
@@ -111,7 +201,7 @@ async function login({ identifier, password, ipAddress, userAgent }) {
   const otpExpiresAt =
     Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
 
-  twoFactorStore.set(session.id, otpCode, otpExpiresAt);
+  await twoFactorStore.set(session.id, otpCode, otpExpiresAt, employee.email);
 
   const emailResult = await sendTwoFactorCode({
     to: employee.email,
@@ -124,6 +214,8 @@ async function login({ identifier, password, ipAddress, userAgent }) {
     sessionToken,
     email: tokenService.maskEmail(employee.email),
     expiresInMinutes: config.twoFactor.expiresMinutes,
+    trustedDeviceDays: config.session.trustedDeviceDays,
+    clearDeviceTrust: Boolean(deviceTrustToken),
     devCodeLogged: emailResult.devLogged === true,
   };
 }
@@ -145,7 +237,7 @@ async function verifyTwoFactor({
     throw new ApiError(400, "Two-factor authentication already completed");
   }
 
-  const isValidCode = twoFactorStore.verify(session.id, code);
+  const isValidCode = await twoFactorStore.verify(session.id, code);
 
   if (!isValidCode) {
     throw new ApiError(401, "Invalid or expired verification code");
@@ -160,34 +252,38 @@ async function verifyTwoFactor({
 
   await Employee.updateLastLogin(session.employee_id);
 
-  const accessToken = tokenService.generateAccessToken({
-    employeeId: session.employee_id,
-    role: session.role,
-    sessionId: session.id,
-  });
+  let nextDeviceTrustToken = null;
+  let deviceTrustExpiresAt = null;
 
-  const refreshToken = tokenService.generateRefreshToken({
-    employeeId: session.employee_id,
-    sessionId: session.id,
-    sessionToken,
-  });
+  if (trustDevice) {
+    nextDeviceTrustToken = crypto.randomBytes(32).toString("hex");
+    const trustedAt = new Date();
+    deviceTrustExpiresAt = tokenService.getSessionExpiryDate(true);
 
-  return {
-    accessToken,
-    refreshToken,
-    sessionToken,
-    expiresIn: tokenService.getAccessTokenExpiresInSeconds(),
-    user: formatUser({
+    await AuthTrustedDevice.create({
+      employeeId: session.employee_id,
+      deviceToken: nextDeviceTrustToken,
+      trustedAt,
+      expiresAt: deviceTrustExpiresAt,
+    });
+  }
+
+  return issueAuthTokens({
+    employee: {
       id: session.employee_id,
       name: session.name,
       email: session.email,
       logon: session.logon,
       role: session.role,
-    }),
+    },
+    session,
+    sessionToken,
     trustDevice,
+    deviceTrustToken: nextDeviceTrustToken,
+    deviceTrustExpiresAt,
     ipAddress,
     userAgent,
-  };
+  });
 }
 
 async function resendTwoFactor({ sessionToken }) {
@@ -201,7 +297,7 @@ async function resendTwoFactor({ sessionToken }) {
     throw new ApiError(400, "Two-factor authentication already completed");
   }
 
-  const lastSentAt = twoFactorStore.getLastSentAt(session.id);
+  const lastSentAt = await twoFactorStore.getLastSentAt(session.id);
   const cooldownMs = config.twoFactor.resendCooldownSeconds * 1000;
 
   if (lastSentAt && Date.now() - lastSentAt < cooldownMs) {
@@ -218,7 +314,7 @@ async function resendTwoFactor({ sessionToken }) {
   const otpExpiresAt =
     Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
 
-  twoFactorStore.set(session.id, otpCode, otpExpiresAt);
+  await twoFactorStore.set(session.id, otpCode, otpExpiresAt, session.email);
 
   const emailResult = await sendTwoFactorCode({
     to: session.email,
@@ -283,7 +379,7 @@ async function logout({ refreshToken, sessionToken }) {
   if (refreshToken) {
     try {
       const decoded = tokenService.verifyRefreshToken(refreshToken);
-      twoFactorStore.remove(decoded.sessionId);
+      await twoFactorStore.remove(decoded.sessionId);
       await AuthSession.deleteById(decoded.sessionId);
       return {
         message: "Logged out successfully",
@@ -299,7 +395,7 @@ async function logout({ refreshToken, sessionToken }) {
     const session = await AuthSession.findBySessionToken(sessionToken);
 
     if (session) {
-      twoFactorStore.remove(session.id);
+      await twoFactorStore.remove(session.id);
       await AuthSession.deleteBySessionToken(sessionToken);
       return {
         message: "Logged out successfully",
@@ -485,10 +581,11 @@ async function sendPasswordResetCode(employee, sessionToken) {
   const otpExpiresAt =
     Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
 
-  twoFactorStore.set(
+  await twoFactorStore.set(
     passwordResetOtpKey(sessionToken),
     otpCode,
-    otpExpiresAt
+    otpExpiresAt,
+    employee.email
   );
 
   const emailResult = await sendTwoFactorCode({
@@ -550,7 +647,7 @@ async function verifyPasswordReset({ sessionToken, code }) {
     throw new ApiError(401, "Invalid or expired password reset session");
   }
 
-  const isValidCode = twoFactorStore.verify(
+  const isValidCode = await twoFactorStore.verify(
     passwordResetOtpKey(sessionToken),
     code
   );
@@ -580,7 +677,7 @@ async function resendPasswordReset({ sessionToken }) {
     throw new ApiError(401, "Invalid or expired password reset session");
   }
 
-  const lastSentAt = twoFactorStore.getLastSentAt(
+  const lastSentAt = await twoFactorStore.getLastSentAt(
     passwordResetOtpKey(sessionToken)
   );
   const cooldownMs = config.twoFactor.resendCooldownSeconds * 1000;

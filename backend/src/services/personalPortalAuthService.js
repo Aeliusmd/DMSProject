@@ -65,7 +65,12 @@ async function login({ email, ipAddress, userAgent }) {
   const otpExpiresAt =
     Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
 
-  twoFactorStore.set(personalOtpKey(session.id), otpCode, otpExpiresAt);
+  await twoFactorStore.set(
+    personalOtpKey(session.id),
+    otpCode,
+    otpExpiresAt,
+    user.email
+  );
 
   const emailResult = await sendTwoFactorCode({
     to: user.email,
@@ -94,7 +99,10 @@ async function verifyTwoFactor({ sessionToken, code, trustDevice = false }) {
     throw new ApiError(400, "Two-factor authentication already completed");
   }
 
-  const isValidCode = twoFactorStore.verify(personalOtpKey(session.id), code);
+  const isValidCode = await twoFactorStore.verify(
+    personalOtpKey(session.id),
+    code
+  );
 
   if (!isValidCode) {
     throw new ApiError(401, "Invalid or expired verification code");
@@ -142,7 +150,7 @@ async function resendTwoFactor({ sessionToken }) {
   }
 
   const otpKey = personalOtpKey(session.id);
-  const lastSentAt = twoFactorStore.getLastSentAt(otpKey);
+  const lastSentAt = await twoFactorStore.getLastSentAt(otpKey);
   const cooldownMs = config.twoFactor.resendCooldownSeconds * 1000;
 
   if (lastSentAt && Date.now() - lastSentAt < cooldownMs) {
@@ -159,7 +167,7 @@ async function resendTwoFactor({ sessionToken }) {
   const otpExpiresAt =
     Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
 
-  twoFactorStore.set(otpKey, otpCode, otpExpiresAt);
+  await twoFactorStore.set(otpKey, otpCode, otpExpiresAt, session.email);
 
   const emailResult = await sendTwoFactorCode({
     to: session.email,
@@ -220,7 +228,7 @@ async function logout({ refreshToken, sessionToken }) {
   if (sessionToken) {
     const session = await PersonalPortalSession.findBySessionToken(sessionToken);
     if (session) {
-      twoFactorStore.remove(personalOtpKey(session.id));
+      await twoFactorStore.remove(personalOtpKey(session.id));
       deleted = await PersonalPortalSession.deleteBySessionToken(sessionToken);
     }
   }
@@ -230,7 +238,7 @@ async function logout({ refreshToken, sessionToken }) {
       const decoded = tokenService.verifyPersonalRefreshToken(refreshToken);
       const session = await PersonalPortalSession.findById(decoded.sessionId);
       if (session) {
-        twoFactorStore.remove(personalOtpKey(session.id));
+        await twoFactorStore.remove(personalOtpKey(session.id));
         await PersonalPortalSession.deleteById(session.id);
       }
     } catch {

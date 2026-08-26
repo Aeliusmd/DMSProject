@@ -5,8 +5,11 @@ const authService = require("../services/authService");
 const activityLogService = require("../services/activityLogService");
 const {
   buildAuthPayload,
+  clearDeviceTrustCookie,
   clearPortalAuthCookies,
+  getDeviceTrustTokenFromRequest,
   getRefreshTokenFromRequest,
+  setDeviceTrustCookie,
   setPortalAuthCookies,
 } = require("../utils/authCookies");
 const {
@@ -37,8 +40,40 @@ exports.login = asyncHandler(async (req, res) => {
   const result = await authService.login({
     identifier: validation.identifier,
     password: req.body.password,
+    deviceTrustToken: getDeviceTrustTokenFromRequest(req),
     ...getRequestMeta(req),
   });
+
+  if (result.clearDeviceTrust) {
+    clearDeviceTrustCookie(res);
+  }
+
+  if (!result.requiresTwoFactor) {
+    await activityLogService.recordSafe({
+      performedBy: result.user.id,
+      performerName: result.user.name,
+      context: "auth",
+      action: "login",
+      details: "Logged in successfully (trusted device)",
+      targetEmployeeId: result.user.id,
+      companyName: "System",
+    });
+
+    setPortalAuthCookies(res, "internal", result);
+    if (result.deviceTrustToken && result.deviceTrustExpiresAt) {
+      setDeviceTrustCookie(
+        res,
+        result.deviceTrustToken,
+        result.deviceTrustExpiresAt
+      );
+    }
+
+    return ApiResponse.success(
+      res,
+      buildAuthPayload(result),
+      "Authentication successful"
+    );
+  }
 
   return ApiResponse.success(res, result, "Two-factor authentication required");
 });
@@ -69,6 +104,16 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
   });
 
   setPortalAuthCookies(res, "internal", result);
+
+  if (result.trustDevice && result.deviceTrustToken && result.deviceTrustExpiresAt) {
+    setDeviceTrustCookie(
+      res,
+      result.deviceTrustToken,
+      result.deviceTrustExpiresAt
+    );
+  } else {
+    clearDeviceTrustCookie(res);
+  }
 
   return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });

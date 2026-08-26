@@ -24,6 +24,8 @@ export default function TwoFactorAuthModal({
   title = "Two-Factor Authentication",
   description,
   showTrustDevice = true,
+  trustedDeviceDays = 7,
+  trustDeviceLabel = null,
   persistSession = true,
 }) {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
@@ -286,7 +288,8 @@ export default function TwoFactorAuthModal({
               onChange={(e) => setTrustDevice(e.target.checked)}
               className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
             />
-            Keep me signed in on this device for 30 days
+            {trustDeviceLabel ||
+              `Trust this device for ${trustedDeviceDays} days — skip the verification code on your next sign-ins from this browser`}
           </label>
           ) : null}
 

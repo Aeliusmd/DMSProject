@@ -29,7 +29,7 @@ module.exports = {
   },
 
   session: {
-    trustedDeviceDays: Number(process.env.SESSION_TRUSTED_DAYS) || 30,
+    trustedDeviceDays: Number(process.env.SESSION_TRUSTED_DAYS) || 7,
     defaultDays: Number(process.env.SESSION_DEFAULT_DAYS) || 7,
   },
 

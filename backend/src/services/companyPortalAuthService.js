@@ -137,7 +137,10 @@ async function verifyTwoFactor({
     throw new ApiError(400, "Two-factor authentication already completed");
   }
 
-  const isValidCode = twoFactorStore.verify(companyOtpKey(session.id), code);
+  const isValidCode = await twoFactorStore.verify(
+    companyOtpKey(session.id),
+    code
+  );
 
   if (!isValidCode) {
     throw new ApiError(401, "Invalid or expired verification code");
@@ -185,7 +188,7 @@ async function resendTwoFactor({ sessionToken }) {
   }
 
   const otpKey = companyOtpKey(session.id);
-  const lastSentAt = twoFactorStore.getLastSentAt(otpKey);
+  const lastSentAt = await twoFactorStore.getLastSentAt(otpKey);
   const cooldownMs = config.twoFactor.resendCooldownSeconds * 1000;
 
   if (lastSentAt && Date.now() - lastSentAt < cooldownMs) {
@@ -202,7 +205,7 @@ async function resendTwoFactor({ sessionToken }) {
   const otpExpiresAt =
     Date.now() + config.twoFactor.expiresMinutes * 60 * 1000;
 
-  twoFactorStore.set(otpKey, otpCode, otpExpiresAt);
+  await twoFactorStore.set(otpKey, otpCode, otpExpiresAt, session.email);
 
   const emailResult = await sendTwoFactorCode({
     to: session.email,
@@ -282,7 +285,7 @@ async function logout({ refreshToken, sessionToken }) {
       companyUserId = session.company_user_id;
       companyName = session.company_name || null;
       performerName = session.company_name || "Company Admin";
-      twoFactorStore.remove(companyOtpKey(session.id));
+      await twoFactorStore.remove(companyOtpKey(session.id));
       deleted = await CompanyPortalSession.deleteBySessionToken(sessionToken);
     }
   }
@@ -296,7 +299,7 @@ async function logout({ refreshToken, sessionToken }) {
         companyUserId = session.company_user_id;
         companyName = session.company_name || null;
         performerName = session.company_name || "Company Admin";
-        twoFactorStore.remove(companyOtpKey(session.id));
+        await twoFactorStore.remove(companyOtpKey(session.id));
         await CompanyPortalSession.deleteById(session.id);
         deleted = true;
       }

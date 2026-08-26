@@ -1,55 +1,92 @@
 const crypto = require("crypto");
-
-const store = new Map();
+const AuthOtpCode = require("../models/AuthOtpCode");
 
 function hashCode(code) {
   return crypto.createHash("sha256").update(String(code)).digest("hex");
 }
 
-function set(sessionId, code, expiresAt) {
-  store.set(String(sessionId), {
-    hash: hashCode(code),
-    expiresAt,
-    createdAt: Date.now(),
+function hashesMatch(storedHash, incomingHash) {
+  const a = Buffer.from(String(storedHash || ""), "utf8");
+  const b = Buffer.from(String(incomingHash || ""), "utf8");
+
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(a, b);
+}
+
+function toMs(value) {
+  if (value == null) return null;
+  if (value instanceof Date) return value.getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Persist a hashed OTP in MySQL so any app server behind a load balancer
+ * can verify it. Callers should pass the recipient email when known.
+ *
+ * @param {string|number} lookupKey session-scoped key (not the email alone)
+ * @param {string} code plain OTP (hashed before save)
+ * @param {number} expiresAtMs expiry as epoch ms
+ * @param {string} [email] recipient email stored with the row
+ */
+async function set(lookupKey, code, expiresAtMs, email = "") {
+  const startTime = new Date();
+  const endTime = new Date(expiresAtMs);
+
+  await AuthOtpCode.upsert({
+    lookupKey,
+    email,
+    otpHash: hashCode(code),
+    startTime,
+    endTime,
   });
 }
 
-function verify(sessionId, code) {
-  const entry = store.get(String(sessionId));
+async function verify(lookupKey, code) {
+  const entry = await AuthOtpCode.findByLookupKey(lookupKey);
 
   if (!entry) {
     return false;
   }
 
-  if (Date.now() > entry.expiresAt) {
-    store.delete(String(sessionId));
+  const endsAtMs = toMs(entry.end_time);
+  if (!endsAtMs || Date.now() > endsAtMs) {
+    await AuthOtpCode.deleteByLookupKey(lookupKey);
     return false;
   }
 
-  const isValid = entry.hash === hashCode(code);
+  const isValid = hashesMatch(entry.otp_hash, hashCode(code));
   if (isValid) {
-    store.delete(String(sessionId));
+    await AuthOtpCode.deleteByLookupKey(lookupKey);
   }
 
   return isValid;
 }
 
-function remove(sessionId) {
-  store.delete(String(sessionId));
+async function remove(lookupKey) {
+  await AuthOtpCode.deleteByLookupKey(lookupKey);
 }
 
-function getLastSentAt(sessionId) {
-  const entry = store.get(String(sessionId));
-  return entry?.createdAt || null;
+async function getLastSentAt(lookupKey) {
+  const entry = await AuthOtpCode.findByLookupKey(lookupKey);
+  return toMs(entry?.start_time);
 }
 
-function cleanupExpired() {
-  const now = Date.now();
+async function cleanupExpired() {
+  try {
+    await AuthOtpCode.deleteExpired();
+  } catch {
+    // Ignore cleanup failures (e.g. pool not ready during boot).
+  }
 
-  for (const [key, entry] of store.entries()) {
-    if (now > entry.expiresAt) {
-      store.delete(key);
-    }
+  try {
+    const AuthTrustedDevice = require("../models/AuthTrustedDevice");
+    await AuthTrustedDevice.deleteExpired();
+  } catch {
+    // Ignore cleanup failures.
   }
 }
 

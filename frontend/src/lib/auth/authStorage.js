@@ -6,6 +6,7 @@ const USER_KEY = "dms_user";
 const ACCESS_EXPIRES_KEY = "dms_access_expires_at";
 const IMPERSONATION_FLAG_KEY = "dms_impersonating";
 const SESSION_USER_KEY = "dms_session_user";
+const DEVICE_TRUST_TOKEN_KEY = "dms_device_trust_token";
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -159,6 +160,35 @@ export function clearAuth() {
 
   if (!impersonating) {
     localStorage.removeItem(USER_KEY);
+  }
+}
+
+export function getDeviceTrustToken() {
+  if (!isBrowser()) return null;
+  try {
+    return localStorage.getItem(DEVICE_TRUST_TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setDeviceTrustToken(token) {
+  if (!isBrowser()) return;
+  try {
+    if (typeof token === "string" && token) {
+      localStorage.setItem(DEVICE_TRUST_TOKEN_KEY, token);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function clearDeviceTrustToken() {
+  if (!isBrowser()) return;
+  try {
+    localStorage.removeItem(DEVICE_TRUST_TOKEN_KEY);
+  } catch {
+    // Ignore storage failures.
   }
 }
 

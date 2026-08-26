@@ -133,6 +133,7 @@ export default function PersonalPortalLoginClient() {
         verifyFn={verifyPersonalTwoFactor}
         resendFn={resendPersonalTwoFactor}
         saveSessionFn={savePersonalAuthSession}
+        trustDeviceLabel="Keep me signed in on this device for 7 days"
         onClose={() => {
           setIsTwoFactorOpen(false);
           setSessionToken("");
