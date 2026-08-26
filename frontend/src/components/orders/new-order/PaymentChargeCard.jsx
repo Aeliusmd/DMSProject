@@ -98,6 +98,8 @@ export default function PaymentChargeCard({
   checkDisplayValue = null,
   checkReadOnly = false,
   checkAllowAnyChars = false,
+  /** When true, Check # / Check Date stay disabled while paid and due are both 0. */
+  disableCheckWhenZeroBalance = false,
 }) {
   const colors = paymentThemes[theme];
   const [paidCapError, setPaidCapError] = useState("");
@@ -124,6 +126,18 @@ export default function PaymentChargeCard({
       ? charge
       : dueAmountFromFee(charge, resolvedPaid);
   const paidDisplay = mirrorPaidDue ? charge : paid;
+  const dueDisplayValue = autoComputeDue
+    ? computedDue.toFixed(2)
+    : mirrorPaidDue
+      ? charge.toFixed(2)
+      : dueAmountFromFee(charge, paid).toFixed(2);
+  // Lock Check # / Date when there is nothing paid and nothing due (xray zero-balance case).
+  const zeroBalance =
+    disableCheckWhenZeroBalance &&
+    paid <= 0 &&
+    parsePaymentAmount(dueDisplayValue) <= 0;
+  const checkFieldsDisabled = Boolean(lockCheck || zeroBalance);
+  const dateFieldsDisabled = Boolean(lockFields || zeroBalance);
 
   const emitValues = (updates) => {
     if (onValuesChange) {
@@ -134,6 +148,16 @@ export default function PaymentChargeCard({
     Object.entries(updates).forEach(([name, value]) => {
       onChange({ target: { name, value } });
     });
+  };
+
+  const handleCheckChange = (event) => {
+    if (checkFieldsDisabled) return;
+    onChange?.(event);
+  };
+
+  const handleDateChange = (event) => {
+    if (dateFieldsDisabled) return;
+    onChange?.(event);
   };
 
   const handlePaidChange = (event) => {
@@ -168,12 +192,6 @@ export default function PaymentChargeCard({
 
     emitValues(updates);
   };
-
-  const dueDisplayValue = autoComputeDue
-    ? computedDue.toFixed(2)
-    : mirrorPaidDue
-      ? charge.toFixed(2)
-      : dueAmountFromFee(charge, paid).toFixed(2);
 
   return (
     <div className={`rounded-[10px] border ${colors.border} ${colors.bg} p-4`}>
@@ -221,10 +239,10 @@ export default function PaymentChargeCard({
               ? checkDisplayValue
               : formData[`${prefix}Check`]
           }
-          onChange={onChange}
+          onChange={handleCheckChange}
           onBlur={onBlur}
           placeholder={checkPlaceholder}
-          disabled={lockCheck}
+          disabled={checkFieldsDisabled}
           inputMode={checkReadOnly || checkAllowAnyChars ? "text" : "numeric"}
           maxLength={checkReadOnly || checkAllowAnyChars ? 50 : 12}
           error={getError(`${prefix}Check`)}
@@ -233,11 +251,12 @@ export default function PaymentChargeCard({
         <NewOrderField
           label="Check Date"
           name={`${prefix}Date`}
-          value={formData[`${prefix}Date`]}
-          onChange={onChange}
+          value={formData[`${prefix}Date`] || ""}
+          onChange={handleDateChange}
           onBlur={onBlur}
           type="date"
-          disabled={lockFields}
+          disabled={dateFieldsDisabled}
+          readOnly={dateFieldsDisabled}
           error={getError(`${prefix}Date`)}
         />
 

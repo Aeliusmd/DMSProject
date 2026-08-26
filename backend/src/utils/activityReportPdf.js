@@ -243,6 +243,7 @@ function generateActivityReportPdf(report = {}, meta = {}) {
       size: "LETTER",
       layout: "landscape",
       margins: { top: 40, bottom: 40, left: 40, right: 40 },
+      bufferPages: true,
     });
 
     const chunks = [];
@@ -274,15 +275,17 @@ function generateActivityReportPdf(report = {}, meta = {}) {
       });
     }
 
-    const pageCount = doc.bufferedPageRange().count;
-    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+    const range = doc.bufferedPageRange();
+    const pageCount = range.count;
+    for (let i = 0; i < pageCount; i += 1) {
+      const pageIndex = range.start + i;
       doc.switchToPage(pageIndex);
       doc
         .font("Helvetica")
         .fontSize(8)
         .fillColor(COLORS.muted)
         .text(
-          `Page ${pageIndex + 1} of ${pageCount}`,
+          `Page ${i + 1} of ${pageCount}`,
           contentLeft,
           doc.page.height - doc.page.margins.bottom + 12,
           {

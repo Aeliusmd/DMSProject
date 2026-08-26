@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import FilterSelect from "@/components/ui/FilterSelect";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { ORDER_PERIOD_OPTIONS } from "@/lib/orders/orderFilterConstants";
@@ -22,6 +23,9 @@ const STATUS_OPTIONS = [
   { value: "paid", label: "Paid" },
   { value: "released", label: "Released" },
 ];
+
+const SELECT_CLASS =
+  "h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2] disabled:cursor-not-allowed disabled:opacity-60";
 
 function clampSearch(value) {
   return `${value || ""}`.trim().slice(0, MAX_SEARCH_LENGTH);
@@ -76,9 +80,10 @@ export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
     };
   }, []);
 
-  const facilityOptions = useMemo(
-    () =>
-      (facilities || []).map((facility) => ({
+  const facilitySelectOptions = useMemo(
+    () => [
+      { value: "", label: "All facilities" },
+      ...(facilities || []).map((facility) => ({
         value: String(facility.id),
         label:
           facility.facility ||
@@ -86,80 +91,72 @@ export default function PersonalOrderFilterBar({ filters, onFiltersChange }) {
           facility.name ||
           `Facility ${facility.id}`,
       })),
+    ],
     [facilities]
   );
 
+  const yearSelectOptions = useMemo(
+    () => [
+      { value: "", label: "All years" },
+      ...yearOptions.map((year) => ({ value: year, label: year })),
+    ],
+    [yearOptions]
+  );
+
   return (
-    <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
-      <div className="flex flex-wrap items-end gap-3">
+    <section className="relative z-20 overflow-visible rounded-[9px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-end gap-3 overflow-visible">
         <label className="flex min-w-[180px] flex-1 flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
           Facility
-          <select
+          <FilterSelect
             value={draftFilters.facility}
-            onChange={(e) =>
-              setDraftFilters((prev) => ({ ...prev, facility: e.target.value }))
+            onChange={(next) =>
+              setDraftFilters((prev) => ({ ...prev, facility: next }))
             }
-            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
-          >
-            <option value="">All facilities</option>
-            {facilityOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            options={facilitySelectOptions}
+            disabled={Boolean(facilitiesLoadError)}
+            aria-label="Facility"
+            className={SELECT_CLASS}
+          />
         </label>
 
         <label className="flex min-w-[120px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
           Year
-          <select
+          <FilterSelect
             value={draftFilters.year}
-            onChange={(e) =>
-              setDraftFilters((prev) => ({ ...prev, year: e.target.value }))
+            onChange={(next) =>
+              setDraftFilters((prev) => ({ ...prev, year: next }))
             }
-            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
-          >
-            <option value="">All years</option>
-            {yearOptions.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </select>
+            options={yearSelectOptions}
+            aria-label="Year"
+            className={SELECT_CLASS}
+          />
         </label>
 
         <label className="flex min-w-[150px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
           Period
-          <select
+          <FilterSelect
             value={draftFilters.period}
-            onChange={(e) =>
-              setDraftFilters((prev) => ({ ...prev, period: e.target.value }))
+            onChange={(next) =>
+              setDraftFilters((prev) => ({ ...prev, period: next }))
             }
-            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
-          >
-            {ORDER_PERIOD_OPTIONS.map((option) => (
-              <option key={option.value || "all"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            options={ORDER_PERIOD_OPTIONS}
+            aria-label="Period"
+            className={SELECT_CLASS}
+          />
         </label>
 
         <label className="flex min-w-[160px] flex-col gap-1 text-[11px] font-semibold text-[#64748B]">
           Status
-          <select
+          <FilterSelect
             value={draftFilters.status}
-            onChange={(e) =>
-              setDraftFilters((prev) => ({ ...prev, status: e.target.value }))
+            onChange={(next) =>
+              setDraftFilters((prev) => ({ ...prev, status: next }))
             }
-            className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[13px] text-[#111827] outline-none focus:border-[#0097B2]"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value || "all"} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+            options={STATUS_OPTIONS}
+            aria-label="Status"
+            className={SELECT_CLASS}
+          />
         </label>
 
         <button

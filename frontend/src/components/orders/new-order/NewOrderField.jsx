@@ -9,6 +9,7 @@ export default function NewOrderField({
   required = false,
   error = "",
   disabled = false,
+  readOnly = false,
   options = [],
   textarea = false,
   hint,
@@ -17,6 +18,10 @@ export default function NewOrderField({
   maxLength,
 }) {
   const hasError = Boolean(error);
+  const isLocked = Boolean(disabled || readOnly);
+  const lockedClass = isLocked
+    ? "cursor-not-allowed bg-[#F8FAFC] text-[#94A3B8] pointer-events-none"
+    : "";
 
   return (
     <div className="min-w-0">
@@ -34,15 +39,14 @@ export default function NewOrderField({
           onChange={onChange}
           onBlur={onBlur}
           disabled={disabled}
+          readOnly={readOnly}
           placeholder={placeholder}
           rows={3}
           className={`w-full resize-none rounded-[6px] border bg-white px-3 py-2 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
             hasError
               ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
               : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-          } ${
-            disabled ? "cursor-not-allowed bg-[#F8FAFC] text-[#94A3B8]" : ""
-          }`}
+          } ${lockedClass}`}
         />
       ) : options.length > 0 ? (
         <select
@@ -50,14 +54,12 @@ export default function NewOrderField({
           value={value}
           onChange={onChange}
           onBlur={onBlur}
-          disabled={disabled}
+          disabled={disabled || readOnly}
           className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[13px] text-[#111827] outline-none focus:ring-2 ${
             hasError
               ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
               : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-          } ${
-            disabled ? "cursor-not-allowed bg-[#F8FAFC] text-[#94A3B8]" : ""
-          }`}
+          } ${lockedClass}`}
         >
           {options.map((option) => (
             <option
@@ -74,20 +76,35 @@ export default function NewOrderField({
         <input
           name={name}
           value={value}
-          onChange={onChange}
+          onChange={isLocked ? undefined : onChange}
           onBlur={onBlur}
           type={type}
           disabled={disabled}
+          readOnly={readOnly}
+          tabIndex={isLocked ? -1 : undefined}
           placeholder={placeholder}
           inputMode={inputMode}
           maxLength={maxLength}
+          onClick={
+            isLocked
+              ? (event) => {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              : undefined
+          }
+          onKeyDown={
+            isLocked
+              ? (event) => {
+                  event.preventDefault();
+                }
+              : undefined
+          }
           className={`h-[38px] w-full rounded-[6px] border bg-white px-3 text-[13px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
             hasError
               ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
               : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-          } ${
-            disabled ? "cursor-not-allowed bg-[#F8FAFC] text-[#94A3B8]" : ""
-          }`}
+          } ${lockedClass}`}
         />
       )}
 

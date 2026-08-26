@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import SubpoenaExtractionOverlay from "@/components/orders/new-order/SubpoenaExtractionOverlay";
@@ -178,7 +179,13 @@ export default function BatchScanPage() {
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] flex-col">
         <div className="shrink-0">
-          <h1 className="text-[15px] font-semibold text-[#111827]">
+          <Link
+            href="/orders"
+            className="text-[11px] font-medium text-[#007F96] hover:underline"
+          >
+            Back to Orders
+          </Link>
+          <h1 className="mt-2 text-[15px] font-semibold text-[#111827]">
             BatchScan
           </h1>
         </div>

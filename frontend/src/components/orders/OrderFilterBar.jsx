@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import FilterSelect from "@/components/ui/FilterSelect";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { getOrderFilterCompanies } from "@/lib/orders/orderApi";
@@ -24,6 +25,9 @@ export const defaultOrderFilters = {
   search: "",
   creationSource: ORDER_SOURCE_INTERNAL,
 };
+
+const SELECT_CLASS =
+  "h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 export default function OrderFilterBar({
   filters,
@@ -62,6 +66,43 @@ export default function OrderFilterBar({
 
     return Array.from({ length: 8 }, (_, index) => String(currentYear - index));
   }, []);
+
+  const facilitySelectOptions = useMemo(
+    () => [
+      {
+        value: "",
+        label: facilitiesLoadError ? "Facilities unavailable" : "All Facility",
+      },
+      ...(facilities || []).map((facility) => ({
+        value: String(facility.id),
+        label:
+          facility.facility || facility.facilityName || facility.name || `Facility ${facility.id}`,
+      })),
+    ],
+    [facilities, facilitiesLoadError]
+  );
+
+  const companySelectOptions = useMemo(
+    () => [
+      {
+        value: "",
+        label: companiesLoadError ? "Companies unavailable" : "All Company",
+      },
+      ...(companies || []).map((company) => ({
+        value: company,
+        label: company,
+      })),
+    ],
+    [companies, companiesLoadError]
+  );
+
+  const yearSelectOptions = useMemo(
+    () => [
+      { value: "", label: "All Year" },
+      ...yearOptions.map((year) => ({ value: year, label: year })),
+    ],
+    [yearOptions]
+  );
 
   useEffect(() => {
     setDraftFilters({
@@ -170,45 +211,31 @@ export default function OrderFilterBar({
   };
 
   return (
-    <section className="min-w-0 rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
+    <section className="relative z-20 min-w-0 overflow-visible rounded-[9px] border border-[#E2E8F0] bg-white px-3 py-4 shadow-sm sm:px-4">
       <h2 className="mb-3 text-[13px] font-semibold text-[#111827]">
         Filters
       </h2>
 
-      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]">
+      <div className="grid min-w-0 grid-cols-1 gap-3 overflow-visible sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-[repeat(auto-fit,minmax(140px,1fr))]">
         {showSourceFilter ? (
-          <div className="min-w-0">
-            <select
-              value={draftOrderSource}
-              onChange={(e) => updateDraftFilter("creationSource", e.target.value)}
-              className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-              aria-label="Order source"
-            >
-              {sourceOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <FilterSelect
+            value={draftOrderSource}
+            onChange={(next) => updateDraftFilter("creationSource", next)}
+            options={sourceOptions}
+            aria-label="Order source"
+            className={SELECT_CLASS}
+          />
         ) : null}
 
         <div className="min-w-0">
-          <select
+          <FilterSelect
             value={draftFilters.facility}
-            onChange={(e) => updateDraftFilter("facility", e.target.value)}
+            onChange={(next) => updateDraftFilter("facility", next)}
+            options={facilitySelectOptions}
             disabled={Boolean(facilitiesLoadError)}
-            className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option value="">
-              {facilitiesLoadError ? "Facilities unavailable" : "All Facility"}
-            </option>
-            {facilities.map((facility) => (
-              <option key={facility.id} value={String(facility.id)}>
-                {facility.facility || facility.facilityName || facility.name}
-              </option>
-            ))}
-          </select>
+            aria-label="Facility"
+            className={SELECT_CLASS}
+          />
           {facilitiesLoadError && (
             <p className="mt-1 text-[10px] font-medium text-red-600">
               {facilitiesLoadError}
@@ -218,21 +245,14 @@ export default function OrderFilterBar({
 
         {!isPersonalDraft ? (
           <div className="min-w-0">
-            <select
+            <FilterSelect
               value={draftFilters.company}
-              onChange={(e) => updateDraftFilter("company", e.target.value)}
+              onChange={(next) => updateDraftFilter("company", next)}
+              options={companySelectOptions}
               disabled={Boolean(companiesLoadError)}
-              className="h-[34px] w-full rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">
-                {companiesLoadError ? "Companies unavailable" : "All Company"}
-              </option>
-              {companies.map((company) => (
-                <option key={company} value={company}>
-                  {company}
-                </option>
-              ))}
-            </select>
+              aria-label="Company"
+              className={SELECT_CLASS}
+            />
             {companiesLoadError && (
               <p className="mt-1 text-[10px] font-medium text-red-600">
                 {companiesLoadError}
@@ -241,42 +261,29 @@ export default function OrderFilterBar({
           </div>
         ) : null}
 
-        <select
+        <FilterSelect
           value={draftFilters.year}
-          onChange={(e) => updateDraftFilter("year", e.target.value)}
-          className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-        >
-          <option value="">All Year</option>
-          {yearOptions.map((year) => (
-            <option key={year} value={year}>
-              {year}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => updateDraftFilter("year", next)}
+          options={yearSelectOptions}
+          aria-label="Year"
+          className={SELECT_CLASS}
+        />
 
-        <select
+        <FilterSelect
           value={draftFilters.period || ""}
-          onChange={(e) => updateDraftFilter("period", e.target.value)}
-          className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-        >
-          {ORDER_PERIOD_OPTIONS.map((option) => (
-            <option key={option.value || "all"} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => updateDraftFilter("period", next)}
+          options={ORDER_PERIOD_OPTIONS}
+          aria-label="Period"
+          className={SELECT_CLASS}
+        />
 
-        <select
+        <FilterSelect
           value={draftFilters.status}
-          onChange={(e) => updateDraftFilter("status", e.target.value)}
-          className="h-[34px] w-full min-w-0 rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[12px] text-[#64748B] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
-        >
-          {statusOptions.map((option) => (
-            <option key={option.value || "all"} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => updateDraftFilter("status", next)}
+          options={statusOptions}
+          aria-label="Status"
+          className={SELECT_CLASS}
+        />
 
         <button
           type="button"

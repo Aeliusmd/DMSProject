@@ -3279,18 +3279,7 @@ function ServeInfoForm({
 
       <Divider />
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold text-[#111827]">Company</h3>
-
-        {!readOnly ? (
-          <button
-            type="button"
-            className="text-[11px] font-semibold text-[#0097B2]"
-          >
-            clear
-          </button>
-        ) : null}
-      </div>
+      <h3 className="text-[13px] font-semibold text-[#111827]">Company</h3>
 
       <ProviderSearchField
         label="Provider"
@@ -3691,6 +3680,7 @@ function PaymentForm({
         onBlur={onBlur}
         getError={getError}
         onValuesChange={onValuesChange}
+        disableCheckWhenZeroBalance
       />
     </div>
   );
