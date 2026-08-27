@@ -17,6 +17,7 @@ function createPool() {
     connectionLimit: 10,
     namedPlaceholders: true,
     dateStrings: ["DATE"],
+    timezone: "Z",
   });
 }
 

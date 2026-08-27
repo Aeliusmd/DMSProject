@@ -6,6 +6,7 @@ import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import SuspendEmployeeModal from "@/components/employees/SuspendEmployeeModal";
 import EmployeeMilestoneModal from "@/components/employees/EmployeeMilestoneModal";
 import { ApiRequestError, startImpersonation } from "@/lib/auth/authApi";
+import { formatDateTimeValue } from "@/lib/utils/timezoneUtils";
 
 function isAdminRole(role) {
   return String(role || "").trim().toLowerCase() === "admin";
@@ -284,7 +285,9 @@ export default function MatrixEmployeesTable({
                   </td>
 
                   <td className="px-5 py-4 text-[12px] text-[#64748B]">
-                    {employee.lastLogin}
+                    {formatDateTimeValue(employee.lastLoginAt, {
+                      fallback: employee.lastLogin || "Never",
+                    })}
                   </td>
 
                   <td className="px-5 py-4 text-center">
@@ -305,7 +308,10 @@ export default function MatrixEmployeesTable({
 
                       {employee.suspended && employee.reactivatedDate && (
                         <span className="text-[10px] leading-[14px] text-[#94A3B8]">
-                          Until {employee.reactivatedDate}
+                          Until{" "}
+                          {formatDateTimeValue(employee.reactivatedAt, {
+                            fallback: employee.reactivatedDate || "—",
+                          })}
                         </span>
                       )}
                     </div>

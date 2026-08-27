@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { getEmployeeActivityLogsPaginated } from "@/lib/activityLog/activityLogApi";
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
 
 const LOGS_PAGE_SIZE = 10;
 
@@ -229,7 +230,9 @@ export default function ActivityLogModal({
                     className="border-b border-[#F8FAFC] text-[12px] text-[#334155] last:border-b-0 odd:bg-white even:bg-[#FCFEFF] hover:bg-[#F8FBFC]"
                   >
                     <td className="px-5 py-4 align-top text-[#475569]">
-                      {log.displayDate || log.date}
+                      {formatUtcInstant(log.loggedAt, {
+                        fallback: log.displayDate || log.date,
+                      })}
                     </td>
 
                     <td className="px-5 py-4 align-top font-semibold text-[#111827]">

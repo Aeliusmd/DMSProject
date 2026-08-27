@@ -62,6 +62,7 @@ const {
   extractYear,
   formatSsnLastFourDisplay,
 } = require("../utils/dateUtils");
+const { toUtcIso } = require("../utils/timezoneUtils");
 const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
 
 const WORKFLOW_STAGE_NAMES = [
@@ -1131,6 +1132,7 @@ function mapNote(note) {
     authorName: note.author_name || "",
     createdBy: note.created_by || null,
     noteDate: note.note_date || null,
+    noteDateAt: toUtcIso(note.note_date),
     callbackDate: toInputDate(note.callback_date),
     isCalled: Boolean(note.is_called),
     attachmentPath: note.attachment_path || "",

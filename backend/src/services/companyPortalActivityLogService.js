@@ -13,7 +13,8 @@ const {
 } = require("../utils/sanitize");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const { assertReportDateRange } = require("../lib/reportQueryParser");
-const { getTodayInputDate } = require("../utils/dateUtils");
+const { calendarTodayInTimezone, splitUtcInstant, loggedAtFromParts, formatUtcInstantDisplay } = require("../utils/timezoneUtils");
+const config = require("../config");
 
 const MODULES = {
   SECURITY: "Security",
@@ -94,57 +95,42 @@ function stripInternalTags(details) {
     .trim();
 }
 
-function formatDisplayDate(logDate, logTime) {
-  if (!logDate) return "";
+function formatDisplayDate(logDate, logTime, timeZone = config.businessTimezone) {
+  const loggedAt = loggedAtFromParts(logDate, logTime);
+  if (loggedAt) {
+    return formatUtcInstantDisplay(loggedAt, timeZone);
+  }
 
   const datePart =
     logDate instanceof Date
-      ? logDate.toISOString().slice(0, 10)
-      : String(logDate).slice(0, 10);
+      ? `${logDate.getUTCFullYear()}-${String(logDate.getUTCMonth() + 1).padStart(2, "0")}-${String(logDate.getUTCDate()).padStart(2, "0")}`
+      : String(logDate || "").slice(0, 10);
   const timePart =
     logTime instanceof Date
-      ? logTime.toTimeString().slice(0, 8)
+      ? `${String(logTime.getUTCHours()).padStart(2, "0")}:${String(logTime.getUTCMinutes()).padStart(2, "0")}:${String(logTime.getUTCSeconds()).padStart(2, "0")}`
       : String(logTime || "").slice(0, 8);
 
-  const [year, month, day] = datePart.split("-");
-  if (!year || !month || !day) return datePart;
-
-  const months = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const monthLabel = months[Number(month) - 1] || month;
-  return timePart
-    ? `${monthLabel} ${Number(day)}, ${year} ${timePart}`
-    : `${monthLabel} ${Number(day)}, ${year}`;
+  return timePart ? `${datePart} ${timePart}` : datePart;
 }
 
-function mapLogRow(row) {
+function mapLogRow(row, timeZone = config.businessTimezone) {
   const details = stripInternalTags(row.details);
   const logDate =
     row.log_date instanceof Date
-      ? row.log_date.toISOString().slice(0, 10)
+      ? `${row.log_date.getUTCFullYear()}-${String(row.log_date.getUTCMonth() + 1).padStart(2, "0")}-${String(row.log_date.getUTCDate()).padStart(2, "0")}`
       : String(row.log_date || "").slice(0, 10);
   const logTime =
     row.log_time instanceof Date
-      ? row.log_time.toTimeString().slice(0, 8)
+      ? `${String(row.log_time.getUTCHours()).padStart(2, "0")}:${String(row.log_time.getUTCMinutes()).padStart(2, "0")}:${String(row.log_time.getUTCSeconds()).padStart(2, "0")}`
       : String(row.log_time || "").slice(0, 8);
+  const loggedAt = loggedAtFromParts(logDate, logTime);
 
   return {
     id: row.id,
     date: logDate,
     time: logTime,
-    displayDate: formatDisplayDate(row.log_date, row.log_time),
+    loggedAt,
+    displayDate: formatDisplayDate(row.log_date, row.log_time, timeZone),
     by: row.performer_name,
     performedBy: row.performer_name,
     initials: row.performer_initials || getInitials(row.performer_name),
@@ -203,8 +189,7 @@ async function recordActivity({
   );
 
   const now = new Date();
-  const logDate = getTodayInputDate(now);
-  const logTime = now.toTimeString().slice(0, 8);
+  const { date: logDate, time: logTime } = splitUtcInstant(now);
   const resolvedModule = resolveModule(context, module);
   const resolvedAction = formatActionLabel(action, context);
 
@@ -291,11 +276,12 @@ async function recordSafe(payload = {}) {
   );
 }
 
-async function queryLogs(companyUserId, query = {}) {
+async function queryLogs(companyUserId, query = {}, { timezone } = {}) {
   if (!companyUserId) {
     throw new ApiError(401, "Authentication required");
   }
 
+  const timeZone = timezone || config.businessTimezone;
   const filters = { companyUserId };
 
   const module = `${query.module || ""}`.trim();
@@ -307,7 +293,7 @@ async function queryLogs(companyUserId, query = {}) {
   let fromDate = parseOptionalIsoDate(query.fromDate, "fromDate");
   let toDate = parseOptionalIsoDate(query.toDate, "toDate");
 
-  const today = getTodayInputDate();
+  const today = calendarTodayInTimezone(timeZone);
   if (!fromDate && !toDate) {
     fromDate = today;
     toDate = today;
@@ -351,7 +337,7 @@ async function queryLogs(companyUserId, query = {}) {
       ...filters,
       limit: pageSizeRaw > 0 ? Math.min(pageSizeRaw, 500) : 200,
     });
-    return logs.map(mapLogRow);
+    return logs.map((row) => mapLogRow(row, timeZone));
   }
 
   const keysetResult = await CompanyPortalActivityLog.findAllKeyset({
@@ -361,7 +347,7 @@ async function queryLogs(companyUserId, query = {}) {
   });
 
   return {
-    logs: keysetResult.rows.map(mapLogRow),
+    logs: keysetResult.rows.map((row) => mapLogRow(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keysetResult.pageSize,

@@ -6,6 +6,8 @@ const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
 const { runNonCritical } = require("../utils/serviceErrorUtils");
 const { sanitizeSearchText } = require("../utils/sanitize");
+const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
+const config = require("../config");
 
 const NOTIFICATION_TYPES = ["order", "invoice", "reminder", "activity"];
 
@@ -301,12 +303,8 @@ async function notifyReminder({
   });
 }
 
-function getTodayDateString() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function getTodayDateString(timeZone = config.businessTimezone) {
+  return calendarTodayInTimezone(timeZone);
 }
 
 async function syncDueReminderNotifications(employeeId, reminders = []) {
@@ -356,8 +354,9 @@ async function syncDueReminderNotifications(employeeId, reminders = []) {
   return created;
 }
 
-async function getDueRemindersForUser(user) {
+async function getDueRemindersForUser(user, { timezone } = {}) {
   const employeeId = user?.id;
+  const timeZone = timezone || config.businessTimezone;
 
   if (!employeeId) {
     return { reminders: [], enabled: false };
@@ -371,7 +370,7 @@ async function getDueRemindersForUser(user) {
 
   const rows = await Order.findDueRemindersOnDate({
     createdBy: employeeId,
-    date: getTodayDateString(),
+    date: getTodayDateString(timeZone),
   });
 
   const reminders = rows.map((row) => ({

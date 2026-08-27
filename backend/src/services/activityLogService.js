@@ -15,6 +15,13 @@ const {
 } = require("../utils/sanitize");
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const { assertReportDateRange } = require("../lib/reportQueryParser");
+const {
+  splitUtcInstant,
+  loggedAtFromParts,
+  normalizeCalendarDate,
+  formatUtcInstantDisplay,
+} = require("../utils/timezoneUtils");
+const config = require("../config");
 
 const MODULES = {
   SECURITY: "Security",
@@ -230,38 +237,32 @@ function normalizeTimeValue(value) {
   return "";
 }
 
-function formatDisplayDate(logDate, logTime) {
-  const datePart = normalizeDateValue(logDate);
+function formatDisplayDate(logDate, logTime, timeZone = config.businessTimezone) {
+  const loggedAt = loggedAtFromParts(logDate, logTime);
+  if (loggedAt) {
+    return formatUtcInstantDisplay(loggedAt, timeZone);
+  }
+
+  const datePart = normalizeCalendarDate(logDate);
   const timePart = normalizeTimeValue(logTime);
 
   if (!datePart) return "";
 
-  const date = new Date(`${datePart}T${timePart || "00:00"}:00`);
-
-  if (Number.isNaN(date.getTime())) {
-    return `${datePart} ${timePart}`;
-  }
-
-  return date.toLocaleString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return timePart ? `${datePart} ${timePart}` : datePart;
 }
 
-function mapLogRow(row) {
+function mapLogRow(row, timeZone = config.businessTimezone) {
   const details = stripOrderIdTag(stripTargetTag(row.details));
-  const logDate = normalizeDateValue(row.log_date);
+  const logDate = normalizeCalendarDate(row.log_date);
   const logTime = normalizeTimeValue(row.log_time);
+  const loggedAt = loggedAtFromParts(row.log_date, row.log_time);
 
   return {
     id: row.id,
     date: logDate,
     time: logTime,
-    displayDate: formatDisplayDate(row.log_date, row.log_time),
+    loggedAt,
+    displayDate: formatDisplayDate(row.log_date, row.log_time, timeZone),
     by: row.performer_name,
     performedBy: row.performer_name,
     initials: row.performer_initials || getInitials(row.performer_name),
@@ -323,8 +324,7 @@ async function recordActivity({
   }
 
   const now = new Date();
-  const logDate = now.toISOString().slice(0, 10);
-  const logTime = now.toTimeString().slice(0, 8);
+  const { date: logDate, time: logTime } = splitUtcInstant(now);
   const resolvedModule = resolveModule(context, module);
   const resolvedAction = formatActionLabel(action, context);
   const resolvedCompanyName = await resolveCompanyName({ companyName, facilityId });
@@ -400,7 +400,8 @@ async function recordSafe(payload) {
   );
 }
 
-async function queryLogs(query = {}) {
+async function queryLogs(query = {}, { timezone } = {}) {
+  const timeZone = timezone || config.businessTimezone;
   const filters = {};
 
   if (query.performedBy) {
@@ -450,7 +451,7 @@ async function queryLogs(query = {}) {
 
   if (!useKeysetPagination) {
     const logs = await ActivityLog.findAll(filters);
-    return logs.map(mapLogRow);
+    return logs.map((row) => mapLogRow(row, timeZone));
   }
 
   const keysetResult = await ActivityLog.findAllKeyset({
@@ -460,7 +461,7 @@ async function queryLogs(query = {}) {
   });
 
   return {
-    logs: keysetResult.rows.map(mapLogRow),
+    logs: keysetResult.rows.map((row) => mapLogRow(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keysetResult.pageSize,
@@ -470,14 +471,18 @@ async function queryLogs(query = {}) {
   };
 }
 
-async function getMyLogs(employeeId, query = {}) {
-  return queryLogs({
-    ...query,
-    performedBy: employeeId,
-  });
+async function getMyLogs(employeeId, query = {}, options = {}) {
+  return queryLogs(
+    {
+      ...query,
+      performedBy: employeeId,
+    },
+    options
+  );
 }
 
-async function getEmployeeLogs(employeeId, query = {}) {
+async function getEmployeeLogs(employeeId, query = {}, options = {}) {
+  const timeZone = options.timezone || config.businessTimezone;
   const employee = await Employee.findByIdPublic(employeeId);
 
   if (!employee) {
@@ -500,7 +505,7 @@ async function getEmployeeLogs(employeeId, query = {}) {
     const logs = await ActivityLog.findByEmployeeId(employeeId, {
       limit: pageSizeRaw > 0 ? Math.min(pageSizeRaw, 500) : 200,
     });
-    return logs.map(mapLogRow);
+    return logs.map((row) => mapLogRow(row, timeZone));
   }
 
   const keysetResult = await ActivityLog.findByEmployeeIdKeyset(employeeId, {
@@ -510,7 +515,7 @@ async function getEmployeeLogs(employeeId, query = {}) {
   });
 
   return {
-    logs: keysetResult.rows.map(mapLogRow),
+    logs: keysetResult.rows.map((row) => mapLogRow(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keysetResult.pageSize,
@@ -520,18 +525,19 @@ async function getEmployeeLogs(employeeId, query = {}) {
   };
 }
 
-async function getAllLogs(query = {}) {
-  return queryLogs(query);
+async function getAllLogs(query = {}, options = {}) {
+  return queryLogs(query, options);
 }
 
-async function getLogById(id) {
+async function getLogById(id, options = {}) {
+  const timeZone = options.timezone || config.businessTimezone;
   const log = await ActivityLog.findById(id);
 
   if (!log) {
     throw new ApiError(404, "Activity log not found");
   }
 
-  return mapLogRow(log);
+  return mapLogRow(log, timeZone);
 }
 
 module.exports = {

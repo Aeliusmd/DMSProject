@@ -9,7 +9,7 @@ import {
   updateOrderNote,
 } from "@/lib/orders/orderApi";
 import { API_BASE_URL } from "@/config/api";
-import { buildCallbackLine, getNoteAttachmentError } from "@/lib/orders/orderNoteUtils";
+import { buildCallbackLine, formatNoteDate, getNoteAttachmentError } from "@/lib/orders/orderNoteUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 
@@ -20,17 +20,10 @@ function toFileUrl(path) {
   return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
-function formatNoteDate(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString();
-}
-
 function toHistoryItems(notes = []) {
   return notes.map((note) => ({
     id: note.id,
-    date: formatNoteDate(note.noteDate),
+    date: formatNoteDate(note.noteDateAt || note.noteDate),
     by: note.authorName || "—",
     note: note.note || "",
     callbackDate: note.callbackDate || "",

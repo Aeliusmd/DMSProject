@@ -9,6 +9,12 @@ const path = require("path");
 const Stripe = require("stripe");
 
 const config = require("../config");
+const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
+
+function businessCalendarToday() {
+  return calendarTodayInTimezone(config.businessTimezone);
+}
+
 const ApiError = require("../utils/ApiError");
 const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 const { getPool } = require("../config/database");
@@ -80,7 +86,7 @@ function otpSessionKey(sessionToken) {
 }
 
 function generateConfirmationReference() {
-  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const datePart = businessCalendarToday().replace(/-/g, "");
   const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
   return `PR-${datePart}-${suffix}`;
 }
@@ -392,7 +398,7 @@ function buildOrderPayloadFromBundle(bundle, confirmationReference, options = {}
     injuryType: "cumulative",
     injuryDateBegin: primaryFacility?.records_date_begin,
     injuryDateEnd: primaryFacility?.records_date_end,
-    dateRequested: new Date().toISOString().slice(0, 10),
+    dateRequested: businessCalendarToday(),
     creationSource: "personal_portal",
     deliveryPreference: order.delivery_preference,
     mailAddress: order.mail_address,
@@ -748,7 +754,7 @@ async function fulfillPersonalPortalPayment(session) {
         prepaymentPaid: feeAmount,
         prepaymentDue: 0,
         prepaymentMemo: "Personal portal processing fee",
-        prepaymentDate: new Date().toISOString().slice(0, 10),
+        prepaymentDate: businessCalendarToday(),
         prepaymentCheck: "STRIPE-PORTAL",
       },
       null,
@@ -798,7 +804,7 @@ async function fulfillPersonalPortalPayment(session) {
       orderId: dmsOrderId,
       paymentType: "prepayment",
       checkNumber: "STRIPE-PORTAL",
-      paymentDate: new Date().toISOString().slice(0, 10),
+      paymentDate: businessCalendarToday(),
       amount: feeAmount,
       dueAmount: 0,
       isPaid: 1,
@@ -1857,7 +1863,7 @@ async function backfillMissingDmsOrderLinks() {
           prepaymentPaid: feeAmount,
           prepaymentDue: 0,
           prepaymentMemo: "Personal portal processing fee",
-          prepaymentDate: new Date().toISOString().slice(0, 10),
+          prepaymentDate: businessCalendarToday(),
           prepaymentCheck: "STRIPE-PORTAL",
         },
         null,
@@ -1901,7 +1907,7 @@ async function backfillMissingDmsOrderLinks() {
           orderId: dmsOrder.id,
           paymentType: "prepayment",
           checkNumber: "STRIPE-PORTAL",
-          paymentDate: new Date().toISOString().slice(0, 10),
+          paymentDate: businessCalendarToday(),
           amount: feeAmount,
           dueAmount: 0,
           isPaid: 1,

@@ -14,7 +14,9 @@ const { validateMilestoneStatsQuery } = require("../validators/queryValidators")
 const { throwIfInvalid } = require("../utils/validationUtils");
 
 exports.getAll = asyncHandler(async (req, res) => {
-  const result = await employeeService.getAllEmployees(req.query);
+  const result = await employeeService.getAllEmployees(req.query, {
+    timezone: req.clientTimezone,
+  });
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { employees: result });
   }
@@ -124,14 +126,15 @@ exports.activate = asyncHandler(async (req, res) => {
 });
 
 exports.suspend = asyncHandler(async (req, res) => {
-  throwIfInvalid(validateSuspendEmployee(req.body));
+  throwIfInvalid(validateSuspendEmployee(req.body, req.clientTimezone));
 
   const reactivatedDate = req.body?.reactivatedDate || req.body?.reactivated_date;
 
   const employee = await employeeService.suspendEmployee(
     req.params.id,
     req.user.id,
-    reactivatedDate
+    reactivatedDate,
+    req.clientTimezone
   );
 
   await activityLogService.recordFromRequest(req, {

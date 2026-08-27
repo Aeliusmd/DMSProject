@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { fetchCompanyPortalWalletReceiptBlob } from "@/lib/payments/paymentApi";
+import { formatDateTimeValue } from "@/lib/utils/timezoneUtils";
 
 function downloadBlobAsFile(blob, fileName) {
   const url = URL.createObjectURL(blob);
@@ -15,22 +16,7 @@ function downloadBlobAsFile(blob, fileName) {
 }
 function formatDisplayDate(value) {
   if (!value) return "—";
-
-  const datePart = String(value).slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return value;
-    return parsed.toLocaleString(undefined, {
-      month: "numeric",
-      day: "numeric",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }
-
-  const [year, month, day] = datePart.split("-");
-  return `${month}/${day}/${year}`;
+  return formatDateTimeValue(value, { fallback: value });
 }
 
 function PaymentTypeBadge({ label }) {

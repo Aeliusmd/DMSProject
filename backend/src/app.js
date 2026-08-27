@@ -48,6 +48,9 @@ app.post(
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
+const clientTimezoneMiddleware = require("./middleware/clientTimezone");
+app.use(clientTimezoneMiddleware);
+
 app.use("/uploads", express.static(uploadsRoot));
 
 if (config.nodeEnv !== "test") {

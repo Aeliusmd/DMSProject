@@ -19,11 +19,11 @@ export function toFileUrl(path) {
   return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
+import { formatDateTimeValue, formatUtcInstant } from "@/lib/utils/timezoneUtils";
+
 export function formatNoteDate(value) {
   if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString();
+  return formatDateTimeValue(value, { fallback: String(value) });
 }
 
 export function formatNotePreview(text, maxLength = 90) {
@@ -36,8 +36,8 @@ export function formatNotePreview(text, maxLength = 90) {
 export function toHistoryItem(note) {
   return {
     id: note.id,
-    date: formatNoteDate(note.noteDate),
-    noteDate: note.noteDate || null,
+    date: formatNoteDate(note.noteDateAt || note.noteDate),
+    noteDate: note.noteDateAt || note.noteDate || null,
     by: note.authorName || "—",
     note: note.note || "",
     callbackDate: note.callbackDate || "",
@@ -77,7 +77,7 @@ export function filterNotesByDate(notes, { from = "", to = "" } = {}) {
 }
 
 export function buildCallbackLine(date = new Date()) {
-  return `Calledback - ${date.toLocaleString()}`;
+  return `Calledback - ${formatUtcInstant(date)}`;
 }
 
 export function hasCalledbackLine(text) {

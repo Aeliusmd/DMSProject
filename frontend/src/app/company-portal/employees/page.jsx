@@ -18,6 +18,7 @@ import {
   setCompanyEmployeeStatus,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
 import { sanitizeSearchText } from "@/lib/company-portal/companyPortalValidation";
 
 const EMPLOYEES_PAGE_SIZE = 10;
@@ -341,7 +342,7 @@ export default function CompanyEmployeesPage() {
                         </td>
                         <td className="px-5 py-3">
                           {employee.lastLoginAt
-                            ? new Date(employee.lastLoginAt).toLocaleString()
+                            ? formatUtcInstant(employee.lastLoginAt)
                             : "—"}
                         </td>
                         <td className="px-5 py-3">

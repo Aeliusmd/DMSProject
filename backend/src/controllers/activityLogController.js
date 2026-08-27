@@ -3,8 +3,14 @@ const ApiResponse = require("../utils/ApiResponse");
 const activityLogService = require("../services/activityLogService");
 const { isEmployee, isManager } = require("../utils/roles");
 
+const timezoneOptions = (req) => ({ timezone: req.clientTimezone });
+
 exports.getMyLogs = asyncHandler(async (req, res) => {
-  const result = await activityLogService.getMyLogs(req.user.id, req.query);
+  const result = await activityLogService.getMyLogs(
+    req.user.id,
+    req.query,
+    timezoneOptions(req)
+  );
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { logs: result });
   }
@@ -13,10 +19,13 @@ exports.getMyLogs = asyncHandler(async (req, res) => {
 
 exports.list = asyncHandler(async (req, res) => {
   const restrictOwn = isEmployee(req.user?.role) || isManager(req.user?.role);
-  const result = await activityLogService.getAllLogs({
-    ...req.query,
-    performedBy: restrictOwn ? req.user.id : undefined,
-  });
+  const result = await activityLogService.getAllLogs(
+    {
+      ...req.query,
+      performedBy: restrictOwn ? req.user.id : undefined,
+    },
+    timezoneOptions(req)
+  );
 
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { logs: result });
@@ -25,7 +34,10 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.getAll = asyncHandler(async (req, res) => {
-  const result = await activityLogService.getAllLogs(req.query);
+  const result = await activityLogService.getAllLogs(
+    req.query,
+    timezoneOptions(req)
+  );
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { logs: result });
   }
@@ -35,7 +47,8 @@ exports.getAll = asyncHandler(async (req, res) => {
 exports.getEmployeeLogs = asyncHandler(async (req, res) => {
   const result = await activityLogService.getEmployeeLogs(
     req.params.employeeId,
-    req.query
+    req.query,
+    timezoneOptions(req)
   );
 
   if (Array.isArray(result)) {
@@ -46,6 +59,9 @@ exports.getEmployeeLogs = asyncHandler(async (req, res) => {
 });
 
 exports.getById = asyncHandler(async (req, res) => {
-  const log = await activityLogService.getLogById(req.params.id);
+  const log = await activityLogService.getLogById(
+    req.params.id,
+    timezoneOptions(req)
+  );
   return ApiResponse.success(res, { log });
 });

@@ -71,6 +71,9 @@ module.exports = {
     lookupDays: Number(process.env.PERSONAL_PORTAL_LOOKUP_DAYS) || 7,
   },
 
+  /** Fallback when X-Client-Timezone is absent (cron, webhooks, emails). */
+  businessTimezone: (process.env.BUSINESS_TIMEZONE || "UTC").trim() || "UTC",
+
   authRateLimit: {
     enabled: process.env.AUTH_RATE_LIMIT_ENABLED !== "false",
     login: {

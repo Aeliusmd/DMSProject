@@ -1,5 +1,7 @@
 "use client";
 
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
+
 export default function ActivityLogTable({ logs, footer = null }) {
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
@@ -24,9 +26,11 @@ export default function ActivityLogTable({ logs, footer = null }) {
               >
                 <td className="px-5 py-4 align-middle">
                   <p className="text-[12px] text-[#475569]">
-                    {log.displayDate || log.date}
+                    {formatUtcInstant(log.loggedAt, {
+                      fallback: log.displayDate || log.date,
+                    })}
                   </p>
-                  {!log.displayDate && log.time ? (
+                  {!log.loggedAt && !log.displayDate && log.time ? (
                     <p className="mt-1 text-[11px] text-[#64748B]">{log.time}</p>
                   ) : null}
                 </td>

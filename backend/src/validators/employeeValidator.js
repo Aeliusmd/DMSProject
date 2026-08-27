@@ -4,6 +4,7 @@ const MAX_EMAIL_LENGTH = 255;
 const ALLOWED_ROLES = new Set(["Manager", "Employee"]);
 const { addPersonNameFormatError } = require("../utils/nameValidation");
 const { validatePasswordComplexity } = require("../utils/passwordValidation");
+const { localInstantToUtc } = require("../utils/timezoneUtils");
 
 function trimToString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -140,20 +141,7 @@ function validateUpdateEmployee(body = {}) {
   };
 }
 
-function parseReactivationDateTime(value) {
-  if (!value) return null;
-
-  const normalized = String(value).trim().replace(" ", "T");
-  const date = new Date(normalized);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
-}
-
-function validateSuspendEmployee(body = {}) {
+function validateSuspendEmployee(body = {}, clientTimezone = "UTC") {
   const errors = [];
   const reactivatedDate = body.reactivatedDate ?? body.reactivated_date;
 
@@ -165,7 +153,7 @@ function validateSuspendEmployee(body = {}) {
     return { valid: false, errors };
   }
 
-  const scheduledAt = parseReactivationDateTime(reactivatedDate);
+  const scheduledAt = localInstantToUtc(reactivatedDate, clientTimezone);
 
   if (!scheduledAt) {
     errors.push({

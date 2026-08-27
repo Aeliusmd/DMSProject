@@ -8,6 +8,13 @@ const { sendInternalEmployeeCredentials } = require("./emailService");
 const { isAdminOrManager } = require("../utils/roles");
 const { formatEmployee } = require("../views/responses");
 const { sanitizeSearchText } = require("../utils/sanitize");
+const {
+  localInstantToUtc,
+  toMysqlUtcDateTime,
+  toUtcIso,
+  formatUtcInstantDisplay,
+} = require("../utils/timezoneUtils");
+const config = require("../config");
 
 const ALLOWED_CREATE_ROLES = ["Manager", "Employee"];
 
@@ -15,82 +22,41 @@ function isAdminRole(role) {
   return String(role || "").trim().toLowerCase() === "admin";
 }
 
-function parseReactivationDateTime(value) {
-  if (!value) return null;
-
-  const normalized = String(value).trim().replace(" ", "T");
-  const date = new Date(normalized);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date;
-}
-
-function toMySqlDateTime(date) {
-  const pad = (part) => String(part).padStart(2, "0");
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function formatLastLogin(value) {
+function formatLastLogin(value, timeZone) {
   if (!value) {
     return "Never";
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Never";
-  }
-
-  return date.toLocaleString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return (
+    formatUtcInstantDisplay(value, timeZone) ||
+    formatUtcInstantDisplay(value, config.businessTimezone) ||
+    "Never"
+  );
 }
 
-function formatScheduledDateTime(value) {
-  if (!value) {
-    return null;
-  }
+function mapEmployeeRow(row, timeZone = config.businessTimezone) {
+  const lastLoginAt = toUtcIso(row.last_login_at);
+  const reactivatedAt = toUtcIso(row.reactivated_date);
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date.toLocaleString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-function mapEmployeeRow(row) {
   return formatEmployee({
     id: row.id,
     name: row.name,
     logon: row.logon,
     email: row.email,
     role: row.role,
-    lastLogin: formatLastLogin(row.last_login_at),
+    lastLoginAt,
+    reactivatedAt,
+    lastLogin: lastLoginAt ? formatLastLogin(row.last_login_at, timeZone) : "Never",
     terminated: Boolean(row.is_terminated),
     suspended: Boolean(row.is_suspended),
-    reactivatedDate: formatScheduledDateTime(row.reactivated_date),
+    reactivatedDate: reactivatedAt
+      ? formatLastLogin(row.reactivated_date, timeZone)
+      : null,
   });
 }
 
-async function getAllEmployees(query = {}) {
+async function getAllEmployees(query = {}, { timezone } = {}) {
+  const timeZone = timezone || config.businessTimezone;
   const filters = {};
 
   if (query.search && `${query.search}`.trim()) {
@@ -115,7 +81,7 @@ async function getAllEmployees(query = {}) {
 
   if (!useKeysetPagination) {
     const employees = await Employee.findAll(filters);
-    return employees.map(mapEmployeeRow);
+    return employees.map((row) => mapEmployeeRow(row, timeZone));
   }
 
   const keysetResult = await Employee.findAllKeyset({
@@ -125,7 +91,7 @@ async function getAllEmployees(query = {}) {
   });
 
   return {
-    employees: keysetResult.rows.map(mapEmployeeRow),
+    employees: keysetResult.rows.map((row) => mapEmployeeRow(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keysetResult.pageSize,
@@ -259,7 +225,7 @@ async function activateEmployee(id) {
   return mapEmployeeRow(await Employee.findById(id, { includeDeleted: true }));
 }
 
-async function suspendEmployee(id, actorId, reactivatedDate) {
+async function suspendEmployee(id, actorId, reactivatedDate, clientTimezone) {
   if (Number(id) === Number(actorId)) {
     throw new ApiError(400, "You cannot suspend your own account");
   }
@@ -282,7 +248,10 @@ async function suspendEmployee(id, actorId, reactivatedDate) {
     throw new ApiError(400, "Admin accounts cannot be suspended");
   }
 
-  const scheduledAt = parseReactivationDateTime(reactivatedDate);
+  const scheduledAt = localInstantToUtc(
+    reactivatedDate,
+    clientTimezone || config.businessTimezone
+  );
 
   if (!scheduledAt) {
     throw new ApiError(400, "Invalid reactivation date and time");
@@ -294,11 +263,14 @@ async function suspendEmployee(id, actorId, reactivatedDate) {
 
   await Employee.suspend(id, {
     suspendedBy: actorId,
-    reactivatedDate: toMySqlDateTime(scheduledAt),
+    reactivatedDate: toMysqlUtcDateTime(scheduledAt),
   });
   await AuthSession.deleteAllByEmployeeId(id);
 
-  return mapEmployeeRow(await Employee.findById(id, { includeDeleted: true }));
+  return mapEmployeeRow(
+    await Employee.findById(id, { includeDeleted: true }),
+    clientTimezone || config.businessTimezone
+  );
 }
 
 async function processScheduledReactivations() {

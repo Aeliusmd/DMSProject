@@ -13,6 +13,7 @@ import {
   formatDobForApi,
   validateStatusLookupForm,
 } from "@/lib/validations/personalRequestValidation";
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
 import {
   clearPersonalAuth,
   isPersonalAuthenticated,
@@ -282,7 +283,7 @@ export default function PersonalRequestStatusPage() {
                 <p className="text-center text-[11px] text-[#64748B]">
                   This download link expires in 7 days
                   {result.downloadExpiresAt
-                    ? ` (${new Date(result.downloadExpiresAt).toLocaleString()})`
+                    ? ` (${formatUtcInstant(result.downloadExpiresAt)})`
                     : ""}
                   .
                 </p>

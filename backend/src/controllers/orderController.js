@@ -357,7 +357,9 @@ exports.getReminders = asyncHandler(async (req, res) => {
 });
 
 exports.getDueRemindersToday = asyncHandler(async (req, res) => {
-  const data = await notificationService.getDueRemindersForUser(req.user);
+  const data = await notificationService.getDueRemindersForUser(req.user, {
+    timezone: req.clientTimezone,
+  });
   return ApiResponse.success(res, data, "Due reminders retrieved");
 });
 

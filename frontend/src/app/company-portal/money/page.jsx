@@ -17,6 +17,7 @@ import {
   listCompanyWalletTransactions,
 } from "@/lib/company-portal/companyPortalManagementApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
 import { sanitizeMoneyInput } from "@/lib/company-portal/companyPortalValidation";
 
 const TRANSACTIONS_PAGE_SIZE = 10;
@@ -404,9 +405,7 @@ function MoneyManagementClient() {
                       className="border-t border-[#F1F5F9] text-[#334155]"
                     >
                       <td className="px-5 py-3">
-                        {tx.createdAt
-                          ? new Date(tx.createdAt).toLocaleString()
-                          : "—"}
+                        {tx.createdAt ? formatUtcInstant(tx.createdAt) : "—"}
                       </td>
                       <td className="px-5 py-3 capitalize">
                         {String(tx.type || "").replace(/_/g, " ")}

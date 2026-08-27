@@ -5,7 +5,8 @@ const companyPortalActivityLogService = require("../services/companyPortalActivi
 exports.list = asyncHandler(async (req, res) => {
   const result = await companyPortalActivityLogService.queryLogs(
     req.companyUser.id,
-    req.query
+    req.query,
+    { timezone: req.clientTimezone }
   );
 
   if (Array.isArray(result)) {
