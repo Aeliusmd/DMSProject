@@ -69,6 +69,8 @@ const {
   toMysqlUtcDateTime,
   formatUtcInstantDisplay,
   calendarTodayInTimezone,
+  embedUtcInstantToken,
+  expandUtcInstantTokens,
 } = require("../utils/timezoneUtils");
 const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
 
@@ -76,6 +78,34 @@ function resolveClientCalendarDate(options = {}) {
   return calendarTodayInTimezone(
     options.timezone || config.businessTimezone || "UTC"
   );
+}
+
+/**
+ * Expand [[utc:...]] tokens in note body. For legacy "Calledback - local time"
+ * lines (no token), rewrite using fallbackInstant when provided.
+ */
+function expandCalledbackNoteText(
+  noteText,
+  timeZone = config.businessTimezone,
+  fallbackInstant = null
+) {
+  let text = expandUtcInstantTokens(String(noteText || ""), timeZone);
+
+  if (
+    fallbackInstant &&
+    /\bCalledback\s*-/i.test(text) &&
+    !/\[\[utc:/i.test(String(noteText || ""))
+  ) {
+    const formatted = formatUtcInstantDisplay(fallbackInstant, timeZone);
+    if (formatted) {
+      text = text.replace(
+        /Calledback\s*-\s*[^\n\r]*/i,
+        `Calledback - ${formatted}`
+      );
+    }
+  }
+
+  return text;
 }
 
 /** Callback datetime from client (local wall time) → MySQL UTC DATETIME. */
@@ -1090,8 +1120,10 @@ function normalizeNoteText(text) {
   return `${text || ""}`.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 }
 
-function mapActivityLog(log) {
-  const callbackDate = log.callback_date ? toShortDate(log.callback_date) : "";
+function mapActivityLog(log, timeZone = config.businessTimezone) {
+  const callbackAt = toUtcIso(log.callback_date);
+  const fallbackInstant =
+    log.updated_at || log.activity_date || log.created_at || null;
 
   return {
     id: `order-${log.id}`,
@@ -1099,14 +1131,76 @@ function mapActivityLog(log) {
     date: toShortDate(log.activity_date),
     displayDate: toShortDate(log.activity_date),
     by: log.author_name || "—",
-    action: callbackDate ? "Reminder" : "Note",
-    callback: callbackDate || "",
-    note: log.note || "",
+    action: callbackAt ? "Reminder" : "Note",
+    callback: callbackAt
+      ? formatUtcInstantDisplay(callbackAt, timeZone)
+      : "",
+    note: expandCalledbackNoteText(log.note, timeZone, fallbackInstant),
     module: "Orders",
     attachmentUrl: log.attachment_path
       ? `/uploads/${log.attachment_path}`
       : "",
     activityDate: log.activity_date,
+  };
+}
+
+function mapNote(note, timeZone = config.businessTimezone) {
+  const callbackAt = toUtcIso(note.callback_date);
+  const calledAtFallback =
+    Number(note.is_called) && (note.updated_at || note.note_date)
+      ? note.updated_at || note.note_date
+      : null;
+
+  return {
+    id: note.id,
+    note: expandCalledbackNoteText(note.note, timeZone, calledAtFallback),
+    authorName: note.author_name || "",
+    createdBy: note.created_by || null,
+    noteDate: note.note_date || null,
+    noteDateAt: toUtcIso(note.note_date),
+    callbackDate: callbackAt
+      ? formatUtcInstantDisplay(callbackAt, timeZone)
+      : null,
+    callbackAt,
+    isCalled: Boolean(note.is_called),
+    attachmentPath: note.attachment_path || "",
+    attachmentUrl: note.attachment_path
+      ? `/uploads/${note.attachment_path}`
+      : "",
+  };
+}
+
+function mapReminderRow(row, timeZone = config.businessTimezone) {
+  const applicant = buildFullName(
+    row.applicant_first_name,
+    row.applicant_middle_name,
+    row.applicant_last_name
+  );
+  const callbackAt = toUtcIso(row.callback_date);
+  const calledAtFallback =
+    Number(row.is_called) && (row.updated_at || row.note_date)
+      ? row.updated_at || row.note_date
+      : null;
+
+  return {
+    noteId: row.note_id,
+    orderId: row.order_id,
+    orderNumber: row.order_number || "",
+    caseNumber: row.case_number || row.order_number || "",
+    date: toShortDate(row.note_date),
+    by: row.author_name || "—",
+    createdBy: row.created_by || null,
+    note: expandCalledbackNoteText(row.note, timeZone, calledAtFallback),
+    applicant: applicant || "—",
+    callbackDate: callbackAt,
+    callbackDateDisplay: callbackAt
+      ? formatUtcInstantDisplay(callbackAt, timeZone)
+      : "",
+    callbackAt,
+    isCalled: Boolean(row.is_called),
+    status: Boolean(row.is_called) ? "callbacked" : "not_callbacked",
+    attachmentPath: row.attachment_path || "",
+    attachmentUrl: row.attachment_path ? `/uploads/${row.attachment_path}` : "",
   };
 }
 
@@ -1159,57 +1253,6 @@ function mergeOrderActivityLogs(orderLogs = [], globalLogs = []) {
   return [...orderLogs, ...supplemental].sort(
     (a, b) => getActivityTimestamp(b) - getActivityTimestamp(a)
   );
-}
-
-function mapNote(note, timeZone = config.businessTimezone) {
-  const callbackAt = toUtcIso(note.callback_date);
-  return {
-    id: note.id,
-    note: note.note || "",
-    authorName: note.author_name || "",
-    createdBy: note.created_by || null,
-    noteDate: note.note_date || null,
-    noteDateAt: toUtcIso(note.note_date),
-    callbackDate: callbackAt
-      ? formatUtcInstantDisplay(callbackAt, timeZone)
-      : null,
-    callbackAt,
-    isCalled: Boolean(note.is_called),
-    attachmentPath: note.attachment_path || "",
-    attachmentUrl: note.attachment_path
-      ? `/uploads/${note.attachment_path}`
-      : "",
-  };
-}
-
-function mapReminderRow(row, timeZone = config.businessTimezone) {
-  const applicant = buildFullName(
-    row.applicant_first_name,
-    row.applicant_middle_name,
-    row.applicant_last_name
-  );
-  const callbackAt = toUtcIso(row.callback_date);
-
-  return {
-    noteId: row.note_id,
-    orderId: row.order_id,
-    orderNumber: row.order_number || "",
-    caseNumber: row.case_number || row.order_number || "",
-    date: toShortDate(row.note_date),
-    by: row.author_name || "—",
-    createdBy: row.created_by || null,
-    note: row.note || "",
-    applicant: applicant || "—",
-    callbackDate: callbackAt,
-    callbackDateDisplay: callbackAt
-      ? formatUtcInstantDisplay(callbackAt, timeZone)
-      : "",
-    callbackAt,
-    isCalled: Boolean(row.is_called),
-    status: Boolean(row.is_called) ? "callbacked" : "not_callbacked",
-    attachmentPath: row.attachment_path || "",
-    attachmentUrl: row.attachment_path ? `/uploads/${row.attachment_path}` : "",
-  };
 }
 
 function mapOrderDetail(
@@ -2029,8 +2072,9 @@ function parseBooleanFlag(value) {
   return value === true || value === "true" || value === "1" || value === 1;
 }
 
-function buildCallbackLine(date = new Date(), timeZone = config.businessTimezone) {
-  return `Calledback - ${formatUtcInstantDisplay(date, timeZone) || date.toISOString()}`;
+function buildCallbackLine(date = new Date()) {
+  const token = embedUtcInstantToken(date);
+  return token ? `Calledback - ${token}` : `Calledback - ${new Date(date).toISOString()}`;
 }
 
 function hasCalledbackLine(text) {
@@ -2071,7 +2115,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file, options = {
 
   if (markCalled) {
     if (!hasCalledbackLine(noteText)) {
-      const callLine = buildCallbackLine(new Date(), timeZone);
+      const callLine = buildCallbackLine(new Date());
       noteText = noteText ? `${noteText}\n${callLine}` : callLine;
     }
   }
@@ -2123,11 +2167,15 @@ async function updateOrderNote(orderId, noteId, data, actorId, file, options = {
 
   return {
     notes: notes.map((row) => mapNote(row, timeZone)),
-    activityLogs: activityLogs.map(mapActivityLog),
+    activityLogs: activityLogs.map((row) => mapActivityLog(row, timeZone)),
   };
 }
 
-function mapMergedActivityLogRow(row, notes = []) {
+function mapMergedActivityLogRow(
+  row,
+  notes = [],
+  timeZone = config.businessTimezone
+) {
   if (row.log_source === "global") {
     return mapGlobalOrderActivityLog(row);
   }
@@ -2147,11 +2195,12 @@ function mapMergedActivityLogRow(row, notes = []) {
     }
   }
 
-  return mapActivityLog({ ...row, attachment_path: attachmentPath });
+  return mapActivityLog({ ...row, attachment_path: attachmentPath }, timeZone);
 }
 
 async function getOrderActivityLogs(orderId, query = {}) {
   const order = await Order.findById(orderId);
+  const timeZone = query.timezone || config.businessTimezone;
 
   if (!order) {
     throw new ApiError(404, "Order not found");
@@ -2177,7 +2226,7 @@ async function getOrderActivityLogs(orderId, query = {}) {
     const notes = await Order.findNotesByOrderId(order.id, false);
 
     const mappedOrderLogs = logs.map((log) =>
-      mapMergedActivityLogRow({ ...log, log_source: "order" }, notes)
+      mapMergedActivityLogRow({ ...log, log_source: "order" }, notes, timeZone)
     );
     const mappedGlobalLogs = globalLogs.map(mapGlobalOrderActivityLog);
 
@@ -2202,7 +2251,7 @@ async function getOrderActivityLogs(orderId, query = {}) {
   const seenIds = new Set();
   const logs = [];
   for (const row of keyset.rows) {
-    const mapped = mapMergedActivityLogRow(row, notes);
+    const mapped = mapMergedActivityLogRow(row, notes, timeZone);
     if (!mapped?.id || seenIds.has(mapped.id)) continue;
     seenIds.add(mapped.id);
     logs.push(mapped);

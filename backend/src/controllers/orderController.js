@@ -615,7 +615,7 @@ exports.updateNote = asyncHandler(async (req, res) => {
 exports.getActivityLogs = asyncHandler(async (req, res) => {
   const result = await orderService.getOrderActivityLogs(
     req.params.id,
-    req.query
+    { ...req.query, timezone: req.clientTimezone }
   );
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { logs: result });

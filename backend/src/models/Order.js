@@ -1100,7 +1100,7 @@ class Order {
 
     const [rows] = await pool.execute(
       `SELECT id, order_id, note_date, created_by, author_name, note,
-              callback_date, attachment_path, is_called
+              callback_date, attachment_path, is_called, updated_at
        FROM order_notes
        WHERE ${conditions.join(" AND ")}
        ORDER BY note_date DESC, id DESC`,
@@ -1148,7 +1148,7 @@ class Order {
 
     const [rows] = await pool.execute(
       `SELECT id, order_id, note_date, created_by, author_name, note,
-              callback_date, attachment_path, is_called
+              callback_date, attachment_path, is_called, updated_at
        FROM order_notes
        WHERE ${conditions.join(" AND ")}
        ORDER BY id DESC
@@ -1181,7 +1181,7 @@ class Order {
     const [rows] = await pool.execute(
       `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
               n.author_name, n.note, n.callback_date, n.attachment_path,
-              n.is_called,
+              n.is_called, n.updated_at,
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
        FROM order_notes n
@@ -1220,7 +1220,7 @@ class Order {
     const [rows] = await pool.execute(
       `SELECT n.id AS note_id, n.order_id, n.note_date, n.created_by,
               n.author_name, n.note, n.callback_date, n.attachment_path,
-              n.is_called,
+              n.is_called, n.updated_at,
               o.order_number, o.case_number,
               o.applicant_first_name, o.applicant_middle_name, o.applicant_last_name
        FROM order_notes n

@@ -25,8 +25,16 @@ export function formatNoteDate(value) {
   return formatDateTimeValue(value, { fallback: String(value) });
 }
 
+export function expandNoteUtcTokens(text) {
+  return String(text || "").replace(/\[\[utc:([^\]]+)\]\]/gi, (_match, raw) => {
+    return formatUtcInstant(raw) || String(raw || "").trim();
+  });
+}
+
 export function formatNotePreview(text, maxLength = 90) {
-  const normalized = `${text || ""}`.replace(/\s+/g, " ").trim();
+  const normalized = expandNoteUtcTokens(`${text || ""}`)
+    .replace(/\s+/g, " ")
+    .trim();
   if (!normalized) return "—";
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength)}…`;
@@ -38,7 +46,7 @@ export function toHistoryItem(note) {
     date: formatNoteDate(note.noteDateAt || note.noteDate),
     noteDate: note.noteDateAt || note.noteDate || null,
     by: note.authorName || "—",
-    note: note.note || "",
+    note: expandNoteUtcTokens(note.note || ""),
     callbackDate: note.callbackAt || note.callbackDate || "",
     callbackAt: note.callbackAt || null,
     callbackDateDisplay:
@@ -80,7 +88,11 @@ export function filterNotesByDate(notes, { from = "", to = "" } = {}) {
 }
 
 export function buildCallbackLine(date = new Date()) {
-  return `Calledback - ${formatUtcInstant(date)}`;
+  const instant = date instanceof Date ? date : new Date(date);
+  const iso = Number.isNaN(instant.getTime())
+    ? new Date().toISOString()
+    : instant.toISOString();
+  return `Calledback - [[utc:${iso}]]`;
 }
 
 export function hasCalledbackLine(text) {

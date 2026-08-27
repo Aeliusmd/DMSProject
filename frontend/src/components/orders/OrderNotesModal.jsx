@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import {
@@ -9,7 +9,7 @@ import {
   updateOrderNote,
 } from "@/lib/orders/orderApi";
 import { API_BASE_URL } from "@/config/api";
-import { buildCallbackLine, formatNoteDate, getNoteAttachmentError } from "@/lib/orders/orderNoteUtils";
+import { buildCallbackLine, formatNoteDate, getNoteAttachmentError, hasCalledbackLine, expandNoteUtcTokens } from "@/lib/orders/orderNoteUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
 import {
@@ -31,7 +31,7 @@ function toHistoryItems(notes = []) {
     id: note.id,
     date: formatNoteDate(note.noteDateAt || note.noteDate),
     by: note.authorName || "—",
-    note: note.note || "",
+    note: expandNoteUtcTokens(note.note || ""),
     callbackDate: note.callbackAt || note.callbackDate || "",
     callbackAt: note.callbackAt || null,
     callbackDateDisplay:
@@ -62,6 +62,7 @@ export default function OrderNotesModal({
   singleNoteMode = false,
 }) {
   const mounted = useIsClient();
+  const fileInputRef = useRef(null);
   const [noteText, setNoteText] = useState("");
   const [callbackDate, setCallbackDate] = useState("");
   const [attachment, setAttachment] = useState(null);
@@ -253,6 +254,7 @@ export default function OrderNotesModal({
         note: noteText.trim(),
         callbackDate,
         attachment,
+        markCalled: hasCalledbackLine(noteText),
       });
 
       if (fromReminder) {
@@ -402,14 +404,18 @@ export default function OrderNotesModal({
             </div>
 
             <textarea
-              value={noteText}
+              value={expandNoteUtcTokens(noteText)}
               onChange={(e) => {
+                if (/\[\[utc:/i.test(noteText)) return;
                 setNoteText(e.target.value);
                 clearError("noteText");
               }}
+              readOnly={/\[\[utc:/i.test(noteText)}
               placeholder="Enter note..."
               rows={4}
               className={`w-full resize-none rounded-[6px] border bg-white px-3 py-2 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
+                /\[\[utc:/i.test(noteText) ? "bg-[#F8FAFC] " : ""
+              }${
                 errors.noteText
                   ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
                   : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
@@ -457,13 +463,34 @@ export default function OrderNotesModal({
               </label>
 
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                className="sr-only"
+                tabIndex={-1}
                 onChange={handleAttachmentChange}
-                className={`block h-[36px] w-full rounded-[6px] border bg-white text-[11px] text-[#64748B] file:mr-3 file:h-[34px] file:border-0 file:border-r file:border-[#E2E8F0] file:bg-[#F8FAFC] file:px-3 file:text-[11px] file:font-medium file:text-[#334155] ${
+              />
+
+              <div
+                className={`flex h-[36px] min-w-0 items-center gap-2 rounded-[6px] border bg-white px-1 ${
                   errors.attachment ? "border-red-500" : "border-[#CBD5E1]"
                 }`}
-              />
+              >
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex h-[28px] shrink-0 items-center justify-center rounded-[4px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[11px] font-medium text-[#334155] hover:bg-[#F1F5F9]"
+                >
+                  Choose file
+                </button>
+
+                <span
+                  className="min-w-0 flex-1 truncate text-[11px] text-[#64748B]"
+                  title={attachment?.name || ""}
+                >
+                  {attachment?.name || "No file chosen"}
+                </span>
+              </div>
 
               {!attachment && existingAttachmentUrl && (
                 <a

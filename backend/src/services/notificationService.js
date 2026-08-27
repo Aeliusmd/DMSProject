@@ -459,7 +459,7 @@ async function getDueRemindersForUser(user, { timezone } = {}) {
       .filter(Boolean)
       .join(" ")
       .trim(),
-    note: row.note || "",
+    note: expandUtcInstantTokens(row.note || "", timeZone),
     callbackDate: row.callback_date,
     callbackAt: row.callback_date,
     callbackDateDisplay: formatUtcInstantDisplay(row.callback_date, timeZone) || "",
