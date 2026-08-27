@@ -135,13 +135,14 @@ async function createEmployee({ name, logon, email, password, role }) {
       email,
       userName: logon,
       password,
+      role,
     });
   } catch (error) {
     // Keep account creation successful even if SMTP is unavailable.
     // Admin can still share or reset credentials manually.
     // eslint-disable-next-line no-console
     console.warn(
-      "[employees] Failed to email new employee credentials:",
+      "[employees] Failed to email new staff credentials:",
       error.message || error
     );
   }

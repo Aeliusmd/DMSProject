@@ -979,8 +979,10 @@ async function sendInternalEmployeeCredentials({
   email,
   userName,
   password,
+  role = "Employee",
 }) {
   const portalUrl = `${(config.clientUrl || "http://localhost:3000").replace(/\/$/, "")}/login`;
+  const roleLabel = String(role || "Employee").trim() || "Employee";
   const subject = "Your DMS staff account";
   const text = [
     `Hello ${name},`,
@@ -991,6 +993,7 @@ async function sendInternalEmployeeCredentials({
     `Email: ${email}`,
     `Username: ${userName}`,
     `Password: ${password}`,
+    `Role: ${roleLabel}`,
     "",
     "Keep these credentials secure.",
   ].join("\n");
@@ -1004,7 +1007,8 @@ async function sendInternalEmployeeCredentials({
         <p style="margin:0 0 8px;"><strong>Login page:</strong> <a href="${escapeHtml(portalUrl)}">${escapeHtml(portalUrl)}</a></p>
         <p style="margin:0 0 8px;"><strong>Email:</strong> ${escapeHtml(email)}</p>
         <p style="margin:0 0 8px;"><strong>Username:</strong> ${escapeHtml(userName)}</p>
-        <p style="margin:0;"><strong>Password:</strong> ${escapeHtml(password)}</p>
+        <p style="margin:0 0 8px;"><strong>Password:</strong> ${escapeHtml(password)}</p>
+        <p style="margin:0;"><strong>Role:</strong> ${escapeHtml(roleLabel)}</p>
       </div>
       <p style="color:#64748B;font-size:13px;">Keep these credentials secure.</p>
     </div>`;
@@ -1017,6 +1021,7 @@ async function sendInternalEmployeeCredentials({
       email,
       userName,
       password,
+      role: roleLabel,
       hint: "Set SMTP credentials in .env to send real emails",
     });
     return { devLogged: true };
@@ -1026,7 +1031,7 @@ async function sendInternalEmployeeCredentials({
     await mailTransporter.sendMail(
       buildMailOptions({ to, subject, text, html })
     );
-    logger.info("Internal employee credentials email sent", { to });
+    logger.info("Internal employee credentials email sent", { to, role: roleLabel });
     return { delivered: true };
   } catch (error) {
     logger.error("Failed to send internal employee credentials", {
