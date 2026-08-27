@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import OrdersTable from "@/components/orders/OrdersTable";
-import CurrentDateTime from "@/components/dashboard/CurrentDateTime";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessActivityReport } from "@/lib/auth/roles";
 import { getFacilities } from "@/lib/facilities/facilityApi";
@@ -242,11 +241,6 @@ export default function ReportsPage() {
                   Activity Report
                 </Link>
               )}
-
-              <div className="flex items-center gap-1 text-[11px] text-[#64748B]">
-                <span>as of</span>
-                <CurrentDateTime />
-              </div>
             </div>
           </div>
         </div>
