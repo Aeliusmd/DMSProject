@@ -16,7 +16,7 @@ const {
 } = require("../utils/timezoneUtils");
 const config = require("../config");
 
-const ALLOWED_CREATE_ROLES = ["Manager", "Employee"];
+const ALLOWED_CREATE_ROLES = ["Admin", "Manager", "Employee"];
 
 function isAdminRole(role) {
   return String(role || "").trim().toLowerCase() === "admin";
@@ -103,7 +103,7 @@ async function getAllEmployees(query = {}, { timezone } = {}) {
 
 async function createEmployee({ name, logon, email, password, role }) {
   if (!ALLOWED_CREATE_ROLES.includes(role)) {
-    throw new ApiError(400, "Role must be Manager or Employee");
+    throw new ApiError(400, "Role must be Admin, Manager, or Employee");
   }
 
   const existingEmail = await Employee.findByEmail(email);
@@ -151,7 +151,7 @@ async function createEmployee({ name, logon, email, password, role }) {
 
 async function updateEmployee(id, { name, logon, email, role, password }) {
   if (!ALLOWED_CREATE_ROLES.includes(role)) {
-    throw new ApiError(400, "Role must be Manager or Employee");
+    throw new ApiError(400, "Role must be Admin, Manager, or Employee");
   }
 
   const employee = await Employee.findById(id);

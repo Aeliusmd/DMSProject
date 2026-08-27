@@ -395,6 +395,7 @@ function EmployeeSelect({
           }`}
       >
        
+        <option value="Admin">Admin</option>
         <option value="Manager">Manager</option>
         <option value="Employee">Employee</option>
       </select>
@@ -445,6 +446,8 @@ function validateEmployeeForm(data, isEditMode = false, originalUserName = "") {
   }
   if (!data.role) {
     errors.role = "Role is required";
+  } else if (!["Admin", "Manager", "Employee"].includes(data.role)) {
+    errors.role = "Role must be Admin, Manager, or Employee";
   }
   return errors;
 }

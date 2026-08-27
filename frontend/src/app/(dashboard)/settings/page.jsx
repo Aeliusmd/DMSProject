@@ -574,7 +574,7 @@ function SettingsField({
             inputProps.onBlur?.(event);
             onBlur?.(event);
           }}
-          className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:bg-white focus:ring-2 ${
+          className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:bg-white focus:ring-2 [&::-ms-reveal]:hidden [&::-ms-clear]:hidden ${
             isPasswordField ? "pr-10" : ""
           } ${
             error
@@ -587,7 +587,7 @@ function SettingsField({
           <button
             type="button"
             onClick={() => setShowPassword((prev) => !prev)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#64748B]"
+            className="absolute right-3 top-1/2 z-10 -translate-y-1/2 text-[#94A3B8] hover:text-[#64748B]"
             aria-label={showPassword ? "Hide password" : "Show password"}
           >
             {showPassword ? <EyeOffIcon /> : <EyeIcon />}

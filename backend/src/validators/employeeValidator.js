@@ -1,7 +1,7 @@
 const MAX_NAME_LENGTH = 150;
 const MAX_LOGON_LENGTH = 100;
 const MAX_EMAIL_LENGTH = 255;
-const ALLOWED_ROLES = new Set(["Manager", "Employee"]);
+const ALLOWED_ROLES = new Set(["Admin", "Manager", "Employee"]);
 const { addPersonNameFormatError } = require("../utils/nameValidation");
 const { validatePasswordComplexity } = require("../utils/passwordValidation");
 const { localInstantToUtc } = require("../utils/timezoneUtils");
@@ -60,7 +60,7 @@ function validateCreateEmployee(body = {}) {
   if (!role) {
     errors.push({ field: "role", message: "Role is required" });
   } else if (!ALLOWED_ROLES.has(role)) {
-    errors.push({ field: "role", message: "Role must be Manager or Employee" });
+    errors.push({ field: "role", message: "Role must be Admin, Manager, or Employee" });
   }
 
   return {
@@ -123,7 +123,7 @@ function validateUpdateEmployee(body = {}) {
   if (!role) {
     errors.push({ field: "role", message: "Role is required" });
   } else if (!ALLOWED_ROLES.has(role)) {
-    errors.push({ field: "role", message: "Role must be Manager or Employee" });
+    errors.push({ field: "role", message: "Role must be Admin, Manager, or Employee" });
   }
 
   const hasPassword = password.length > 0;
