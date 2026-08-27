@@ -10,11 +10,15 @@ import {
   clearDeviceTrustToken,
   getAccessExpiresAt,
   getAccessToken,
+  getBrowserStaffOwner,
   getDeviceTrustToken,
   getRefreshToken,
+  getStaffBrowserUser,
   getStoredUser,
   isImpersonating,
+  isSameStaffUser,
   setAuth,
+  setBrowserStaffOwner,
   setDeviceTrustToken,
 } from "./authStorage";
 
@@ -92,6 +96,18 @@ let staffAuthChannel = null;
 
 const STAFF_AUTH_CHANNEL = "dms-staff-auth";
 const TOKEN_HANDOFF_MS = 300;
+const SESSION_QUERY_MS = 300;
+
+export const STAFF_BROWSER_SESSION_CONFLICT_MESSAGE =
+  "Another account is already signed in in this browser. Sign out from that account first, or use a private/incognito window.";
+
+export class StaffBrowserSessionConflictError extends Error {
+  constructor(message = STAFF_BROWSER_SESSION_CONFLICT_MESSAGE, existingEmail = "") {
+    super(message);
+    this.name = "StaffBrowserSessionConflictError";
+    this.existingEmail = existingEmail;
+  }
+}
 
 function markActivity() {
   lastActivityAt = Date.now();
@@ -108,6 +124,17 @@ function bindStaffAuthChannel() {
 
   staffAuthChannel = new BroadcastChannel(STAFF_AUTH_CHANNEL);
   staffAuthChannel.onmessage = (event) => {
+    if (event?.data?.type === "auth-session-query") {
+      const user = getStaffBrowserUser();
+      if (!user) return;
+
+      staffAuthChannel.postMessage({
+        type: "auth-session-info",
+        user,
+      });
+      return;
+    }
+
     if (event?.data?.type !== "auth-tokens-request") return;
     const refreshToken = getRefreshToken();
     if (!refreshToken) return;
@@ -173,6 +200,67 @@ function requestTokensFromOtherTabs() {
   });
 }
 
+function queryStaffSessionsInOtherTabs() {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || typeof BroadcastChannel === "undefined") {
+      resolve([]);
+      return;
+    }
+
+    const channel = new BroadcastChannel(STAFF_AUTH_CHANNEL);
+    const users = [];
+
+    const timer = setTimeout(() => {
+      try {
+        channel.close();
+      } catch {
+        // Ignore channel close failures.
+      }
+      resolve(users);
+    }, SESSION_QUERY_MS);
+
+    channel.onmessage = (event) => {
+      if (event?.data?.type !== "auth-session-info") return;
+      if (!event.data.user) return;
+
+      users.push(event.data.user);
+    };
+
+    channel.postMessage({ type: "auth-session-query" });
+  });
+}
+
+export async function assertStaffSignInAllowed({ email, userId, user } = {}) {
+  const incoming =
+    user ||
+    {
+      ...(userId != null ? { id: userId } : {}),
+      ...(email ? { email } : {}),
+    };
+
+  if (!incoming.id && !incoming.email) return;
+
+  const browserUser = getStaffBrowserUser();
+  if (browserUser && !isSameStaffUser(browserUser, incoming)) {
+    throw new StaffBrowserSessionConflictError(
+      STAFF_BROWSER_SESSION_CONFLICT_MESSAGE,
+      browserUser.email || ""
+    );
+  }
+
+  const tabUsers = await queryStaffSessionsInOtherTabs();
+
+  for (const tabUser of tabUsers) {
+    if (isSameStaffUser(tabUser, incoming)) continue;
+    if (tabUser?.id != null || tabUser?.email) {
+      throw new StaffBrowserSessionConflictError(
+        STAFF_BROWSER_SESSION_CONFLICT_MESSAGE,
+        tabUser.email || browserUser?.email || ""
+      );
+    }
+  }
+}
+
 /**
  * Staff auth is tab-scoped via sessionStorage. Closing the tab clears tokens,
  * but httpOnly cookies can otherwise restore the session. Require client tokens
@@ -182,14 +270,14 @@ function requestTokensFromOtherTabs() {
 export async function ensureStaffClientSession() {
   if (typeof window === "undefined") return false;
 
+  bindStaffAuthChannel();
+
   if (hasStaffClientTokens()) {
-    bindStaffAuthChannel();
     return true;
   }
 
   const recovered = await requestTokensFromOtherTabs();
   if (recovered && hasStaffClientTokens()) {
-    bindStaffAuthChannel();
     return true;
   }
 
@@ -283,6 +371,13 @@ export function scheduleTokenRefresh() {
 
 export function startAuthAutoRefresh() {
   if (typeof window === "undefined") return;
+
+  if (!isImpersonating()) {
+    const user = getStoredUser();
+    if (user && !getBrowserStaffOwner()) {
+      setBrowserStaffOwner(user);
+    }
+  }
 
   if (!activityListenersBound) {
     ACTIVITY_EVENTS.forEach((event) =>
@@ -387,6 +482,8 @@ export async function request(
 }
 
 export async function login({ email, password }) {
+  await assertStaffSignInAllowed({ email: email.trim() });
+
   const data = await request("/auth/login", {
     method: "POST",
     body: {
@@ -407,7 +504,7 @@ export async function login({ email, password }) {
   }
 
   if (!payload.requiresTwoFactor && payload.accessToken) {
-    saveAuthSession({
+    await saveAuthSession({
       user: payload.user,
       accessToken: payload.accessToken,
       refreshToken: payload.refreshToken,
@@ -517,7 +614,10 @@ export async function getCurrentUser() {
   return user;
 }
 
-export function saveAuthSession(payload) {
+export async function saveAuthSession(payload) {
+  await assertStaffSignInAllowed({ user: payload.user });
+
+  setBrowserStaffOwner(payload.user);
   setAuth({
     user: payload.user,
     accessToken: payload.accessToken,

@@ -7,6 +7,7 @@ const ACCESS_EXPIRES_KEY = "dms_access_expires_at";
 const IMPERSONATION_FLAG_KEY = "dms_impersonating";
 const SESSION_USER_KEY = "dms_session_user";
 const DEVICE_TRUST_TOKEN_KEY = "dms_device_trust_token";
+const BROWSER_STAFF_OWNER_KEY = "dms_browser_staff_owner";
 
 function isBrowser() {
   return typeof window !== "undefined";
@@ -69,6 +70,84 @@ function parseUser(raw) {
   } catch {
     return null;
   }
+}
+
+function normalizeStaffEmail(email) {
+  return String(email || "").trim().toLowerCase();
+}
+
+function toStaffIdentity(user) {
+  if (!user) return null;
+
+  const id = user.id ?? user.userId ?? null;
+  const email = user.email || "";
+
+  if (id == null && !email) return null;
+
+  return { id, email };
+}
+
+export function isSameStaffUser(a, b) {
+  const left = toStaffIdentity(a);
+  const right = toStaffIdentity(b);
+
+  if (!left || !right) return false;
+
+  if (left.id != null && right.id != null && String(left.id) === String(right.id)) {
+    return true;
+  }
+
+  const leftEmail = normalizeStaffEmail(left.email);
+  const rightEmail = normalizeStaffEmail(right.email);
+
+  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
+}
+
+export function getBrowserStaffOwner() {
+  if (!isBrowser()) return null;
+
+  try {
+    return toStaffIdentity(parseUser(localStorage.getItem(BROWSER_STAFF_OWNER_KEY)));
+  } catch {
+    return null;
+  }
+}
+
+export function setBrowserStaffOwner(user) {
+  if (!isBrowser()) return;
+
+  const identity = toStaffIdentity(user);
+  if (!identity) return;
+
+  try {
+    localStorage.setItem(BROWSER_STAFF_OWNER_KEY, JSON.stringify(identity));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+export function clearBrowserStaffOwner() {
+  if (!isBrowser()) return;
+
+  try {
+    localStorage.removeItem(BROWSER_STAFF_OWNER_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+/** Staff account that owns this browser (admin during impersonation, not the employee). */
+export function getStaffBrowserUser() {
+  if (!isBrowser()) return null;
+
+  const owner = getBrowserStaffOwner();
+  if (owner) return owner;
+
+  if (isImpersonating()) {
+    return toStaffIdentity(parseUser(localStorage.getItem(USER_KEY)));
+  }
+
+  return toStaffIdentity(getStoredUser());
 }
 
 export function getStoredUser() {
@@ -160,6 +239,7 @@ export function clearAuth() {
 
   if (!impersonating) {
     localStorage.removeItem(USER_KEY);
+    clearBrowserStaffOwner();
   }
 }
 
