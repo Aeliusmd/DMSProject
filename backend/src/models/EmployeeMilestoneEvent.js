@@ -1,4 +1,6 @@
 const { getPool } = require("../config/database");
+const config = require("../config");
+const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
 
 const METRIC_TYPES = ["created", "updated", "completed", "cancelled", "deleted"];
 
@@ -33,7 +35,7 @@ class EmployeeMilestoneEvent {
 
     const pool = getPool();
     const resolvedDate =
-      eventDate || new Date().toISOString().slice(0, 10);
+      eventDate || calendarTodayInTimezone(config.businessTimezone || "UTC");
 
     await pool.execute(
       `INSERT IGNORE INTO employee_order_milestone_events (

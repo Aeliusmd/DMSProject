@@ -75,7 +75,8 @@ exports.updateStage = asyncHandler(async (req, res) => {
   const status = String(req.body?.status || "").trim();
   const updated = await companyPortalInternalSyncService.updateCompanyPortalStage(
     orderId,
-    status
+    status,
+    { timezone: req.clientTimezone }
   );
 
   const order = await Order.findById(orderId);
@@ -108,6 +109,7 @@ exports.emailRecords = asyncHandler(async (req, res) => {
       emails: req.body?.emails,
       email: req.body?.email,
       additionalEmails: req.body?.additionalEmails,
+      timezone: req.clientTimezone,
     }
   );
 

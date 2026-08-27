@@ -421,7 +421,7 @@ class Invoice {
          status = :status,
          amount_due = :amountDue,
          writeoff_amount = :writeoffAmount,
-         writeoff_date = CURDATE(),
+         writeoff_date = :writeoffDate,
          writeoff_by = :writeoffBy,
          writeoff_reason = :writeoffReason,
          updated_at = NOW()
@@ -430,7 +430,7 @@ class Invoice {
     );
   }
 
-  static async markAsSent(ids = []) {
+  static async markAsSent(ids = [], sentDate = null) {
     if (!ids.length) return 0;
 
     const pool = getPool();
@@ -439,10 +439,11 @@ class Invoice {
       acc[`id${index}`] = id;
       return acc;
     }, {});
+    params.sentDate = sentDate;
 
     const [result] = await pool.execute(
       `UPDATE invoices
-       SET sent_date = CURDATE(),
+       SET sent_date = COALESCE(:sentDate, CURDATE()),
            updated_at = NOW()
        WHERE id IN (${placeholders})
          AND sent_date IS NULL`,
@@ -452,7 +453,7 @@ class Invoice {
     return result.affectedRows || 0;
   }
 
-  static async markAsEmailSent(ids = []) {
+  static async markAsEmailSent(ids = [], sentDate = null) {
     if (!ids.length) return 0;
 
     const pool = getPool();
@@ -461,10 +462,11 @@ class Invoice {
       acc[`id${index}`] = id;
       return acc;
     }, {});
+    params.sentDate = sentDate;
 
     const [result] = await pool.execute(
       `UPDATE invoices
-       SET sent_date = CURDATE(),
+       SET sent_date = COALESCE(:sentDate, CURDATE()),
            status = CASE
              WHEN status IN ('Paid', 'Partial', 'Unpaid', 'Written Off') THEN status
              ELSE 'Needs Resend'

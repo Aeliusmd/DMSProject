@@ -15,6 +15,14 @@ const {
 } = require("../utils/companyPortalRecordTypes");
 const { getPool } = require("../config/database");
 const { sanitizeZip } = require("../utils/zipUtils");
+const config = require("../config");
+const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
+
+function resolveClientCalendarDate(options = {}) {
+  return calendarTodayInTimezone(
+    options.timezone || config.businessTimezone || "UTC"
+  );
+}
 
 const COMPANY_PORTAL_STAGES = [
   "In Process",
@@ -476,7 +484,7 @@ async function backfillMissingPortalPrepayments({ limit = 200 } = {}) {
   return { checked: rows.length, updated };
 }
 
-async function updateCompanyPortalStage(internalOrderId, status) {
+async function updateCompanyPortalStage(internalOrderId, status, options = {}) {
   if (!COMPANY_PORTAL_STAGES.includes(status)) {
     throw new ApiError(400, "Invalid company portal stage");
   }
@@ -495,15 +503,16 @@ async function updateCompanyPortalStage(internalOrderId, status) {
 
   // Mirror Released onto the internal order lifecycle fields.
   if (status === "Released") {
+    const deliveryDate = resolveClientCalendarDate(options);
     const pool = getPool();
     await pool.execute(
       `UPDATE orders
        SET status = 'Completed',
-           delivery_date = COALESCE(delivery_date, CURDATE()),
+           delivery_date = COALESCE(delivery_date, :deliveryDate),
            updated_at = NOW()
        WHERE id = :id
          AND status NOT IN ('Cancelled', 'Deleted')`,
-      { id: internalOrderId }
+      { id: internalOrderId, deliveryDate }
     );
   }
 
@@ -518,7 +527,7 @@ function buildRecordsDownloadUrl(token) {
 
 async function emailCompanyPortalRecords(
   internalOrderId,
-  { emails, email, additionalEmails } = {}
+  { emails, email, additionalEmails, timezone } = {}
 ) {
   const orderId = Number(internalOrderId);
   if (!Number.isFinite(orderId) || orderId <= 0) {
@@ -626,16 +635,17 @@ async function emailCompanyPortalRecords(
 
   await CompanyPortalOrder.updateStatus(portalOrder.id, "Released");
 
+  const calendarDate = resolveClientCalendarDate({ timezone });
   const pool = getPool();
   await pool.execute(
     `UPDATE orders
-     SET delivery_date = CURDATE(),
-         ready_date = COALESCE(ready_date, CURDATE()),
+     SET delivery_date = :deliveryDate,
+         ready_date = COALESCE(ready_date, :readyDate),
          status = 'Completed',
          updated_at = NOW()
      WHERE id = :orderId
        AND status NOT IN ('Cancelled', 'Deleted')`,
-    { orderId }
+    { orderId, deliveryDate: calendarDate, readyDate: calendarDate }
   );
 
   return {

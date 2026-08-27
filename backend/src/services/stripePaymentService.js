@@ -18,6 +18,7 @@ const {
   assertPositiveInt,
   likePrefix,
 } = require("../utils/sqlSafety");
+const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
 
 let stripeClient = null;
 
@@ -719,11 +720,15 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
            amount_due = 0,
            status = 'Paid',
            payment_method = 'online',
-           payment_date = CURDATE(),
+           payment_date = :paymentDate,
            payment_recorded_at = NOW(),
            updated_at = NOW()
        WHERE id = :id`,
-      { id: invoice.id, amountPaid: total }
+      {
+        id: invoice.id,
+        amountPaid: total,
+        paymentDate: calendarTodayInTimezone(config.businessTimezone),
+      }
     );
     return;
   }
@@ -739,11 +744,15 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
      SET amount_paid = :amountPaid,
          status = 'Paid',
          payment_method = 'online',
-         payment_date = CURDATE(),
+         payment_date = :paymentDate,
          payment_recorded_at = NOW(),
          updated_at = NOW()
      WHERE order_id = :orderId`,
-    { orderId, amountPaid: total }
+    {
+      orderId,
+      amountPaid: total,
+      paymentDate: calendarTodayInTimezone(config.businessTimezone),
+    }
   );
 
   const { syncOrderPaymentDuesFromInvoice } = require("./invoiceService");

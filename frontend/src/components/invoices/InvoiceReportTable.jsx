@@ -561,7 +561,7 @@ export default function InvoiceReportTable({
                 <th className="w-[44px] px-4 py-3"></th>
                 <th className="w-[210px] px-4 py-3">All Company</th>
                 <th className="w-[300px] px-4 py-3">Email</th>
-                <th className="w-[210px] px-4 py-3">Case</th>
+                <th className="w-[210px] max-w-[210px] px-4 py-3">Case</th>
                 <th className="w-[125px] px-4 py-3">Inv Date</th>
                 <th className="w-[130px] px-4 py-3 text-right">Invoiced</th>
                 <th className="w-[130px] px-4 py-3 text-right">Paid</th>
@@ -918,36 +918,39 @@ function InvoiceRow({
       <td className="px-4 py-4"></td>
       <td className="px-4 py-4"></td>
 
-      <td className="px-4 py-4 align-top">
-        <div className="max-w-[190px] text-[12px] leading-[20px]">
+      <td className="w-[210px] max-w-[210px] overflow-hidden px-4 py-4 align-top">
+        <div className="min-w-0 w-full max-w-[194px] overflow-hidden text-[12px] leading-[20px]">
           <Link
             href={`/orders/new?mode=edit&orderId=${encodeURIComponent(
               row.orderId
             )}`}
-            className="whitespace-nowrap font-semibold text-[#007F96] hover:underline"
+            title={row.caseNo}
+            className="block break-all font-semibold text-[#007F96] hover:underline"
           >
             {row.caseNo}
           </Link>
 
-          {row.isSent ? (
-            <span className="ml-2 text-[#94A3B8]">invoice sent</span>
-          ) : (
-            <span className="ml-2 text-[#94A3B8]">not sent</span>
-          )}
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-[11px] leading-[16px]">
+            {row.isSent ? (
+              <span className="text-[#94A3B8]">invoice sent</span>
+            ) : (
+              <span className="text-[#94A3B8]">not sent</span>
+            )}
 
-          <button
-            type="button"
-            onClick={() => onOpenInvoiceModal(group, row)}
-            className={`ml-1 whitespace-nowrap font-medium hover:underline ${
-              row.isSent ? "text-red-500" : "text-[#475569]"
-            }`}
-          >
-            {row.sentDate}
-          </button>
+            <button
+              type="button"
+              onClick={() => onOpenInvoiceModal(group, row)}
+              className={`whitespace-nowrap font-medium hover:underline ${
+                row.isSent ? "text-red-500" : "text-[#475569]"
+              }`}
+            >
+              {row.sentDate}
+            </button>
 
-          <span className="ml-1 whitespace-nowrap text-[#64748B]">
-            ({row.days} days)
-          </span>
+            <span className="whitespace-nowrap text-[#64748B]">
+              ({row.days} days)
+            </span>
+          </div>
         </div>
       </td>
 

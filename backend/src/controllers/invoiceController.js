@@ -159,6 +159,7 @@ exports.send = asyncHandler(async (req, res) => {
 
   const result = await invoiceService.sendInvoices(req.body.invoiceIds, {
     emails: req.body.emails,
+    timezone: req.clientTimezone,
   });
 
   await logBillingActivity(req, {
@@ -180,6 +181,7 @@ exports.resend = asyncHandler(async (req, res) => {
 
   const result = await invoiceService.resendInvoices(req.body.invoiceIds, {
     emails: req.body.emails,
+    timezone: req.clientTimezone,
   });
 
   await logBillingActivity(req, {
@@ -201,6 +203,7 @@ exports.sendXray = asyncHandler(async (req, res) => {
 
   const result = await invoiceService.sendXrayInvoices(req.body.orderIds, {
     emails: req.body.emails,
+    timezone: req.clientTimezone,
   });
 
   await logBillingActivity(req, {
@@ -217,6 +220,7 @@ exports.resendXray = asyncHandler(async (req, res) => {
 
   const result = await invoiceService.resendXrayInvoices(req.body.orderIds, {
     emails: req.body.emails,
+    timezone: req.clientTimezone,
   });
 
   await logBillingActivity(req, {
@@ -228,7 +232,9 @@ exports.resendXray = asyncHandler(async (req, res) => {
 });
 
 exports.emailByOrder = asyncHandler(async (req, res) => {
-  const result = await invoiceService.emailInvoiceByOrderId(req.params.orderId);
+  const result = await invoiceService.emailInvoiceByOrderId(req.params.orderId, {
+    timezone: req.clientTimezone,
+  });
   const context = await resolveOrderBillingContext(result.orderId);
 
   await logBillingActivity(req, {
@@ -255,7 +261,7 @@ exports.emailXrayByOrder = asyncHandler(async (req, res) => {
 
   const result = await invoiceService.emailXrayInvoiceByOrderId(
     req.params.orderId,
-    { emails: req.body.emails }
+    { emails: req.body.emails, timezone: req.clientTimezone }
   );
   const context = await resolveOrderBillingContext(result.orderId);
 
@@ -311,7 +317,11 @@ exports.getXrayByOrder = asyncHandler(async (req, res) => {
 exports.writeOff = asyncHandler(async (req, res) => {
   throwIfInvalid(validateWriteOffInvoices(req.body));
 
-  const result = await invoiceService.writeOffInvoices(req.body, req.user?.id);
+  const result = await invoiceService.writeOffInvoices(
+    req.body,
+    req.user?.id,
+    { timezone: req.clientTimezone }
+  );
 
   for (const item of result.invoices || []) {
     const context = await resolveOrderBillingContext(item.orderId);

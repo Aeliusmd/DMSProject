@@ -659,6 +659,7 @@ exports.mailCompletedOrder = asyncHandler(async (req, res) => {
     email: req.body.email,
     additionalEmails: req.body.additionalEmails,
     deliveryDate: req.body.deliveryDate,
+    timezone: req.clientTimezone,
   });
 
   const order = await orderService.getOrderById(req.params.id);
@@ -678,6 +679,7 @@ exports.sendCnrRecord = asyncHandler(async (req, res) => {
     email: req.body.email,
     additionalEmails: req.body.additionalEmails,
     sentDate: req.body.sentDate,
+    timezone: req.clientTimezone,
   });
 
   const order = await orderService.getOrderById(req.params.id);
@@ -697,6 +699,7 @@ exports.sendCertificateOfRecords = asyncHandler(async (req, res) => {
     email: req.body.email,
     additionalEmails: req.body.additionalEmails,
     sentDate: req.body.sentDate,
+    timezone: req.clientTimezone,
   });
 
   const order = await orderService.getOrderById(req.params.id);

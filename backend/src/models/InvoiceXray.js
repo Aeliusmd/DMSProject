@@ -339,15 +339,15 @@ class InvoiceXray {
     );
   }
 
-  static async markAsSent(orderId, connection = null) {
+  static async markAsSent(orderId, sentDate = null, connection = null) {
     const db = connection || getPool();
 
     const [result] = await db.execute(
       `UPDATE invoice_xray_details
-       SET sent_date = CURDATE(), updated_at = NOW()
+       SET sent_date = COALESCE(:sentDate, CURDATE()), updated_at = NOW()
        WHERE order_id = :orderId
          AND sent_date IS NULL`,
-      { orderId }
+      { orderId, sentDate }
     );
 
     return result.affectedRows;
@@ -360,7 +360,7 @@ class InvoiceXray {
       `UPDATE invoice_xray_details SET
          status = :status,
          writeoff_amount = :writeoffAmount,
-         writeoff_date = CURDATE(),
+         writeoff_date = :writeoffDate,
          writeoff_by = :writeoffBy,
          writeoff_reason = :writeoffReason,
          updated_at = NOW()

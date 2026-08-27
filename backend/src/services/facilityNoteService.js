@@ -1,10 +1,13 @@
 const path = require("path");
 const fs = require("fs");
 const ApiError = require("../utils/ApiError");
+const config = require("../config");
 const Facility = require("../models/Facility");
 const FacilityNote = require("../models/FacilityNote");
 const FacilityNoteAttachment = require("../models/FacilityNoteAttachment");
 const Employee = require("../models/Employee");
+const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
+const { toInputDate } = require("../utils/dateUtils");
 
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   "application/pdf",
@@ -21,13 +24,7 @@ const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
 const MAX_ATTACHMENTS_PER_NOTE = 10;
 
 function formatDisplayDate(value) {
-  if (!value) return "";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toISOString().slice(0, 10);
+  return toInputDate(value);
 }
 
 function mapAttachmentRow(row, facilityId) {
@@ -113,7 +110,7 @@ async function getNotes(facilityId) {
   );
 }
 
-async function createNote(facilityId, { note }, actorId, files = []) {
+async function createNote(facilityId, { note }, actorId, files = [], options = {}) {
   await ensureFacilityExists(facilityId);
 
   const trimmedNote = String(note || "").trim();
@@ -140,7 +137,9 @@ async function createNote(facilityId, { note }, actorId, files = []) {
 
   const created = await FacilityNote.create({
     facilityId,
-    noteDate: new Date().toISOString().slice(0, 10),
+    noteDate: calendarTodayInTimezone(
+      options.timezone || config.businessTimezone || "UTC"
+    ),
     createdBy: actorId,
     authorName: employee.name || "Unknown",
     note: trimmedNote,

@@ -62,8 +62,15 @@ const {
   extractYear,
   formatSsnLastFourDisplay,
 } = require("../utils/dateUtils");
-const { toUtcIso } = require("../utils/timezoneUtils");
+const config = require("../config");
+const { toUtcIso, calendarTodayInTimezone } = require("../utils/timezoneUtils");
 const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
+
+function resolveClientCalendarDate(options = {}) {
+  return calendarTodayInTimezone(
+    options.timezone || config.businessTimezone || "UTC"
+  );
+}
 
 const WORKFLOW_STAGE_NAMES = [
   "Review Records",
@@ -3571,7 +3578,7 @@ async function maybeSendCnrMemoEmail(orderId, data, existingOrder = null, actorI
 
 async function sendCnrRecord(
   orderId,
-  { emails, email, additionalEmails, sentDate } = {}
+  { emails, email, additionalEmails, sentDate, timezone } = {}
 ) {
   const normalizedId = Number(orderId);
   const recipients = resolveMailRecipients({ emails, email, additionalEmails });
@@ -3593,7 +3600,11 @@ async function sendCnrRecord(
   const { generateCnrDocumentPdf } = require("../utils/cnrMemoPdf");
   const { sendCnrRecordEmail } = require("./emailService");
   const pdfBuffer = await generateCnrDocumentPdf(pdfData);
-  const documentDate = dateOrNull(sentDate) || order.cnr_date_sent || new Date();
+  const mailSentDate =
+    dateOrNull(sentDate) ||
+    dateOrNull(order.cnr_date_sent) ||
+    resolveClientCalendarDate({ timezone });
+  const documentDate = mailSentDate;
   const deliveredTo = [];
 
   for (const recipient of recipients) {
@@ -3613,9 +3624,6 @@ async function sendCnrRecord(
 
     deliveredTo.push(recipient);
   }
-
-  const mailSentDate =
-    dateOrNull(sentDate) || new Date().toISOString().slice(0, 10);
   const pool = getPool();
 
   await pool.execute(
@@ -3679,7 +3687,7 @@ function buildRecordsDownloadUrl(token) {
 
 async function mailCompletedOrder(
   orderId,
-  { emails, email, additionalEmails, deliveryDate } = {}
+  { emails, email, additionalEmails, deliveryDate, timezone } = {}
 ) {
   const normalizedId = Number(orderId);
   const recipients = resolveMailRecipients({ emails, email, additionalEmails });
@@ -3708,7 +3716,8 @@ async function mailCompletedOrder(
     );
   }
 
-  const mailSentDate = dateOrNull(deliveryDate) || new Date().toISOString().slice(0, 10);
+  const mailSentDate =
+    dateOrNull(deliveryDate) || resolveClientCalendarDate({ timezone });
 
   const pool = getPool();
 
@@ -3788,7 +3797,7 @@ function buildCertificateOfRecordsPdfData(order) {
 
 async function sendCertificateOfRecords(
   orderId,
-  { emails, email, additionalEmails, sentDate } = {}
+  { emails, email, additionalEmails, sentDate, timezone } = {}
 ) {
   const normalizedId = Number(orderId);
   const recipients = resolveMailRecipients({ emails, email, additionalEmails });
@@ -3813,7 +3822,8 @@ async function sendCertificateOfRecords(
   const { generateCertificateOfRecordsPdf } = require("../utils/certificateOfRecordsPdf");
   const { sendCertificateOfRecordsEmail } = require("./emailService");
   const pdfBuffer = await generateCertificateOfRecordsPdf(pdfData);
-  const documentDate = dateOrNull(sentDate) || new Date();
+  const documentDate =
+    dateOrNull(sentDate) || resolveClientCalendarDate({ timezone });
   const deliveredTo = [];
 
   for (const recipient of recipients) {

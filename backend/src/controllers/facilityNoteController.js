@@ -22,7 +22,8 @@ exports.createNote = asyncHandler(async (req, res) => {
     req.params.id,
     req.body,
     req.user.id,
-    files
+    files,
+    { timezone: req.clientTimezone }
   );
 
   const attachmentSuffix =

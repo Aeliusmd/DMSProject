@@ -12,6 +12,7 @@ const {
 } = require("../validators/employeeValidator");
 const { validateMilestoneStatsQuery } = require("../validators/queryValidators");
 const { throwIfInvalid } = require("../utils/validationUtils");
+const { embedUtcInstantToken } = require("../utils/timezoneUtils");
 
 exports.getAll = asyncHandler(async (req, res) => {
   const result = await employeeService.getAllEmployees(req.query, {
@@ -137,17 +138,22 @@ exports.suspend = asyncHandler(async (req, res) => {
     req.clientTimezone
   );
 
+  const untilLabel =
+    embedUtcInstantToken(employee.reactivatedAt) ||
+    employee.reactivatedDate ||
+    "scheduled time";
+
   await activityLogService.recordFromRequest(req, {
     context: "employees",
     action: "suspend",
-    details: `Suspended employee ${employee.name} until ${employee.reactivatedDate}`,
+    details: `Suspended employee ${employee.name} until ${untilLabel}`,
     targetEmployeeId: employee.id,
     companyName: "System",
   });
 
   await notificationService.notifyActivityEvent({
     title: "Employee Suspended",
-    description: `${employee.name} was suspended until ${employee.reactivatedDate}`,
+    description: `${employee.name} was suspended until ${untilLabel}`,
     referenceType: "Employee",
     referenceId: employee.id,
   });

@@ -236,6 +236,21 @@ function formatUtcInstantDisplay(value, timeZone = DEFAULT_TIMEZONE, locale = "e
   });
 }
 
+/** Embed a UTC instant so text can be reformatted per viewer timezone on read. */
+const UTC_INSTANT_TOKEN_RE = /\[\[utc:([^\]]+)\]\]/gi;
+
+function embedUtcInstantToken(value) {
+  const iso = toUtcIso(value);
+  if (!iso) return "";
+  return `[[utc:${iso}]]`;
+}
+
+function expandUtcInstantTokens(text, timeZone = DEFAULT_TIMEZONE, locale = "en-US") {
+  return String(text || "").replace(UTC_INSTANT_TOKEN_RE, (_match, raw) => {
+    return formatUtcInstantDisplay(raw, timeZone, locale) || String(raw || "").trim();
+  });
+}
+
 module.exports = {
   DEFAULT_TIMEZONE,
   resolveTimezone,
@@ -249,4 +264,6 @@ module.exports = {
   loggedAtFromParts,
   calendarTodayInTimezone,
   formatUtcInstantDisplay,
+  embedUtcInstantToken,
+  expandUtcInstantTokens,
 };

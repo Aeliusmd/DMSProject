@@ -11,7 +11,8 @@ exports.getAll = asyncHandler(async (req, res) => {
 
   const data = await notificationService.getNotificationsForEmployee(
     req.user.id,
-    req.query
+    req.query,
+    { timezone: req.clientTimezone }
   );
 
   return ApiResponse.success(res, data, "Notifications retrieved");

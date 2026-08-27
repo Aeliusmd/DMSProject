@@ -6,7 +6,7 @@ const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
 const { runNonCritical } = require("../utils/serviceErrorUtils");
 const { sanitizeSearchText } = require("../utils/sanitize");
-const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
+const { calendarTodayInTimezone, expandUtcInstantTokens, embedUtcInstantToken } = require("../utils/timezoneUtils");
 const config = require("../config");
 
 const NOTIFICATION_TYPES = ["order", "invoice", "reminder", "activity"];
@@ -94,7 +94,7 @@ function formatRelativeTime(value) {
   });
 }
 
-function mapNotificationRow(row) {
+function mapNotificationRow(row, timeZone = config.businessTimezone) {
   const createdAt = row.created_at;
 
   return {
@@ -102,7 +102,7 @@ function mapNotificationRow(row) {
     type: capitalizeType(row.notification_type),
     notificationType: row.notification_type,
     title: row.title || "",
-    description: row.description || "",
+    description: expandUtcInstantTokens(row.description || "", timeZone),
     time: formatRelativeTime(createdAt),
     read: Boolean(row.is_read),
     referenceType: row.reference_type || null,
@@ -110,6 +110,75 @@ function mapNotificationRow(row) {
     createdAt,
     readAt: row.read_at || null,
   };
+}
+
+/**
+ * Older suspend notifications baked the actor's local time into `description`.
+ * If the employee is still suspended, rewrite with a UTC token so viewers see
+ * their own timezone.
+ */
+async function withRepairedSuspendDescriptions(rows = []) {
+  const legacy = rows.filter(
+    (row) =>
+      String(row.title || "").toLowerCase() === "employee suspended" &&
+      String(row.reference_type || "").toLowerCase() === "employee" &&
+      row.reference_id &&
+      !/\[\[utc:/i.test(String(row.description || ""))
+  );
+
+  if (!legacy.length) {
+    return rows;
+  }
+
+  const employeeIds = [
+    ...new Set(
+      legacy
+        .map((row) => Number(row.reference_id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    ),
+  ];
+
+  const reactivatedByEmployeeId = new Map();
+
+  await Promise.all(
+    employeeIds.map(async (id) => {
+      const employee = await Employee.findById(id, { includeDeleted: true });
+      if (employee?.reactivated_date && Number(employee.is_suspended)) {
+        reactivatedByEmployeeId.set(id, {
+          name: employee.name,
+          token: embedUtcInstantToken(employee.reactivated_date),
+        });
+      }
+    })
+  );
+
+  if (!reactivatedByEmployeeId.size) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const meta = reactivatedByEmployeeId.get(Number(row.reference_id));
+    if (!meta?.token) {
+      return row;
+    }
+
+    if (
+      String(row.title || "").toLowerCase() !== "employee suspended" ||
+      /\[\[utc:/i.test(String(row.description || ""))
+    ) {
+      return row;
+    }
+
+    const nameMatch = String(row.description || "").match(
+      /^(.+?)\s+was suspended until\s+/i
+    );
+    const name = nameMatch?.[1] || meta.name || "Employee";
+
+    return {
+      ...row,
+      description: `${name} was suspended until ${meta.token}`,
+    };
+  });
 }
 
 async function isPreferenceEnabled(employeeId, preferenceKey) {
@@ -392,18 +461,22 @@ async function getDueRemindersForUser(user, { timezone } = {}) {
   return { reminders, enabled: true };
 }
 
-async function getNotificationsForEmployee(employeeId, query = {}) {
+async function getNotificationsForEmployee(employeeId, query = {}, options = {}) {
   const limit = Number(query.limit) > 0 ? Number(query.limit) : 100;
   const rawType = query.type ? String(query.type).toLowerCase() : null;
   const typeFilter =
     rawType && NOTIFICATION_TYPES.includes(rawType) ? rawType : null;
+  const timeZone = options.timezone || config.businessTimezone || "UTC";
 
   const rows = await Notification.findByEmployeeId(employeeId, {
     limit,
     type: typeFilter,
   });
 
-  let notifications = rows.map(mapNotificationRow);
+  const repairedRows = await withRepairedSuspendDescriptions(rows);
+  let notifications = repairedRows.map((row) =>
+    mapNotificationRow(row, timeZone)
+  );
 
   if (query.search && `${query.search}`.trim()) {
     const term = sanitizeSearchText(query.search, { maxLength: 100 }).toLowerCase();

@@ -9,7 +9,10 @@ const Provider = require("../models/Provider");
 const config = require("../config");
 const { getPool } = require("../config/database");
 const { calculateOrderRushLevel } = require("../utils/rushUtils");
-const { formatDobDisplay } = require("../utils/dateUtils");
+const { formatDobDisplay, toShortDate: toSqlShortDate } = require("../utils/dateUtils");
+const {
+  calendarTodayInTimezone,
+} = require("../utils/timezoneUtils");
 const {
   sanitizeTrimOrNull,
 } = require("../utils/sanitize");
@@ -579,6 +582,11 @@ function boolToInt(value) {
 
 function toShortDate(value) {
   if (!value) return "";
+
+  // Prefer calendar-safe formatting for DATE / YYYY-MM-DD values.
+  const sqlShort = toSqlShortDate(value);
+  if (sqlShort) return sqlShort;
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
 
@@ -589,8 +597,18 @@ function toShortDate(value) {
   return `${month}/${day}/${year}`;
 }
 
+function resolveClientCalendarDate(options = {}) {
+  return calendarTodayInTimezone(
+    options.timezone || config.businessTimezone || "UTC"
+  );
+}
+
 function toCompactDate(value) {
   if (!value) return "";
+
+  const sqlShort = toSqlShortDate(value);
+  if (sqlShort) return sqlShort;
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
 
@@ -3710,6 +3728,8 @@ async function deliverInvoiceEmail(
     reminderLevel = null,
     orderPayments = [],
     recipientEmails = null,
+    sentDate = null,
+    timezone = null,
   } = {}
 ) {
   if (!invoice) {
@@ -3734,6 +3754,11 @@ async function deliverInvoiceEmail(
     ? await Invoice.findByOrderId(invoice.order_id)
     : null;
   const attachments = [];
+  const emailSentDate =
+    sentDate ||
+    (isResend
+      ? invoice.sent_date || resolveClientCalendarDate({ timezone })
+      : resolveClientCalendarDate({ timezone }));
 
   if (order && invoiceRow) {
     const payload = buildPrintInvoicePdfData(invoiceRow, order, payments);
@@ -3772,7 +3797,7 @@ async function deliverInvoiceEmail(
       caseNo: invoice.order_number || "",
       applicant: buildApplicantName(invoice),
       invoiceDate: toShortDate(invoice.invoice_date),
-      sentDate: toShortDate(isResend ? invoice.sent_date || new Date() : new Date()),
+      sentDate: toShortDate(emailSentDate),
       invoiced: formatMoney(financials.totalAmount),
       paid: formatMoney(financials.amountPaid),
       due: formatMoney(financials.amountDue),
@@ -3815,7 +3840,13 @@ async function deliverXrayInvoiceEmail(
   xrayRow,
   order,
   orderPayments = [],
-  { isResend = false, reminderLevel = null, recipientEmails = null } = {}
+  {
+    isResend = false,
+    reminderLevel = null,
+    recipientEmails = null,
+    sentDate = null,
+    timezone = null,
+  } = {}
 ) {
   if (!xrayRow || !order) {
     throw new ApiError(404, "X-Ray invoice not found");
@@ -3840,6 +3871,11 @@ async function deliverXrayInvoiceEmail(
       : await Order.findPaymentsByOrderId(order.id);
   const payload = buildPrintXrayInvoicePdfData(xrayRow, order, payments);
   const attachments = [];
+  const emailSentDate =
+    sentDate ||
+    (isResend
+      ? xrayRow.sent_date || resolveClientCalendarDate({ timezone })
+      : resolveClientCalendarDate({ timezone }));
 
   if (payload) {
     const { generatePrintXrayInvoicePdf } = require("../utils/printXrayInvoicePdf");
@@ -3875,9 +3911,7 @@ async function deliverXrayInvoiceEmail(
       caseNo: order.order_number || "",
       applicant: buildApplicantName(order),
       invoiceDate: toShortDate(xrayRow.xray_invoice_date),
-      sentDate: toShortDate(
-        isResend ? xrayRow.sent_date || new Date() : new Date()
-      ),
+      sentDate: toShortDate(emailSentDate),
       invoiced: formatMoney(financials.totalAmount),
       paid: formatMoney(financials.amountPaid),
       due: formatMoney(financials.amountDue),
@@ -3928,6 +3962,7 @@ async function sendInvoices(invoiceIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
+  const sentDate = resolveClientCalendarDate(options);
 
   const existing = await Invoice.findByIds(ids);
   const unsentIds = existing
@@ -3964,9 +3999,11 @@ async function sendInvoices(invoiceIds = [], options = {}) {
       isResend: false,
       orderPayments,
       recipientEmails,
+      sentDate,
+      timezone: options.timezone,
     });
 
-    const markedCount = await Invoice.markAsSent([invoiceId]);
+    const markedCount = await Invoice.markAsSent([invoiceId], sentDate);
 
     if (!markedCount) {
       continue;
@@ -4050,6 +4087,7 @@ async function resendInvoices(invoiceIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
+  const sentDate = resolveClientCalendarDate(options);
 
   const resent = [];
 
@@ -4077,19 +4115,21 @@ async function resendInvoices(invoiceIds = [], options = {}) {
     const { recipient: deliveredTo } = await deliverInvoiceEmail(invoice, {
       isResend: true,
       recipientEmails,
+      sentDate,
+      timezone: options.timezone,
     });
 
     await getPool().execute(
       `UPDATE invoices
        SET recipient_emails = :recipientEmails,
-           sent_date = CURDATE(),
+           sent_date = :sentDate,
            status = CASE
              WHEN status IN ('Paid', 'Partial', 'Unpaid', 'Written Off') THEN status
              ELSE 'Needs Resend'
            END,
            updated_at = NOW()
        WHERE id = :invoiceId`,
-      { recipientEmails: deliveredTo, invoiceId }
+      { recipientEmails: deliveredTo, invoiceId, sentDate }
     );
 
     if (invoice.order_id) {
@@ -4102,7 +4142,7 @@ async function resendInvoices(invoiceIds = [], options = {}) {
   return { resentCount: resent.length };
 }
 
-async function emailInvoiceByOrderId(orderId) {
+async function emailInvoiceByOrderId(orderId, options = {}) {
   const normalizedOrderId = Number(orderId);
 
   if (!Number.isFinite(normalizedOrderId)) {
@@ -4125,14 +4165,17 @@ async function emailInvoiceByOrderId(orderId) {
     throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
   }
 
+  const sentDate = resolveClientCalendarDate(options);
   const orderPayments = await Order.findPaymentsByOrderId(normalizedOrderId);
   const { recipient, delivered, devLogged } = await deliverInvoiceEmail(invoice, {
     isResend: false,
     orderPayments,
+    sentDate,
+    timezone: options.timezone,
   });
 
   const invoiceId = normalizeInvoiceId(invoice.id);
-  const sentCount = await Invoice.markAsSent([invoiceId]);
+  const sentCount = await Invoice.markAsSent([invoiceId], sentDate);
 
   if (!sentCount) {
     throw new ApiError(400, "Invoice is already marked as sent");
@@ -4160,8 +4203,6 @@ async function emailInvoiceByOrderId(orderId) {
     );
   }
 
-  const sentOn = new Date();
-
   return {
     invoiceId,
     orderId: normalizedOrderId,
@@ -4170,8 +4211,8 @@ async function emailInvoiceByOrderId(orderId) {
     recipientEmail: recipient,
     emailed: delivered,
     devLogged: Boolean(devLogged),
-    sentDate: toShortDate(sentOn),
-    sentDateCompact: toCompactDate(sentOn),
+    sentDate: toShortDate(sentDate),
+    sentDateCompact: toCompactDate(sentDate),
   };
 }
 
@@ -4191,6 +4232,7 @@ async function sendXrayInvoices(orderIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
+  const sentDate = resolveClientCalendarDate(options);
 
   const sent = [];
 
@@ -4226,10 +4268,10 @@ async function sendXrayInvoices(orderIds = [], options = {}) {
       xrayRow,
       order,
       orderPayments,
-      { isResend: false, recipientEmails }
+      { isResend: false, recipientEmails, sentDate, timezone: options.timezone }
     );
 
-    const markedCount = await InvoiceXray.markAsSent(orderId);
+    const markedCount = await InvoiceXray.markAsSent(orderId, sentDate);
 
     if (!markedCount) {
       continue;
@@ -4283,6 +4325,7 @@ async function resendXrayInvoices(orderIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
+  const sentDate = resolveClientCalendarDate(options);
 
   const resent = [];
 
@@ -4321,16 +4364,16 @@ async function resendXrayInvoices(orderIds = [], options = {}) {
       xrayRow,
       order,
       orderPayments,
-      { isResend: true, recipientEmails }
+      { isResend: true, recipientEmails, sentDate, timezone: options.timezone }
     );
 
     await getPool().execute(
       `UPDATE invoice_xray_details
-       SET sent_date = CURDATE(),
+       SET sent_date = :sentDate,
            recipient_emails = :recipientEmails,
            updated_at = NOW()
        WHERE order_id = :orderId`,
-      { recipientEmails: deliveredTo, orderId }
+      { recipientEmails: deliveredTo, orderId, sentDate }
     );
 
     resent.push({ orderId, recipient: deliveredTo });
@@ -4353,7 +4396,7 @@ async function emailXrayInvoiceByOrderId(orderId, options = {}) {
     throw new ApiError(400, "X-Ray invoice is already marked as sent");
   }
 
-  const sentOn = new Date();
+  const sentDate = resolveClientCalendarDate(options);
 
   return {
     orderId: normalizedOrderId,
@@ -4361,8 +4404,8 @@ async function emailXrayInvoiceByOrderId(orderId, options = {}) {
     recipientEmail: sentEntry.recipient,
     emailed: true,
     devLogged: false,
-    xraySentDate: toShortDate(sentOn),
-    xraySentDateCompact: toCompactDate(sentOn),
+    xraySentDate: toShortDate(sentDate),
+    xraySentDateCompact: toCompactDate(sentDate),
   };
 }
 
@@ -4400,7 +4443,7 @@ async function syncOrderWriteOffStatus(connection, orderId, orderAction = "keep_
   return newStatus;
 }
 
-async function writeOffInvoices(body = {}, userId) {
+async function writeOffInvoices(body = {}, userId, options = {}) {
   const items = Array.isArray(body.invoices) ? body.invoices : [];
 
   if (!items.length) {
@@ -4408,6 +4451,7 @@ async function writeOffInvoices(body = {}, userId) {
   }
 
   const orderAction = body.orderAction === "close_order" ? "close_order" : "keep_write_off";
+  const writeoffDate = resolveClientCalendarDate(options);
   const pool = getPool();
   const connection = await pool.getConnection();
 
@@ -4451,6 +4495,7 @@ async function writeOffInvoices(body = {}, userId) {
               status: currentDue <= 0 ? "Paid" : "Written Off",
               writeoffAmount: toNumber(xrayRow.writeoff_amount),
               writeoffBy: userId || null,
+              writeoffDate,
               writeoffReason:
                 orderAction === "close_order"
                   ? "Order closed with no remaining due"
@@ -4502,6 +4547,7 @@ async function writeOffInvoices(body = {}, userId) {
           status: newStatus,
           writeoffAmount: totalWriteoff,
           writeoffBy: userId || null,
+          writeoffDate,
           writeoffReason,
         });
 
@@ -4560,6 +4606,7 @@ async function writeOffInvoices(body = {}, userId) {
             amountDue: 0,
             writeoffAmount: toNumber(invoice.writeoff_amount),
             writeoffBy: userId || null,
+            writeoffDate,
             writeoffReason:
               orderAction === "close_order"
                 ? "Order closed with no remaining due"
@@ -4612,6 +4659,7 @@ async function writeOffInvoices(body = {}, userId) {
         amountDue: newDue,
         writeoffAmount: totalWriteoff,
         writeoffBy: userId || null,
+        writeoffDate,
         writeoffReason,
       });
 

@@ -20,6 +20,8 @@ const {
   loggedAtFromParts,
   normalizeCalendarDate,
   formatUtcInstantDisplay,
+  expandUtcInstantTokens,
+  embedUtcInstantToken,
 } = require("../utils/timezoneUtils");
 const config = require("../config");
 
@@ -179,6 +181,74 @@ function stripOrderIdTag(details) {
     .trim();
 }
 
+function extractTargetEmployeeId(details) {
+  const match = String(details || "").match(/target_employee_id:(\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
+async function withRepairedSuspendLogDetails(rows = []) {
+  const legacy = rows.filter((row) => {
+    const action = String(row.action || "").toLowerCase();
+    return (
+      action === "suspend" &&
+      extractTargetEmployeeId(row.details) &&
+      !/\[\[utc:/i.test(String(row.details || ""))
+    );
+  });
+
+  if (!legacy.length) {
+    return rows;
+  }
+
+  const employeeIds = [
+    ...new Set(
+      legacy
+        .map((row) => extractTargetEmployeeId(row.details))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    ),
+  ];
+
+  const reactivatedByEmployeeId = new Map();
+
+  await Promise.all(
+    employeeIds.map(async (id) => {
+      const employee = await Employee.findById(id, { includeDeleted: true });
+      if (employee?.reactivated_date && Number(employee.is_suspended)) {
+        reactivatedByEmployeeId.set(id, {
+          name: employee.name,
+          token: embedUtcInstantToken(employee.reactivated_date),
+        });
+      }
+    })
+  );
+
+  if (!reactivatedByEmployeeId.size) {
+    return rows;
+  }
+
+  return rows.map((row) => {
+    const targetId = extractTargetEmployeeId(row.details);
+    const meta = reactivatedByEmployeeId.get(targetId);
+    if (!meta?.token || String(row.action || "").toLowerCase() !== "suspend") {
+      return row;
+    }
+    if (/\[\[utc:/i.test(String(row.details || ""))) {
+      return row;
+    }
+
+    const name = meta.name || "employee";
+    const suffixMatch = String(row.details || "").match(
+      /(\s*\|\s*target_employee_id:\d+\s*)$/i
+    );
+    const suffix = suffixMatch?.[1] || ` | target_employee_id:${targetId}`;
+
+    return {
+      ...row,
+      details: `Suspended employee ${name} until ${meta.token}${suffix}`,
+    };
+  });
+}
+
 function appendOrderId(details, orderId) {
   const base = stripOrderIdTag(details);
 
@@ -252,7 +322,10 @@ function formatDisplayDate(logDate, logTime, timeZone = config.businessTimezone)
 }
 
 function mapLogRow(row, timeZone = config.businessTimezone) {
-  const details = stripOrderIdTag(stripTargetTag(row.details));
+  const details = expandUtcInstantTokens(
+    stripOrderIdTag(stripTargetTag(row.details)),
+    timeZone
+  );
   const logDate = normalizeCalendarDate(row.log_date);
   const logTime = normalizeTimeValue(row.log_time);
   const loggedAt = loggedAtFromParts(row.log_date, row.log_time);
@@ -450,7 +523,9 @@ async function queryLogs(query = {}, { timezone } = {}) {
   const cursorId = Number.isFinite(cursorRaw) && cursorRaw > 0 ? cursorRaw : null;
 
   if (!useKeysetPagination) {
-    const logs = await ActivityLog.findAll(filters);
+    const logs = await withRepairedSuspendLogDetails(
+      await ActivityLog.findAll(filters)
+    );
     return logs.map((row) => mapLogRow(row, timeZone));
   }
 
@@ -459,9 +534,10 @@ async function queryLogs(query = {}, { timezone } = {}) {
     pageSize,
     cursorId,
   });
+  const repairedRows = await withRepairedSuspendLogDetails(keysetResult.rows);
 
   return {
-    logs: keysetResult.rows.map((row) => mapLogRow(row, timeZone)),
+    logs: repairedRows.map((row) => mapLogRow(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keysetResult.pageSize,
@@ -502,9 +578,11 @@ async function getEmployeeLogs(employeeId, query = {}, options = {}) {
     : null;
 
   if (!useKeysetPagination) {
-    const logs = await ActivityLog.findByEmployeeId(employeeId, {
-      limit: pageSizeRaw > 0 ? Math.min(pageSizeRaw, 500) : 200,
-    });
+    const logs = await withRepairedSuspendLogDetails(
+      await ActivityLog.findByEmployeeId(employeeId, {
+        limit: pageSizeRaw > 0 ? Math.min(pageSizeRaw, 500) : 200,
+      })
+    );
     return logs.map((row) => mapLogRow(row, timeZone));
   }
 
@@ -513,9 +591,10 @@ async function getEmployeeLogs(employeeId, query = {}, options = {}) {
     cursorId,
     search,
   });
+  const repairedRows = await withRepairedSuspendLogDetails(keysetResult.rows);
 
   return {
-    logs: keysetResult.rows.map((row) => mapLogRow(row, timeZone)),
+    logs: repairedRows.map((row) => mapLogRow(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keysetResult.pageSize,
@@ -537,7 +616,8 @@ async function getLogById(id, options = {}) {
     throw new ApiError(404, "Activity log not found");
   }
 
-  return mapLogRow(log, timeZone);
+  const [repaired] = await withRepairedSuspendLogDetails([log]);
+  return mapLogRow(repaired || log, timeZone);
 }
 
 module.exports = {
