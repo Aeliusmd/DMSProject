@@ -9,6 +9,7 @@ export default function OrderNoteFormFields({
   existingAttachmentUrl,
   errors = {},
   readOnly = false,
+  minCallbackDateTime = "",
   onNoteTextChange,
   onCallbackDateChange,
   onAttachmentChange,
@@ -62,7 +63,7 @@ export default function OrderNoteFormFields({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label className="mb-[6px] block text-[11px] font-semibold text-[#475569]">
-            Callback Date
+            Callback Date & Time
           </label>
 
           {readOnly ? (
@@ -71,8 +72,9 @@ export default function OrderNoteFormFields({
             </p>
           ) : (
             <input
-              type="date"
+              type="datetime-local"
               value={callbackDate}
+              min={minCallbackDateTime || undefined}
               onChange={(e) => onCallbackDateChange?.(e.target.value)}
               className={`h-[36px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
                 errors.callbackDate

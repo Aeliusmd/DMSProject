@@ -110,25 +110,43 @@ class Notification {
 
   static async existsTodayForReference(
     employeeId,
-    { referenceType, referenceId, notificationType = "reminder" }
+    {
+      referenceType,
+      referenceId,
+      notificationType = "reminder",
+      fromUtc = null,
+      toUtc = null,
+    }
   ) {
     const pool = getPool();
+    const conditions = [
+      "employee_id = :employeeId",
+      "notification_type = :notificationType",
+      "reference_type = :referenceType",
+      "reference_id = :referenceId",
+    ];
+    const params = {
+      employeeId,
+      notificationType,
+      referenceType,
+      referenceId,
+    };
+
+    if (fromUtc && toUtc) {
+      conditions.push("created_at >= :fromUtc");
+      conditions.push("created_at <= :toUtc");
+      params.fromUtc = fromUtc;
+      params.toUtc = toUtc;
+    } else {
+      conditions.push("DATE(created_at) = CURDATE()");
+    }
 
     const [rows] = await pool.execute(
       `SELECT id
        FROM notifications
-       WHERE employee_id = :employeeId
-         AND notification_type = :notificationType
-         AND reference_type = :referenceType
-         AND reference_id = :referenceId
-         AND DATE(created_at) = CURDATE()
+       WHERE ${conditions.join(" AND ")}
        LIMIT 1`,
-      {
-        employeeId,
-        notificationType,
-        referenceType,
-        referenceId,
-      }
+      params
     );
 
     return Boolean(rows[0]);

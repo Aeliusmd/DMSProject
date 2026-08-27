@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "@/config/api";
-
 import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
+import { isFutureDateTimeLocal } from "@/lib/utils/dateUtils";
+import { formatDateTimeValue, formatUtcInstant } from "@/lib/utils/timezoneUtils";
 
 export const MAX_NOTE_LENGTH = 1000;
 export const MAX_FILE_SIZE_MB = 10;
@@ -18,8 +19,6 @@ export function toFileUrl(path) {
   const origin = API_BASE_URL.replace(/\/api\/?$/, "");
   return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
 }
-
-import { formatDateTimeValue, formatUtcInstant } from "@/lib/utils/timezoneUtils";
 
 export function formatNoteDate(value) {
   if (!value) return "";
@@ -40,9 +39,13 @@ export function toHistoryItem(note) {
     noteDate: note.noteDateAt || note.noteDate || null,
     by: note.authorName || "—",
     note: note.note || "",
-    callbackDate: note.callbackDate || "",
+    callbackDate: note.callbackAt || note.callbackDate || "",
+    callbackAt: note.callbackAt || null,
+    callbackDateDisplay:
+      note.callbackDate ||
+      (note.callbackAt ? formatUtcInstant(note.callbackAt) : ""),
     isCalled: Boolean(note.isCalled),
-    isReminder: Boolean(note.callbackDate),
+    isReminder: Boolean(note.callbackAt || note.callbackDate),
     attachmentUrl: toFileUrl(note.attachmentUrl),
   };
 }
@@ -105,12 +108,8 @@ export function validateNoteForm({
   }
 
   if (callbackDate) {
-    const selectedDate = new Date(callbackDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    selectedDate.setHours(0, 0, 0, 0);
-    if (selectedDate < today) {
-      errors.callbackDate = "Callback date cannot be in the past.";
+    if (!isFutureDateTimeLocal(callbackDate)) {
+      errors.callbackDate = "Callback date and time must be in the future.";
     }
   }
 

@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import OrderNoteFormFields from "@/components/orders/OrderNoteFormFields";
 import { ReminderBadge } from "@/components/orders/OrderNotesListModal";
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
+import { utcIsoToDateTimeLocal } from "@/lib/utils/dateUtils";
 
 export default function ReminderNoteDetailModal({ reminder, onClose }) {
   const mounted = useIsClient();
@@ -41,9 +43,13 @@ export default function ReminderNoteDetailModal({ reminder, onClose }) {
             <DetailField label="Date" value={reminder.date} />
             <DetailField label="By" value={reminder.by} />
             <DetailField
-              label="Callback Date"
+              label="Callback Date & Time"
               value={
-                reminder.callbackDateDisplay || reminder.callbackDate || "—"
+                reminder.callbackDateDisplay ||
+                (reminder.callbackAt
+                  ? formatUtcInstant(reminder.callbackAt)
+                  : reminder.callbackDate) ||
+                "—"
               }
             />
             <DetailField
@@ -54,7 +60,13 @@ export default function ReminderNoteDetailModal({ reminder, onClose }) {
 
           <OrderNoteFormFields
             noteText={reminder.note || ""}
-            callbackDate={reminder.callbackDate || ""}
+            callbackDate={
+              reminder.callbackDateDisplay ||
+              (reminder.callbackAt
+                ? formatUtcInstant(reminder.callbackAt)
+                : utcIsoToDateTimeLocal(reminder.callbackDate)) ||
+              ""
+            }
             existingAttachmentUrl={reminder.attachmentUrl || ""}
             readOnly
           />

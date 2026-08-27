@@ -6,7 +6,7 @@ const ApiError = require("../utils/ApiError");
 const logger = require("../utils/logger");
 const { runNonCritical } = require("../utils/serviceErrorUtils");
 const { sanitizeSearchText } = require("../utils/sanitize");
-const { calendarTodayInTimezone, expandUtcInstantTokens, embedUtcInstantToken } = require("../utils/timezoneUtils");
+const { calendarTodayInTimezone, expandUtcInstantTokens, embedUtcInstantToken, endOfTodayUtc, toMysqlUtcDateTime, startOfCalendarDayUtc, formatUtcInstantDisplay } = require("../utils/timezoneUtils");
 const config = require("../config");
 
 const NOTIFICATION_TYPES = ["order", "invoice", "reminder", "activity"];
@@ -376,13 +376,15 @@ function getTodayDateString(timeZone = config.businessTimezone) {
   return calendarTodayInTimezone(timeZone);
 }
 
-async function syncDueReminderNotifications(employeeId, reminders = []) {
+async function syncDueReminderNotifications(employeeId, reminders = [], timeZone = config.businessTimezone) {
   const enabled = await isPreferenceEnabled(employeeId, PREFERENCE_KEYS.reminder);
 
   if (!enabled || !reminders.length) {
     return 0;
   }
 
+  const dayStart = toMysqlUtcDateTime(startOfCalendarDayUtc(null, timeZone));
+  const dayEnd = toMysqlUtcDateTime(endOfTodayUtc(timeZone));
   let created = 0;
 
   for (const reminder of reminders) {
@@ -396,6 +398,8 @@ async function syncDueReminderNotifications(employeeId, reminders = []) {
       referenceType: "Reminder",
       referenceId: noteId,
       notificationType: "reminder",
+      fromUtc: dayStart,
+      toUtc: dayEnd,
     });
 
     if (alreadyExists) {
@@ -404,15 +408,18 @@ async function syncDueReminderNotifications(employeeId, reminders = []) {
 
     const orderLabel = reminder.orderNumber || reminder.caseNumber || "Order";
     const applicant = reminder.applicant || "";
+    const when = reminder.callbackDateDisplay
+      ? ` (due ${reminder.callbackDateDisplay})`
+      : "";
 
     await dispatchPersonal({
       employeeId,
       notificationType: "reminder",
       preferenceKey: PREFERENCE_KEYS.reminder,
-      title: `Reminder Due Today — ${orderLabel}`,
+      title: `Callback Reminder — ${orderLabel}`,
       description: applicant
-        ? `${applicant}${reminder.note ? ` — ${reminder.note}` : ""}`
-        : reminder.note || "",
+        ? `${applicant}${when}${reminder.note ? ` — ${reminder.note}` : ""}`
+        : `${reminder.note || "Callback due"}${when}`,
       referenceType: "Reminder",
       referenceId: noteId,
     });
@@ -437,9 +444,10 @@ async function getDueRemindersForUser(user, { timezone } = {}) {
     return { reminders: [], enabled: false };
   }
 
+  const until = endOfTodayUtc(timeZone);
   const rows = await Order.findDueRemindersOnDate({
     createdBy: employeeId,
-    date: getTodayDateString(timeZone),
+    untilUtc: toMysqlUtcDateTime(until),
   });
 
   const reminders = rows.map((row) => ({
@@ -453,10 +461,11 @@ async function getDueRemindersForUser(user, { timezone } = {}) {
       .trim(),
     note: row.note || "",
     callbackDate: row.callback_date,
-    callbackDateDisplay: row.callback_date,
+    callbackAt: row.callback_date,
+    callbackDateDisplay: formatUtcInstantDisplay(row.callback_date, timeZone) || "",
   }));
 
-  await syncDueReminderNotifications(employeeId, reminders);
+  await syncDueReminderNotifications(employeeId, reminders, timeZone);
 
   return { reminders, enabled: true };
 }

@@ -12,6 +12,9 @@ const { calculateOrderRushLevel } = require("../utils/rushUtils");
 const { formatDobDisplay, toShortDate: toSqlShortDate } = require("../utils/dateUtils");
 const {
   calendarTodayInTimezone,
+  toMysqlUtcDateTime,
+  toUtcIso,
+  formatUtcInstantDisplay,
 } = require("../utils/timezoneUtils");
 const {
   sanitizeTrimOrNull,
@@ -597,10 +600,28 @@ function toShortDate(value) {
   return `${month}/${day}/${year}`;
 }
 
+function formatSentInstant(value, timeZone = config.businessTimezone) {
+  if (!value) return "";
+  return formatUtcInstantDisplay(value, timeZone) || toShortDate(value) || "";
+}
+
+function formatSentInstantCompact(value, timeZone = config.businessTimezone) {
+  if (!value) return "";
+  const full = formatUtcInstantDisplay(value, timeZone);
+  if (!full) return toCompactDate(value);
+  const datePart = String(full).split(",")[0]?.trim();
+  return datePart || full;
+}
+
 function resolveClientCalendarDate(options = {}) {
   return calendarTodayInTimezone(
     options.timezone || config.businessTimezone || "UTC"
   );
+}
+
+/** Exact send moment as MySQL UTC DATETIME. */
+function resolveSentAtUtc() {
+  return toMysqlUtcDateTime(new Date());
 }
 
 function toCompactDate(value) {
@@ -1700,17 +1721,20 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
       getOrderPaymentAmount(orderPayments, "custodian") > 0
         ? formatMoney(getOrderPaymentAmount(orderPayments, "custodian"))
         : null,
-    sentDate: row.sent_date ? toShortDate(row.sent_date) : null,
-    sentDateCompact: row.sent_date ? toCompactDate(row.sent_date) : null,
+    sentDate: row.sent_date ? formatSentInstant(row.sent_date) : null,
+    sentDateCompact: row.sent_date ? formatSentInstantCompact(row.sent_date) : null,
+    sentAt: toUtcIso(row.sent_date),
     xrayReviewDate: hasXray ? toShortDate(xrayRow.xray_invoice_date) : "",
     xrayReviewDateCompact: hasXray
       ? toCompactDate(xrayRow.xray_invoice_date)
       : "",
     xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
     xraySentDate:
-      hasXray && xrayRow?.sent_date ? toShortDate(xrayRow.sent_date) : null,
+      hasXray && xrayRow?.sent_date ? formatSentInstant(xrayRow.sent_date) : null,
     xraySentDateCompact:
-      hasXray && xrayRow?.sent_date ? toCompactDate(xrayRow.sent_date) : null,
+      hasXray && xrayRow?.sent_date
+        ? formatSentInstantCompact(xrayRow.sent_date)
+        : null,
     xrayRecipientEmail:
       hasXray && xrayRow?.recipient_emails
         ? trimOrNull(xrayRow.recipient_emails) || ""
@@ -1837,7 +1861,8 @@ function mapXrayOutstandingRow(row, orderPayments = []) {
     status,
     isWrittenOff,
     isSent,
-    sentDate: toShortDate(displayDate),
+    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invDate: toShortDate(row.xray_invoice_date),
     invoiced: formatMoney(financials.totalAmount),
@@ -1871,7 +1896,8 @@ function mapXrayResendRow(row, orderPayments = []) {
     status,
     isWrittenOff,
     isSent,
-    sentDate: toShortDate(displayDate),
+    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invoiceDate: toShortDate(row.xray_invoice_date),
     invoiced: formatMoney(financials.totalAmount),
@@ -1962,7 +1988,8 @@ function mapOutstandingRow(row, orderPayments = []) {
     status: row.status || "Unpaid",
     isWrittenOff,
     isSent,
-    sentDate: toShortDate(displayDate),
+    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invDate: toShortDate(row.invoice_date),
     invoiced: formatMoney(financials.totalAmount),
@@ -1986,7 +2013,8 @@ function mapResendRow(row, orderPayments = []) {
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
     isSent,
-    sentDate: toShortDate(displayDate),
+    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invoiceDate: toShortDate(row.invoice_date),
     invoiced: formatMoney(financials.totalAmount),
@@ -3757,8 +3785,8 @@ async function deliverInvoiceEmail(
   const emailSentDate =
     sentDate ||
     (isResend
-      ? invoice.sent_date || resolveClientCalendarDate({ timezone })
-      : resolveClientCalendarDate({ timezone }));
+      ? invoice.sent_date || resolveSentAtUtc()
+      : resolveSentAtUtc());
 
   if (order && invoiceRow) {
     const payload = buildPrintInvoicePdfData(invoiceRow, order, payments);
@@ -3874,8 +3902,8 @@ async function deliverXrayInvoiceEmail(
   const emailSentDate =
     sentDate ||
     (isResend
-      ? xrayRow.sent_date || resolveClientCalendarDate({ timezone })
-      : resolveClientCalendarDate({ timezone }));
+      ? xrayRow.sent_date || resolveSentAtUtc()
+      : resolveSentAtUtc());
 
   if (payload) {
     const { generatePrintXrayInvoicePdf } = require("../utils/printXrayInvoicePdf");
@@ -3962,7 +3990,7 @@ async function sendInvoices(invoiceIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
-  const sentDate = resolveClientCalendarDate(options);
+  const sentDate = resolveSentAtUtc();
 
   const existing = await Invoice.findByIds(ids);
   const unsentIds = existing
@@ -4087,7 +4115,7 @@ async function resendInvoices(invoiceIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
-  const sentDate = resolveClientCalendarDate(options);
+  const sentDate = resolveSentAtUtc();
 
   const resent = [];
 
@@ -4165,7 +4193,7 @@ async function emailInvoiceByOrderId(orderId, options = {}) {
     throw new ApiError(400, NO_PROVIDER_EMAIL_MESSAGE);
   }
 
-  const sentDate = resolveClientCalendarDate(options);
+  const sentDate = resolveSentAtUtc();
   const orderPayments = await Order.findPaymentsByOrderId(normalizedOrderId);
   const { recipient, delivered, devLogged } = await deliverInvoiceEmail(invoice, {
     isResend: false,
@@ -4232,7 +4260,7 @@ async function sendXrayInvoices(orderIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
-  const sentDate = resolveClientCalendarDate(options);
+  const sentDate = resolveSentAtUtc();
 
   const sent = [];
 
@@ -4325,7 +4353,7 @@ async function resendXrayInvoices(orderIds = [], options = {}) {
   const customEmails = options.emails
     ? assertValidRecipientEmails(options.emails)
     : null;
-  const sentDate = resolveClientCalendarDate(options);
+  const sentDate = resolveSentAtUtc();
 
   const resent = [];
 
@@ -4396,7 +4424,7 @@ async function emailXrayInvoiceByOrderId(orderId, options = {}) {
     throw new ApiError(400, "X-Ray invoice is already marked as sent");
   }
 
-  const sentDate = resolveClientCalendarDate(options);
+  const sentDate = resolveSentAtUtc();
 
   return {
     orderId: normalizedOrderId,

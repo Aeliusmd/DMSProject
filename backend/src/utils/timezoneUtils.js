@@ -220,6 +220,23 @@ function calendarTodayInTimezone(timeZone = DEFAULT_TIMEZONE) {
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 }
 
+/** Start of a calendar day in `timeZone`, as a UTC Date. */
+function startOfCalendarDayUtc(calendarDate, timeZone = DEFAULT_TIMEZONE) {
+  const day = normalizeCalendarDate(calendarDate) || calendarTodayInTimezone(timeZone);
+  return localInstantToUtc(`${day}T00:00:00`, timeZone);
+}
+
+/** End of a calendar day in `timeZone`, as a UTC Date. */
+function endOfCalendarDayUtc(calendarDate, timeZone = DEFAULT_TIMEZONE) {
+  const day = normalizeCalendarDate(calendarDate) || calendarTodayInTimezone(timeZone);
+  return localInstantToUtc(`${day}T23:59:59`, timeZone);
+}
+
+/** Inclusive end of "today" in `timeZone`, as UTC Date (for due-through queries). */
+function endOfTodayUtc(timeZone = DEFAULT_TIMEZONE) {
+  return endOfCalendarDayUtc(calendarTodayInTimezone(timeZone), timeZone);
+}
+
 /** Format UTC instant for API consumers that still expect a display string. */
 function formatUtcInstantDisplay(value, timeZone = DEFAULT_TIMEZONE, locale = "en-US") {
   const date = parseUtcInstant(value);
@@ -263,6 +280,9 @@ module.exports = {
   splitUtcInstant,
   loggedAtFromParts,
   calendarTodayInTimezone,
+  startOfCalendarDayUtc,
+  endOfCalendarDayUtc,
+  endOfTodayUtc,
   formatUtcInstantDisplay,
   embedUtcInstantToken,
   expandUtcInstantTokens,

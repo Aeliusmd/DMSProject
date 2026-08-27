@@ -9,6 +9,7 @@ import {
   validateNoteForm,
 } from "@/lib/orders/orderNoteUtils";
 import OrderNoteFormFields from "@/components/orders/OrderNoteFormFields";
+import { getMinFutureDateTimeLocal } from "@/lib/utils/dateUtils";
 import { applyApiFieldErrors, getApiErrorMessage, hasValidationErrors } from "@/lib/apiErrorUtils";
 
 export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
@@ -130,6 +131,7 @@ export default function OrderAddNoteModal({ isOpen, order, onClose, onSaved }) {
             callbackDate={callbackDate}
             attachment={attachment}
             errors={errors}
+            minCallbackDateTime={getMinFutureDateTimeLocal()}
             onNoteTextChange={(value) => {
               setNoteText(value);
               clearError("noteText");

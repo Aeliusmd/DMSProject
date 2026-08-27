@@ -352,6 +352,7 @@ exports.getPrintXrayInvoiceFile = asyncHandler(async (req, res) => {
 exports.getReminders = asyncHandler(async (req, res) => {
   const reminders = await orderService.getOrderReminders(req.user, {
     scope: req.query.scope,
+    timezone: req.clientTimezone,
   });
   return ApiResponse.success(res, { reminders });
 });
@@ -552,6 +553,7 @@ exports.getNotes = asyncHandler(async (req, res) => {
     pageSize: req.query.pageSize || req.query.limit || 10,
     fromDate: req.query.fromDate || null,
     toDate: req.query.toDate || null,
+    timezone: req.clientTimezone,
   });
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { notes: result });
@@ -571,7 +573,8 @@ exports.createNote = asyncHandler(async (req, res) => {
     req.params.id,
     req.body,
     req.user.id,
-    req.file
+    req.file,
+    { timezone: req.clientTimezone }
   );
 
   await logOrderActivity(req, order, {
@@ -596,7 +599,8 @@ exports.updateNote = asyncHandler(async (req, res) => {
     req.params.noteId,
     req.body,
     req.user.id,
-    req.file
+    req.file,
+    { timezone: req.clientTimezone }
   );
 
   await logOrderActivity(req, order, {

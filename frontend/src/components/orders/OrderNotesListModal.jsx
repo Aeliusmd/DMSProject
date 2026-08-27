@@ -14,6 +14,10 @@ import {
 } from "@/lib/orders/orderNoteUtils";
 import OrderNoteFormFields from "@/components/orders/OrderNoteFormFields";
 import {
+  getMinFutureDateTimeLocal,
+  utcIsoToDateTimeLocal,
+} from "@/lib/utils/dateUtils";
+import {
   applyApiFieldErrors,
   getApiErrorMessage,
   hasValidationErrors,
@@ -83,7 +87,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
 
     setExpandedNoteId(item.id);
     setNoteText(item.note);
-    setCallbackDate(item.callbackDate || "");
+    setCallbackDate(utcIsoToDateTimeLocal(item.callbackAt || item.callbackDate) || "");
     setExistingAttachmentUrl(item.attachmentUrl || "");
     setAttachment(null);
     setErrors({});
@@ -446,6 +450,7 @@ export default function OrderNotesListModal({ isOpen, order, onClose, onSaved })
                           existingAttachmentUrl={existingAttachmentUrl}
                           errors={errors}
                           readOnly={isReadOnly}
+                          minCallbackDateTime={getMinFutureDateTimeLocal()}
                           onNoteTextChange={(value) => {
                             setNoteText(value);
                             clearError("noteText");

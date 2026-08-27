@@ -12,6 +12,12 @@ import { API_BASE_URL } from "@/config/api";
 import { buildCallbackLine, formatNoteDate, getNoteAttachmentError } from "@/lib/orders/orderNoteUtils";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { validateNoHtmlMarkup } from "@/lib/validations/nameValidation";
+import {
+  getMinFutureDateTimeLocal,
+  isFutureDateTimeLocal,
+  utcIsoToDateTimeLocal,
+} from "@/lib/utils/dateUtils";
+import { formatUtcInstant } from "@/lib/utils/timezoneUtils";
 
 function toFileUrl(path) {
   if (!path) return "";
@@ -26,7 +32,11 @@ function toHistoryItems(notes = []) {
     date: formatNoteDate(note.noteDateAt || note.noteDate),
     by: note.authorName || "—",
     note: note.note || "",
-    callbackDate: note.callbackDate || "",
+    callbackDate: note.callbackAt || note.callbackDate || "",
+    callbackAt: note.callbackAt || null,
+    callbackDateDisplay:
+      note.callbackDate ||
+      (note.callbackAt ? formatUtcInstant(note.callbackAt) : ""),
     attachmentUrl: toFileUrl(note.attachmentUrl),
   }));
 }
@@ -130,7 +140,7 @@ export default function OrderNotesModal({
 
     setSelectedNoteId(initial.id);
     setNoteText(initial.note);
-    setCallbackDate(initial.callbackDate || "");
+    setCallbackDate(utcIsoToDateTimeLocal(initial.callbackAt || initial.callbackDate) || "");
     setExistingAttachmentUrl(initial.attachmentUrl || "");
     setAttachment(null);
     setErrors({});
@@ -143,14 +153,8 @@ export default function OrderNotesModal({
     if (noteTextError) newErrors.noteText = noteTextError;
 
     if (callbackDate) {
-      const selectedDate = new Date(callbackDate);
-      const today = new Date();
-
-      today.setHours(0, 0, 0, 0);
-      selectedDate.setHours(0, 0, 0, 0);
-
-      if (selectedDate < today) {
-        newErrors.callbackDate = "Callback date cannot be in the past.";
+      if (!isFutureDateTimeLocal(callbackDate)) {
+        newErrors.callbackDate = "Callback date and time must be in the future.";
       }
     }
 
@@ -182,16 +186,8 @@ export default function OrderNotesModal({
   };
 
   const validateCallback = (newErrors) => {
-    if (callbackDate) {
-      const selectedDate = new Date(callbackDate);
-      const today = new Date();
-
-      today.setHours(0, 0, 0, 0);
-      selectedDate.setHours(0, 0, 0, 0);
-
-      if (selectedDate < today) {
-        newErrors.callbackDate = "Callback date cannot be in the past.";
-      }
+    if (callbackDate && !isFutureDateTimeLocal(callbackDate)) {
+      newErrors.callbackDate = "Callback date and time must be in the future.";
     }
   };
 
@@ -311,7 +307,7 @@ export default function OrderNotesModal({
   const handleSelectHistory = (item) => {
     setSelectedNoteId(item.id);
     setNoteText(item.note);
-    setCallbackDate(item.callbackDate || "");
+    setCallbackDate(utcIsoToDateTimeLocal(item.callbackAt || item.callbackDate) || "");
     setExistingAttachmentUrl(item.attachmentUrl || "");
     setAttachment(null);
     setErrors({});
@@ -430,12 +426,13 @@ export default function OrderNotesModal({
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-[6px] block text-[11px] font-semibold text-[#475569]">
-                Callback Date
+                Callback Date & Time
               </label>
 
               <input
-                type="date"
+                type="datetime-local"
                 value={callbackDate}
+                min={getMinFutureDateTimeLocal()}
                 onChange={(e) => {
                   setCallbackDate(e.target.value);
                   clearError("callbackDate");

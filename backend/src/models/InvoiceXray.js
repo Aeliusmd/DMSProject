@@ -344,7 +344,7 @@ class InvoiceXray {
 
     const [result] = await db.execute(
       `UPDATE invoice_xray_details
-       SET sent_date = COALESCE(:sentDate, CURDATE()), updated_at = NOW()
+       SET sent_date = COALESCE(:sentDate, NOW()), updated_at = NOW()
        WHERE order_id = :orderId
          AND sent_date IS NULL`,
       { orderId, sentDate }

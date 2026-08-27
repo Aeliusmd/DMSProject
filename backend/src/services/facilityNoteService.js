@@ -6,8 +6,10 @@ const Facility = require("../models/Facility");
 const FacilityNote = require("../models/FacilityNote");
 const FacilityNoteAttachment = require("../models/FacilityNoteAttachment");
 const Employee = require("../models/Employee");
-const { calendarTodayInTimezone } = require("../utils/timezoneUtils");
-const { toInputDate } = require("../utils/dateUtils");
+const {
+  toMysqlUtcDateTime,
+  formatUtcInstantDisplay,
+} = require("../utils/timezoneUtils");
 
 const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
   "application/pdf",
@@ -23,8 +25,9 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
 const MAX_ATTACHMENT_SIZE_BYTES = 15 * 1024 * 1024;
 const MAX_ATTACHMENTS_PER_NOTE = 10;
 
-function formatDisplayDate(value) {
-  return toInputDate(value);
+function formatDisplayDate(value, timeZone = config.businessTimezone) {
+  if (!value) return "";
+  return formatUtcInstantDisplay(value, timeZone) || "";
 }
 
 function mapAttachmentRow(row, facilityId) {
@@ -137,9 +140,7 @@ async function createNote(facilityId, { note }, actorId, files = [], options = {
 
   const created = await FacilityNote.create({
     facilityId,
-    noteDate: calendarTodayInTimezone(
-      options.timezone || config.businessTimezone || "UTC"
-    ),
+    noteDate: toMysqlUtcDateTime(new Date()),
     createdBy: actorId,
     authorName: employee.name || "Unknown",
     note: trimmedNote,

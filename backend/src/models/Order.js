@@ -1195,14 +1195,22 @@ class Order {
     return rows;
   }
 
-  static async findDueRemindersOnDate({ createdBy = null, date }) {
+  static async findDueRemindersOnDate({ createdBy = null, date, untilUtc = null }) {
     const pool = getPool();
     const conditions = [
       "n.callback_date IS NOT NULL",
       "n.is_called = 0",
-      "DATE(n.callback_date) = :dueDate",
     ];
-    const params = { dueDate: date };
+    const params = {};
+
+    if (untilUtc) {
+      // Due today or overdue: callback instant is at or before end of viewer's today.
+      conditions.push("n.callback_date <= :untilUtc");
+      params.untilUtc = untilUtc;
+    } else if (date) {
+      conditions.push("DATE(n.callback_date) = :dueDate");
+      params.dueDate = date;
+    }
 
     if (createdBy) {
       conditions.push("n.created_by = :createdBy");

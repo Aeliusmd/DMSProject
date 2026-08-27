@@ -63,13 +63,42 @@ const {
   formatSsnLastFourDisplay,
 } = require("../utils/dateUtils");
 const config = require("../config");
-const { toUtcIso, calendarTodayInTimezone } = require("../utils/timezoneUtils");
+const {
+  toUtcIso,
+  localInstantToUtc,
+  toMysqlUtcDateTime,
+  formatUtcInstantDisplay,
+  calendarTodayInTimezone,
+} = require("../utils/timezoneUtils");
 const { resolveOrderPeriodStartDate } = require("../utils/orderPeriodFilter");
 
 function resolveClientCalendarDate(options = {}) {
   return calendarTodayInTimezone(
     options.timezone || config.businessTimezone || "UTC"
   );
+}
+
+/** Callback datetime from client (local wall time) → MySQL UTC DATETIME. */
+function resolveCallbackAtUtc(value, timezone) {
+  if (value === undefined || value === null || value === "") return null;
+
+  const trimmed = String(value).trim();
+
+  // Date-only legacy: treat as start of that calendar day in client TZ.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const utc = localInstantToUtc(
+      `${trimmed}T00:00:00`,
+      timezone || config.businessTimezone
+    );
+    return utc ? toMysqlUtcDateTime(utc) : null;
+  }
+
+  const utc = localInstantToUtc(trimmed, timezone || config.businessTimezone);
+  if (!utc) {
+    throw new ApiError(400, "Invalid callback date and time");
+  }
+
+  return toMysqlUtcDateTime(utc);
 }
 
 const WORKFLOW_STAGE_NAMES = [
@@ -1132,7 +1161,8 @@ function mergeOrderActivityLogs(orderLogs = [], globalLogs = []) {
   );
 }
 
-function mapNote(note) {
+function mapNote(note, timeZone = config.businessTimezone) {
+  const callbackAt = toUtcIso(note.callback_date);
   return {
     id: note.id,
     note: note.note || "",
@@ -1140,7 +1170,10 @@ function mapNote(note) {
     createdBy: note.created_by || null,
     noteDate: note.note_date || null,
     noteDateAt: toUtcIso(note.note_date),
-    callbackDate: toInputDate(note.callback_date),
+    callbackDate: callbackAt
+      ? formatUtcInstantDisplay(callbackAt, timeZone)
+      : null,
+    callbackAt,
     isCalled: Boolean(note.is_called),
     attachmentPath: note.attachment_path || "",
     attachmentUrl: note.attachment_path
@@ -1149,12 +1182,13 @@ function mapNote(note) {
   };
 }
 
-function mapReminderRow(row) {
+function mapReminderRow(row, timeZone = config.businessTimezone) {
   const applicant = buildFullName(
     row.applicant_first_name,
     row.applicant_middle_name,
     row.applicant_last_name
   );
+  const callbackAt = toUtcIso(row.callback_date);
 
   return {
     noteId: row.note_id,
@@ -1166,8 +1200,11 @@ function mapReminderRow(row) {
     createdBy: row.created_by || null,
     note: row.note || "",
     applicant: applicant || "—",
-    callbackDate: toInputDate(row.callback_date),
-    callbackDateDisplay: toShortDate(row.callback_date),
+    callbackDate: callbackAt,
+    callbackDateDisplay: callbackAt
+      ? formatUtcInstantDisplay(callbackAt, timeZone)
+      : "",
+    callbackAt,
     isCalled: Boolean(row.is_called),
     status: Boolean(row.is_called) ? "callbacked" : "not_callbacked",
     attachmentPath: row.attachment_path || "",
@@ -1872,9 +1909,11 @@ async function getOrderNotes(
     pageSize = 10,
     fromDate = null,
     toDate = null,
+    timezone = null,
   } = {}
 ) {
   const order = await Order.findById(orderId);
+  const timeZone = timezone || config.businessTimezone;
 
   if (!order) {
     throw new ApiError(404, "Order not found");
@@ -1896,7 +1935,7 @@ async function getOrderNotes(
       throw new ApiError(403, "You can only access your own notes");
     }
 
-    return [mapNote(note)];
+    return [mapNote(note, timeZone)];
   }
 
   const useKeysetPagination = String(pagination || "").toLowerCase() === "keyset";
@@ -1904,7 +1943,7 @@ async function getOrderNotes(
 
   if (!useKeysetPagination) {
     const notes = await Order.findNotesByOrderId(order.id, pendingOnly);
-    return notes.map(mapNote);
+    return notes.map((row) => mapNote(row, timeZone));
   }
 
   const keyset = await Order.findNotesByOrderIdKeyset(order.id, {
@@ -1916,7 +1955,7 @@ async function getOrderNotes(
   });
 
   return {
-    notes: keyset.rows.map(mapNote),
+    notes: keyset.rows.map((row) => mapNote(row, timeZone)),
     pagination: {
       type: "keyset",
       pageSize: keyset.pageSize,
@@ -1926,20 +1965,24 @@ async function getOrderNotes(
   };
 }
 
-async function getOrderReminders(user, { scope = "my", limit = 500 } = {}) {
+async function getOrderReminders(
+  user,
+  { scope = "my", limit = 500, timezone = null } = {}
+) {
   const isAdmin = String(user?.role || "").toLowerCase() === "admin";
   const normalizedScope = String(scope || "my").toLowerCase();
   const includeAll = isAdmin && normalizedScope === "all";
+  const timeZone = timezone || config.businessTimezone;
 
   const rows = await Order.findReminders({
     createdBy: includeAll ? null : user?.id || null,
     limit,
   });
 
-  return rows.map(mapReminderRow);
+  return rows.map((row) => mapReminderRow(row, timeZone));
 }
 
-async function addOrderNote(orderId, data, actorId, file) {
+async function addOrderNote(orderId, data, actorId, file, options = {}) {
   const order = await Order.findById(orderId);
 
   if (!order) {
@@ -1953,13 +1996,18 @@ async function addOrderNote(orderId, data, actorId, file) {
   }
 
   const authorName = await resolveAuthorName(actorId);
+  const callbackAt = resolveCallbackAtUtc(
+    data.callbackDate,
+    options.timezone || config.businessTimezone
+  );
+  const timeZone = options.timezone || config.businessTimezone;
 
   await Order.createNote({
     orderId: order.id,
     createdBy: actorId || null,
     authorName,
     note: noteText,
-    callbackDate: dateOrNull(data.callbackDate),
+    callbackDate: callbackAt,
     attachmentPath: toRelativeStoragePath(file),
     isCalled: 0,
   });
@@ -1969,28 +2017,29 @@ async function addOrderNote(orderId, data, actorId, file) {
     actorId,
     authorName,
     note: noteText,
-    callbackDate: dateOrNull(data.callbackDate),
+    callbackDate: callbackAt,
     attachmentPath: toRelativeStoragePath(file),
   });
 
   const notes = await Order.findNotesByOrderId(order.id, false);
-  return notes.map(mapNote);
+  return notes.map((row) => mapNote(row, timeZone));
 }
 
 function parseBooleanFlag(value) {
   return value === true || value === "true" || value === "1" || value === 1;
 }
 
-function buildCallbackLine(date = new Date()) {
-  return `Calledback - ${date.toLocaleString("en-US")}`;
+function buildCallbackLine(date = new Date(), timeZone = config.businessTimezone) {
+  return `Calledback - ${formatUtcInstantDisplay(date, timeZone) || date.toISOString()}`;
 }
 
 function hasCalledbackLine(text) {
   return /\bCalledback\b/i.test(text) || /\bCallback\s*-/i.test(text);
 }
 
-async function updateOrderNote(orderId, noteId, data, actorId, file) {
+async function updateOrderNote(orderId, noteId, data, actorId, file, options = {}) {
   const order = await Order.findById(orderId);
+  const timeZone = options.timezone || config.businessTimezone;
 
   if (!order) {
     throw new ApiError(404, "Order not found");
@@ -2022,13 +2071,14 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
 
   if (markCalled) {
     if (!hasCalledbackLine(noteText)) {
-      const callLine = buildCallbackLine();
+      const callLine = buildCallbackLine(new Date(), timeZone);
       noteText = noteText ? `${noteText}\n${callLine}` : callLine;
     }
   }
 
   const authorName = await resolveAuthorName(actorId);
   const attachmentPath = toRelativeStoragePath(file);
+  const callbackAt = resolveCallbackAtUtc(data.callbackDate, timeZone);
 
   const pool = getPool();
   const connection = await pool.getConnection();
@@ -2038,7 +2088,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
 
     await Order.updateNote(connection, note.id, {
       note: noteText,
-      callbackDate: dateOrNull(data.callbackDate),
+      callbackDate: callbackAt,
       attachmentPath,
       isCalled: markCalled ? 1 : Number(note.is_called) || 0,
     });
@@ -2052,8 +2102,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
           activityDate: new Date(),
           performedBy: actorId || null,
           authorName,
-          callbackDate:
-            dateOrNull(data.callbackDate) || updatedNote?.callback_date || null,
+          callbackDate: callbackAt || updatedNote?.callback_date || null,
           note: noteText,
           attachmentPath: updatedNote?.attachment_path || null,
         },
@@ -2073,7 +2122,7 @@ async function updateOrderNote(orderId, noteId, data, actorId, file) {
   const activityLogs = await Order.findActivityLogsByOrderId(order.id);
 
   return {
-    notes: notes.map(mapNote),
+    notes: notes.map((row) => mapNote(row, timeZone)),
     activityLogs: activityLogs.map(mapActivityLog),
   };
 }

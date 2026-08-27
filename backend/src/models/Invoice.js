@@ -443,7 +443,7 @@ class Invoice {
 
     const [result] = await pool.execute(
       `UPDATE invoices
-       SET sent_date = COALESCE(:sentDate, CURDATE()),
+       SET sent_date = COALESCE(:sentDate, NOW()),
            updated_at = NOW()
        WHERE id IN (${placeholders})
          AND sent_date IS NULL`,
@@ -466,7 +466,7 @@ class Invoice {
 
     const [result] = await pool.execute(
       `UPDATE invoices
-       SET sent_date = COALESCE(:sentDate, CURDATE()),
+       SET sent_date = COALESCE(:sentDate, NOW()),
            status = CASE
              WHEN status IN ('Paid', 'Partial', 'Unpaid', 'Written Off') THEN status
              ELSE 'Needs Resend'
