@@ -169,7 +169,9 @@ function toMysqlUtcDateTime(value) {
   const date = value instanceof Date ? value : parseUtcInstant(value);
   if (!date || Number.isNaN(date.getTime())) return null;
 
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  const ms = String(date.getUTCMilliseconds()).padStart(3, "0");
+
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}.${ms}`;
 }
 
 function splitUtcInstant(value = new Date()) {

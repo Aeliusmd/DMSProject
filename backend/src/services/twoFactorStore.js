@@ -1,5 +1,9 @@
 const crypto = require("crypto");
 const AuthOtpCode = require("../models/AuthOtpCode");
+const {
+  parseUtcInstant,
+  toMysqlUtcDateTime,
+} = require("../utils/timezoneUtils");
 
 function hashCode(code) {
   return crypto.createHash("sha256").update(String(code)).digest("hex");
@@ -16,11 +20,11 @@ function hashesMatch(storedHash, incomingHash) {
   return crypto.timingSafeEqual(a, b);
 }
 
+/** OTP DATETIME values are stored as UTC — never interpret as host-local. */
 function toMs(value) {
   if (value == null) return null;
-  if (value instanceof Date) return value.getTime();
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
+  const parsed = parseUtcInstant(value);
+  return parsed ? parsed.getTime() : null;
 }
 
 /**
@@ -33,8 +37,8 @@ function toMs(value) {
  * @param {string} [email] recipient email stored with the row
  */
 async function set(lookupKey, code, expiresAtMs, email = "") {
-  const startTime = new Date();
-  const endTime = new Date(expiresAtMs);
+  const startTime = toMysqlUtcDateTime(new Date());
+  const endTime = toMysqlUtcDateTime(new Date(expiresAtMs));
 
   await AuthOtpCode.upsert({
     lookupKey,

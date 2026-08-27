@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import ActivityLogModal from "@/components/ui/ActivityLogModal";
 import SuspendEmployeeModal from "@/components/employees/SuspendEmployeeModal";
@@ -20,6 +20,7 @@ export default function MatrixEmployeesTable({
   onDeleteEmployee,
   onActivateEmployee,
   onSuspendEmployee,
+  onInteractionBusyChange,
 }) {
   const [prevEmployees, setPrevEmployees] = useState(employees);
   const [tableEmployees, setTableEmployees] = useState(employees || []);
@@ -49,6 +50,18 @@ export default function MatrixEmployeesTable({
     setPrevEmployees(employees);
     setTableEmployees(employees || []);
   }
+
+  const interactionBusy =
+    actionLoading ||
+    confirmModal.open ||
+    suspendModal.open ||
+    Boolean(selectedLogEmployee) ||
+    Boolean(milestoneEmployee);
+
+  useEffect(() => {
+    onInteractionBusyChange?.(interactionBusy);
+    return () => onInteractionBusyChange?.(false);
+  }, [interactionBusy, onInteractionBusyChange]);
 
   const openTerminateModal = (employee) => {
     setActionError("");

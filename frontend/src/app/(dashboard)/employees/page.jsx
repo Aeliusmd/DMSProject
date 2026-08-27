@@ -19,6 +19,31 @@ import {
 } from "@/lib/employees/employeeApi";
 
 const EMPLOYEES_PER_PAGE = 10;
+/** Quiet refresh so auto-reactivation shows without a full page reload. */
+const EMPLOYEE_STATUS_POLL_MS = 30 * 1000;
+
+function mergeEmployeeStatus(previousList, nextList) {
+  const previousById = new Map(
+    (previousList || []).map((employee) => [String(employee.id), employee])
+  );
+
+  return (nextList || []).map((employee) => {
+    const previous = previousById.get(String(employee.id));
+    if (!previous) return employee;
+
+    return {
+      ...previous,
+      ...employee,
+      // Keep identity/display fields stable; status comes from the server.
+      suspended: employee.suspended,
+      terminated: employee.terminated,
+      reactivatedDate: employee.reactivatedDate,
+      reactivatedAt: employee.reactivatedAt,
+      lastLogin: employee.lastLogin,
+      lastLoginAt: employee.lastLoginAt,
+    };
+  });
+}
 
 export default function EmployeesPage() {
   const router = useRouter();
@@ -27,11 +52,13 @@ export default function EmployeesPage() {
   const [pageError, setPageError] = useState("");
   const [isNewEmployeeModalOpen, setIsNewEmployeeModalOpen] = useState(false);
   const [editEmployee, setEditEmployee] = useState(null);
+  const [tableBusy, setTableBusy] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
+  const writeInFlightRef = useRef(false);
   const [pagination, setPagination] = useState({
     pageSize: EMPLOYEES_PER_PAGE,
     hasMore: false,
@@ -64,9 +91,11 @@ export default function EmployeesPage() {
     });
   };
 
-  const loadEmployees = useCallback(async () => {
-    setIsLoading(true);
-    setPageError("");
+  const loadEmployees = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setIsLoading(true);
+      setPageError("");
+    }
 
     try {
       const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
@@ -78,8 +107,11 @@ export default function EmployeesPage() {
       });
       const hasMore = Boolean(result.pagination?.hasMore);
       const nextCursor = result.pagination?.nextCursor ?? null;
+      const nextEmployees = result.employees || [];
 
-      setEmployees(result.employees || []);
+      setEmployees((previous) =>
+        silent ? mergeEmployeeStatus(previous, nextEmployees) : nextEmployees
+      );
       setPagination({
         pageSize: Number(result.pagination?.pageSize) || EMPLOYEES_PER_PAGE,
         hasMore,
@@ -101,10 +133,15 @@ export default function EmployeesPage() {
         return;
       }
 
+      // Background polls must not wipe the table or flash errors.
+      if (silent) return;
+
       setPageError(error.message || "Unable to load employees");
       setEmployees([]);
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [appliedSearch, currentPage, router]);
 
@@ -123,50 +160,112 @@ export default function EmployeesPage() {
     cursorHistoryRef.current = cursorHistory;
   }, [cursorHistory]);
 
+  useEffect(() => {
+    if (isLoading) return undefined;
+
+    const poll = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (writeInFlightRef.current) return;
+      if (isNewEmployeeModalOpen || editEmployee) return;
+      if (tableBusy) return;
+
+      void loadEmployees({ silent: true });
+    };
+
+    const timerId = window.setInterval(poll, EMPLOYEE_STATUS_POLL_MS);
+
+    const onVisibility = () => {
+      if (!document.hidden) poll();
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      window.clearInterval(timerId);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [
+    editEmployee,
+    isLoading,
+    isNewEmployeeModalOpen,
+    loadEmployees,
+    tableBusy,
+  ]);
+
+  const withWriteLock = async (work) => {
+    writeInFlightRef.current = true;
+    try {
+      return await work();
+    } finally {
+      writeInFlightRef.current = false;
+    }
+  };
+
   const handleCreateEmployee = async (newEmployeeData) => {
-    await createEmployee(newEmployeeData);
-    setIsNewEmployeeModalOpen(false);
-    setCurrentPage(1);
-    setCursorHistory([null]);
-    await loadEmployees();
+    await withWriteLock(async () => {
+      await createEmployee(newEmployeeData);
+      setIsNewEmployeeModalOpen(false);
+      setCurrentPage(1);
+      setCursorHistory([null]);
+      await loadEmployees();
+    });
   };
 
   const handleUpdateEmployee = async (payload) => {
     if (!editEmployee) return;
 
-    const updated = await updateEmployee(editEmployee.id, payload);
-    setEmployees((prev) =>
-      prev.map((item) => (item.id === updated.id ? updated : item))
-    );
-    setEditEmployee(null);
+    await withWriteLock(async () => {
+      const updated = await updateEmployee(editEmployee.id, payload);
+      setEmployees((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item))
+      );
+      setEditEmployee(null);
+    });
   };
 
   const handleTerminateEmployee = async (employee) => {
-    const updatedEmployee = await terminateEmployee(employee.id);
-    setEmployees((prev) =>
-      prev.map((item) => (item.id === updatedEmployee.id ? updatedEmployee : item))
-    );
+    await withWriteLock(async () => {
+      const updatedEmployee = await terminateEmployee(employee.id);
+      setEmployees((prev) =>
+        prev.map((item) =>
+          item.id === updatedEmployee.id ? updatedEmployee : item
+        )
+      );
+    });
   };
 
   const handleActivateEmployee = async (employee) => {
-    const updatedEmployee = await activateEmployee(employee.id);
-    setEmployees((prev) =>
-      prev.map((item) => (item.id === updatedEmployee.id ? updatedEmployee : item))
-    );
-    return updatedEmployee;
+    return withWriteLock(async () => {
+      const updatedEmployee = await activateEmployee(employee.id);
+      setEmployees((prev) =>
+        prev.map((item) =>
+          item.id === updatedEmployee.id ? updatedEmployee : item
+        )
+      );
+      return updatedEmployee;
+    });
   };
 
   const handleSuspendEmployee = async (employee, reactivatedDate) => {
-    const updatedEmployee = await suspendEmployee(employee.id, reactivatedDate);
-    setEmployees((prev) =>
-      prev.map((item) => (item.id === updatedEmployee.id ? updatedEmployee : item))
-    );
-    return updatedEmployee;
+    return withWriteLock(async () => {
+      const updatedEmployee = await suspendEmployee(
+        employee.id,
+        reactivatedDate
+      );
+      setEmployees((prev) =>
+        prev.map((item) =>
+          item.id === updatedEmployee.id ? updatedEmployee : item
+        )
+      );
+      return updatedEmployee;
+    });
   };
 
   const handleDeleteEmployee = async (employee) => {
-    await deleteEmployee(employee.id);
-    await loadEmployees();
+    await withWriteLock(async () => {
+      await deleteEmployee(employee.id);
+      await loadEmployees();
+    });
   };
 
   const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
@@ -246,6 +345,7 @@ export default function EmployeesPage() {
             onDeleteEmployee={handleDeleteEmployee}
             onActivateEmployee={handleActivateEmployee}
             onSuspendEmployee={handleSuspendEmployee}
+            onInteractionBusyChange={setTableBusy}
           />
         )}
 

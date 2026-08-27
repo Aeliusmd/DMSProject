@@ -7,7 +7,7 @@ const { rethrowServiceError } = require("../utils/serviceErrorUtils");
 let pool = null;
 
 function createPool() {
-  return mysql.createPool({
+  const nextPool = mysql.createPool({
     host: config.db.host,
     port: config.db.port,
     user: config.db.user,
@@ -17,8 +17,18 @@ function createPool() {
     connectionLimit: 10,
     namedPlaceholders: true,
     dateStrings: ["DATE"],
+    // Treat JS Date <-> MySQL DATETIME as UTC wall-clock values.
     timezone: "Z",
   });
+
+  // mysql2 timezone only converts Date objects. SQL NOW()/CURDATE() still
+  // follow the MySQL session time_zone (often the host local zone). Force UTC
+  // so stored UTC datetimes compare correctly with NOW().
+  nextPool.on("connection", (connection) => {
+    connection.query("SET time_zone = '+00:00'");
+  });
+
+  return nextPool;
 }
 
 async function connectDatabase() {
@@ -30,10 +40,14 @@ async function connectDatabase() {
     pool = createPool();
 
     const connection = await pool.getConnection();
+    await connection.query("SET time_zone = '+00:00'");
     await connection.ping();
     connection.release();
 
-    logger.info("MySQL database connected", { database: config.db.database });
+    logger.info("MySQL database connected", {
+      database: config.db.database,
+      timeZone: "UTC",
+    });
 
     return pool;
   } catch (error) {
