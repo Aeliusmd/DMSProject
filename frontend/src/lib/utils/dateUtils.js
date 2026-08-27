@@ -13,6 +13,42 @@ export function toDateTimeLocalValue(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** Human display for a datetime-local value (avoids showing the raw `T` separator). */
+export function formatDateTimeLocalDisplay(value) {
+  if (!value) return "";
+
+  const trimmed = String(value).trim();
+  const match = trimmed.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/
+  );
+
+  let date;
+  if (match) {
+    const [, year, month, day, hour, minute, second = "0"] = match;
+    date = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    );
+  } else {
+    date = new Date(trimmed);
+  }
+
+  if (Number.isNaN(date.getTime())) return trimmed;
+
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 /** Convert a UTC instant (ISO / MySQL) into a datetime-local input value in the browser timezone. */
 export function utcIsoToDateTimeLocal(value) {
   if (!value) return "";

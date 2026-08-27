@@ -10,7 +10,9 @@ const activityLogService = require("../services/activityLogService");
 const notificationService = require("../services/notificationService");
 
 exports.listNotes = asyncHandler(async (req, res) => {
-  const notes = await facilityNoteService.getNotes(req.params.id);
+  const notes = await facilityNoteService.getNotes(req.params.id, {
+    timezone: req.clientTimezone,
+  });
   return ApiResponse.success(res, { notes });
 });
 

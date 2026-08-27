@@ -41,16 +41,18 @@ function mapAttachmentRow(row, facilityId) {
   };
 }
 
-function mapNoteRow(row, attachmentsByNoteId = {}, facilityId) {
+function mapNoteRow(row, attachmentsByNoteId = {}, facilityId, timezone = null) {
+  const viewerTz = timezone || config.businessTimezone;
   const attachments = attachmentsByNoteId[row.id] || [];
+  const displayDate = formatDisplayDate(row.note_date, viewerTz);
 
   return {
     id: row.id,
-    date: formatDisplayDate(row.note_date),
+    date: displayDate,
     by: row.author_name || "",
     authorName: row.author_name || "",
     note: row.note || "",
-    noteDate: formatDisplayDate(row.note_date),
+    noteDate: displayDate,
     createdBy: row.created_by,
     createdAt: row.created_at,
     attachments: attachments.map((attachment) =>
@@ -93,12 +95,13 @@ function validateAttachmentFiles(files = []) {
   });
 }
 
-async function getNotes(facilityId) {
+async function getNotes(facilityId, options = {}) {
   await ensureFacilityExists(facilityId);
 
   const notes = await FacilityNote.findByFacilityId(facilityId);
   const noteIds = notes.map((note) => note.id);
   const attachments = await FacilityNoteAttachment.findByNoteIds(noteIds);
+  const timezone = options.timezone || null;
 
   const attachmentsByNoteId = attachments.reduce((acc, attachment) => {
     if (!acc[attachment.facility_note_id]) {
@@ -109,7 +112,7 @@ async function getNotes(facilityId) {
   }, {});
 
   return notes.map((note) =>
-    mapNoteRow(note, attachmentsByNoteId, facilityId)
+    mapNoteRow(note, attachmentsByNoteId, facilityId, timezone)
   );
 }
 
@@ -168,7 +171,12 @@ async function createNote(facilityId, { note }, actorId, files = [], options = {
     [created.id]: savedAttachments,
   };
 
-  return mapNoteRow(created, attachmentsByNoteId, facilityId);
+  return mapNoteRow(
+    created,
+    attachmentsByNoteId,
+    facilityId,
+    options.timezone || null
+  );
 }
 
 async function getAttachmentFile(facilityId, noteId, attachmentId) {

@@ -1054,7 +1054,8 @@ function mapOrderListRow(
     invoice: invoiceService.mapOrderInvoiceSummary(
       invoiceRow,
       xrayRow,
-      orderPayments
+      orderPayments,
+      extras.timezone || null
     ),
     certificateNoRecords: Boolean(Number(row.certificate_no_records)),
     cnrReason: row.cnr_reason || "",
@@ -1646,6 +1647,7 @@ async function getAllOrders(query = {}) {
         portalStatus,
         portalStatusLabel,
         personalRequest: portal,
+        timezone: query.timezone || null,
       }
     );
   });

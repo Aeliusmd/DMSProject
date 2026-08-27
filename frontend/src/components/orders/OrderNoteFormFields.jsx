@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { MAX_NOTE_LENGTH, expandNoteUtcTokens } from "@/lib/orders/orderNoteUtils";
+import { formatDateTimeLocalDisplay } from "@/lib/utils/dateUtils";
 
 export default function OrderNoteFormFields({
   noteText,
@@ -73,7 +74,7 @@ export default function OrderNoteFormFields({
 
           {readOnly ? (
             <p className="h-[36px] rounded-[6px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[12px] text-[#334155]">
-              {callbackDate || "—"}
+              {formatDateTimeLocalDisplay(callbackDate) || "—"}
             </p>
           ) : (
             <input

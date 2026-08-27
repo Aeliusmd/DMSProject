@@ -145,7 +145,10 @@ async function logOrderActivity(
 
 exports.getAll = asyncHandler(async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate");
-  const result = await orderService.getAllOrders(req.query);
+  const result = await orderService.getAllOrders({
+    ...req.query,
+    timezone: req.clientTimezone,
+  });
   if (Array.isArray(result)) {
     return ApiResponse.success(res, { orders: result });
   }

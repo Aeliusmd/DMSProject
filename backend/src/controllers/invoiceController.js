@@ -72,7 +72,10 @@ async function resolveOrderBillingContext(orderId) {
 }
 
 exports.getAll = asyncHandler(async (req, res) => {
-  const data = await invoiceService.getInvoices(req.query);
+  const data = await invoiceService.getInvoices({
+    ...req.query,
+    timezone: req.clientTimezone,
+  });
   return ApiResponse.success(res, data, "Invoices retrieved");
 });
 
@@ -82,7 +85,10 @@ exports.getCompanyWise = asyncHandler(async (_req, res) => {
 });
 
 exports.getByCompany = asyncHandler(async (req, res) => {
-  const data = await invoiceService.getByCompany(req.params.companyId, req.query);
+  const data = await invoiceService.getByCompany(req.params.companyId, {
+    ...req.query,
+    timezone: req.clientTimezone,
+  });
   return ApiResponse.success(res, data, "Company invoices retrieved");
 });
 

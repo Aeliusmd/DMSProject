@@ -1,10 +1,16 @@
 const path = require("path");
 const fs = require("fs");
 const ApiError = require("../utils/ApiError");
+const config = require("../config");
 const Facility = require("../models/Facility");
 const FacilityDocument = require("../models/FacilityDocument");
+const { formatUtcInstantDisplay } = require("../utils/timezoneUtils");
 
 const DOCUMENT_TYPES = ["Standard", "Legal", "Medical", "Financial", "Other"];
+
+function resolveViewerTimezone(timezone) {
+  return timezone || config.businessTimezone || "UTC";
+}
 
 function formatDocumentRow(row) {
   return {
@@ -18,14 +24,10 @@ function formatDocumentRow(row) {
   };
 }
 
-function formatDisplayDate(value) {
+/** Viewer-local date+time for upload instant (avoids UTC toISOString off-by-one). */
+function formatDisplayDate(value, timezone = null) {
   if (!value) return "";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  return date.toISOString().slice(0, 10);
+  return formatUtcInstantDisplay(value, resolveViewerTimezone(timezone)) || "";
 }
 
 async function ensureFacilityExists(facilityId) {
@@ -38,18 +40,25 @@ async function ensureFacilityExists(facilityId) {
   return facility;
 }
 
-async function getDocuments(facilityId) {
+async function getDocuments(facilityId, options = {}) {
   await ensureFacilityExists(facilityId);
 
   const documents = await FacilityDocument.findByFacilityId(facilityId);
+  const timezone = options.timezone || null;
 
   return documents.map((row) => ({
     ...formatDocumentRow(row),
-    date: formatDisplayDate(row.uploaded_at),
+    date: formatDisplayDate(row.uploaded_at, timezone),
   }));
 }
 
-async function createDocument(facilityId, file, documentType, uploadedBy) {
+async function createDocument(
+  facilityId,
+  file,
+  documentType,
+  uploadedBy,
+  options = {}
+) {
   await ensureFacilityExists(facilityId);
 
   if (!file) {
@@ -76,7 +85,7 @@ async function createDocument(facilityId, file, documentType, uploadedBy) {
 
   return {
     ...formatDocumentRow(document),
-    date: formatDisplayDate(document.uploaded_at),
+    date: formatDisplayDate(document.uploaded_at, options.timezone || null),
   };
 }
 

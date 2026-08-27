@@ -600,14 +600,22 @@ function toShortDate(value) {
   return `${month}/${day}/${year}`;
 }
 
+function resolveViewerTimezone(timezone) {
+  return timezone || config.businessTimezone || "UTC";
+}
+
 function formatSentInstant(value, timeZone = config.businessTimezone) {
   if (!value) return "";
-  return formatUtcInstantDisplay(value, timeZone) || toShortDate(value) || "";
+  return (
+    formatUtcInstantDisplay(value, resolveViewerTimezone(timeZone)) ||
+    toShortDate(value) ||
+    ""
+  );
 }
 
 function formatSentInstantCompact(value, timeZone = config.businessTimezone) {
   if (!value) return "";
-  const full = formatUtcInstantDisplay(value, timeZone);
+  const full = formatUtcInstantDisplay(value, resolveViewerTimezone(timeZone));
   if (!full) return toCompactDate(value);
   const datePart = String(full).split(",")[0]?.trim();
   return datePart || full;
@@ -1668,7 +1676,13 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {
   return null;
 }
 
-function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
+function mapOrderInvoiceSummary(
+  row,
+  xrayRow = null,
+  orderPayments = [],
+  timezone = null
+) {
+  const viewerTz = resolveViewerTimezone(timezone);
   const paymentsSummary = mapOrderPaymentsSummary(orderPayments);
 
   if (!row) {
@@ -1683,9 +1697,11 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
             xrayReviewDate: toShortDate(xrayRow.xray_invoice_date),
             xrayReviewDateCompact: toCompactDate(xrayRow.xray_invoice_date),
             xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
-            xraySentDate: xrayRow.sent_date ? toShortDate(xrayRow.sent_date) : null,
+            xraySentDate: xrayRow.sent_date
+              ? formatSentInstant(xrayRow.sent_date, viewerTz)
+              : null,
             xraySentDateCompact: xrayRow.sent_date
-              ? toCompactDate(xrayRow.sent_date)
+              ? formatSentInstantCompact(xrayRow.sent_date, viewerTz)
               : null,
             xrayRecipientEmail: trimOrNull(xrayRow.recipient_emails) || "",
             xrayDueMeta: `${toCompactDate(xrayRow.xray_invoice_date)} - Due:${mapXrayReviewAmount(xrayRow, orderPayments)}`,
@@ -1721,8 +1737,12 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
       getOrderPaymentAmount(orderPayments, "custodian") > 0
         ? formatMoney(getOrderPaymentAmount(orderPayments, "custodian"))
         : null,
-    sentDate: row.sent_date ? formatSentInstant(row.sent_date) : null,
-    sentDateCompact: row.sent_date ? formatSentInstantCompact(row.sent_date) : null,
+    sentDate: row.sent_date
+      ? formatSentInstant(row.sent_date, viewerTz)
+      : null,
+    sentDateCompact: row.sent_date
+      ? formatSentInstantCompact(row.sent_date, viewerTz)
+      : null,
     sentAt: toUtcIso(row.sent_date),
     xrayReviewDate: hasXray ? toShortDate(xrayRow.xray_invoice_date) : "",
     xrayReviewDateCompact: hasXray
@@ -1730,10 +1750,12 @@ function mapOrderInvoiceSummary(row, xrayRow = null, orderPayments = []) {
       : "",
     xrayReviewAmount: mapXrayReviewAmount(xrayRow, orderPayments),
     xraySentDate:
-      hasXray && xrayRow?.sent_date ? formatSentInstant(xrayRow.sent_date) : null,
+      hasXray && xrayRow?.sent_date
+        ? formatSentInstant(xrayRow.sent_date, viewerTz)
+        : null,
     xraySentDateCompact:
       hasXray && xrayRow?.sent_date
-        ? formatSentInstantCompact(xrayRow.sent_date)
+        ? formatSentInstantCompact(xrayRow.sent_date, viewerTz)
         : null,
     xrayRecipientEmail:
       hasXray && xrayRow?.recipient_emails
@@ -1842,7 +1864,8 @@ function getXrayRecipientEmail(row) {
   );
 }
 
-function mapXrayOutstandingRow(row, orderPayments = []) {
+function mapXrayOutstandingRow(row, orderPayments = [], timezone = null) {
+  const viewerTz = resolveViewerTimezone(timezone);
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.xray_invoice_date;
   const orderId = normalizeOrderId(row.order_id);
@@ -1861,7 +1884,9 @@ function mapXrayOutstandingRow(row, orderPayments = []) {
     status,
     isWrittenOff,
     isSent,
-    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentDate: isSent
+      ? formatSentInstant(row.sent_date, viewerTz)
+      : toShortDate(displayDate),
     sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invDate: toShortDate(row.xray_invoice_date),
@@ -1875,7 +1900,8 @@ function mapXrayOutstandingRow(row, orderPayments = []) {
   };
 }
 
-function mapXrayResendRow(row, orderPayments = []) {
+function mapXrayResendRow(row, orderPayments = [], timezone = null) {
+  const viewerTz = resolveViewerTimezone(timezone);
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.xray_invoice_date;
   const orderId = normalizeOrderId(row.order_id);
@@ -1896,7 +1922,9 @@ function mapXrayResendRow(row, orderPayments = []) {
     status,
     isWrittenOff,
     isSent,
-    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentDate: isSent
+      ? formatSentInstant(row.sent_date, viewerTz)
+      : toShortDate(displayDate),
     sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invoiceDate: toShortDate(row.xray_invoice_date),
@@ -1937,13 +1965,17 @@ function buildXraySummary(rows = [], paymentsByOrderId = {}) {
   };
 }
 
-function groupXrayOutstandingRows(rows = [], paymentsByOrderId = {}) {
+function groupXrayOutstandingRows(
+  rows = [],
+  paymentsByOrderId = {},
+  timezone = null
+) {
   const groups = new Map();
 
   rows.forEach((row) => {
     const company = getInvoiceCompanyName(row);
     const orderPayments = paymentsByOrderId[row.order_id] || [];
-    const mappedRow = mapXrayOutstandingRow(row, orderPayments);
+    const mappedRow = mapXrayOutstandingRow(row, orderPayments, timezone);
     const financials = resolveXrayRowFinancials(row, orderPayments);
 
     if (!groups.has(company)) {
@@ -1972,7 +2004,8 @@ function groupXrayOutstandingRows(rows = [], paymentsByOrderId = {}) {
   }));
 }
 
-function mapOutstandingRow(row, orderPayments = []) {
+function mapOutstandingRow(row, orderPayments = [], timezone = null) {
+  const viewerTz = resolveViewerTimezone(timezone);
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.invoice_date;
   const invoiceDbId = normalizeInvoiceId(row.id);
@@ -1988,7 +2021,9 @@ function mapOutstandingRow(row, orderPayments = []) {
     status: row.status || "Unpaid",
     isWrittenOff,
     isSent,
-    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentDate: isSent
+      ? formatSentInstant(row.sent_date, viewerTz)
+      : toShortDate(displayDate),
     sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invDate: toShortDate(row.invoice_date),
@@ -1998,7 +2033,8 @@ function mapOutstandingRow(row, orderPayments = []) {
   };
 }
 
-function mapResendRow(row, orderPayments = []) {
+function mapResendRow(row, orderPayments = [], timezone = null) {
+  const viewerTz = resolveViewerTimezone(timezone);
   const isSent = Boolean(row.sent_date);
   const displayDate = isSent ? row.sent_date : row.invoice_date;
   const invoiceDbId = normalizeInvoiceId(row.id);
@@ -2013,7 +2049,9 @@ function mapResendRow(row, orderPayments = []) {
     caseNo: row.order_number,
     applicant: buildApplicantName(row),
     isSent,
-    sentDate: isSent ? formatSentInstant(row.sent_date) : toShortDate(displayDate),
+    sentDate: isSent
+      ? formatSentInstant(row.sent_date, viewerTz)
+      : toShortDate(displayDate),
     sentAt: isSent ? toUtcIso(row.sent_date) : null,
     days: daysSince(displayDate),
     invoiceDate: toShortDate(row.invoice_date),
@@ -2050,13 +2088,17 @@ function buildSummary(rows = [], paymentsByOrderId = {}) {
   };
 }
 
-function groupOutstandingRows(rows = [], paymentsByOrderId = {}) {
+function groupOutstandingRows(
+  rows = [],
+  paymentsByOrderId = {},
+  timezone = null
+) {
   const groups = new Map();
 
   rows.forEach((row) => {
     const company = getInvoiceCompanyName(row);
     const orderPayments = paymentsByOrderId[row.order_id] || [];
-    const mappedRow = mapOutstandingRow(row, orderPayments);
+    const mappedRow = mapOutstandingRow(row, orderPayments, timezone);
     const financials = resolveRowFinancials(row, orderPayments);
 
     if (!groups.has(company)) {
@@ -2308,7 +2350,8 @@ function groupFirstPerCompanyPageRows(perCompanyRows = [], pageSize = 10) {
 async function buildOutstandingGroupsFromFirstPerCompany(
   perCompanyRows = [],
   paymentsByOrderId = {},
-  pageSize = 10
+  pageSize = 10,
+  timezone = null
 ) {
   if (!perCompanyRows.length) return [];
 
@@ -2327,7 +2370,8 @@ async function buildOutstandingGroupsFromFirstPerCompany(
 
           return mapOutstandingRow(
             sourceRow,
-            paymentsByOrderId[sourceRow.order_id] || []
+            paymentsByOrderId[sourceRow.order_id] || [],
+            timezone
           );
         })
         .filter(Boolean);
@@ -2342,7 +2386,8 @@ async function buildOutstandingGroupsFromFirstPerCompany(
 async function buildXrayOutstandingGroupsFromFirstPerCompany(
   perCompanyRows = [],
   paymentsByOrderId = {},
-  pageSize = 10
+  pageSize = 10,
+  timezone = null
 ) {
   if (!perCompanyRows.length) return [];
 
@@ -2363,7 +2408,8 @@ async function buildXrayOutstandingGroupsFromFirstPerCompany(
 
           return mapXrayOutstandingRow(
             sourceRow,
-            paymentsByOrderId[sourceRow.order_id] || []
+            paymentsByOrderId[sourceRow.order_id] || [],
+            timezone
           );
         })
         .filter(Boolean);
@@ -2378,7 +2424,8 @@ async function buildXrayOutstandingGroupsFromFirstPerCompany(
 async function buildResendGroupsFromFirstPerCompany(
   perCompanyRows = [],
   paymentsByOrderId = {},
-  pageSize = 10
+  pageSize = 10,
+  timezone = null
 ) {
   if (!perCompanyRows.length) return [];
 
@@ -2396,7 +2443,11 @@ async function buildResendGroupsFromFirstPerCompany(
           if (!sourceRow) return null;
 
           return mapResendRowForGroup(
-            mapResendRow(sourceRow, paymentsByOrderId[sourceRow.order_id] || [])
+            mapResendRow(
+              sourceRow,
+              paymentsByOrderId[sourceRow.order_id] || [],
+              timezone
+            )
           );
         })
         .filter(Boolean);
@@ -2411,7 +2462,8 @@ async function buildResendGroupsFromFirstPerCompany(
 async function buildXrayResendGroupsFromFirstPerCompany(
   perCompanyRows = [],
   paymentsByOrderId = {},
-  pageSize = 10
+  pageSize = 10,
+  timezone = null
 ) {
   if (!perCompanyRows.length) return [];
 
@@ -2433,7 +2485,8 @@ async function buildXrayResendGroupsFromFirstPerCompany(
           return mapResendRowForGroup(
             mapXrayResendRow(
               sourceRow,
-              paymentsByOrderId[sourceRow.order_id] || []
+              paymentsByOrderId[sourceRow.order_id] || [],
+              timezone
             )
           );
         })
@@ -2455,6 +2508,7 @@ function clearKeysetWhenEmpty(keysetResult, filters, mappedRows) {
 
 async function getOutstandingInvoicesCompanyGroupPage(query = {}) {
   const filters = parseReportFilters(query);
+  const timezone = query.timezone || null;
   const [keysetResult, companyTotals] = await Promise.all([
     InvoiceReport.findStandardOutstandingKeyset(filters),
     InvoiceReport.getStandardOutstandingCompanyTotals(
@@ -2468,7 +2522,7 @@ async function getOutstandingInvoicesCompanyGroupPage(query = {}) {
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
   const mappedRows = rows.map((row) =>
-    mapOutstandingRow(row, paymentsByOrderId[row.order_id] || [])
+    mapOutstandingRow(row, paymentsByOrderId[row.order_id] || [], timezone)
   );
 
   clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
@@ -2493,6 +2547,7 @@ async function getOutstandingInvoicesCompanyGroupPage(query = {}) {
 
 async function getResendInvoicesCompanyGroupPage(query = {}) {
   const filters = parseReportFilters(query);
+  const timezone = query.timezone || null;
   const [keysetResult, companyTotals] = await Promise.all([
     InvoiceReport.findStandardResendKeyset(filters),
     InvoiceReport.getStandardResendCompanyTotals(filters, filters.companyGroupKey),
@@ -2503,7 +2558,9 @@ async function getResendInvoicesCompanyGroupPage(query = {}) {
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
   const mappedRows = rows
-    .map((row) => mapResendRow(row, paymentsByOrderId[row.order_id] || []))
+    .map((row) =>
+      mapResendRow(row, paymentsByOrderId[row.order_id] || [], timezone)
+    )
     .map(mapResendRowForGroup);
 
   clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
@@ -2528,6 +2585,7 @@ async function getResendInvoicesCompanyGroupPage(query = {}) {
 
 async function getXrayOutstandingInvoicesCompanyGroupPage(query = {}) {
   const filters = parseReportFilters(query);
+  const timezone = query.timezone || null;
   const [keysetResult, companyTotals] = await Promise.all([
     InvoiceReport.findXrayOutstandingKeyset(filters),
     InvoiceReport.getXrayOutstandingCompanyTotals(filters, filters.companyGroupKey),
@@ -2538,7 +2596,7 @@ async function getXrayOutstandingInvoicesCompanyGroupPage(query = {}) {
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
   const mappedRows = rows.map((row) =>
-    mapXrayOutstandingRow(row, paymentsByOrderId[row.order_id] || [])
+    mapXrayOutstandingRow(row, paymentsByOrderId[row.order_id] || [], timezone)
   );
 
   clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
@@ -2563,6 +2621,7 @@ async function getXrayOutstandingInvoicesCompanyGroupPage(query = {}) {
 
 async function getXrayResendInvoicesCompanyGroupPage(query = {}) {
   const filters = parseReportFilters(query);
+  const timezone = query.timezone || null;
   const [keysetResult, companyTotals] = await Promise.all([
     InvoiceReport.findXrayResendKeyset(filters),
     InvoiceReport.getXrayResendCompanyTotals(filters, filters.companyGroupKey),
@@ -2573,7 +2632,9 @@ async function getXrayResendInvoicesCompanyGroupPage(query = {}) {
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
   const mappedRows = rows
-    .map((row) => mapXrayResendRow(row, paymentsByOrderId[row.order_id] || []))
+    .map((row) =>
+      mapXrayResendRow(row, paymentsByOrderId[row.order_id] || [], timezone)
+    )
     .map(mapResendRowForGroup);
 
   clearKeysetWhenEmpty(keysetResult, filters, mappedRows);
@@ -2621,7 +2682,8 @@ async function getOutstandingInvoicesKeyset(query = {}) {
   const groups = await buildOutstandingGroupsFromFirstPerCompany(
     perCompanyRows,
     paymentsByOrderId,
-    filters.pageSize
+    filters.pageSize,
+    query.timezone || null
   );
 
   return {
@@ -2656,7 +2718,8 @@ async function getResendInvoicesKeyset(query = {}) {
   const groups = await buildResendGroupsFromFirstPerCompany(
     perCompanyRows,
     paymentsByOrderId,
-    filters.pageSize
+    filters.pageSize,
+    query.timezone || null
   );
 
   return {
@@ -2692,7 +2755,8 @@ async function getXrayOutstandingInvoicesKeyset(query = {}) {
   const groups = await buildXrayOutstandingGroupsFromFirstPerCompany(
     perCompanyRows,
     paymentsByOrderId,
-    filters.pageSize
+    filters.pageSize,
+    query.timezone || null
   );
 
   return {
@@ -2727,7 +2791,8 @@ async function getXrayResendInvoicesKeyset(query = {}) {
   const groups = await buildXrayResendGroupsFromFirstPerCompany(
     perCompanyRows,
     paymentsByOrderId,
-    filters.pageSize
+    filters.pageSize,
+    query.timezone || null
   );
 
   return {
@@ -2797,7 +2862,7 @@ async function getOutstandingInvoices(query = {}) {
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
 
   return {
-    groups: groupOutstandingRows(rows, paymentsByOrderId),
+    groups: groupOutstandingRows(rows, paymentsByOrderId, query.timezone || null),
     summary: buildSummary(rows, paymentsByOrderId),
     count: rows.length,
   };
@@ -2816,9 +2881,12 @@ async function getResendInvoices(query = {}) {
   const orderIds = [...new Set(rows.map((row) => row.order_id))];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const timezone = query.timezone || null;
 
   return {
-    invoices: rows.map((row) => mapResendRow(row, paymentsByOrderId[row.order_id] || [])),
+    invoices: rows.map((row) =>
+      mapResendRow(row, paymentsByOrderId[row.order_id] || [], timezone)
+    ),
     summary: buildSummary(rows, paymentsByOrderId),
     count: rows.length,
   };
@@ -2839,7 +2907,11 @@ async function getXrayOutstandingInvoices(query = {}) {
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
 
   return {
-    groups: groupXrayOutstandingRows(rows, paymentsByOrderId),
+    groups: groupXrayOutstandingRows(
+      rows,
+      paymentsByOrderId,
+      query.timezone || null
+    ),
     summary: buildXraySummary(rows, paymentsByOrderId),
     count: rows.length,
   };
@@ -2858,10 +2930,11 @@ async function getXrayResendInvoices(query = {}) {
   const orderIds = [...new Set(rows.map((row) => row.order_id))];
   const paymentRows = await Order.findPaymentsByOrderIds(orderIds);
   const paymentsByOrderId = groupPaymentsByOrderId(paymentRows);
+  const timezone = query.timezone || null;
 
   return {
     invoices: rows.map((row) =>
-      mapXrayResendRow(row, paymentsByOrderId[row.order_id] || [])
+      mapXrayResendRow(row, paymentsByOrderId[row.order_id] || [], timezone)
     ),
     summary: buildXraySummary(rows, paymentsByOrderId),
     count: rows.length,
@@ -4239,8 +4312,8 @@ async function emailInvoiceByOrderId(orderId, options = {}) {
     recipientEmail: recipient,
     emailed: delivered,
     devLogged: Boolean(devLogged),
-    sentDate: toShortDate(sentDate),
-    sentDateCompact: toCompactDate(sentDate),
+    sentDate: formatSentInstant(sentDate, options.timezone),
+    sentDateCompact: formatSentInstantCompact(sentDate, options.timezone),
   };
 }
 
@@ -4432,8 +4505,8 @@ async function emailXrayInvoiceByOrderId(orderId, options = {}) {
     recipientEmail: sentEntry.recipient,
     emailed: true,
     devLogged: false,
-    xraySentDate: toShortDate(sentDate),
-    xraySentDateCompact: toCompactDate(sentDate),
+    xraySentDate: formatSentInstant(sentDate, options.timezone),
+    xraySentDateCompact: formatSentInstantCompact(sentDate, options.timezone),
   };
 }
 

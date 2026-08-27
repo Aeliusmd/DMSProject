@@ -21,7 +21,9 @@ function buildFacilityLogBase(req, facility) {
 }
 
 exports.listDocuments = asyncHandler(async (req, res) => {
-  const documents = await facilityDocumentService.getDocuments(req.params.id);
+  const documents = await facilityDocumentService.getDocuments(req.params.id, {
+    timezone: req.clientTimezone,
+  });
   return ApiResponse.success(res, { documents });
 });
 
@@ -32,7 +34,8 @@ exports.uploadDocument = asyncHandler(async (req, res) => {
     req.params.id,
     req.file,
     req.body.documentType,
-    req.user.id
+    req.user.id,
+    { timezone: req.clientTimezone }
   );
 
   await activityLogService.recordFromRequest(req, {
