@@ -36,7 +36,7 @@ export function validateNewPassword(password) {
 }
 
 export function validateConfirmPassword(newPassword, confirmPassword) {
-  if (!confirmPassword.trim()) {
+  if (!String(confirmPassword || "").trim()) {
     return "Confirm password is required";
   }
 
@@ -49,31 +49,30 @@ export function validateConfirmPassword(newPassword, confirmPassword) {
 
 export function validatePasswordChangeForm(data) {
   const errors = {};
+  const currentPassword = String(data?.currentPassword || "");
+  const newPassword = String(data?.newPassword || "");
+  const confirmPassword = String(data?.confirmPassword || "");
 
-  if (!data.currentPassword.trim()) {
+  if (!currentPassword.trim()) {
     errors.currentPassword = "Current password is required";
   }
 
-  const newPasswordError = validateNewPassword(data.newPassword);
+  const newPasswordError = validateNewPassword(newPassword);
 
   if (newPasswordError) {
     errors.newPassword = newPasswordError;
   }
 
   const confirmPasswordError = validateConfirmPassword(
-    data.newPassword,
-    data.confirmPassword
+    newPassword,
+    confirmPassword
   );
 
   if (confirmPasswordError) {
     errors.confirmPassword = confirmPasswordError;
   }
 
-  if (
-    data.currentPassword &&
-    data.newPassword &&
-    data.currentPassword === data.newPassword
-  ) {
+  if (currentPassword && newPassword && currentPassword === newPassword) {
     errors.newPassword = "New password must be different from current password";
   }
 

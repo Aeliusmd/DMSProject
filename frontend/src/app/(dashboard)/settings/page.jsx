@@ -64,6 +64,11 @@ export default function SettingsPage() {
     newPassword: "",
     confirmPassword: "",
   });
+  const [passwordTouched, setPasswordTouched] = useState({
+    currentPassword: false,
+    newPassword: false,
+    confirmPassword: false,
+  });
 
   const [errors, setErrors] = useState({});
   const [profileErrors, setProfileErrors] = useState({});
@@ -147,9 +152,31 @@ export default function SettingsPage() {
 
     setPasswordData(nextPasswordData);
 
-    if (submitAttempted) {
-      setErrors(validatePasswordChangeForm(nextPasswordData));
+    if (submitAttempted || passwordTouched[name]) {
+      const nextErrors = validatePasswordChangeForm(nextPasswordData);
+      setErrors((prev) => {
+        const merged = { ...prev };
+        ["currentPassword", "newPassword", "confirmPassword"].forEach((field) => {
+          if (nextErrors[field]) {
+            merged[field] = nextErrors[field];
+          } else {
+            delete merged[field];
+          }
+        });
+        return merged;
+      });
     }
+  };
+
+  const handlePasswordBlur = (e) => {
+    const { name, value } = e.target;
+    setPasswordTouched((prev) => ({ ...prev, [name]: true }));
+    setErrors(
+      validatePasswordChangeForm({
+        ...passwordData,
+        [name]: value,
+      })
+    );
   };
 
   const validateProfileForm = () => {
@@ -183,12 +210,6 @@ export default function SettingsPage() {
     [profile]
   );
   const isProfileInvalid = hasValidationErrors(profileValidationErrors);
-
-  const passwordValidationErrors = useMemo(
-    () => validatePasswordChangeForm(passwordData),
-    [passwordData]
-  );
-  const isPasswordInvalid = hasValidationErrors(passwordValidationErrors);
 
   const handleSaveProfile = async () => {
     const validationErrors = validateProfileForm();
@@ -259,6 +280,11 @@ export default function SettingsPage() {
 
   const handleUpdatePassword = async () => {
     setSubmitAttempted(true);
+    setPasswordTouched({
+      currentPassword: true,
+      newPassword: true,
+      confirmPassword: true,
+    });
 
     const validationErrors = validatePasswordChangeForm(passwordData);
     setErrors(validationErrors);
@@ -277,6 +303,11 @@ export default function SettingsPage() {
         currentPassword: "",
         newPassword: "",
         confirmPassword: "",
+      });
+      setPasswordTouched({
+        currentPassword: false,
+        newPassword: false,
+        confirmPassword: false,
       });
       setErrors({});
       setSubmitAttempted(false);
@@ -299,13 +330,13 @@ export default function SettingsPage() {
 
       if (Object.keys(mapped).length > 0) {
         setErrors((prev) => ({ ...prev, ...mapped }));
+      } else {
+        showAlert(
+          "error",
+          "Password Update Failed",
+          getApiErrorMessage(err, "Failed to update password")
+        );
       }
-
-      showAlert(
-        "error",
-        "Password Update Failed",
-        getApiErrorMessage(err, "Failed to update password")
-      );
     } finally {
       setUpdatingPassword(false);
     }
@@ -410,9 +441,14 @@ export default function SettingsPage() {
                 type="password"
                 value={passwordData.currentPassword}
                 onChange={handlePasswordChange}
-                error={errors.currentPassword}
+                onBlur={handlePasswordBlur}
+                error={
+                  submitAttempted || passwordTouched.currentPassword
+                    ? errors.currentPassword
+                    : ""
+                }
                 inputProps={{
-                  autoComplete: "off",
+                  autoComplete: "current-password",
                   readOnly: true,
                   onFocus: (event) => {
                     event.target.removeAttribute("readonly");
@@ -428,7 +464,12 @@ export default function SettingsPage() {
                 type="password"
                 value={passwordData.newPassword}
                 onChange={handlePasswordChange}
-                error={errors.newPassword}
+                onBlur={handlePasswordBlur}
+                error={
+                  submitAttempted || passwordTouched.newPassword
+                    ? errors.newPassword
+                    : ""
+                }
                 inputProps={{ autoComplete: "new-password" }}
               />
 
@@ -438,14 +479,24 @@ export default function SettingsPage() {
                 type="password"
                 value={passwordData.confirmPassword}
                 onChange={handlePasswordChange}
-                error={errors.confirmPassword}
+                onBlur={handlePasswordBlur}
+                error={
+                  submitAttempted || passwordTouched.confirmPassword
+                    ? errors.confirmPassword
+                    : ""
+                }
                 inputProps={{ autoComplete: "new-password" }}
               />
+
+              <p className="text-[11px] leading-[16px] text-[#94A3B8]">
+                Password must be 8–128 characters and include uppercase,
+                lowercase, a number, and a special character.
+              </p>
 
               <button
                 type="button"
                 onClick={handleUpdatePassword}
-                disabled={updatingPassword || isPasswordInvalid}
+                disabled={updatingPassword}
                 className="inline-flex h-[38px] min-w-[132px] items-center justify-center rounded-[6px] bg-[#111827] px-5 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {updatingPassword ? "Updating..." : "Update Password"}
@@ -497,32 +548,56 @@ function SettingsField({
   name,
   value,
   onChange,
+  onBlur,
   type = "text",
   error = "",
   inputProps = {},
 }) {
+  const isPasswordField = type === "password";
+  const [showPassword, setShowPassword] = useState(false);
+  const resolvedType = isPasswordField && showPassword ? "text" : type;
+
   return (
     <div>
       <label className="mb-2 block text-[11px] font-semibold text-[#64748B]">
         {label}
       </label>
 
-      <input
-        type={type}
-        name={name}
-        value={value}
-        onChange={onChange}
-        {...inputProps}
-        className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:bg-white focus:ring-2 ${
-          error
-            ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-            : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
-        }`}
-      />
+      <div className="relative">
+        <input
+          type={resolvedType}
+          name={name}
+          value={value}
+          {...inputProps}
+          onChange={onChange}
+          onBlur={(event) => {
+            inputProps.onBlur?.(event);
+            onBlur?.(event);
+          }}
+          className={`h-[38px] w-full rounded-[6px] border bg-[#F8FAFC] px-3 text-[12px] text-[#111827] outline-none focus:bg-white focus:ring-2 ${
+            isPasswordField ? "pr-10" : ""
+          } ${
+            error
+              ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
+              : "border-[#E2E8F0] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+          }`}
+        />
 
-      {error && (
+        {isPasswordField ? (
+          <button
+            type="button"
+            onClick={() => setShowPassword((prev) => !prev)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[#94A3B8] hover:text-[#64748B]"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+          >
+            {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+          </button>
+        ) : null}
+      </div>
+
+      {error ? (
         <p className="mt-1 text-[11px] font-medium text-red-500">{error}</p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -543,5 +618,43 @@ function ToggleSwitch({ checked, onChange }) {
         }`}
       />
     </button>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.88 9.88A3 3 0 0 0 14.12 14.12" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <path d="M2 2l20 20" />
+    </svg>
   );
 }
