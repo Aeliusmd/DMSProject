@@ -161,6 +161,7 @@ export default function CreateInvoiceModal({
         const isCnr = Boolean(
           order.certificateNoRecords || orderData.certificateNoRecords
         );
+        const suggestedPages = resolveRegularInvoicePageCount(orderData);
         setPersistedInvoiceMeta(null);
         setQuickRecordsFee(false);
         setSavedDetailedFees(null);
@@ -168,6 +169,7 @@ export default function CreateInvoiceModal({
           ...getInitialInvoiceFormData(order, isEditMode, isCnr),
           rushOrder: Boolean(derivedRushLevel),
           notes: "",
+          ...(!isCnr ? { pages: String(suggestedPages) } : {}),
         });
       } catch (error) {
         if (!cancelled) {
@@ -1495,6 +1497,28 @@ function validateInvoiceForm(
 function toNumber(value) {
   const number = Number(value);
   return Number.isNaN(number) ? 0 : number;
+}
+
+function resolveRegularInvoicePageCount(orderData = {}) {
+  const total = Number(orderData?.records?.regularInvoicePageCount);
+  if (Number.isFinite(total) && total >= 0) {
+    return Math.floor(total);
+  }
+
+  const rows = [
+    ...(Array.isArray(orderData?.records?.orderRecords)
+      ? orderData.records.orderRecords
+      : []),
+    ...(Array.isArray(orderData?.orderRecords) ? orderData.orderRecords : []),
+  ];
+
+  return rows.reduce((sum, record) => {
+    if (!record?.hasFile) return sum;
+    if (`${record.recordType || ""}`.toLowerCase() === "xrays") return sum;
+    const pages = Number(record.pageCount);
+    if (!Number.isFinite(pages) || pages < 0) return sum;
+    return sum + Math.floor(pages);
+  }, 0);
 }
 
 function formatMoney(value) {

@@ -11,7 +11,7 @@ const fileStorage = require("../utils/fileStorage");
 const { ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
 
 const RECORD_COLUMNS = `id, order_id, record_type, storage_path, original_file_name,
-              uploaded_by, uploaded_at, created_at, updated_at`;
+              page_count, uploaded_by, uploaded_at, created_at, updated_at`;
 
 function resolveStorageAbsolutePath(storagePath) {
   const normalized = String(storagePath || "").replace(/\\/g, "/");
@@ -156,7 +156,7 @@ class OrderRecord {
 
   static async insertScan(
     connection,
-    { orderId, recordType, storagePath, originalFileName, uploadedBy }
+    { orderId, recordType, storagePath, originalFileName, pageCount, uploadedBy }
   ) {
     const existing = await OrderRecord.findByOrderAndTypeAll(
       orderId,
@@ -170,6 +170,7 @@ class OrderRecord {
         `UPDATE order_records
          SET storage_path = :storagePath,
              original_file_name = :originalFileName,
+             page_count = :pageCount,
              uploaded_by = :uploadedBy,
              uploaded_at = NOW(),
              updated_at = NOW()
@@ -178,6 +179,7 @@ class OrderRecord {
           id: placeholder.id,
           storagePath,
           originalFileName: originalFileName || null,
+          pageCount: pageCount ?? null,
           uploadedBy: uploadedBy || null,
         }
       );
@@ -186,10 +188,10 @@ class OrderRecord {
 
     await connection.execute(
       `INSERT INTO order_records (
-         order_id, record_type, storage_path, original_file_name,
+         order_id, record_type, storage_path, original_file_name, page_count,
          uploaded_by, uploaded_at, created_at, updated_at
        ) VALUES (
-         :orderId, :recordType, :storagePath, :originalFileName,
+         :orderId, :recordType, :storagePath, :originalFileName, :pageCount,
          :uploadedBy, NOW(), NOW(), NOW()
        )`,
       {
@@ -197,6 +199,7 @@ class OrderRecord {
         recordType,
         storagePath,
         originalFileName: originalFileName || null,
+        pageCount: pageCount ?? null,
         uploadedBy: uploadedBy || null,
       }
     );

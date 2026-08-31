@@ -8,6 +8,7 @@ import {
   getXrayInvoiceByOrderId,
   saveXrayInvoice,
 } from "@/lib/invoices/invoiceApi";
+import { getOrder } from "@/lib/orders/orderApi";
 import {
   applyApiFieldErrors,
   getApiErrorMessage,
@@ -62,17 +63,24 @@ export default function CreateXrayInvoiceModal({
       setLoadingXray(true);
 
       try {
-        const data = await getXrayInvoiceByOrderId(order.dbId);
+        const [data, orderData] = await Promise.all([
+          getXrayInvoiceByOrderId(order.dbId),
+          getOrder(order.dbId),
+        ]);
         if (cancelled) return;
 
         const xray = data?.xray;
         const xrayPaidEarlier =
           xray?.xrayPaidEarlier ?? xray?.prepayment ?? "0.00";
+        const hasSavedXray = Boolean(String(xray?.xrayInvoiceDate || "").trim());
+        const suggestedViews = resolveXrayInvoicePageCount(orderData);
 
         setFormData({
           xrayInvoiceDate: xray?.xrayInvoiceDate || getTodayInputDate(),
           examDate: xray?.examDate || "",
-          views: xray?.views ?? initialFormData.views,
+          views: hasSavedXray
+            ? (xray?.views ?? initialFormData.views)
+            : String(suggestedViews),
           perViewAmount: xray?.perViewAmount ?? initialFormData.perViewAmount,
           xrayPaidEarlier,
           checkNumber: xray?.checkNumber ?? "",
@@ -81,7 +89,10 @@ export default function CreateXrayInvoiceModal({
         });
       } catch {
         if (!cancelled) {
-          setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
+          setFormData({
+            ...initialFormData,
+            xrayInvoiceDate: getTodayInputDate(),
+          });
         }
       } finally {
         if (!cancelled) {
@@ -521,6 +532,28 @@ function validateXrayInvoiceForm(data) {
   if (descriptionError) errors.description = descriptionError;
 
   return errors;
+}
+
+function resolveXrayInvoicePageCount(orderData = {}) {
+  const total = Number(orderData?.records?.xrayInvoicePageCount);
+  if (Number.isFinite(total) && total >= 0) {
+    return Math.floor(total);
+  }
+
+  const rows = [
+    ...(Array.isArray(orderData?.records?.orderRecords)
+      ? orderData.records.orderRecords
+      : []),
+    ...(Array.isArray(orderData?.orderRecords) ? orderData.orderRecords : []),
+  ];
+
+  return rows.reduce((sum, record) => {
+    if (!record?.hasFile) return sum;
+    if (`${record.recordType || ""}`.toLowerCase() !== "xrays") return sum;
+    const pages = Number(record.pageCount);
+    if (!Number.isFinite(pages) || pages < 0) return sum;
+    return sum + Math.floor(pages);
+  }, 0);
 }
 
 function toNumber(value) {

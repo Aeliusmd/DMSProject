@@ -41,6 +41,11 @@ const {
 const { FIELD_LIMITS } = require("../utils/fieldLimits");
 const { sanitizeZip, sanitizeZipOrNull } = require("../utils/zipUtils");
 const { toRelativeStoragePath, ORDER_UPLOADS_ROOT } = require("../middleware/uploadMiddleware");
+const {
+  sumRegularInvoicePageCount,
+  sumXrayInvoicePageCount,
+  resolvePdfPageCountFromUpload,
+} = require("../utils/orderRecordPageCount");
 const { calculateOrderRushLevel, RUSH_READY_MIN_DAYS } = require("../utils/rushUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const {
@@ -224,11 +229,14 @@ function resolveRecordTypesFromForm(data = {}) {
 }
 
 function mapOrderRecordRow(row = {}) {
+  const pageCount = Number(row.page_count);
   return {
     id: row.id,
     recordType: row.record_type,
     storagePath: row.storage_path || null,
     originalFileName: row.original_file_name || null,
+    pageCount:
+      Number.isFinite(pageCount) && pageCount >= 0 ? Math.floor(pageCount) : null,
     storageUrl: buildSubpoenaUrl(row.storage_path),
     uploadedAt: row.uploaded_at || null,
     hasFile: Boolean(row.storage_path),
@@ -956,6 +964,8 @@ function buildRecordsBlock(row, orderRecords = []) {
     allRecordsUploaded: hasMedicalRecords,
     anyRecordsUploaded: anyOrderRecordUploaded(orderRecords),
     orderRecords: mappedRecords,
+    regularInvoicePageCount: sumRegularInvoicePageCount(orderRecords),
+    xrayInvoicePageCount: sumXrayInvoicePageCount(orderRecords),
     medicalRecordsUrl: uploadedRecords[0]?.storageUrl || null,
     cnrNote:
       hasCnr && !Number(row.cnr_memo)
@@ -3282,11 +3292,14 @@ async function scanMedicalRecords(
     await connection.beginTransaction();
 
     for (const file of fileList) {
+      const pageCount = await resolvePdfPageCountFromUpload(file);
+
       await OrderRecord.insertScan(connection, {
         orderId,
         recordType: normalizedType,
         storagePath: toRelativeStoragePath(file),
         originalFileName: file.originalname || null,
+        pageCount,
         uploadedBy: actorId || null,
       });
     }
