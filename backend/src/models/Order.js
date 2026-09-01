@@ -283,6 +283,9 @@ const ORDER_UPDATE_SET = `
   subpoena_storage_path = :subpoenaStoragePath,
   has_subpoena = :hasSubpoena,
   creation_source = :creationSource,
+  batch_chosen_facility_id = :batchChosenFacilityId,
+  extracted_facility_id = :extractedFacilityId,
+  facility_mismatch = :facilityMismatch,
   updated_at = NOW()`;
 
 const ORDER_DETAIL_SELECT = `

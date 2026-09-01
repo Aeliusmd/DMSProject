@@ -52,6 +52,7 @@ import {
   readDraftOrderSession,
   rememberDraftOrderSession,
   resolvePendingFacility,
+  resolveBatchMismatchFacilityForEdit,
   serializeFormForDraft,
   mergePersonalPortalFieldsFromOrder,
 } from "@/lib/orders/facilityOrderUtils";
@@ -863,6 +864,31 @@ function NewOrderPageContent() {
         } else if (!isReturnFromFacilityEdit) {
           // No pending facility change — drop stale draft for a clean load.
           clearDraftOrderSession(draftScope);
+        }
+
+        if (
+          order.creationSource === "auto" &&
+          order.facilityMismatch &&
+          order.extractedFacilityId &&
+          !shouldRestoreDraft &&
+          !applyFacilityId &&
+          !isReturnFromFacilityEdit
+        ) {
+          try {
+            const resolved = await resolveBatchMismatchFacilityForEdit(order);
+            if (resolved?.facilityId) {
+              nextForm = {
+                ...nextForm,
+                facility: resolved.facilityId,
+                facilityName: resolved.facilityName || nextForm.facilityName,
+              };
+              profileIncomplete = resolved.facilityProfileIncomplete;
+              facilityWasCreated = resolved.facilityCreated;
+              facilityLabel = resolved.facilityName || nextForm.facilityName;
+            }
+          } catch {
+            // Keep the facility already stored on the order.
+          }
         }
 
         if (!active) return;

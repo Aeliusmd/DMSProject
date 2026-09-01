@@ -298,6 +298,26 @@ export async function resolvePendingFacility({
   };
 }
 
+export function shouldUseBatchExtractedFacilityForEdit(order = {}) {
+  return (
+    order.creationSource === "auto" &&
+    Boolean(order.facilityMismatch) &&
+    Boolean(`${order.extractedFacilityId || ""}`.trim())
+  );
+}
+
+export async function resolveBatchMismatchFacilityForEdit(order = {}) {
+  if (!shouldUseBatchExtractedFacilityForEdit(order)) {
+    return null;
+  }
+
+  return resolvePendingFacility({
+    facilityId: order.extractedFacilityId,
+    facilityName: order.extractedFacilityName || "",
+    allowCreate: false,
+  });
+}
+
 export async function refreshFacilityProfileStatus(facilityId) {
   const id = `${facilityId || ""}`.trim();
   if (!id) {

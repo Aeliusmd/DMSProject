@@ -2989,6 +2989,30 @@ async function updateOrderFacility(id, data, actorId) {
   }
 }
 
+function resolveOrderFacilityMismatchOnUpdate(existing, resolvedFacilityId) {
+  const batchChosenFacilityId = existing.batch_chosen_facility_id || null;
+  const extractedFacilityId = existing.extracted_facility_id || null;
+
+  if (!Number(existing.facility_mismatch)) {
+    return {
+      batchChosenFacilityId,
+      extractedFacilityId,
+      facilityMismatch: 0,
+    };
+  }
+
+  const currentId = Number(resolvedFacilityId);
+  const extractedId = Number(extractedFacilityId);
+  const facilityMismatch =
+    extractedId && currentId === extractedId ? 0 : Number(existing.facility_mismatch);
+
+  return {
+    batchChosenFacilityId,
+    extractedFacilityId,
+    facilityMismatch,
+  };
+}
+
 async function updateOrder(id, data, actorId, files) {
   assertValidCnrDeliveryDate(data);
 
@@ -3069,9 +3093,14 @@ async function updateOrder(id, data, actorId, files) {
     }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
+    const mismatchState = resolveOrderFacilityMismatchOnUpdate(
+      existing,
+      resolvedFacilityId
+    );
 
     await Order.update(connection, existing.id, {
       ...payload,
+      ...mismatchState,
       subpoenaStoragePath,
       hasSubpoena: orderFlags.hasSubpoena,
       orderNumber,
