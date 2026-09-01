@@ -471,7 +471,6 @@ function NewFacilityPageContent() {
                 onChange={handleChange}
                 placeholder="email"
                 error={getError("email")}
-                required
               />
 
               <div className="h-px w-full bg-[#E2E8F0]" />
@@ -750,9 +749,7 @@ function validateFacilityForm(data, managers) {
     if (facilityNameError) errors.facilityName = facilityNameError;
   }
 
-  if (!data.email.trim()) {
-    errors.email = "Email is required";
-  } else if (!isValidEmail(data.email)) {
+  if (data.email.trim() && !isValidEmail(data.email)) {
     errors.email = "Enter a valid email address";
   }
 
@@ -800,7 +797,6 @@ function validateFacilityForm(data, managers) {
 function validateFacilityField(field, value) {
   if (!value.trim()) {
     if (field === "facilityName") return "Facility name is required";
-    if (field === "email") return "Email is required";
   }
 
   const contactNameField = CONTACT_NAME_FIELDS.find(

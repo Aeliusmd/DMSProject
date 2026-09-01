@@ -1074,7 +1074,6 @@ export default function FacilityDetailsPage() {
               name="email"
               value={formData.email}
               onChange={handleChange}
-              required
               placeholder="email"
               error={getError("email")}
             />
@@ -2146,9 +2145,7 @@ function validateFacilityForm(data) {
     if (facilityNameError) errors.facilityName = facilityNameError;
   }
 
-  if (!data.email?.trim()) {
-    errors.email = "Email is required";
-  } else if (!isValidEmail(data.email)) {
+  if (data.email?.trim() && !isValidEmail(data.email)) {
     errors.email = "Enter a valid email address";
   }
 

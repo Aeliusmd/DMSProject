@@ -64,15 +64,15 @@ function validateFacilityPayload(data) {
     addOrganizationNameFormatError(errors, "facilityName", facilityName);
   }
 
-  if (!email) {
-    errors.push({ field: "email", message: "Email is required" });
-  } else if (email.length > LIMITS.email) {
-    errors.push({
-      field: "email",
-      message: `Email must be ${LIMITS.email} characters or less`,
-    });
-  } else if (!isValidEmail(email)) {
-    errors.push({ field: "email", message: "Enter a valid email address" });
+  if (email) {
+    if (email.length > LIMITS.email) {
+      errors.push({
+        field: "email",
+        message: `Email must be ${LIMITS.email} characters or less`,
+      });
+    } else if (!isValidEmail(email)) {
+      errors.push({ field: "email", message: "Enter a valid email address" });
+    }
   }
 
   addMaxLengthError(errors, "firstName", data.firstName, LIMITS.contactName);
