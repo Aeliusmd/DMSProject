@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import SubpoenaExtractionOverlay from "@/components/orders/new-order/SubpoenaExtractionOverlay";
+import { getFacilities } from "@/lib/facilities/facilityApi";
 import { uploadBatchScan } from "@/lib/orders/orderApi";
 
 const MAX_FILE_SIZE_MB = 50;
@@ -20,10 +21,49 @@ function isPdfFile(file) {
 export default function BatchScanPage() {
   const router = useRouter();
   const fileInputRef = useRef(null);
+  const [facilities, setFacilities] = useState([]);
+  const [facilitiesLoading, setFacilitiesLoading] = useState(true);
+  const [facilitiesError, setFacilitiesError] = useState("");
+  const [selectedFacilityId, setSelectedFacilityId] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+
+  const uploadEnabled = Boolean(selectedFacilityId) && !uploading;
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadFacilities() {
+      setFacilitiesLoading(true);
+      setFacilitiesError("");
+
+      try {
+        const rows = await getFacilities({ limit: 500 });
+        if (!active) return;
+
+        const sorted = [...rows].sort((a, b) => {
+          const left = `${a.facility || a.facilityName || ""}`.trim().toLowerCase();
+          const right = `${b.facility || b.facilityName || ""}`.trim().toLowerCase();
+          return left.localeCompare(right);
+        });
+
+        setFacilities(sorted);
+      } catch (err) {
+        if (!active) return;
+        setFacilitiesError(err.message || "Failed to load facilities");
+      } finally {
+        if (active) setFacilitiesLoading(false);
+      }
+    }
+
+    loadFacilities();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!error) return undefined;
@@ -43,12 +83,12 @@ export default function BatchScanPage() {
   };
 
   const handleChooseFile = () => {
-    if (uploading) return;
+    if (!uploadEnabled) return;
     fileInputRef.current?.click();
   };
 
   const validateAndSetFile = (file) => {
-    if (!file) return;
+    if (!file || !uploadEnabled) return;
 
     if (!isPdfFile(file)) {
       rejectFile("Only PDF files are allowed.");
@@ -56,7 +96,6 @@ export default function BatchScanPage() {
     }
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
-      // Do not keep or preview oversize PDFs.
       rejectFile(`File size must be less than ${MAX_FILE_SIZE_MB}MB.`);
       return;
     }
@@ -72,7 +111,7 @@ export default function BatchScanPage() {
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    if (uploading) return;
+    if (!uploadEnabled) return;
     setIsDragging(true);
   };
 
@@ -83,24 +122,35 @@ export default function BatchScanPage() {
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
-    if (uploading) return;
+    if (!uploadEnabled) return;
 
     const file = e.dataTransfer.files?.[0];
     validateAndSetFile(file);
   };
 
+  const handleFacilityChange = (event) => {
+    const nextFacilityId = event.target.value;
+    setSelectedFacilityId(nextFacilityId);
+    setSelectedFile(null);
+    clearFileInput();
+    setError("");
+  };
+
   const handleUpload = async () => {
-    if (!selectedFile || uploading) return;
+    if (!selectedFile || !selectedFacilityId || uploading) return;
 
     setError("");
     setUploading(true);
 
     try {
-      const result = await uploadBatchScan(selectedFile);
+      const result = await uploadBatchScan(selectedFile, {
+        chosenFacilityId: selectedFacilityId,
+      });
       const created = result?.autoCreate?.created || [];
       const failed = result?.autoCreate?.failed || [];
       const createdCount = created.length;
       const failedCount = failed.length;
+      const mismatchCount = created.filter((item) => item?.facilityMismatch).length;
       const duplicateFailures = failed.filter(
         (item) =>
           item?.reason === "duplicate_order_number" ||
@@ -120,6 +170,12 @@ export default function BatchScanPage() {
       let message = `Batch scan complete. ${createdCount} order${
         createdCount === 1 ? "" : "s"
       } created.`;
+
+      if (mismatchCount > 0) {
+        message += ` ${mismatchCount} order${
+          mismatchCount === 1 ? "" : "s"
+        } flagged because the extracted facility differed from your selection.`;
+      }
 
       if (duplicateFailures.length > 0) {
         message += ` ${duplicateFailures.length} duplicate order${
@@ -157,6 +213,7 @@ export default function BatchScanPage() {
             createdCount,
             failedCount,
             duplicateCount: duplicateFailures.length,
+            mismatchCount,
             at: Date.now(),
           })
         );
@@ -175,6 +232,12 @@ export default function BatchScanPage() {
     }
   };
 
+  const selectedFacility = facilities.find(
+    (facility) => String(facility.id) === String(selectedFacilityId)
+  );
+  const selectedFacilityName =
+    selectedFacility?.facility || selectedFacility?.facilityName || "";
+
   return (
     <DashboardShell>
       <div className="flex min-h-[calc(100vh-92px)] flex-col">
@@ -191,38 +254,100 @@ export default function BatchScanPage() {
         </div>
 
         <div className="flex flex-1 items-center justify-center px-4 py-10">
-          <div className="w-full max-w-[310px] text-center">
-            <h2 className="text-[20px] font-semibold text-[#111827]">
-              BatchScan
-            </h2>
+          <div className="w-full max-w-[420px]">
+            <div className="text-center">
+              <h2 className="text-[20px] font-semibold text-[#111827]">
+                BatchScan
+              </h2>
+              <p className="mt-2 text-[11px] text-[#94A3B8]">
+                Select a facility, then upload a scanned PDF with multiple
+                subpoenas
+              </p>
+            </div>
 
-            <p className="mt-2 text-[11px] text-[#94A3B8]">
-              Upload a scanned PDF with multiple subpoenas
-            </p>
+            <div className="mt-6 rounded-[10px] border border-[#E2E8F0] bg-white p-4 shadow-sm">
+              <label
+                htmlFor="batch-scan-facility"
+                className="mb-[6px] block text-[11px] font-medium text-[#475569]"
+              >
+                Facility <span className="text-red-500">*</span>
+              </label>
+
+              <select
+                id="batch-scan-facility"
+                value={selectedFacilityId}
+                onChange={handleFacilityChange}
+                disabled={facilitiesLoading || uploading}
+                className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]"
+              >
+                <option value="">
+                  {facilitiesLoading
+                    ? "Loading facilities..."
+                    : "Select a facility"}
+                </option>
+                {facilities.map((facility) => (
+                  <option key={facility.id} value={facility.id}>
+                    {facility.facility || facility.facilityName}
+                  </option>
+                ))}
+              </select>
+
+              {facilitiesError ? (
+                <p className="mt-2 text-[11px] font-medium text-red-500">
+                  {facilitiesError}
+                </p>
+              ) : null}
+
+              {selectedFacilityName ? (
+                <p className="mt-2 text-[10px] text-[#64748B]">
+                  Orders from this batch will be assigned to{" "}
+                  <span className="font-semibold text-[#334155]">
+                    {selectedFacilityName}
+                  </span>
+                  . Subpoenas that extract a different facility will be flagged.
+                </p>
+              ) : (
+                <p className="mt-2 text-[10px] text-[#94A3B8]">
+                  Choose a facility to enable PDF upload.
+                </p>
+              )}
+            </div>
 
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              className={`mt-8 flex h-[190px] w-full flex-col items-center justify-center rounded-[8px] border border-dashed transition ${
-                isDragging
-                  ? "border-[#0097B2] bg-[#E6F7FA]"
-                  : "border-[#CBD5E1] bg-white"
+              className={`mt-5 flex h-[190px] w-full flex-col items-center justify-center rounded-[8px] border border-dashed transition ${
+                !uploadEnabled
+                  ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] opacity-70"
+                  : isDragging
+                    ? "border-[#0097B2] bg-[#E6F7FA]"
+                    : "border-[#CBD5E1] bg-white"
               }`}
             >
-              <div className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-[#F8FAFC] text-[#94A3B8]">
+              <div
+                className={`flex h-[42px] w-[42px] items-center justify-center rounded-full ${
+                  uploadEnabled ? "bg-[#F8FAFC] text-[#94A3B8]" : "bg-white text-[#CBD5E1]"
+                }`}
+              >
                 <UploadCloudIcon />
               </div>
 
-              <p className="mt-5 text-[12px] font-medium text-[#111827]">
-                Drag and drop your PDF here
+              <p
+                className={`mt-5 text-[12px] font-medium ${
+                  uploadEnabled ? "text-[#111827]" : "text-[#94A3B8]"
+                }`}
+              >
+                {uploadEnabled
+                  ? "Drag and drop your PDF here"
+                  : "Select a facility to upload"}
               </p>
 
               <button
                 type="button"
                 onClick={handleChooseFile}
-                disabled={uploading}
-                className="mt-5 inline-flex h-[30px] items-center justify-center rounded-[5px] bg-[#E6F7FA] px-4 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!uploadEnabled}
+                className="mt-5 inline-flex h-[30px] items-center justify-center rounded-[5px] bg-[#E6F7FA] px-4 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA] disabled:cursor-not-allowed disabled:bg-[#F1F5F9] disabled:text-[#94A3B8]"
               >
                 Choose File
               </button>
@@ -236,12 +361,13 @@ export default function BatchScanPage() {
                 type="file"
                 accept="application/pdf,.pdf"
                 onChange={handleFileChange}
+                disabled={!uploadEnabled}
                 className="hidden"
               />
             </div>
 
             {selectedFile && (
-              <p className="mt-4 truncate text-[11px] font-medium text-[#007F96]">
+              <p className="mt-4 truncate text-center text-[11px] font-medium text-[#007F96]">
                 Selected: {selectedFile.name}
               </p>
             )}
@@ -250,7 +376,7 @@ export default function BatchScanPage() {
               <button
                 type="button"
                 onClick={handleUpload}
-                disabled={uploading}
+                disabled={uploading || !selectedFacilityId}
                 className="mt-4 inline-flex h-[34px] w-full items-center justify-center rounded-[6px] bg-[#0097B2] px-4 text-[12px] font-semibold text-white hover:bg-[#007F96] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {uploading ? "Uploading..." : "Upload & Process"}

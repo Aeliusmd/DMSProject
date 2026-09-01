@@ -734,6 +734,8 @@ function toRenderOrder(order, companyPortalMode = false) {
       : [],
     hasIncompleteRequiredFields: Boolean(order.hasIncompleteRequiredFields),
     autoProcessingStatus: order.autoProcessingStatus || null,
+    facilityMismatch: Boolean(order.facilityMismatch),
+    extractedFacilityName: order.extractedFacilityName || "",
     companyPortalStatus: order.companyPortalStatus || null,
     companyPortalOrderId: order.companyPortalOrderId || null,
     personalPortalStatus: order.personalPortalStatus || null,
@@ -785,6 +787,8 @@ function toRenderOrder(order, companyPortalMode = false) {
     dateRequestedDisplay: order.dateRequestedDisplay || "",
     forms: order.forms?.length ? order.forms : DEFAULT_ORDER_FORMS,
     hasIncompleteRequiredFields: orderHasIncompleteRequiredFields(order),
+    facilityMismatch: Boolean(order.facilityMismatch),
+    extractedFacilityName: order.extractedFacilityName || "",
     missingRequiredFields: Array.isArray(order.missingRequiredFields)
       ? order.missingRequiredFields
       : Array.isArray(order.missing_required_fields)
@@ -1835,6 +1839,31 @@ export default function OrdersTable({
                               Processed
                             </p>
                           )}
+                        {order.creationSource === "auto" && order.facilityMismatch && (
+                          <div className="mt-1.5 w-full">
+                            <div
+                              className="flex w-full items-start gap-1 rounded-[6px] border border-amber-200 bg-amber-50 px-1.5 py-1"
+                              title={
+                                order.extractedFacilityName
+                                  ? `Extracted facility: ${order.extractedFacilityName}`
+                                  : "Extracted facility differs from batch selection"
+                              }
+                            >
+                              <span
+                                className="mt-px shrink-0 text-[11px] font-bold leading-none text-amber-600"
+                                aria-hidden="true"
+                              >
+                                !
+                              </span>
+                              <p className="min-w-0 flex-1 text-[10px] font-medium leading-snug text-amber-700">
+                                Facility differs from chosen
+                                {order.extractedFacilityName
+                                  ? `: ${order.extractedFacilityName}`
+                                  : ""}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                         {order.creationSource === "personal_portal" && (
                           <p className="mt-1 text-[10px] font-medium text-[#0097B2]">
                             Personal Portal

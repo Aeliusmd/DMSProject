@@ -16,10 +16,10 @@ async function insertParentBatch(conn, parent) {
   const [result] = await conn.execute(
     `INSERT INTO unprocessed_subpoenas (
       reference_code, file_name, storage_path, mime_type, file_size_bytes,
-      page_count, uploaded_by, order_id, is_processed
+      page_count, uploaded_by, chosen_facility_id, order_id, is_processed
     ) VALUES (
       :reference_code, :file_name, :storage_path, :mime_type, :file_size_bytes,
-      :page_count, :uploaded_by, NULL, 0
+      :page_count, :uploaded_by, :chosen_facility_id, NULL, 0
     )`,
     parent
   );
@@ -35,7 +35,7 @@ async function insertChildExtract(conn, child) {
       customer, company_name, company_address, specific_doctor, doctor_address,
       record_type, requested_record, subpoena_date, date_requested, depo_due_date,
       amount, cheque_date, cheque_number, extraction_confidence, raw_extraction,
-      is_processed
+      extracted_facility_id, facility_mismatch, is_processed
     ) VALUES (
       :parent_id, :reference_code, :subpoena_index, :file_name, :storage_path,
       :mime_type, :file_size_bytes, :page_count, :page_range_start, :page_range_end,
@@ -43,10 +43,12 @@ async function insertChildExtract(conn, child) {
       :customer, :company_name, :company_address, :specific_doctor, :doctor_address,
       :record_type, :requested_record, :subpoena_date, :date_requested, :depo_due_date,
       :amount, :cheque_date, :cheque_number, :extraction_confidence, :raw_extraction,
-      0
+      :extracted_facility_id, :facility_mismatch, 0
     )`,
     {
       ...child,
+      extracted_facility_id: child.extracted_facility_id ?? null,
+      facility_mismatch: child.facility_mismatch ? 1 : 0,
       extraction_confidence: JSON.stringify(child.extraction_confidence || {}),
       raw_extraction: JSON.stringify(child.raw_extraction || {}),
     }
@@ -101,6 +103,7 @@ async function getExtractById(extractId) {
       p.file_name AS batch_file_name,
       p.storage_path AS batch_storage_path,
       p.uploaded_by,
+      p.chosen_facility_id,
       p.uploaded_at AS batch_uploaded_at
     FROM batch_scan_extracts e
     INNER JOIN unprocessed_subpoenas p ON p.id = e.parent_id

@@ -35,10 +35,41 @@ function findFacilityByNameMatch(name, facilityList = []) {
   );
 }
 
+function resolveBatchFacilityMismatch({
+  chosenFacilityId,
+  extractedFacilityId,
+  chosenFacilityName = "",
+  extractedFacilityName = "",
+} = {}) {
+  const chosen = Number(chosenFacilityId);
+  const extracted = Number(extractedFacilityId);
+  const chosenNormalized = normalizeFacilityName(chosenFacilityName);
+  const extractedNormalized = normalizeFacilityName(extractedFacilityName);
+
+  if (
+    chosenNormalized &&
+    extractedNormalized &&
+    chosenNormalized === extractedNormalized
+  ) {
+    return false;
+  }
+
+  if (chosen && extracted) {
+    return chosen !== extracted;
+  }
+
+  if (chosenNormalized && extractedNormalized) {
+    return chosenNormalized !== extractedNormalized;
+  }
+
+  return false;
+}
+
 module.exports = {
   normalizeFacilityName,
   normalizeZip,
   normalizeState,
   getFacilityLabel,
   findFacilityByNameMatch,
+  resolveBatchFacilityMismatch,
 };

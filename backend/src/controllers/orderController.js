@@ -209,7 +209,8 @@ exports.batchScan = asyncHandler(async (req, res) => {
   );
   const result = await batchScanService.processBatchScan(
     req.file,
-    req.body.uploadedBy || req.user?.id
+    req.body.uploadedBy || req.user?.id,
+    { chosenFacilityId: req.body.chosenFacilityId }
   );
   return ApiResponse.created(res, result, "Batch scan processed successfully");
 });

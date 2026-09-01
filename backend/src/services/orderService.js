@@ -15,7 +15,7 @@ const { buildProviderPayload, findOrCreateProvider, resolveProviderFromHints } =
 const {
   isFacilityProfileIncomplete,
 } = require("./facilityService");
-const { normalizeFacilityName } = require("../utils/facilityNameUtils");
+const { normalizeFacilityName, resolveBatchFacilityMismatch } = require("../utils/facilityNameUtils");
 const Employee = require("../models/Employee");
 const ActivityLog = require("../models/ActivityLog");
 const { stripOrderIdTag, mapLogRow } = require("./activityLogService");
@@ -543,6 +543,13 @@ function buildOrderDbPayload(data) {
           : data.creationSource === "company_portal"
             ? "company_portal"
             : "manual",
+    batchChosenFacilityId: data.batchChosenFacilityId
+      ? Number(data.batchChosenFacilityId)
+      : null,
+    extractedFacilityId: data.extractedFacilityId
+      ? Number(data.extractedFacilityId)
+      : null,
+    facilityMismatch: boolToInt(data.facilityMismatch),
   };
 }
 
@@ -1086,6 +1093,14 @@ function mapOrderListRow(
     pendingFacilitySearchFee: 0,
     portalStatus: extras.portalStatus || null,
     portalStatusLabel: extras.portalStatusLabel || null,
+    batchChosenFacilityId: row.batch_chosen_facility_id
+      ? String(row.batch_chosen_facility_id)
+      : "",
+    extractedFacilityId: row.extracted_facility_id
+      ? String(row.extracted_facility_id)
+      : "",
+    extractedFacilityName: row.extracted_facility_name || "",
+    facilityMismatch: Boolean(Number(row.facility_mismatch)),
   };
 
   if (extras.personalRequest) {
@@ -1310,6 +1325,14 @@ function mapOrderDetail(
       is_auto_created: row.facility_is_auto_created,
       email: row.facility_email,
     }),
+    batchChosenFacilityId: row.batch_chosen_facility_id
+      ? String(row.batch_chosen_facility_id)
+      : "",
+    extractedFacilityId: row.extracted_facility_id
+      ? String(row.extracted_facility_id)
+      : "",
+    extractedFacilityName: row.extracted_facility_name || "",
+    facilityMismatch: Boolean(Number(row.facility_mismatch)),
     providerId: row.provider_id ? String(row.provider_id) : "",
     providerName: row.provider_name || "",
     type: resolveOrderTypeForForm(row, orderRecords),
@@ -2727,7 +2750,16 @@ async function applyDefaultFacilityDoctorIfMissing(payload) {
   return true;
 }
 
-async function createOrderFromExtract(extractId, actorId) {
+function resolveCustomerFacilityNameForMismatch(orderHints = {}, extract = {}) {
+  const { splitNameAndAddress } = require("../utils/addressParseUtils");
+  const fromCustomer = splitNameAndAddress(orderHints.customer || extract.customer || "");
+  return (
+    fromCustomer.name ||
+    `${orderHints.customer || extract.customer || ""}`.trim()
+  );
+}
+
+async function createOrderFromExtract(extractId, actorId, options = {}) {
   const extract = await batchScanRepository.getExtractById(extractId);
 
   if (!extract) {
@@ -2737,6 +2769,14 @@ async function createOrderFromExtract(extractId, actorId) {
   if (extract.is_processed) {
     throw new ApiError(409, "This subpoena extract was already processed into an order");
   }
+
+  const chosenFacilityId =
+    Number(options.chosenFacilityId) ||
+    Number(extract.chosen_facility_id) ||
+    null;
+  const extractedFacilityId = extract.extracted_facility_id
+    ? Number(extract.extracted_facility_id)
+    : null;
 
   const facilities = await Facility.findAll();
   const payload = buildOrderPayloadFromExtractRow(extract, facilities);
@@ -2758,6 +2798,20 @@ async function createOrderFromExtract(extractId, actorId) {
   const providerResolution = await resolveProviderFromHints(orderHints);
   orderHints = providerResolution.orderHints;
 
+  const chosenFacility = chosenFacilityId
+    ? await Facility.findById(chosenFacilityId)
+    : null;
+  const extractedFacilityName = resolveCustomerFacilityNameForMismatch(
+    orderHints,
+    extract
+  );
+  const facilityMismatch = resolveBatchFacilityMismatch({
+    chosenFacilityId,
+    extractedFacilityId,
+    chosenFacilityName: chosenFacility?.facility_name || "",
+    extractedFacilityName,
+  });
+
   if (providerResolution.provider?.id) {
     payload.providerId = String(providerResolution.provider.id);
   }
@@ -2767,8 +2821,21 @@ async function createOrderFromExtract(extractId, actorId) {
   }
 
   const facilityService = require("./facilityService");
-  if (orderHints.customer) {
-    const { splitNameAndAddress } = require("../utils/addressParseUtils");
+  const { splitNameAndAddress } = require("../utils/addressParseUtils");
+
+  if (chosenFacilityId) {
+    if (!chosenFacility) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
+
+    payload.facility = String(chosenFacilityId);
+    payload.facilityName = chosenFacility.facility_name || "";
+    payload.batchChosenFacilityId = String(chosenFacilityId);
+    payload.extractedFacilityId = extractedFacilityId
+      ? String(extractedFacilityId)
+      : "";
+    payload.facilityMismatch = facilityMismatch;
+  } else if (orderHints.customer) {
     const { facility } = await facilityService.resolveFacilityFromHints(
       orderHints,
       null,
@@ -2808,18 +2875,21 @@ async function createOrderFromExtract(extractId, actorId) {
   });
 }
 
-async function autoCreateOrdersFromBatch({ childIds = [], actorId }) {
+async function autoCreateOrdersFromBatch({ childIds = [], actorId, chosenFacilityId = null }) {
   const created = [];
   const failed = [];
 
   for (const extractId of childIds) {
     try {
-      const order = await createOrderFromExtract(extractId, actorId);
+      const order = await createOrderFromExtract(extractId, actorId, {
+        chosenFacilityId,
+      });
       created.push({
         extractId,
         orderId: order.id,
         orderNumber: order.orderNumber,
         hasIncompleteRequiredFields: order.hasIncompleteRequiredFields,
+        facilityMismatch: Boolean(order.facilityMismatch),
       });
     } catch (error) {
       const message = error.message || "Failed to auto-create order";

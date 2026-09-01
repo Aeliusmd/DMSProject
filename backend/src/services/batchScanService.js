@@ -13,7 +13,9 @@ const {
 const subpoenaExtractionService = require("./subpoenaExtractionService");
 const { resolveProviderFromHints } = require("./providerService");
 const { resolveFacilityFromHints, resolveDoctorFromExtractHints } = require("./facilityService");
+const Facility = require("../models/Facility");
 const { splitNameAndAddress } = require("../utils/addressParseUtils");
+const { resolveBatchFacilityMismatch } = require("../utils/facilityNameUtils");
 const batchScanRepository = require("../repositories/batchScanRepository");
 const { withTransaction } = require("../config/database");
 
@@ -167,6 +169,42 @@ async function mapExtractRowToApi(row) {
   };
 }
 
+function resolveFacilityMismatch(
+  chosenFacilityId,
+  extractedFacilityId,
+  chosenFacilityName,
+  extractedFacilityName
+) {
+  return resolveBatchFacilityMismatch({
+    chosenFacilityId,
+    extractedFacilityId,
+    chosenFacilityName,
+    extractedFacilityName,
+  });
+}
+
+async function resolveExtractedFacilityMeta(orderHints = {}) {
+  if (!orderHints.customer) {
+    return { extractedFacilityId: null, extractedFacilityName: "" };
+  }
+
+  const { facility } = await resolveFacilityFromHints(orderHints, null, {
+    allowCreate: true,
+  });
+  const fromCustomer = splitNameAndAddress(orderHints.customer);
+  const extractedFacilityName =
+    facility?.facilityName ||
+    facility?.facility_name ||
+    fromCustomer.name ||
+    orderHints.customer ||
+    "";
+
+  return {
+    extractedFacilityId: facility?.id ? Number(facility.id) : null,
+    extractedFacilityName: `${extractedFacilityName}`.trim(),
+  };
+}
+
 async function processBatchScan(file, uploadedBy, options = {}) {
   if (!file?.buffer?.length) {
     throw new ApiError(400, "No file uploaded");
@@ -180,6 +218,16 @@ async function processBatchScan(file, uploadedBy, options = {}) {
   const employee = await batchScanRepository.findEmployeeById(userId);
   if (!employee) {
     throw new ApiError(400, "Invalid uploadedBy — employee not found or terminated");
+  }
+
+  const chosenFacilityId = Number(options.chosenFacilityId);
+  if (!chosenFacilityId) {
+    throw new ApiError(400, "Facility selection is required");
+  }
+
+  const chosenFacility = await Facility.findById(chosenFacilityId);
+  if (!chosenFacility) {
+    throw new ApiError(400, "Selected facility does not exist");
   }
 
   const originalName = file.originalname || "batch.pdf";
@@ -234,6 +282,15 @@ async function processBatchScan(file, uploadedBy, options = {}) {
     const childPageCount = await getPdfPageCount(childBuffer);
     const schema = result.schema_extraction || {};
     const mapped = mapSchemaToExtractRow(schema);
+    const orderHints = enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), mapped);
+    const { extractedFacilityId, extractedFacilityName } =
+      await resolveExtractedFacilityMeta(orderHints);
+    const facilityMismatch = resolveFacilityMismatch(
+      chosenFacilityId,
+      extractedFacilityId,
+      chosenFacility.facility_name,
+      extractedFacilityName
+    );
 
     preparedChildren.push({
       reference_code: buildChildReference(documentId, subpoenaIndex),
@@ -246,7 +303,9 @@ async function processBatchScan(file, uploadedBy, options = {}) {
       page_range_start: start,
       page_range_end: end,
       ...mapped,
-      order_hints: enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), mapped),
+      order_hints: orderHints,
+      extracted_facility_id: extractedFacilityId,
+      facility_mismatch: facilityMismatch,
     });
   }
 
@@ -261,6 +320,7 @@ async function processBatchScan(file, uploadedBy, options = {}) {
       file_size_bytes: file.buffer.length,
       page_count: parentPageCount,
       uploaded_by: userId,
+      chosen_facility_id: chosenFacilityId,
     });
 
     const childIds = [];
@@ -297,6 +357,8 @@ async function processBatchScan(file, uploadedBy, options = {}) {
         cheque_number: child.cheque_number,
         extraction_confidence: child.extraction_confidence,
         raw_extraction: child.raw_extraction,
+        extracted_facility_id: child.extracted_facility_id,
+        facility_mismatch: child.facility_mismatch,
       });
       childIds.push(childId);
     }
@@ -320,6 +382,7 @@ async function processBatchScan(file, uploadedBy, options = {}) {
     autoCreate = await orderService.autoCreateOrdersFromBatch({
       childIds: dbResult.childIds,
       actorId: userId,
+      chosenFacilityId,
     });
   }
 
@@ -337,11 +400,15 @@ async function processBatchScan(file, uploadedBy, options = {}) {
       end: child.page_range_end,
     },
     orderHints: child.order_hints,
+    extractedFacilityId: child.extracted_facility_id || null,
+    facilityMismatch: Boolean(child.facility_mismatch),
     extractionConfidence: child.extraction_confidence,
   }));
 
   return {
     documentId,
+    chosenFacilityId,
+    chosenFacilityName: chosenFacility.facility_name,
     parent: {
       id: dbResult.parentId,
       referenceCode: parentReference,

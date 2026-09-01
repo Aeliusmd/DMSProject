@@ -338,9 +338,12 @@ export async function getOrderActivityLogsPaginated(
   };
 }
 
-export async function uploadBatchScan(file) {
+export async function uploadBatchScan(file, { chosenFacilityId } = {}) {
   const formData = new FormData();
   formData.append("file", file);
+  if (chosenFacilityId) {
+    formData.append("chosenFacilityId", String(chosenFacilityId));
+  }
 
   const data = await request("/orders/batch-scan", {
     method: "POST",

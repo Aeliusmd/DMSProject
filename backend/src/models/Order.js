@@ -207,7 +207,8 @@ const ORDER_COLUMNS = `
   ready_date, invoice_date, xray_invoice_date,
   specific_record, specific_doctor, specific_doctor_is_default, full_address,
   certificate_no_records, cnr_reason, cnr_delivery, cnr_date_sent, cnr_memo,
-  subpoena_storage_path, has_note, has_subpoena, creation_source, created_by`;
+  subpoena_storage_path, has_note, has_subpoena, creation_source, created_by,
+  batch_chosen_facility_id, extracted_facility_id, facility_mismatch`;
 
 const ORDER_VALUES = `
   :orderNumber, :recNumber, :facilityId, :providerId, :status, :court,
@@ -222,7 +223,8 @@ const ORDER_VALUES = `
   :readyDate, :invoiceDate, :xrayInvoiceDate,
   :specificRecord, :specificDoctor, :specificDoctorIsDefault, :fullAddress,
   :certificateNoRecords, :cnrReason, :cnrDelivery, :cnrDateSent, :cnrMemo,
-  :subpoenaStoragePath, :hasNote, :hasSubpoena, :creationSource, :createdBy`;
+  :subpoenaStoragePath, :hasNote, :hasSubpoena, :creationSource, :createdBy,
+  :batchChosenFacilityId, :extractedFacilityId, :facilityMismatch`;
 
 const ORDER_UPDATE_SET = `
   order_number = :orderNumber,
@@ -288,10 +290,12 @@ const ORDER_DETAIL_SELECT = `
          f.address AS facility_address, f.city AS facility_city,
          f.state AS facility_state, f.zip_code AS facility_zip,
          f.email AS facility_email, f.is_auto_created AS facility_is_auto_created,
+         ef.facility_name AS extracted_facility_name,
          p.company_name AS provider_name,
          p.email AS provider_email
   FROM orders o
   LEFT JOIN facilities f ON f.id = o.facility_id
+  LEFT JOIN facilities ef ON ef.id = o.extracted_facility_id
   LEFT JOIN providers p ON p.id = o.provider_id`;
 
 function appendRushLevelFilter(conditions, params, rushLevel) {

@@ -233,6 +233,13 @@ function validateBatchScan(body = {}, file = null, userId = null) {
     });
   }
 
+  if (!isValidPositiveIntId(body.chosenFacilityId)) {
+    errors.push({
+      field: "chosenFacilityId",
+      message: "Facility selection is required",
+    });
+  }
+
   return { valid: errors.length === 0, errors };
 }
 
