@@ -314,12 +314,12 @@ function validateOrderPayload(body = {}, options = {}) {
   }
 
   const providerEmail = trimToString(body.email);
-  if (isBlank(body.email)) {
-    errors.push({ field: "email", message: "Provider email is required" });
-  } else if (!isValidEmail(providerEmail)) {
-    errors.push({ field: "email", message: "Enter a valid email address" });
-  } else {
-    addMaxLengthError(errors, "email", providerEmail, FIELD_LIMITS.VARCHAR_255);
+  if (!isBlank(body.email)) {
+    if (!isValidEmail(providerEmail)) {
+      errors.push({ field: "email", message: "Enter a valid email address" });
+    } else {
+      addMaxLengthError(errors, "email", providerEmail, FIELD_LIMITS.VARCHAR_255);
+    }
   }
 
   if (isBlank(body.specificDoctor)) {

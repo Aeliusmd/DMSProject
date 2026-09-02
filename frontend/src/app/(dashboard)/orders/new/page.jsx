@@ -3408,7 +3408,6 @@ function ServeInfoForm({
         onChange={onChange}
         onBlur={onBlur}
         placeholder="company@email.com"
-        required={!isPersonalPortal}
         error={getError("email")}
       />
 

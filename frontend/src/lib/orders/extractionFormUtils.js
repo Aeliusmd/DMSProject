@@ -611,9 +611,13 @@ export function mapOrderHintsToForm(hints, { facilityList = [], providerList = [
       updates.state = matched.state || updates.state || "";
       updates.phone = matched.phone || updates.phone || "";
       updates.fax = matched.fax || updates.fax || "";
-      updates.email = matched.email || updates.email || "";
-    } else if (companyAddressSource) {
-      applyParsedServeAddress(updates, companyAddressSource);
+      updates.email =
+        matched.email || hints.providerEmail || updates.email || "";
+    } else {
+      updates.email = hints.providerEmail || updates.email || "";
+      if (companyAddressSource) {
+        applyParsedServeAddress(updates, companyAddressSource);
+      }
     }
 
     meta.providerName = updates.serveCompanyName;

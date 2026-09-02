@@ -157,6 +157,7 @@ async function resolveProviderFromHints(orderHints = {}, connection = null) {
   const enrichedHints = {
     ...orderHints,
     providerId: String(provider.id),
+    providerEmail: provider.email || "",
     companyName: provider.companyName,
     companyAddress:
       orderHints.companyAddress ||

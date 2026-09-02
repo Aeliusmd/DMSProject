@@ -249,10 +249,10 @@ export function validateNewOrderForm(data, fileErrors = {}) {
     if (companyError) errors.serveCompanyName = companyError;
   }
 
-  if (!data.email?.trim()) {
-    errors.email = "Provider email is required";
-  } else if (!isValidEmail(data.email)) {
-    errors.email = "Enter a valid email address";
+  if (data.email?.trim()) {
+    if (!isValidEmail(data.email)) {
+      errors.email = "Enter a valid email address";
+    }
   }
 
   if (!data.specificDoctor?.trim()) {
