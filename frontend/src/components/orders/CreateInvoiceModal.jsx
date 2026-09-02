@@ -105,7 +105,13 @@ export default function CreateInvoiceModal({
   }
 
   useEffect(() => {
-    if (!isOpen || !order?.dbId) return;
+    if (!isOpen) return;
+
+    if (!order?.dbId) {
+      setLoadError("Order not found");
+      setIsContentReady(true);
+      return;
+    }
 
     let cancelled = false;
 
@@ -117,6 +123,11 @@ export default function CreateInvoiceModal({
         const orderData = await getOrder(order.dbId);
 
         if (cancelled) return;
+
+        if (!orderData) {
+          setLoadError("Order not found");
+          return;
+        }
 
         const derivedRushLevel = calculateOrderRushLevel(
           orderData.subpoenaDate || orderData.createdAt
@@ -630,17 +641,18 @@ export default function CreateInvoiceModal({
         setInvoiceReloadKey((prev) => prev + 1);
       }
     } catch (error) {
-      const { fieldErrors, message } = applyApiFieldErrors(error);
+      const { fieldErrors, errorMessage } = resolveInvoiceSubmitError(error);
 
       if (Object.keys(fieldErrors).length > 0) {
         setErrors((prev) => ({ ...prev, ...fieldErrors }));
       }
 
-      const fallback = getApiErrorMessage(error, "Failed to save invoice");
-      setSubmitError(
-        message ||
-          (shouldShowSubmitError(fallback, fieldErrors) ? fallback : "")
-      );
+      if (isOrderMissingError(errorMessage)) {
+        setLoadError(errorMessage);
+        setSubmitError("");
+      } else {
+        setSubmitError(errorMessage);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -1061,9 +1073,9 @@ export default function CreateInvoiceModal({
             </div>
 
             <div className="mt-auto pt-6">
-              {submitError && (
-                <p className="mb-3 text-[11px] text-red-500">{submitError}</p>
-              )}
+              {submitError ? (
+                <InvoiceModalBannerError message={submitError} />
+              ) : null}
 
               {successMessage ? (
                 <p className="mb-3 rounded-[6px] border border-[#86EFAC] bg-[#ECFDF5] px-3 py-2 text-[11px] font-medium text-[#059669]">
@@ -1117,14 +1129,37 @@ function InvoiceModalLoadingBody({ message = "Loading invoice..." }) {
 
 function InvoiceModalErrorBody({ message = "Something went wrong" }) {
   return (
-    <div className="flex min-h-[360px] flex-1 flex-col items-center justify-center px-4 py-12">
-      <div className="flex w-full max-w-md items-center justify-center rounded-[10px] border border-[#FEE2E2] bg-[#FEF2F2] px-6 py-10">
-        <p className="text-center text-[14px] font-semibold leading-snug text-red-500">
+    <div className="flex min-h-[360px] flex-1 items-center justify-center px-4 py-12">
+      <div className="w-full max-w-md rounded-[10px] border border-[#FEE2E2] bg-[#FEF2F2] px-6 py-10">
+        <p className="w-full text-center text-[15px] font-semibold leading-snug text-red-500">
           {message}
         </p>
       </div>
     </div>
   );
+}
+
+function InvoiceModalBannerError({ message }) {
+  return (
+    <div className="mb-3 w-full rounded-[6px] border border-[#FEE2E2] bg-[#FEF2F2] px-3 py-3">
+      <p className="w-full text-center text-[14px] font-semibold leading-snug text-red-500">
+        {message}
+      </p>
+    </div>
+  );
+}
+
+function isOrderMissingError(message = "") {
+  return /order not found/i.test(`${message || ""}`.trim());
+}
+
+function resolveInvoiceSubmitError(error) {
+  const { fieldErrors, message } = applyApiFieldErrors(error);
+  const fallback = getApiErrorMessage(error, "Failed to save invoice");
+  const errorMessage =
+    message || (shouldShowSubmitError(fallback, fieldErrors) ? fallback : "");
+
+  return { fieldErrors, errorMessage };
 }
 
 function zeroInvoiceFeeFields() {
