@@ -369,6 +369,9 @@ function wantsExcludePortalOrders(query = {}) {
 }
 
 function resolveManualListFilters(query = {}) {
+  const excludeDeletedRaw = String(query.excludeDeletedOrders ?? "1")
+    .trim()
+    .toLowerCase();
   const filters = {
     orderId: null,
     orderSearch: null,
@@ -376,6 +379,11 @@ function resolveManualListFilters(query = {}) {
     dateFrom: parseOptionalIsoDate(query.dateFrom, "dateFrom"),
     dateTo: parseOptionalIsoDate(query.dateTo, "dateTo"),
     excludePortalOrders: wantsExcludePortalOrders(query),
+    excludeDeletedOrders: !(
+      excludeDeletedRaw === "0" ||
+      excludeDeletedRaw === "false" ||
+      excludeDeletedRaw === "no"
+    ),
   };
 
   if (query.orderId && Number.isFinite(Number(query.orderId)) && Number(query.orderId) > 0) {
@@ -451,6 +459,10 @@ function appendManualFilterConditions(conditions, params, alias, filters, invoic
     conditions.push(
       "(o.creation_source IS NULL OR o.creation_source NOT IN ('company_portal', 'personal_portal'))"
     );
+  }
+
+  if (filters.excludeDeletedOrders !== false) {
+    conditions.push("o.status <> 'Deleted'");
   }
 }
 
@@ -861,7 +873,7 @@ async function getOrderPaymentDetail(orderRef) {
   const [invoice, xray, manualRows, onlineRows] = await Promise.all([
     Invoice.findByOrderId(order.id),
     InvoiceXray.findByOrderId(order.id),
-    getManualPayments({ orderId: order.id }),
+    getManualPayments({ orderId: order.id, excludeDeletedOrders: false }),
     stripePaymentService.getOnlinePaymentsForOrder(order.id),
   ]);
 

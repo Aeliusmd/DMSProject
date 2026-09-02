@@ -573,6 +573,17 @@ async function getOnlinePayments(query = {}) {
     );
   }
 
+  const excludeDeletedRaw = String(query.excludeDeletedOrders ?? "1")
+    .trim()
+    .toLowerCase();
+  if (
+    excludeDeletedRaw !== "0" &&
+    excludeDeletedRaw !== "false" &&
+    excludeDeletedRaw !== "no"
+  ) {
+    conditions.push("o.status <> 'Deleted'");
+  }
+
   const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
   const [rows] = await pool.execute(
@@ -643,7 +654,7 @@ async function getOnlinePayments(query = {}) {
 }
 
 async function getOnlinePaymentsForOrder(orderId) {
-  return getOnlinePayments({ orderId, limit: 500 });
+  return getOnlinePayments({ orderId, limit: 500, excludeDeletedOrders: false });
 }
 
 async function extractStripePaymentDetails(session) {
