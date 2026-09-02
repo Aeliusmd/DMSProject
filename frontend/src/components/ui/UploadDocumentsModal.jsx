@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useIsClient from "@/hooks/useIsClient";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
@@ -24,6 +24,7 @@ export default function UploadDocumentsModal({
   uploadError = "",
 }) {
   const mounted = useIsClient();
+  const fileInputRef = useRef(null);
   const [documentType, setDocumentType] = useState("Standard");
   const [files, setFiles] = useState([]);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -39,6 +40,9 @@ export default function UploadDocumentsModal({
       setFiles([]);
       setFieldErrors({});
       setLocalError("");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   }
 
@@ -150,14 +154,36 @@ export default function UploadDocumentsModal({
             </label>
 
             <input
+              ref={fileInputRef}
               type="file"
               multiple
               onChange={handleFileChange}
               disabled={uploading}
-              className={`block w-full text-[11px] text-[#64748B] file:mr-3 file:h-[30px] file:rounded-[5px] file:border file:border-[#E2E8F0] file:bg-[#F8FAFC] file:px-3 file:text-[11px] file:font-medium file:text-[#334155] hover:file:bg-[#F1F5F9] disabled:opacity-60 ${
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden="true"
+            />
+
+            <div
+              className={`flex items-center gap-2 ${
                 fileError ? "rounded-[6px] border border-red-500 px-2 py-1" : ""
               }`}
-            />
+            >
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="inline-flex h-[30px] shrink-0 items-center justify-center rounded-[5px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[11px] font-medium text-[#334155] hover:bg-[#F1F5F9] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Choose File
+              </button>
+
+              <span className="min-w-0 flex-1 truncate text-[11px] text-[#64748B]">
+                {files.length > 0
+                  ? files.map((file) => file.name).join(", ")
+                  : "No file chosen"}
+              </span>
+            </div>
 
             <p className="mt-1 text-[10px] text-[#94A3B8]">
               Max {MAX_FILE_SIZE_MB}MB per file
@@ -166,12 +192,6 @@ export default function UploadDocumentsModal({
             {fileError ? (
               <p className="mt-1 text-[11px] font-semibold text-red-600">{fileError}</p>
             ) : null}
-
-            {files.length > 0 && (
-              <p className="mt-2 text-[10px] text-[#64748B]">
-                {files.length} file{files.length > 1 ? "s" : ""} selected
-              </p>
-            )}
           </div>
 
           {displayError && (
