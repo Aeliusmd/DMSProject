@@ -72,6 +72,12 @@ export default function SettingsPage() {
 
   const [errors, setErrors] = useState({});
   const [profileErrors, setProfileErrors] = useState({});
+  const [profileTouched, setProfileTouched] = useState({
+    firstName: false,
+    lastName: false,
+    email: false,
+  });
+  const [profileSubmitAttempted, setProfileSubmitAttempted] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
@@ -118,6 +124,25 @@ export default function SettingsPage() {
     });
   };
 
+  const syncProfileFieldError = (name, value, showRequired = false) => {
+    const fieldError = validateProfileField(value, {
+      showRequired,
+      field: name,
+    });
+
+    setProfileErrors((prev) => {
+      const next = { ...prev };
+
+      if (fieldError) {
+        next[name] = fieldError;
+      } else {
+        delete next[name];
+      }
+
+      return next;
+    });
+  };
+
   const handleProfileChange = (e) => {
     const { name, value } = e.target;
 
@@ -126,13 +151,28 @@ export default function SettingsPage() {
       [name]: value,
     }));
 
-    if (profileErrors[name]) {
+    const showRequired = profileTouched[name] || profileSubmitAttempted;
+    const shouldValidate =
+      name === "firstName" ||
+      name === "lastName" ||
+      showRequired;
+
+    if (shouldValidate) {
+      syncProfileFieldError(name, value, showRequired);
+    } else if (profileErrors[name]) {
       setProfileErrors((prev) => {
         const next = { ...prev };
         delete next[name];
         return next;
       });
     }
+  };
+
+  const handleProfileBlur = (e) => {
+    const { name, value } = e.target;
+
+    setProfileTouched((prev) => ({ ...prev, [name]: true }));
+    syncProfileFieldError(name, value, true);
   };
 
   const handleNotificationToggle = (key) => {
@@ -182,25 +222,16 @@ export default function SettingsPage() {
   const validateProfileForm = () => {
     const nextErrors = {};
 
-    if (!profile.firstName.trim()) {
-      nextErrors.firstName = "First name is required";
-    } else {
-      const firstNameError = validatePersonName(profile.firstName, {
-        fieldLabel: "First name",
+    ["firstName", "lastName", "email"].forEach((field) => {
+      const fieldError = validateProfileField(profile[field], {
+        showRequired: true,
+        field,
       });
-      if (firstNameError) nextErrors.firstName = firstNameError;
-    }
 
-    const lastNameError = validatePersonName(profile.lastName, {
-      fieldLabel: "Last name",
+      if (fieldError) {
+        nextErrors[field] = fieldError;
+      }
     });
-    if (lastNameError) nextErrors.lastName = lastNameError;
-
-    if (!profile.email.trim()) {
-      nextErrors.email = "Email is required";
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(profile.email.trim())) {
-      nextErrors.email = "Enter a valid email address";
-    }
 
     return nextErrors;
   };
@@ -212,6 +243,13 @@ export default function SettingsPage() {
   const isProfileInvalid = hasValidationErrors(profileValidationErrors);
 
   const handleSaveProfile = async () => {
+    setProfileSubmitAttempted(true);
+    setProfileTouched({
+      firstName: true,
+      lastName: true,
+      email: true,
+    });
+
     const validationErrors = validateProfileForm();
     setProfileErrors(validationErrors);
 
@@ -379,6 +417,7 @@ export default function SettingsPage() {
                 name="firstName"
                 value={profile.firstName}
                 onChange={handleProfileChange}
+                onBlur={handleProfileBlur}
                 error={profileErrors.firstName}
               />
 
@@ -387,6 +426,7 @@ export default function SettingsPage() {
                 name="lastName"
                 value={profile.lastName}
                 onChange={handleProfileChange}
+                onBlur={handleProfileBlur}
                 error={profileErrors.lastName}
               />
             </div>
@@ -397,6 +437,7 @@ export default function SettingsPage() {
               type="email"
               value={profile.email}
               onChange={handleProfileChange}
+              onBlur={handleProfileBlur}
               error={profileErrors.email}
             />
 
@@ -442,11 +483,7 @@ export default function SettingsPage() {
                 value={passwordData.currentPassword}
                 onChange={handlePasswordChange}
                 onBlur={handlePasswordBlur}
-                error={
-                  submitAttempted || passwordTouched.currentPassword
-                    ? errors.currentPassword
-                    : ""
-                }
+                error={errors.currentPassword}
                 inputProps={{
                   autoComplete: "current-password",
                   readOnly: true,
@@ -465,11 +502,7 @@ export default function SettingsPage() {
                 value={passwordData.newPassword}
                 onChange={handlePasswordChange}
                 onBlur={handlePasswordBlur}
-                error={
-                  submitAttempted || passwordTouched.newPassword
-                    ? errors.newPassword
-                    : ""
-                }
+                error={errors.newPassword}
                 inputProps={{ autoComplete: "new-password" }}
               />
 
@@ -480,11 +513,7 @@ export default function SettingsPage() {
                 value={passwordData.confirmPassword}
                 onChange={handlePasswordChange}
                 onBlur={handlePasswordBlur}
-                error={
-                  submitAttempted || passwordTouched.confirmPassword
-                    ? errors.confirmPassword
-                    : ""
-                }
+                error={errors.confirmPassword}
                 inputProps={{ autoComplete: "new-password" }}
               />
 
@@ -515,6 +544,34 @@ export default function SettingsPage() {
       />
     </DashboardShell>
   );
+}
+
+function validateProfileField(value, { showRequired = false, field } = {}) {
+  if (field === "firstName") {
+    if (!String(value || "").trim()) {
+      return showRequired ? "First name is required" : "";
+    }
+
+    return validatePersonName(value, { fieldLabel: "First name" });
+  }
+
+  if (field === "lastName") {
+    return validatePersonName(value, { fieldLabel: "Last name" });
+  }
+
+  if (field === "email") {
+    const trimmed = String(value || "").trim();
+
+    if (!trimmed) {
+      return showRequired ? "Email is required" : "";
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmed)) {
+      return "Enter a valid email address";
+    }
+  }
+
+  return "";
 }
 
 function SettingsCard({ title, children }) {
