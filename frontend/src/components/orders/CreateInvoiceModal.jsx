@@ -65,7 +65,7 @@ export default function CreateInvoiceModal({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [loadingInvoice, setLoadingInvoice] = useState(false);
+  const [isContentReady, setIsContentReady] = useState(false);
   const [paymentLines, setPaymentLines] = useState([]);
   const [prepaymentAmount, setPrepaymentAmount] = useState("0.00");
   const [loadedPrepaymentAmount, setLoadedPrepaymentAmount] = useState(0);
@@ -85,6 +85,7 @@ export default function CreateInvoiceModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
+      setIsContentReady(false);
       const isCnr = Boolean(order?.certificateNoRecords);
       setFormData(getInitialInvoiceFormData(order, isEditMode, isCnr));
       setErrors({});
@@ -107,7 +108,6 @@ export default function CreateInvoiceModal({
     let cancelled = false;
 
     async function loadInvoice() {
-      setLoadingInvoice(true);
       setSubmitError("");
 
       try {
@@ -185,7 +185,7 @@ export default function CreateInvoiceModal({
         }
       } finally {
         if (!cancelled) {
-          setLoadingInvoice(false);
+          setIsContentReady(true);
         }
       }
     }
@@ -441,7 +441,13 @@ export default function CreateInvoiceModal({
 
   if (!mounted || !isOpen || !order) return null;
 
-  const modalTitle = isEditMode ? "Edit Invoice" : "Create Invoice";
+  const modalTitle = !isContentReady
+    ? isEditMode
+      ? "Edit Invoice"
+      : "Invoice"
+    : isEditMode
+      ? "Edit Invoice"
+      : "Create Invoice";
   const submitLabel = isEditMode
     ? isEditing
       ? "Save Invoice"
@@ -620,6 +626,7 @@ export default function CreateInvoiceModal({
         }, 1400);
       } else {
         setIsEditing(false);
+        setIsContentReady(false);
         setInvoiceReloadKey((prev) => prev + 1);
       }
     } catch (error) {
@@ -666,6 +673,10 @@ export default function CreateInvoiceModal({
           </p>
         </div>
 
+        {!isContentReady ? (
+          <InvoiceModalLoadingBody message="Loading invoice..." />
+        ) : (
+          <>
         <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-3 sm:px-5">
           <div className="-mx-1 overflow-x-auto px-1">
             <div className="flex min-w-max flex-wrap items-center gap-x-5 gap-y-2 text-[11px] sm:min-w-0">
@@ -737,7 +748,7 @@ export default function CreateInvoiceModal({
                 <button
                   type="button"
                   onClick={handleQuickRecordsFeeToggle}
-                  disabled={loadingInvoice || submitting}
+                  disabled={submitting}
                   className={`inline-flex h-[32px] shrink-0 items-center justify-center rounded-[7px] px-3 text-[12px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                     quickRecordsFee
                       ? "border border-[#0B7C8E] bg-white text-[#0B7C8E] hover:bg-[#E6F7FA]"
@@ -1063,17 +1074,12 @@ export default function CreateInvoiceModal({
                 onClick={handleSubmit}
                 disabled={
                   submitting ||
-                  loadingInvoice ||
                   (isEditing && isFormInvalid) ||
                   Boolean(successMessage)
                 }
                 className="inline-flex h-[36px] w-full items-center justify-center rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting
-                  ? "Saving..."
-                  : loadingInvoice
-                    ? "Loading..."
-                    : submitLabel}
+                {submitting ? "Saving..." : submitLabel}
               </button>
 
               <button
@@ -1087,9 +1093,23 @@ export default function CreateInvoiceModal({
             </div>
           </aside>
         </div>
+          </>
+        )}
       </section>
     </div>,
     document.body
+  );
+}
+
+function InvoiceModalLoadingBody({ message = "Loading invoice..." }) {
+  return (
+    <div className="flex min-h-[360px] flex-1 flex-col items-center justify-center gap-3 px-4 py-12">
+      <div
+        className="h-8 w-8 animate-spin rounded-full border-2 border-[#CBD5E1] border-t-[#0097B2]"
+        aria-hidden="true"
+      />
+      <p className="text-[12px] font-medium text-[#64748B]">{message}</p>
+    </div>
   );
 }
 

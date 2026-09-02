@@ -38,7 +38,7 @@ export default function CreateXrayInvoiceModal({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [loadingXray, setLoadingXray] = useState(false);
+  const [isContentReady, setIsContentReady] = useState(false);
   const [hasExistingInvoice, setHasExistingInvoice] = useState(false);
   const [isEditing, setIsEditing] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
@@ -51,11 +51,13 @@ export default function CreateXrayInvoiceModal({
     setPrevOpenSession(openSession);
 
     if (openSession) {
+      const likelyExisting = orderIndicatesExistingXrayInvoice(order);
+      setIsContentReady(false);
       setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
       setErrors({});
       setSubmitError("");
-      setHasExistingInvoice(false);
-      setIsEditing(true);
+      setHasExistingInvoice(likelyExisting);
+      setIsEditing(!likelyExisting);
     }
   }
 
@@ -65,8 +67,6 @@ export default function CreateXrayInvoiceModal({
     let cancelled = false;
 
     async function loadXrayInvoice() {
-      setLoadingXray(true);
-
       try {
         const [data, orderData] = await Promise.all([
           getXrayInvoiceByOrderId(order.dbId),
@@ -82,7 +82,6 @@ export default function CreateXrayInvoiceModal({
 
         setHasExistingInvoice(hasSavedXray);
         setIsEditing(!hasSavedXray);
-
         setFormData({
           xrayInvoiceDate: xray?.xrayInvoiceDate || getTodayInputDate(),
           examDate: xray?.examDate || "",
@@ -106,7 +105,7 @@ export default function CreateXrayInvoiceModal({
         }
       } finally {
         if (!cancelled) {
-          setLoadingXray(false);
+          setIsContentReady(true);
         }
       }
     }
@@ -147,9 +146,13 @@ export default function CreateXrayInvoiceModal({
   );
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
   const fieldsReadOnly = hasExistingInvoice && !isEditing;
-  const modalTitle = hasExistingInvoice
-    ? "Edit X-Ray Invoice"
-    : "New X-Ray Invoice";
+  const modalTitle = !isContentReady
+    ? orderIndicatesExistingXrayInvoice(order)
+      ? "Edit X-Ray Invoice"
+      : "X-Ray Invoice"
+    : hasExistingInvoice
+      ? "Edit X-Ray Invoice"
+      : "New X-Ray Invoice";
   const submitLabel =
     hasExistingInvoice && !isEditing ? "Edit Invoice" : "Save Invoice";
 
@@ -236,6 +239,7 @@ export default function CreateXrayInvoiceModal({
       if (hasExistingInvoice) {
         setHasExistingInvoice(true);
         setIsEditing(false);
+        setIsContentReady(false);
         setReloadKey((prev) => prev + 1);
         return;
       }
@@ -300,6 +304,10 @@ export default function CreateXrayInvoiceModal({
         </div>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[minmax(0,1fr)_200px]">
+          {!isContentReady ? (
+            <InvoiceModalLoadingBody message="Loading X-Ray invoice..." />
+          ) : (
+            <>
           <div className="min-h-0 overflow-y-auto px-4 py-4 sm:px-5">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <DateField
@@ -471,17 +479,11 @@ export default function CreateXrayInvoiceModal({
                 type="button"
                 onClick={handleSubmit}
                 disabled={
-                  submitting ||
-                  loadingXray ||
-                  (isEditing && isFormInvalid)
+                  submitting || (isEditing && isFormInvalid)
                 }
                 className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting
-                  ? "Saving..."
-                  : loadingXray
-                    ? "Loading..."
-                    : submitLabel}
+                {submitting ? "Saving..." : submitLabel}
               </button>
 
               <button
@@ -493,10 +495,28 @@ export default function CreateXrayInvoiceModal({
               </button>
             </div>
           </aside>
+            </>
+          )}
         </div>
       </section>
     </div>,
     document.body
+  );
+}
+
+function orderIndicatesExistingXrayInvoice(order) {
+  return Boolean(order?.invoice?.hasXray);
+}
+
+function InvoiceModalLoadingBody({ message = "Loading invoice..." }) {
+  return (
+    <div className="col-span-full flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 px-4 py-12">
+      <div
+        className="h-8 w-8 animate-spin rounded-full border-2 border-[#CBD5E1] border-t-[#0097B2]"
+        aria-hidden="true"
+      />
+      <p className="text-[12px] font-medium text-[#64748B]">{message}</p>
+    </div>
   );
 }
 
