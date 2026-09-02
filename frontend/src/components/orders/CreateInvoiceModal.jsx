@@ -64,6 +64,7 @@ export default function CreateInvoiceModal({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isContentReady, setIsContentReady] = useState(false);
   const [paymentLines, setPaymentLines] = useState([]);
@@ -90,6 +91,7 @@ export default function CreateInvoiceModal({
       setFormData(getInitialInvoiceFormData(order, isEditMode, isCnr));
       setErrors({});
       setSubmitError("");
+      setLoadError("");
       setSuccessMessage("");
       // CNR: fees locked at $0. Normal create: start detailed; user clicks $20 button.
       setQuickRecordsFee(
@@ -109,6 +111,7 @@ export default function CreateInvoiceModal({
 
     async function loadInvoice() {
       setSubmitError("");
+      setLoadError("");
 
       try {
         const orderData = await getOrder(order.dbId);
@@ -178,10 +181,7 @@ export default function CreateInvoiceModal({
         });
       } catch (error) {
         if (!cancelled) {
-          setSubmitError(error.message || "Failed to load invoice");
-          const fallbackLines = buildPaymentLinesFromOrder(order);
-          setPaymentLines(fallbackLines);
-          setFormData(getInitialInvoiceFormData(order, isEditMode));
+          setLoadError(getApiErrorMessage(error, "Failed to load invoice"));
         }
       } finally {
         if (!cancelled) {
@@ -675,6 +675,8 @@ export default function CreateInvoiceModal({
 
         {!isContentReady ? (
           <InvoiceModalLoadingBody message="Loading invoice..." />
+        ) : loadError ? (
+          <InvoiceModalErrorBody message={loadError} />
         ) : (
           <>
         <div className="shrink-0 border-b border-[#E2E8F0] bg-white px-4 py-3 sm:px-5">
@@ -1109,6 +1111,18 @@ function InvoiceModalLoadingBody({ message = "Loading invoice..." }) {
         aria-hidden="true"
       />
       <p className="text-[12px] font-medium text-[#64748B]">{message}</p>
+    </div>
+  );
+}
+
+function InvoiceModalErrorBody({ message = "Something went wrong" }) {
+  return (
+    <div className="flex min-h-[360px] flex-1 flex-col items-center justify-center px-4 py-12">
+      <div className="flex w-full max-w-md items-center justify-center rounded-[10px] border border-[#FEE2E2] bg-[#FEF2F2] px-6 py-10">
+        <p className="text-center text-[14px] font-semibold leading-snug text-red-500">
+          {message}
+        </p>
+      </div>
     </div>
   );
 }
