@@ -74,6 +74,8 @@ export default function CreateInvoiceModal({
   const [quickRecordsFee, setQuickRecordsFee] = useState(false);
   const [savedDetailedFees, setSavedDetailedFees] = useState(null);
   const [pendingFacilitySearchFee, setPendingFacilitySearchFee] = useState(0);
+  const [isEditing, setIsEditing] = useState(!isEditMode);
+  const [invoiceReloadKey, setInvoiceReloadKey] = useState(0);
 
   const openSession =
     isOpen && order ? `${order.id || order.orderNo}-${isEditMode}` : null;
@@ -95,6 +97,7 @@ export default function CreateInvoiceModal({
           : false
       );
       setSavedDetailedFees(null);
+      setIsEditing(!isEditMode);
     }
   }
 
@@ -112,7 +115,9 @@ export default function CreateInvoiceModal({
 
         if (cancelled) return;
 
-        const derivedRushLevel = calculateOrderRushLevel(orderData.createdAt);
+        const derivedRushLevel = calculateOrderRushLevel(
+          orderData.subpoenaDate || orderData.createdAt
+        );
         setRushLevel(derivedRushLevel);
         setPendingFacilitySearchFee(
           !isEditMode
@@ -190,7 +195,7 @@ export default function CreateInvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, order?.dbId, isEditMode, order?.invoiceId, order?.invoice?.invoiceId]);
+  }, [isOpen, order?.dbId, isEditMode, order?.invoiceId, order?.invoice?.invoiceId, invoiceReloadKey]);
 
   useEffect(() => {
     if (!openSession) {
@@ -403,7 +408,8 @@ export default function CreateInvoiceModal({
     invoiceTotals;
 
   const feesLocked = isCnrOrder || quickRecordsFee;
-  const canToggleQuickRecordsFee = !isCnrOrder;
+  const fieldsReadOnly = isEditMode && !isEditing;
+  const canToggleQuickRecordsFee = !isCnrOrder && !fieldsReadOnly;
   const isQuickMode =
     !isCnrOrder && (quickRecordsFee || isQuickRecordsFeeInvoice(formData));
   const witnessFeeRequired = PAYMENT_CHARGE_AMOUNTS.prepayment;
@@ -436,7 +442,11 @@ export default function CreateInvoiceModal({
   if (!mounted || !isOpen || !order) return null;
 
   const modalTitle = isEditMode ? "Edit Invoice" : "Create Invoice";
-  const submitLabel = isEditMode ? "Edit Invoice" : "Create Invoice";
+  const submitLabel = isEditMode
+    ? isEditing
+      ? "Save Invoice"
+      : "Edit Invoice"
+    : "Create Invoice";
 
   const clearValidationFeedback = (...fields) => {
     setErrors((prev) => {
@@ -549,6 +559,13 @@ export default function CreateInvoiceModal({
   };
 
   const handleSubmit = async () => {
+    if (isEditMode && !isEditing) {
+      setIsEditing(true);
+      setSubmitError("");
+      setErrors({});
+      return;
+    }
+
     const invoiceId = order.invoiceId || order.invoice?.invoiceId;
     const completingXrayOnlyStub =
       !isEditMode && invoiceId && order.invoice?.createOnly;
@@ -602,7 +619,8 @@ export default function CreateInvoiceModal({
           onClose();
         }, 1400);
       } else {
-        onClose();
+        setIsEditing(false);
+        setInvoiceReloadKey((prev) => prev + 1);
       }
     } catch (error) {
       const { fieldErrors, message } = applyApiFieldErrors(error);
@@ -703,7 +721,7 @@ export default function CreateInvoiceModal({
                 value={formData.invoiceDate}
                 onChange={handleChange}
                 error={errors.invoiceDate}
-                disabled={isCnrOrder && isEditMode}
+                disabled={fieldsReadOnly || (isCnrOrder && isEditMode)}
               />
             </div>
 
@@ -753,7 +771,7 @@ export default function CreateInvoiceModal({
                 value={formData.storageFee}
                 onChange={handleMoneyChange}
                 error={errors.storageFee}
-                disabled={feesLocked}
+                disabled={feesLocked || fieldsReadOnly}
               />
             </div>
 
@@ -764,7 +782,7 @@ export default function CreateInvoiceModal({
                 value={formData.pages}
                 onChange={handlePagesChange}
                 error={errors.pages}
-                disabled={feesLocked}
+                disabled={feesLocked || fieldsReadOnly}
               />
 
               <MoneyField
@@ -773,7 +791,7 @@ export default function CreateInvoiceModal({
                 value={formData.perPageAmount}
                 onChange={handleMoneyChange}
                 error={errors.perPageAmount}
-                disabled={feesLocked}
+                disabled={feesLocked || fieldsReadOnly}
               />
 
               <ReadOnlyMoneyField label="Pages Amount" value={pagesAmount} />
@@ -788,7 +806,7 @@ export default function CreateInvoiceModal({
                 value={formData.clericalTimeHours}
                 onChange={handleClericalHoursChange}
                 error={errors.clericalTimeHours}
-                disabled={feesLocked}
+                disabled={feesLocked || fieldsReadOnly}
               />
 
               <MoneyField
@@ -797,7 +815,7 @@ export default function CreateInvoiceModal({
                 value={formData.clericalHourlyRate}
                 onChange={handleMoneyChange}
                 error={errors.clericalHourlyRate}
-                disabled={feesLocked}
+                disabled={feesLocked || fieldsReadOnly}
               />
 
               <ReadOnlyMoneyField
@@ -815,7 +833,7 @@ export default function CreateInvoiceModal({
                 value={formData.shippingHandling}
                 onChange={handleMoneyChange}
                 error={errors.shippingHandling}
-                disabled={feesLocked}
+                disabled={feesLocked || fieldsReadOnly}
               />
             </div>
 
@@ -830,7 +848,12 @@ export default function CreateInvoiceModal({
                 onChange={handleChange}
                 placeholder="Invoice notes..."
                 rows={2}
-                className="h-[52px] w-full resize-none rounded-[6px] border border-[#CBD5E1] bg-white px-3 py-2 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                disabled={fieldsReadOnly}
+                className={`h-[52px] w-full resize-none rounded-[6px] border px-3 py-2 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
+                  fieldsReadOnly
+                    ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+                    : "border-[#CBD5E1] bg-white focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
               />
             </div>
 
@@ -841,6 +864,7 @@ export default function CreateInvoiceModal({
                   name="sendOrderDetails"
                   checked={formData.sendOrderDetails}
                   onChange={handleChange}
+                  disabled={fieldsReadOnly}
                 />
 
                 <CheckboxField
@@ -848,6 +872,7 @@ export default function CreateInvoiceModal({
                   name="rushOrder"
                   checked={formData.rushOrder}
                   onChange={handleChange}
+                  disabled={fieldsReadOnly}
                 />
               </div>
 
@@ -1039,7 +1064,7 @@ export default function CreateInvoiceModal({
                 disabled={
                   submitting ||
                   loadingInvoice ||
-                  isFormInvalid ||
+                  (isEditing && isFormInvalid) ||
                   Boolean(successMessage)
                 }
                 className="inline-flex h-[36px] w-full items-center justify-center rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold leading-none text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
@@ -1378,15 +1403,20 @@ function NumberField({ label, name, value, onChange, error = "", disabled = fals
   );
 }
 
-function CheckboxField({ label, name, checked, onChange }) {
+function CheckboxField({ label, name, checked, onChange, disabled = false }) {
   return (
-    <label className="flex items-center gap-2 text-[11px] text-[#64748B]">
+    <label
+      className={`flex items-center gap-2 text-[11px] text-[#64748B] ${
+        disabled ? "cursor-not-allowed opacity-70" : ""
+      }`}
+    >
       <input
         type="checkbox"
         name={name}
         checked={checked}
         onChange={onChange}
-        className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
+        disabled={disabled}
+        className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2] disabled:cursor-not-allowed"
       />
       {label}
     </label>

@@ -1,23 +1,24 @@
 /**
- * Rush levels are based on order created_at (calendar days, local date).
- * Rush 1: 15 through 21 days
- * Rush 2: 22 through 28 days
- * Rush 3: 29 days or more
- * Before 15 days: no rush level
+ * Rush levels are based on Date of Subpoena (calendar days, local date).
+ * Rush 1: 14 through 20 days
+ * Rush 2: 21 through 27 days
+ * Rush 3: 28 days or more
+ * Before 14 days: no rush level
  */
-const RUSH_1_MIN_DAYS = 15;
-const RUSH_2_MIN_DAYS = 22;
-const RUSH_3_MIN_DAYS = 29;
+const RUSH_1_MIN_DAYS = 14;
+const RUSH_2_MIN_DAYS = 21;
+const RUSH_3_MIN_DAYS = 28;
 
 /** Last inclusive day of each band (for SQL filters). */
-const RUSH_1_MAX_DAYS = RUSH_2_MIN_DAYS - 1; // 21
-const RUSH_2_MAX_DAYS = RUSH_3_MIN_DAYS - 1; // 28
+const RUSH_1_MAX_DAYS = RUSH_2_MIN_DAYS - 1; // 20
+const RUSH_2_MAX_DAYS = RUSH_3_MIN_DAYS - 1; // 27
 
 /** Active orders at Rush 2+ are treated as Ready (matches deriveDisplayOrderStatus). */
 const RUSH_READY_MIN_DAYS = RUSH_2_MIN_DAYS;
 
-const ORDER_AGE_SQL = "DATE(created_at)";
-const ORDER_AGE_SQL_ALIAS = "DATE(o.created_at)";
+const ORDER_AGE_SQL = "COALESCE(DATE(subpoena_date), DATE(created_at))";
+const ORDER_AGE_SQL_ALIAS =
+  "COALESCE(DATE(o.subpoena_date), DATE(o.created_at))";
 
 function parseDateOnly(value) {
   if (!value) return null;

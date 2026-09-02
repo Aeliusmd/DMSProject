@@ -326,7 +326,10 @@ function resolveOrderWriteOffState(row, invoiceRow, xrayRow) {
   return {
     isWriteOffs,
     status,
-    displayStatus: deriveDisplayOrderStatus(status, row.created_at),
+    displayStatus: deriveDisplayOrderStatus(
+      status,
+      row.subpoena_date || row.created_at
+    ),
     filterStatus:
       isWriteOffs && status !== "Completed"
         ? "writeoffs"
@@ -1012,7 +1015,7 @@ function mapOrderListRow(
   const doiDisplay = formatDoiDisplay(row);
   const dobSsn = [dob, ssn, doiDisplay].filter(Boolean);
 
-  const rush = calculateOrderRushLevel(row.created_at);
+  const rush = calculateOrderRushLevel(row.subpoena_date || row.created_at);
   const writeOffState = resolveOrderWriteOffState(row, invoiceRow, xrayRow);
   const hasBatchFacilityMismatch = Boolean(Number(row.facility_mismatch));
   const displayFacilityId =
@@ -1314,7 +1317,7 @@ function mapOrderDetail(
   );
   const mappedRecords = mapOrderRecords(orderRecords);
   const primaryUploaded = mappedRecords.find((record) => record.hasFile);
-  const rush = calculateOrderRushLevel(row.created_at);
+  const rush = calculateOrderRushLevel(row.subpoena_date || row.created_at);
   const writeOffState = resolveOrderWriteOffState(row, invoiceRow, xrayRow);
   const hasBatchFacilityMismatch = Boolean(Number(row.facility_mismatch));
   const displayFacilityId =

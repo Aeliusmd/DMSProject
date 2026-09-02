@@ -1,16 +1,16 @@
 /**
- * Rush levels are based on order created_at (calendar days, local date).
- * Rush 1: 15 through 21 days
- * Rush 2: 22 through 28 days
- * Rush 3: 29 days or more
- * Before 15 days: no rush level
+ * Rush levels are based on Date of Subpoena (calendar days, local date).
+ * Rush 1: 14 through 20 days
+ * Rush 2: 21 through 27 days
+ * Rush 3: 28 days or more
+ * Before 14 days: no rush level
  */
-export const RUSH_1_MIN_DAYS = 15;
-export const RUSH_2_MIN_DAYS = 22;
-export const RUSH_3_MIN_DAYS = 29;
+export const RUSH_1_MIN_DAYS = 14;
+export const RUSH_2_MIN_DAYS = 21;
+export const RUSH_3_MIN_DAYS = 28;
 
-export const RUSH_1_MAX_DAYS = RUSH_2_MIN_DAYS - 1; // 21
-export const RUSH_2_MAX_DAYS = RUSH_3_MIN_DAYS - 1; // 28
+export const RUSH_1_MAX_DAYS = RUSH_2_MIN_DAYS - 1; // 20
+export const RUSH_2_MAX_DAYS = RUSH_3_MIN_DAYS - 1; // 27
 
 function parseOrderDate(value) {
   if (!value) return null;
@@ -60,6 +60,13 @@ export function getOrderAgeInDays(orderOrDate) {
   return getOrderAgeDays(getOrderAgeDate(orderOrDate));
 }
 
+function rushLevelRangeLabel(rush) {
+  if (rush === "Rush 1") return "14–20 days since Date of Subpoena";
+  if (rush === "Rush 2") return "21–27 days since Date of Subpoena";
+  if (rush === "Rush 3") return "28+ days since Date of Subpoena";
+  return "";
+}
+
 export function buildRushBadgeTooltip(orderOrDate, rushLabel = null) {
   const days = getOrderAgeInDays(orderOrDate);
   const rush =
@@ -70,16 +77,23 @@ export function buildRushBadgeTooltip(orderOrDate, rushLabel = null) {
 
   if (!rush && days == null) return "";
 
-  const dayLabel =
-    days == null
-      ? ""
-      : days === 1
-        ? "1 day since order created"
-        : `${days} days since order created`;
+  const parts = [];
 
-  if (rush && dayLabel) return `${rush} — ${dayLabel}`;
-  if (rush) return rush;
-  return dayLabel;
+  if (rush) {
+    parts.push(rush);
+    const rangeLabel = rushLevelRangeLabel(rush);
+    if (rangeLabel) parts.push(rangeLabel);
+  }
+
+  if (days != null) {
+    parts.push(
+      days === 1
+        ? "1 day since Date of Subpoena"
+        : `${days} days since Date of Subpoena`
+    );
+  }
+
+  return parts.join(" — ");
 }
 
 export function calculateOrderRushLevel(createdAt) {
@@ -95,7 +109,21 @@ export function calculateOrderRushLevel(createdAt) {
 export function getOrderAgeDate(order) {
   if (!order) return null;
 
-  return order.createdAt || order.created_at || null;
+  if (
+    typeof order === "string" ||
+    order instanceof Date ||
+    typeof order === "number"
+  ) {
+    return order;
+  }
+
+  return (
+    order.subpoenaDate ||
+    order.subpoena_date ||
+    order.createdAt ||
+    order.created_at ||
+    null
+  );
 }
 
 export function formatRushLevel(value) {

@@ -39,6 +39,9 @@ export default function CreateXrayInvoiceModal({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [loadingXray, setLoadingXray] = useState(false);
+  const [hasExistingInvoice, setHasExistingInvoice] = useState(false);
+  const [isEditing, setIsEditing] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const openSession =
     isOpen && order ? String(order.id || order.orderNo) : null;
@@ -51,6 +54,8 @@ export default function CreateXrayInvoiceModal({
       setFormData({ ...initialFormData, xrayInvoiceDate: getTodayInputDate() });
       setErrors({});
       setSubmitError("");
+      setHasExistingInvoice(false);
+      setIsEditing(true);
     }
   }
 
@@ -75,6 +80,9 @@ export default function CreateXrayInvoiceModal({
         const hasSavedXray = Boolean(String(xray?.xrayInvoiceDate || "").trim());
         const suggestedViews = resolveXrayInvoicePageCount(orderData);
 
+        setHasExistingInvoice(hasSavedXray);
+        setIsEditing(!hasSavedXray);
+
         setFormData({
           xrayInvoiceDate: xray?.xrayInvoiceDate || getTodayInputDate(),
           examDate: xray?.examDate || "",
@@ -93,6 +101,8 @@ export default function CreateXrayInvoiceModal({
             ...initialFormData,
             xrayInvoiceDate: getTodayInputDate(),
           });
+          setHasExistingInvoice(false);
+          setIsEditing(true);
         }
       } finally {
         if (!cancelled) {
@@ -106,7 +116,7 @@ export default function CreateXrayInvoiceModal({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, order?.dbId]);
+  }, [isOpen, order?.dbId, reloadKey]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -136,6 +146,12 @@ export default function CreateXrayInvoiceModal({
     [formData]
   );
   const isFormInvalid = hasValidationErrors(clientValidationErrors);
+  const fieldsReadOnly = hasExistingInvoice && !isEditing;
+  const modalTitle = hasExistingInvoice
+    ? "Edit X-Ray Invoice"
+    : "New X-Ray Invoice";
+  const submitLabel =
+    hasExistingInvoice && !isEditing ? "Edit Invoice" : "Save Invoice";
 
   if (!mounted || !isOpen || !order) return null;
 
@@ -187,6 +203,13 @@ export default function CreateXrayInvoiceModal({
   };
 
   const handleSubmit = async () => {
+    if (hasExistingInvoice && !isEditing) {
+      setIsEditing(true);
+      setSubmitError("");
+      setErrors({});
+      return;
+    }
+
     const validationErrors = validateXrayInvoiceForm(formData);
     setErrors(validationErrors);
 
@@ -208,6 +231,13 @@ export default function CreateXrayInvoiceModal({
 
       if (onSaved) {
         await onSaved();
+      }
+
+      if (hasExistingInvoice) {
+        setHasExistingInvoice(true);
+        setIsEditing(false);
+        setReloadKey((prev) => prev + 1);
+        return;
       }
 
       onClose();
@@ -240,7 +270,7 @@ export default function CreateXrayInvoiceModal({
           </button>
 
           <h2 className="text-[15px] font-semibold leading-none">
-            New X-Ray Invoice
+            {modalTitle}
           </h2>
 
           <p className="mt-3 text-[11px] font-medium text-white/90">
@@ -278,6 +308,7 @@ export default function CreateXrayInvoiceModal({
                 value={formData.xrayInvoiceDate}
                 onChange={handleChange}
                 error={errors.xrayInvoiceDate}
+                disabled={fieldsReadOnly}
               />
 
               <DateField
@@ -286,6 +317,7 @@ export default function CreateXrayInvoiceModal({
                 value={formData.examDate}
                 onChange={handleChange}
                 error={errors.examDate}
+                disabled={fieldsReadOnly}
               />
             </div>
 
@@ -299,10 +331,17 @@ export default function CreateXrayInvoiceModal({
                   name="views"
                   value={formData.views}
                   onChange={handleViewsChange}
-                  className={`h-[34px] rounded-[6px] border bg-white px-3 text-center text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                  disabled={fieldsReadOnly}
+                  className={`h-[34px] rounded-[6px] border px-3 text-center text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                    fieldsReadOnly
+                      ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+                      : "bg-white"
+                  } ${
                     errors.views
                       ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-                      : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                      : fieldsReadOnly
+                        ? ""
+                        : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
                   }`}
                 />
 
@@ -320,7 +359,12 @@ export default function CreateXrayInvoiceModal({
                       name="perViewAmount"
                       value={formData.perViewAmount}
                       onChange={handleMoneyChange}
-                      className="h-[34px] w-full rounded-[6px] border border-[#CBD5E1] bg-white pl-6 pr-2 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                      disabled={fieldsReadOnly}
+                      className={`h-[34px] w-full rounded-[6px] border pl-6 pr-2 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+                        fieldsReadOnly
+                          ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+                          : "border-[#CBD5E1] bg-white focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                      }`}
                     />
                   </div>
 
@@ -350,7 +394,12 @@ export default function CreateXrayInvoiceModal({
                 onChange={handleChange}
                 placeholder="Add a note or description..."
                 rows={4}
-                className="h-[74px] w-full resize-none rounded-[6px] border border-[#CBD5E1] bg-white px-3 py-2 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10"
+                disabled={fieldsReadOnly}
+                className={`h-[74px] w-full resize-none rounded-[6px] border px-3 py-2 text-[12px] text-[#111827] outline-none placeholder:text-[#94A3B8] focus:ring-2 ${
+                  fieldsReadOnly
+                    ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+                    : "border-[#CBD5E1] bg-white focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+                }`}
               />
             </div>
           </div>
@@ -421,10 +470,18 @@ export default function CreateXrayInvoiceModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || loadingXray || isFormInvalid}
+                disabled={
+                  submitting ||
+                  loadingXray ||
+                  (isEditing && isFormInvalid)
+                }
                 className="h-[36px] w-full rounded-[7px] bg-[#111827] px-4 text-[12px] font-semibold text-white hover:bg-[#1F2937] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {submitting ? "Saving..." : "Save Invoice"}
+                {submitting
+                  ? "Saving..."
+                  : loadingXray
+                    ? "Loading..."
+                    : submitLabel}
               </button>
 
               <button
@@ -467,7 +524,7 @@ function SectionTitle({ title }) {
   );
 }
 
-function DateField({ label, name, value, onChange, error = "" }) {
+function DateField({ label, name, value, onChange, error = "", disabled = false }) {
   return (
     <div>
       <label className="mb-2 block text-[11px] font-semibold text-[#475569]">
@@ -479,10 +536,17 @@ function DateField({ label, name, value, onChange, error = "" }) {
         name={name}
         value={value}
         onChange={onChange}
-        className={`h-[34px] w-full rounded-[6px] border bg-white px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+        disabled={disabled}
+        className={`h-[34px] w-full rounded-[6px] border px-3 text-[12px] text-[#111827] outline-none focus:ring-2 ${
+          disabled
+            ? "cursor-not-allowed border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]"
+            : "bg-white"
+        } ${
           error
             ? "border-red-500 focus:border-red-500 focus:ring-red-500/10"
-            : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
+            : disabled
+              ? ""
+              : "border-[#CBD5E1] focus:border-[#0097B2] focus:ring-[#0097B2]/10"
         }`}
       />
 
