@@ -8,6 +8,7 @@ import DashboardFinancialSummary from "@/components/dashboard/DashboardFinancial
 import DashboardTopProviders from "@/components/dashboard/DashboardTopProviders";
 import { getStoredUser } from "@/lib/auth/authStorage";
 import { canAccessNavItem, isAdmin } from "@/lib/auth/roles";
+import { isUnprocessedSubpoenasNavHidden } from "@/lib/portalNavigationVisibility";
 
 const quickActions = [
   {
@@ -57,8 +58,10 @@ export default function DashboardPage() {
   const user = getStoredUser();
   const showFinancialWidgets = isAdmin(user);
 
-  const visibleQuickActions = quickActions.filter((action) =>
-    canAccessNavItem(user, action.href)
+  const visibleQuickActions = quickActions.filter(
+    (action) =>
+      !isUnprocessedSubpoenasNavHidden(action.href) &&
+      canAccessNavItem(user, action.href)
   );
 
   return (

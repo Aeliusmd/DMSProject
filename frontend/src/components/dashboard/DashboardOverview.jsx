@@ -6,6 +6,7 @@ import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getDashboardStats } from "@/lib/dashboard/dashboardApi";
 import { getCurrentUser } from "@/lib/auth/authApi";
 import { getStoredUser } from "@/lib/auth/authStorage";
+import { isUnprocessedSubpoenasHidden } from "@/lib/portalNavigationVisibility";
 
 function formatCount(value) {
   if (value === null || value === undefined) return "—";
@@ -73,8 +74,8 @@ export default function DashboardOverview() {
     };
   }, []);
 
-  const statCards = useMemo(
-    () => [
+  const statCards = useMemo(() => {
+    const cards = [
       {
         label: "Total Orders",
         value: formatCount(stats?.totalOrders),
@@ -131,9 +132,12 @@ export default function DashboardOverview() {
         iconBg: "#ECFDF5",
         iconColor: "#059669",
       },
-    ],
-    [stats]
-  );
+    ];
+
+    return isUnprocessedSubpoenasHidden()
+      ? cards.filter((card) => card.label !== "Unprocessed")
+      : cards;
+  }, [stats]);
 
   return (
     <div className="flex flex-col gap-5">

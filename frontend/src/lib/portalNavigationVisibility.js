@@ -19,6 +19,16 @@ export const PORTAL_ROUTE_REDIRECT = "/login";
 /** Where staff Company/Personal Orders redirect when hidden. */
 export const STAFF_PORTAL_ORDERS_REDIRECT = "/orders";
 
+/**
+ * Hide Unprocessed Subpoenas dashboard button, stat card, and list page.
+ * Backend APIs and batch-scan → new order flows stay active.
+ * Set to `false` to show again — do not delete the page.
+ */
+export const UNPROCESSED_SUBPOENAS_HIDDEN = true;
+
+/** Where /orders/unprocessed redirects when hidden. */
+export const UNPROCESSED_SUBPOENAS_REDIRECT = "/dashboard";
+
 const BLOCKED_ROUTE_PREFIXES = [
   "/landingpage",
   "/company-portal",
@@ -30,6 +40,8 @@ const BLOCKED_ROUTE_PREFIXES = [
 
 const STAFF_ORDER_ROUTE_PREFIXES = ["/company-orders", "/personal-orders"];
 
+const UNPROCESSED_ROUTE_PREFIXES = ["/orders/unprocessed"];
+
 const ALLOWED_ROUTE_PREFIXES_WHEN_HIDDEN = [
   "/personalrequest/download",
   "/download/records",
@@ -37,6 +49,21 @@ const ALLOWED_ROUTE_PREFIXES_WHEN_HIDDEN = [
 ];
 
 const HIDDEN_STAFF_NAV_HREFS = new Set(["/company-orders", "/personal-orders"]);
+
+const HIDDEN_UNPROCESSED_NAV_HREFS = new Set(["/orders/unprocessed"]);
+
+export function isUnprocessedSubpoenasHidden() {
+  return UNPROCESSED_SUBPOENAS_HIDDEN;
+}
+
+/** Hide Unprocessed Subpoenas quick action / nav links when flag is on. */
+export function isUnprocessedSubpoenasNavHidden(href = "") {
+  if (!isUnprocessedSubpoenasHidden()) {
+    return false;
+  }
+
+  return HIDDEN_UNPROCESSED_NAV_HREFS.has(`${href || ""}`.split("?")[0]);
+}
 
 export function isPortalRouteAllowedWhenHidden(pathname = "") {
   const normalizedPath = `${pathname || ""}`.split("?")[0] || "/";
@@ -53,6 +80,15 @@ export function isStaffPortalOrdersHidden() {
 
 export function isPortalRouteBlocked(pathname = "") {
   const normalizedPath = `${pathname || ""}`.split("?")[0] || "/";
+
+  const isUnprocessedRoute = UNPROCESSED_ROUTE_PREFIXES.some(
+    (prefix) =>
+      normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+  );
+
+  if (isUnprocessedRoute && isUnprocessedSubpoenasHidden()) {
+    return true;
+  }
 
   const isStaffOrderRoute = STAFF_ORDER_ROUTE_PREFIXES.some(
     (prefix) =>
@@ -79,6 +115,15 @@ export function isPortalRouteBlocked(pathname = "") {
 
 export function getBlockedRouteRedirect(pathname = "") {
   const normalizedPath = `${pathname || ""}`.split("?")[0] || "/";
+
+  const isUnprocessedRoute = UNPROCESSED_ROUTE_PREFIXES.some(
+    (prefix) =>
+      normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+  );
+
+  if (isUnprocessedRoute) {
+    return UNPROCESSED_SUBPOENAS_REDIRECT;
+  }
 
   const isStaffOrderRoute = STAFF_ORDER_ROUTE_PREFIXES.some(
     (prefix) =>

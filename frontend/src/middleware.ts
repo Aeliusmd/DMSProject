@@ -31,5 +31,7 @@ export const config = {
     "/company-orders/:path*",
     "/personal-orders",
     "/personal-orders/:path*",
+    "/orders/unprocessed",
+    "/orders/unprocessed/:path*",
   ],
 };
