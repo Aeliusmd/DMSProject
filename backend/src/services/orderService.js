@@ -1045,6 +1045,7 @@ function mapOrderListRow(
     cancelReason: row.cancel_reason || "",
     cancelledAt: row.cancelled_at || null,
     deletedAt: row.deleted_at || null,
+    deleteReason: row.delete_reason || "",
     displayStatus: writeOffState.displayStatus,
     filterStatus: writeOffState.filterStatus,
     workflowStages: workflowStages.map(mapWorkflowStage),
@@ -1338,6 +1339,7 @@ function mapOrderDetail(
     cancelReason: row.cancel_reason || "",
     cancelledAt: row.cancelled_at || null,
     deletedAt: row.deleted_at || null,
+    deleteReason: row.delete_reason || "",
     isSubpoena: readHasSubpoena(row),
     isRecords: hasAnyRecordsRequested(orderRecords),
     isWriteOffs: writeOffState.isWriteOffs,
@@ -3218,7 +3220,7 @@ async function updateOrder(id, data, actorId, files) {
   }
 }
 
-async function deleteOrder(id, { actorId, actorName } = {}) {
+async function deleteOrder(id, { reason, actorId, actorName } = {}) {
   const existing = await Order.findByIdRaw(id);
 
   if (!existing) {
@@ -3233,8 +3235,14 @@ async function deleteOrder(id, { actorId, actorName } = {}) {
     throw new ApiError(400, "Cannot delete a cancelled order");
   }
 
+  const trimmedReason = trimOrNull(reason, { maxLength: FIELD_LIMITS.TEXT });
+  if (!trimmedReason) {
+    throw new ApiError(400, "Deletion reason is required");
+  }
+
   const deleted = await Order.deleteById(existing.id, {
     deletedBy: actorId || null,
+    reason: trimmedReason,
   });
 
   if (!deleted) {
@@ -3247,7 +3255,7 @@ async function deleteOrder(id, { actorId, actorName } = {}) {
     performedBy: actorId || null,
     authorName: actorName || "System",
     callbackDate: null,
-    note: "Order deleted",
+    note: `Order deleted: ${trimmedReason}`,
     attachmentPath: null,
   });
 

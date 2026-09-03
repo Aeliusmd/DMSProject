@@ -19,6 +19,7 @@ import SendInvoiceEmailModal from "@/components/orders/SendInvoiceEmailModal";
 import OrderPickupModal from "@/components/orders/OrderPickupModal";
 import OrderFaxModal from "@/components/orders/OrderFaxModal";
 import OrderCancelModal from "@/components/orders/OrderCancelModal";
+import OrderDeleteModal from "@/components/orders/OrderDeleteModal";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import CompanyOrderFacilityModal from "@/components/orders/CompanyOrderFacilityModal";
 import OrderStatusBadge from "@/components/orders/OrderStatusBadge";
@@ -700,6 +701,7 @@ function toRenderOrder(order, companyPortalMode = false) {
     orderStatus: order.status || "",
     statusBeforeInactive: order.statusBeforeInactive || "",
     cancelReason: order.cancelReason || "",
+    deleteReason: order.deleteReason || "",
     cancelledAt: order.cancelledAt || "",
     deletedAt: order.deletedAt || "",
     displayOrderStatus:
@@ -1110,14 +1112,14 @@ export default function OrdersTable({
     }
   }
 
-  async function handleConfirmDelete() {
-    if (!deleteModal.order?.dbId) return;
+  async function handleConfirmDelete(reason) {
+    if (!deleteModal.order?.dbId || actionLoading) return;
 
     setActionLoading(true);
     setActionError("");
 
     try {
-      await deleteOrder(deleteModal.order.dbId);
+      await deleteOrder(deleteModal.order.dbId, { reason });
       setDeleteModal({ open: false, order: null });
       await fetchOrders();
     } catch (err) {
@@ -2414,18 +2416,26 @@ export default function OrdersTable({
                             </button>
                           </>
                         ) : isInactiveOrderStatus(order.orderStatus) ? (
-                          <button
-                            type="button"
-                            onClick={() => openRestoreModal(order)}
-                            className={`order-action-btn inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] font-semibold leading-none text-[#0369A1] hover:bg-[#E0F2FE] ${
-                              fitToWindow
-                                ? ""
-                                : "h-[28px] px-3 text-[11px]"
-                            }`}
-                          >
-                            <RestoreIcon />
-                            Recover
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openRestoreModal(order)}
+                              className={`order-action-btn inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] border border-[#BAE6FD] bg-[#F0F9FF] font-semibold leading-none text-[#0369A1] hover:bg-[#E0F2FE] ${
+                                fitToWindow
+                                  ? ""
+                                  : "h-[28px] px-3 text-[11px]"
+                              }`}
+                            >
+                              <RestoreIcon />
+                              Recover
+                            </button>
+                            {isDeletedOrderStatus(order.orderStatus) &&
+                            order.deleteReason ? (
+                              <DeletedReasonPreview
+                                text={order.deleteReason}
+                              />
+                            ) : null}
+                          </>
                         ) : null}
                       </div>
                     </td>
@@ -2723,15 +2733,11 @@ export default function OrdersTable({
         }}
       />
 
-      <ConfirmModal
+      <OrderDeleteModal
         open={deleteModal.open}
-        title="Delete Order"
-        message="Are you sure you want to delete this order?"
-        variant="danger"
-        confirmLabel={actionLoading ? "Deleting..." : "Confirm"}
-        cancelLabel="Cancel"
-        confirmDisabled={actionLoading}
-        onCancel={closeDeleteModal}
+        order={deleteModal.order}
+        loading={actionLoading}
+        onClose={closeDeleteModal}
         onConfirm={handleConfirmDelete}
       />
 
@@ -3881,6 +3887,23 @@ function RecordsCaptionPreview({ text }) {
         {normalizedText}
       </p>
       <div className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden min-w-[320px] max-w-[480px] rounded-[8px] border border-[#E2E8F0] bg-white p-4 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/records-caption:block">
+        {normalizedText}
+      </div>
+    </div>
+  );
+}
+
+function DeletedReasonPreview({ text }) {
+  const normalizedText = normalizeRecordsCaption(text);
+  if (!normalizedText) return null;
+
+  return (
+    <div className="group/delete-reason relative max-w-[160px]">
+      <p className="line-clamp-2 whitespace-pre-line text-left text-[10px] leading-snug text-[#991B1B]">
+        <span className="font-semibold">Deleted reason:</span> {normalizedText}
+      </p>
+      <div className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden min-w-[240px] max-w-[360px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/delete-reason:block">
+        <span className="font-semibold text-[#991B1B]">Deleted reason:</span>{" "}
         {normalizedText}
       </div>
     </div>

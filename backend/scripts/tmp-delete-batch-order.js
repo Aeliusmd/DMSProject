@@ -9,7 +9,11 @@ async function main() {
   const actorId = 9;
   const actorName = "Chamodya";
 
-  const result = await orderService.deleteOrder(orderId, { actorId, actorName });
+  const result = await orderService.deleteOrder(orderId, {
+    reason: "Temporary batch cleanup",
+    actorId,
+    actorName,
+  });
   console.log(JSON.stringify(result, null, 2));
 }
 

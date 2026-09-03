@@ -176,10 +176,11 @@ export async function removeOrderSubpoena(orderId) {
   return data?.data?.order;
 }
 
-export async function deleteOrder(id) {
+export async function deleteOrder(id, { reason } = {}) {
   await request(`/orders/${id}`, {
     method: "DELETE",
     auth: true,
+    body: { reason },
   });
 }
 

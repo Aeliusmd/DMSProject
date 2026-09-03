@@ -94,6 +94,20 @@ function validateCancelOrder(body = {}) {
   return { valid: errors.length === 0, errors };
 }
 
+function validateDeleteOrder(body = {}) {
+  const errors = [];
+  const reason = trimToString(body.reason);
+
+  if (!reason) {
+    errors.push({ field: "reason", message: "Deletion reason is required" });
+  } else {
+    addMaxLengthError(errors, "reason", reason, FIELD_LIMITS.TEXT);
+    addNoHtmlMarkupError(errors, "reason", reason);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 function validateMailWithOptionalDate(body = {}, dateField = "deliveryDate") {
   const recipientValidation = validateMailRecipients(body);
   if (!recipientValidation.valid) {
@@ -246,6 +260,7 @@ function validateBatchScan(body = {}, file = null, userId = null) {
 module.exports = {
   validateMailRecipients,
   validateCancelOrder,
+  validateDeleteOrder,
   validateMailWithOptionalDate,
   validateMailWithSentDate,
   validateCopyServiceLetter,

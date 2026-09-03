@@ -19,6 +19,7 @@ const {
 } = require("../validators/orderValidator");
 const {
   validateCancelOrder,
+  validateDeleteOrder,
   validateMailWithOptionalDate,
   validateMailWithSentDate,
   validateCopyServiceLetter,
@@ -481,15 +482,17 @@ exports.updateFacility = asyncHandler(async (req, res) => {
 });
 
 exports.remove = asyncHandler(async (req, res) => {
+  throwIfInvalid(validateDeleteOrder(req.body));
   const order = await orderService.getOrderById(req.params.id);
   const result = await orderService.deleteOrder(req.params.id, {
+    reason: req.body.reason,
     actorId: req.user.id,
     actorName: req.user.name,
   });
 
   await logOrderActivity(req, order, {
     action: "delete",
-    details: `Deleted order ${order.orderNumber} for ${getOrderLogContext(order).companyName}`,
+    details: `Deleted order ${order.orderNumber} for ${getOrderLogContext(order).companyName}: ${req.body.reason}`,
   });
 
   await notificationService.notifyOrderStatusChange({

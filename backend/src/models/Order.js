@@ -87,6 +87,7 @@ function appendOrderSearchFilter(conditions, params, rawSearch) {
     "o.contact2_email LIKE :searchPrefix",
     "o.injury_type LIKE :searchPrefix",
     "o.cancel_reason LIKE :searchPrefix",
+    "o.delete_reason LIKE :searchPrefix",
     "o.specific_doctor LIKE :searchPrefix",
     "o.specific_record LIKE :searchPrefix",
     "CAST(o.status AS CHAR) LIKE :searchPrefix",
@@ -1530,7 +1531,7 @@ class Order {
     return rows[0] || null;
   }
 
-  static async deleteById(id, { deletedBy } = {}) {
+  static async deleteById(id, { deletedBy, reason } = {}) {
     const pool = getPool();
 
     const [result] = await pool.execute(
@@ -1539,9 +1540,10 @@ class Order {
            status = 'Deleted',
            deleted_at = NOW(),
            deleted_by = :deletedBy,
+           delete_reason = :reason,
            updated_at = NOW()
        WHERE id = :id AND ${ACTIVE_ORDER}`,
-      { id, deletedBy: deletedBy || null }
+      { id, deletedBy: deletedBy || null, reason: reason || null }
     );
 
     return result.affectedRows > 0;
@@ -1577,6 +1579,7 @@ class Order {
            cancelled_by = NULL,
            deleted_at = NULL,
            deleted_by = NULL,
+           delete_reason = NULL,
            updated_at = NOW()
        WHERE id = :id
          AND status IN ('Cancelled', 'Deleted')`,
