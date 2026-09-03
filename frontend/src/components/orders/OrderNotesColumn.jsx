@@ -11,6 +11,7 @@ import { ReminderBadge } from "@/components/orders/OrderNotesListModal";
 
 export default function OrderNotesColumn({
   order,
+  openUpward = false,
   onOpenNotes,
   onOpenAddNote,
 }) {
@@ -65,7 +66,11 @@ export default function OrderNotesColumn({
         </button>
       </div>
 
-      <div className="pointer-events-none absolute left-0 top-full z-30 mt-2 hidden w-[300px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 shadow-lg group-hover/notes:block">
+      <div
+        className={`pointer-events-none absolute left-0 z-30 hidden w-[300px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 shadow-lg group-hover/notes:block ${
+          openUpward ? "bottom-full mb-2" : "top-full mt-2"
+        }`}
+      >
         <p className="mb-2 text-[10px] font-semibold text-[#64748B]">
           Recent Notes
         </p>

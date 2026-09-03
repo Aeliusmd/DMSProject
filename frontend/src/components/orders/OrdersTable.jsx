@@ -1776,7 +1776,7 @@ export default function OrdersTable({
                   </td>
                 </tr>
               ) : (
-                currentOrders.map((order) => {
+                currentOrders.map((order, orderIndex) => {
                   const incompleteRequired = orderHasIncompleteRequiredFields(order);
                   const personalIncompletePrefix = isPersonalOrderIncompleteDisplay(
                     order,
@@ -1786,6 +1786,8 @@ export default function OrdersTable({
                     order.missingRequiredFields
                   );
                   const idColumnDate = getOrderIdColumnDate(order);
+                  const openHoverUpward =
+                    orderIndex === currentOrders.length - 1;
 
                   return (
                   <tr
@@ -1960,6 +1962,7 @@ export default function OrdersTable({
                     <td className="px-4 py-5 align-top">
                       <OrderNotesColumn
                         order={order}
+                        openUpward={openHoverUpward}
                         onOpenNotes={setSelectedNoteListOrder}
                         onOpenAddNote={setSelectedAddNoteOrder}
                       />
@@ -2279,6 +2282,7 @@ export default function OrdersTable({
                           cnrMemo={order.cnrMemo}
                           cnrDelivery={order.cnrDelivery}
                           cnrDateSent={order.cnrDateSent}
+                          openUpward={openHoverUpward}
                           onPrintedSentOutClick={() =>
                             openCnrTextModal(
                               setCnrTextModal,
@@ -2433,6 +2437,7 @@ export default function OrdersTable({
                             order.deleteReason ? (
                               <DeletedReasonPreview
                                 text={order.deleteReason}
+                                openUpward={openHoverUpward}
                               />
                             ) : null}
                           </>
@@ -3877,7 +3882,7 @@ function normalizeRecordsCaption(text) {
     .join("\n");
 }
 
-function RecordsCaptionPreview({ text }) {
+function RecordsCaptionPreview({ text, openUpward = false }) {
   const normalizedText = normalizeRecordsCaption(text);
   if (!normalizedText) return null;
 
@@ -3886,14 +3891,18 @@ function RecordsCaptionPreview({ text }) {
       <p className="line-clamp-2 whitespace-pre-line text-left text-[#334155]">
         {normalizedText}
       </p>
-      <div className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden min-w-[320px] max-w-[480px] rounded-[8px] border border-[#E2E8F0] bg-white p-4 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/records-caption:block">
+      <div
+        className={`pointer-events-none absolute left-0 z-30 hidden min-w-[320px] max-w-[480px] rounded-[8px] border border-[#E2E8F0] bg-white p-4 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/records-caption:block ${
+          openUpward ? "bottom-full mb-1.5" : "top-full mt-1.5"
+        }`}
+      >
         {normalizedText}
       </div>
     </div>
   );
 }
 
-function DeletedReasonPreview({ text }) {
+function DeletedReasonPreview({ text, openUpward = false }) {
   const normalizedText = normalizeRecordsCaption(text);
   if (!normalizedText) return null;
 
@@ -3902,7 +3911,11 @@ function DeletedReasonPreview({ text }) {
       <p className="line-clamp-2 whitespace-pre-line text-left text-[10px] leading-snug text-[#991B1B]">
         <span className="font-semibold">Deleted reason:</span> {normalizedText}
       </p>
-      <div className="pointer-events-none absolute right-0 top-full z-30 mt-1.5 hidden min-w-[240px] max-w-[360px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/delete-reason:block">
+      <div
+        className={`pointer-events-none absolute right-0 z-30 hidden min-w-[240px] max-w-[360px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/delete-reason:block ${
+          openUpward ? "bottom-full mb-1.5" : "top-full mt-1.5"
+        }`}
+      >
         <span className="font-semibold text-[#991B1B]">Deleted reason:</span>{" "}
         {normalizedText}
       </div>
@@ -3918,6 +3931,7 @@ function RecordsBlock({
   cnrMemo = false,
   cnrDelivery = "",
   cnrDateSent = "",
+  openUpward = false,
   onCnrNoteClick,
   onPrintedSentOutClick,
 }) {
@@ -3950,7 +3964,9 @@ function RecordsBlock({
             <p className="font-medium text-[#334155]">{dateRange}</p>
           ) : null}
 
-          {caption ? <RecordsCaptionPreview text={caption} /> : null}
+          {caption ? (
+            <RecordsCaptionPreview text={caption} openUpward={openUpward} />
+          ) : null}
         </>
       )}
 
