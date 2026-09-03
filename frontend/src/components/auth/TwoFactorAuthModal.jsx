@@ -280,17 +280,23 @@ export default function TwoFactorAuthModal({
           )}
 
           {showTrustDevice ? (
-          <label className="mt-[22px] flex items-center justify-center gap-[8px] text-[13px] text-[#475569]">
+          <div className="mt-[22px] flex items-center justify-center gap-[8px] text-[13px] text-[#475569]">
             <input
               type="checkbox"
               checked={trustDevice}
               disabled={isVerifying}
               onChange={(e) => setTrustDevice(e.target.checked)}
-              className="h-[13px] w-[13px] rounded border-[#CBD5E1] accent-[#0097B2]"
+              aria-label={
+                trustDeviceLabel ||
+                `Trust this device for ${trustedDeviceDays} days`
+              }
+              className="h-[13px] w-[13px] shrink-0 cursor-pointer rounded border-[#CBD5E1] accent-[#0097B2] disabled:cursor-not-allowed"
             />
-            {trustDeviceLabel ||
-              `Trust this device for ${trustedDeviceDays} days — skip the verification code on your next sign-ins from this browser`}
-          </label>
+            <span className="text-left">
+              {trustDeviceLabel ||
+                `Trust this device for ${trustedDeviceDays} days — skip the verification code on your next sign-ins from this browser`}
+            </span>
+          </div>
           ) : null}
 
           <div className="mt-[20px] text-[13px]">
