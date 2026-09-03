@@ -3902,7 +3902,7 @@ function DeletedReasonPreview({ text }) {
       <p className="line-clamp-2 whitespace-pre-line text-left text-[10px] leading-snug text-[#991B1B]">
         <span className="font-semibold">Deleted reason:</span> {normalizedText}
       </p>
-      <div className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden min-w-[240px] max-w-[360px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/delete-reason:block">
+      <div className="pointer-events-none absolute right-0 top-full z-30 mt-1.5 hidden min-w-[240px] max-w-[360px] rounded-[8px] border border-[#E2E8F0] bg-white p-3 text-left text-[11px] leading-[18px] whitespace-pre-line text-[#334155] shadow-xl group-hover/delete-reason:block">
         <span className="font-semibold text-[#991B1B]">Deleted reason:</span>{" "}
         {normalizedText}
       </div>
