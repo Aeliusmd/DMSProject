@@ -92,10 +92,11 @@ function resolveFacilityEmailForStorage(data = {}) {
 }
 
 function isFacilityProfileIncomplete(row = {}) {
-  if (!row) return false;
-  if (Number(row.is_auto_created)) return true;
-  if (isPlaceholderFacilityEmail(row.email)) return true;
-  return false;
+  if (!row) return true;
+  // Only facility name is required (batch-scan auto-create and manual create).
+  // Email and other contact fields are optional.
+  const name = `${row.facility_name || row.facilityName || row.facility || ""}`.trim();
+  return !name;
 }
 
 function mapFacilityRow(row) {

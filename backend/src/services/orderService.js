@@ -1372,6 +1372,7 @@ function mapOrderDetail(
     facilityName: displayFacilityName,
     facilityIsAutoCreated: Boolean(Number(row.facility_is_auto_created)),
     facilityProfileIncomplete: isFacilityProfileIncomplete({
+      facility_name: displayFacilityName || row.facility_name || "",
       is_auto_created: row.facility_is_auto_created,
       email: row.facility_email,
     }),
