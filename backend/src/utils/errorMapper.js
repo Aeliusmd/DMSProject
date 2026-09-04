@@ -71,7 +71,10 @@ function mapFileSystemError(error) {
   if (!code) return null;
 
   if (code === "ENOENT") {
-    return new ApiError(404, "The requested file was not found.");
+    return new ApiError(
+      404,
+      "This file could not be opened. It may have been moved or deleted."
+    );
   }
 
   if (code === "EACCES" || code === "EPERM") {

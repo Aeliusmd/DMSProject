@@ -7,6 +7,7 @@ import {
   downloadFacilityDocument,
   getFacilityDocumentPreviewBlob,
 } from "@/lib/facilities/facilityApi";
+import { getDocumentOpenErrorMessage } from "@/lib/utils/documentOpenErrors";
 
 const PREVIEWABLE_TYPES = new Set(["PDF", "JPG", "JPEG", "PNG", "GIF", "WEBP"]);
 
@@ -50,7 +51,7 @@ export default function DocumentPreviewModal({
         setPreviewUrl(objectUrl);
       } catch (err) {
         if (active) {
-          setError(err.message || "Failed to load document preview");
+          setError(getDocumentOpenErrorMessage(err, "document"));
         }
       } finally {
         if (active) {
@@ -105,7 +106,7 @@ export default function DocumentPreviewModal({
         selectedDocument.documentName || selectedDocument.name
       );
     } catch (err) {
-      setError(err.message || "Failed to download document");
+      setError(getDocumentOpenErrorMessage(err, "document"));
     } finally {
       setDownloading(false);
     }
@@ -148,15 +149,31 @@ export default function DocumentPreviewModal({
         </div>
 
         <div className="min-h-[320px] flex-1 overflow-auto bg-[#F8FAFC] p-4">
-          {error && (
+          {error && previewUrl ? (
             <div className="mb-3 rounded-[7px] border border-red-200 bg-red-50 px-3 py-3 text-[12px] font-semibold text-red-600">
               {error}
             </div>
-          )}
+          ) : null}
 
           {loading && (
             <div className="flex h-[360px] items-center justify-center text-[13px] text-[#64748B]">
               Loading preview...
+            </div>
+          )}
+
+          {!loading && error && !previewUrl && (
+            <div className="flex h-[360px] flex-col items-center justify-center gap-3 text-center">
+              <p className="max-w-[420px] text-[13px] font-medium text-red-600">
+                {error}
+              </p>
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={downloading}
+                className="inline-flex h-[34px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-4 text-[12px] font-semibold text-[#334155] hover:bg-[#F8FAFC] disabled:opacity-60"
+              >
+                Try Download Instead
+              </button>
             </div>
           )}
 
@@ -178,7 +195,7 @@ export default function DocumentPreviewModal({
             </div>
           )}
 
-          {!loading && !canPreview && (
+          {!loading && !error && !canPreview && (
             <div className="flex h-[360px] flex-col items-center justify-center gap-3 text-center">
               <p className="text-[13px] text-[#64748B]">
                 Preview is not available for this file type.

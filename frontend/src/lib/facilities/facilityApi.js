@@ -1,4 +1,9 @@
 import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
+import {
+  assertOpenableDocumentBlob,
+  getDocumentOpenErrorMessage,
+  readFileResponseErrorMessage,
+} from "@/lib/utils/documentOpenErrors";
 
 export { ApiRequestError };
 
@@ -205,14 +210,21 @@ async function fetchFacilityDocumentBlob(
   );
 
   if (!response.ok) {
-    const data = await response.json().catch(() => null);
+    const rawMessage = await readFileResponseErrorMessage(
+      response,
+      "Unable to open this document."
+    );
     throw new ApiRequestError(
-      data?.message || "Failed to fetch document",
+      getDocumentOpenErrorMessage(
+        new ApiRequestError(rawMessage, response.status),
+        "document"
+      ),
       response.status
     );
   }
 
-  return response.blob();
+  const blob = await response.blob();
+  return assertOpenableDocumentBlob(blob, "document");
 }
 
 export async function getFacilityDocumentPreviewBlob(facilityId, documentId) {

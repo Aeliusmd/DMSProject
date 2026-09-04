@@ -97,7 +97,10 @@ async function getDocumentFile(facilityId, documentId) {
   }
 
   if (!document.storage_path || !fs.existsSync(document.storage_path)) {
-    throw new ApiError(404, "Document file not found on server");
+    throw new ApiError(
+      404,
+      "This document could not be opened. The file may have been moved or deleted."
+    );
   }
 
   return document;

@@ -232,7 +232,7 @@ function validateMedicalRecordTypeQuery(query = {}) {
   return { valid: errors.length === 0, errors };
 }
 
-function validateBatchScan(body = {}, file = null, userId = null) {
+function validateSubpoenaUploadFile(body = {}, file = null, userId = null) {
   const errors = [];
 
   if (!file) {
@@ -247,6 +247,12 @@ function validateBatchScan(body = {}, file = null, userId = null) {
     });
   }
 
+  return { valid: errors.length === 0, errors };
+}
+
+function validateBatchScan(body = {}, file = null, userId = null) {
+  const { errors } = validateSubpoenaUploadFile(body, file, userId);
+
   if (!isValidPositiveIntId(body.chosenFacilityId)) {
     errors.push({
       field: "chosenFacilityId",
@@ -255,6 +261,11 @@ function validateBatchScan(body = {}, file = null, userId = null) {
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+function validateSingleSubpoenaUpload(body = {}, file = null, userId = null) {
+  // New Order / single subpoena upload: no batch-scan facility dropdown.
+  return validateSubpoenaUploadFile(body, file, userId);
 }
 
 module.exports = {
@@ -270,5 +281,6 @@ module.exports = {
   validateRemoveMedicalRecords,
   validateMedicalRecordTypeQuery,
   validateBatchScan,
+  validateSingleSubpoenaUpload,
   VALID_RECORD_TYPES,
 };

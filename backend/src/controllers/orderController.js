@@ -29,6 +29,7 @@ const {
   validateRemoveMedicalRecords,
   validateMedicalRecordTypeQuery,
   validateBatchScan,
+  validateSingleSubpoenaUpload,
 } = require("../validators/orderActionValidator");
 const {
   validateOrderNotesQuery,
@@ -217,7 +218,9 @@ exports.batchScan = asyncHandler(async (req, res) => {
 });
 
 exports.uploadSubpoena = asyncHandler(async (req, res) => {
-  throwIfInvalid(validateBatchScan(req.body, req.file, req.user?.id));
+  throwIfInvalid(
+    validateSingleSubpoenaUpload(req.body, req.file, req.user?.id)
+  );
   const result = await batchScanService.processSingleSubpoena(
     req.file,
     req.user?.id

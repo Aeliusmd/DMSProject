@@ -3368,13 +3368,16 @@ async function getOrderSubpoenaFile(orderId) {
   }
 
   if (!order.subpoena_storage_path) {
-    throw new ApiError(404, "Order subpoena not found");
+    throw new ApiError(404, "This order does not have a subpoena PDF to open.");
   }
 
   const absolutePath = resolveOrderSubpoenaAbsolutePath(order.subpoena_storage_path);
 
   if (!absolutePath || !fs.existsSync(absolutePath)) {
-    throw new ApiError(404, "Subpoena PDF file not found ");
+    throw new ApiError(
+      404,
+      "This subpoena PDF could not be opened. The file may have been moved or deleted."
+    );
   }
 
   return {
@@ -3540,7 +3543,10 @@ async function removeMedicalRecords(orderId, _actorId, { recordType = null } = {
     : orderRecords.filter((record) => record.storage_path);
 
   if (!targets.length) {
-    throw new ApiError(404, "Records file not found for this order");
+    throw new ApiError(
+      404,
+      "This records PDF could not be opened. No file is available for this order."
+    );
   }
 
   const pool = getPool();
@@ -3615,13 +3621,19 @@ async function getOrderMedicalRecordsFile(
   }
 
   if (!targetRecord?.storage_path) {
-    throw new ApiError(404, "Records file not found for this order");
+    throw new ApiError(
+      404,
+      "This records PDF could not be opened. No file is available for this order."
+    );
   }
 
   const absolutePath = resolveOrderSubpoenaAbsolutePath(targetRecord.storage_path);
 
   if (!absolutePath || !fs.existsSync(absolutePath)) {
-    throw new ApiError(404, "Records PDF file not found");
+    throw new ApiError(
+      404,
+      "This records PDF could not be opened. The file may have been moved or deleted."
+    );
   }
 
   const orderRecords = await OrderRecord.findByOrderId(orderId);

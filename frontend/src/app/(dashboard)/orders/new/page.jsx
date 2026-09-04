@@ -66,6 +66,7 @@ import { buildFormFromExtract } from "@/lib/orders/extractionFormUtils";
 import { syncPaymentDueFields, validateOrderPaymentAmounts } from "@/lib/orders/paymentUtils";
 import { API_BASE_URL } from "@/config/api";
 import { applyApiFieldErrors, getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { getDocumentOpenErrorMessage } from "@/lib/utils/documentOpenErrors";
 
 const AUTO_PENDING_ORDER_PREFIX = "AUTO-PENDING-";
 
@@ -399,6 +400,8 @@ function NewOrderPageContent() {
   const [doctorCreated, setDoctorCreated] = useState(false);
   const [resolvingDoctor, setResolvingDoctor] = useState(false);
   const [editSubpoenaSrc, setEditSubpoenaSrc] = useState("");
+  const [editSubpoenaLoading, setEditSubpoenaLoading] = useState(false);
+  const [editSubpoenaError, setEditSubpoenaError] = useState("");
   const [subpoenaRemoveModal, setSubpoenaRemoveModal] = useState({
     open: false,
     removing: false,
@@ -548,8 +551,9 @@ function NewOrderPageContent() {
           extract?.fileName || "subpoena.pdf",
           { type: "application/pdf" }
         );
-      } catch {
+      } catch (err) {
         // Prefill can still proceed without the PDF attachment.
+        setExtractError(getDocumentOpenErrorMessage(err, "subpoena PDF"));
       }
     }
 
@@ -1057,8 +1061,11 @@ function NewOrderPageContent() {
                 extract.fileName || "subpoena.pdf",
                 { type: "application/pdf" }
               );
-            } catch {
+            } catch (err) {
               // Prefill can still proceed without the PDF attachment.
+              if (active) {
+                setExtractError(getDocumentOpenErrorMessage(err, "subpoena PDF"));
+              }
             }
 
             const { formUpdates, meta } = buildFormFromExtract(
@@ -1206,16 +1213,23 @@ function NewOrderPageContent() {
   useEffect(() => {
     if (!isEditMode || !orderId) {
       setEditSubpoenaSrc("");
+      setEditSubpoenaError("");
+      setEditSubpoenaLoading(false);
       return undefined;
     }
 
     if (!formData.subpoenaStoragePath || formData.subpoenaFile) {
       setEditSubpoenaSrc("");
+      setEditSubpoenaError("");
+      setEditSubpoenaLoading(false);
       return undefined;
     }
 
     let active = true;
     let objectUrl = "";
+
+    setEditSubpoenaLoading(true);
+    setEditSubpoenaError("");
 
     (async () => {
       try {
@@ -1223,9 +1237,17 @@ function NewOrderPageContent() {
         if (!active) return;
         objectUrl = URL.createObjectURL(blob);
         setEditSubpoenaSrc(objectUrl);
-      } catch {
+        setEditSubpoenaError("");
+      } catch (err) {
         if (active) {
-          setEditSubpoenaSrc(formData.subpoenaUrl ? toFileUrl(formData.subpoenaUrl) : "");
+          setEditSubpoenaSrc("");
+          setEditSubpoenaError(
+            getDocumentOpenErrorMessage(err, "subpoena PDF")
+          );
+        }
+      } finally {
+        if (active) {
+          setEditSubpoenaLoading(false);
         }
       }
     })();
@@ -1279,8 +1301,11 @@ function NewOrderPageContent() {
             extract.fileName || "subpoena.pdf",
             { type: "application/pdf" }
           );
-        } catch {
+        } catch (err) {
           // Prefill can still proceed without the PDF attachment.
+          if (active) {
+            setExtractError(getDocumentOpenErrorMessage(err, "subpoena PDF"));
+          }
         }
 
         const { formUpdates, meta } = buildFormFromExtract(
@@ -2111,6 +2136,7 @@ function NewOrderPageContent() {
 
     if (fieldName === "subpoenaFile" && file && !error) {
       setEditSubpoenaSrc("");
+      setEditSubpoenaError("");
       setExpandedPanels((prev) => ({
         ...prev,
         subpoena: true,
@@ -2150,7 +2176,10 @@ function NewOrderPageContent() {
         }));
       } catch (err) {
         setExtractError(
-          err.message || "Failed to extract subpoena. You can still fill the form manually."
+          getApiErrorMessage(
+            err,
+            "Failed to extract subpoena. You can still fill the form manually."
+          )
         );
       } finally {
         setExtractingSubpoena(false);
@@ -2174,6 +2203,7 @@ function NewOrderPageContent() {
     if (fieldName === "subpoenaFile") {
       setExtractError("");
       setEditSubpoenaSrc("");
+      setEditSubpoenaError("");
     }
   };
 
@@ -2189,6 +2219,7 @@ function NewOrderPageContent() {
       documentName: "",
     }));
     setEditSubpoenaSrc(order.subpoenaUrl ? toFileUrl(order.subpoenaUrl) : "");
+    setEditSubpoenaError("");
   };
 
   const clearSubpoenaExtractedFormFields = () => {
@@ -2218,6 +2249,7 @@ function NewOrderPageContent() {
     setDoctorCreated(false);
     setExtractError("");
     setEditSubpoenaSrc("");
+    setEditSubpoenaError("");
     clearCommittedFacility();
     setFileErrors((prev) => {
       const next = { ...prev };
@@ -2548,9 +2580,15 @@ function NewOrderPageContent() {
                 src={
                   formData.subpoenaFile
                     ? undefined
-                    : editSubpoenaSrc || toFileUrl(formData.subpoenaUrl)
+                    : editSubpoenaSrc
                 }
                 name={subpoenaFileName(formData.subpoenaStoragePath)}
+                loading={!formData.subpoenaFile && editSubpoenaLoading}
+                error={
+                  formData.subpoenaFile
+                    ? ""
+                    : editSubpoenaError
+                }
               />
             </CollapsibleOrderPanel>
           )}

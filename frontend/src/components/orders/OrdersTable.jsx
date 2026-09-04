@@ -47,6 +47,7 @@ import {
   restorePersonalOrderInProcess,
 } from "@/lib/orders/orderApi";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
+import { getDocumentOpenErrorMessage } from "@/lib/utils/documentOpenErrors";
 import { getTodayInputDate } from "@/lib/utils/dateUtils";
 import {
   cleanupPdfPrintFrame,
@@ -2826,7 +2827,7 @@ function OrderPdfPreviewModal({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(getApiErrorMessage(err, "Failed to load PDF."));
+          setError(getDocumentOpenErrorMessage(err, "PDF"));
         }
       })
       .finally(() => {
@@ -2921,7 +2922,9 @@ function OrderPdfPreviewModal({
           {loading ? (
             <PdfPreviewSkeleton label={loadingLabel} />
           ) : error ? (
-            <p className="text-[12px] font-medium text-red-500">{error}</p>
+            <div className="flex min-h-[240px] items-center justify-center rounded-[8px] border border-red-200 bg-[#FEF2F2] px-4 text-center text-[12px] font-medium text-red-600">
+              {error}
+            </div>
           ) : (
             <SubpoenaPreviewContent src={src} name={fileName} />
           )}

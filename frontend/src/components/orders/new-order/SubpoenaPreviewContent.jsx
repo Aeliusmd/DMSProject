@@ -9,7 +9,29 @@ const ZOOM_STEP = 0.1;
 const PDF_BASE_WIDTH = 520;
 const PDF_BASE_HEIGHT = 760;
 
-export default function SubpoenaPreviewContent({ file, src, name }) {
+export default function SubpoenaPreviewContent({
+  file,
+  src,
+  name,
+  error = "",
+  loading = false,
+}) {
+  if (loading) {
+    return (
+      <div className="flex h-full min-h-0 items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#64748B]">
+        Loading PDF preview...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex h-full min-h-0 items-center justify-center rounded-[8px] border border-red-200 bg-[#FEF2F2] px-4 text-center text-[12px] font-medium text-red-600">
+        {error}
+      </div>
+    );
+  }
+
   if (!file && !src) {
     return (
       <div className="flex h-full min-h-0 items-center justify-center rounded-[8px] border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-4 text-center text-[12px] text-[#94A3B8]">

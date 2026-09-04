@@ -1,4 +1,30 @@
 import { request, authFetch, ApiRequestError } from "@/lib/auth/authApi";
+import {
+  assertOpenableDocumentBlob,
+  getDocumentOpenErrorMessage,
+  readFileResponseErrorMessage,
+} from "@/lib/utils/documentOpenErrors";
+
+async function fetchPdfBlob(path, documentLabel) {
+  const response = await authFetch(path);
+
+  if (!response.ok) {
+    const rawMessage = await readFileResponseErrorMessage(
+      response,
+      `Unable to open this ${documentLabel}.`
+    );
+    throw new ApiRequestError(
+      getDocumentOpenErrorMessage(
+        new ApiRequestError(rawMessage, response.status),
+        documentLabel
+      ),
+      response.status
+    );
+  }
+
+  const blob = await response.blob();
+  return assertOpenableDocumentBlob(blob, documentLabel);
+}
 
 function buildOrdersQuery(filters = {}) {
   const params = new URLSearchParams();
@@ -417,39 +443,14 @@ export async function getUnprocessedSubpoenaById(extractId) {
 }
 
 export async function fetchUnprocessedSubpoenaPdf(extractId) {
-  const response = await authFetch(
-    `/orders/unprocessed/${extractId}/file`
+  return fetchPdfBlob(
+    `/orders/unprocessed/${extractId}/file`,
+    "subpoena PDF"
   );
-
-  if (!response.ok) {
-    let message = "Failed to load subpoena PDF";
-    try {
-      const body = await response.json();
-      message = body?.message || message;
-    } catch {
-      // ignore non-JSON error bodies
-    }
-    throw new ApiRequestError(message, response.status);
-  }
-
-  return response.blob();
 }
 
 export async function fetchOrderSubpoenaPdf(orderId) {
-  const response = await authFetch(`/orders/${orderId}/subpoena/file`);
-
-  if (!response.ok) {
-    let message = "Failed to load order subpoena PDF";
-    try {
-      const body = await response.json();
-      message = body?.message || message;
-    } catch {
-      // ignore non-JSON error bodies
-    }
-    throw new ApiRequestError(message, response.status);
-  }
-
-  return response.blob();
+  return fetchPdfBlob(`/orders/${orderId}/subpoena/file`, "subpoena PDF");
 }
 
 export async function fetchOrderMedicalRecordsPdf(
@@ -460,58 +461,21 @@ export async function fetchOrderMedicalRecordsPdf(
   if (recordType) params.set("recordType", recordType);
   if (recordId) params.set("recordId", String(recordId));
   const query = params.toString() ? `?${params.toString()}` : "";
-  const response = await authFetch(
-    `/orders/${orderId}/medical-records/file${query}`
+  return fetchPdfBlob(
+    `/orders/${orderId}/medical-records/file${query}`,
+    "medical records PDF"
   );
-
-  if (!response.ok) {
-    let message = "Failed to load medical records PDF";
-    try {
-      const body = await response.json();
-      message = body?.message || message;
-    } catch {
-      // ignore non-JSON error bodies
-    }
-    throw new ApiRequestError(message, response.status);
-  }
-
-  return response.blob();
 }
 
 export async function fetchOrderPrintInvoicePdf(orderId) {
-  const response = await authFetch(`/orders/${orderId}/invoice/print`);
-
-  if (!response.ok) {
-    let message = "Failed to load print invoice PDF";
-    try {
-      const body = await response.json();
-      message = body?.message || message;
-    } catch {
-      // ignore non-JSON error bodies
-    }
-    throw new ApiRequestError(message, response.status);
-  }
-
-  return response.blob();
+  return fetchPdfBlob(`/orders/${orderId}/invoice/print`, "invoice PDF");
 }
 
 export async function fetchOrderPrintXrayInvoicePdf(orderId) {
-  const response = await authFetch(
-    `/orders/${orderId}/invoice/xray/print`
+  return fetchPdfBlob(
+    `/orders/${orderId}/invoice/xray/print`,
+    "X-Ray invoice PDF"
   );
-
-  if (!response.ok) {
-    let message = "Failed to load print X-Ray invoice PDF";
-    try {
-      const body = await response.json();
-      message = body?.message || message;
-    } catch {
-      // ignore non-JSON error bodies
-    }
-    throw new ApiRequestError(message, response.status);
-  }
-
-  return response.blob();
 }
 
 export async function mailCompletedOrder(orderId, payload = {}) {

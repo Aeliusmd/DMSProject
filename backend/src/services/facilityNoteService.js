@@ -196,7 +196,10 @@ async function getAttachmentFile(facilityId, noteId, attachmentId) {
   }
 
   if (!attachment.storage_path || !fs.existsSync(attachment.storage_path)) {
-    throw new ApiError(404, "Attachment file not found on server");
+    throw new ApiError(
+      404,
+      "This attachment could not be opened. The file may have been moved or deleted."
+    );
   }
 
   return attachment;

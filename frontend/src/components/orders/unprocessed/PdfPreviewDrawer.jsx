@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchUnprocessedSubpoenaPdf } from "@/lib/orders/orderApi";
+import { getDocumentOpenErrorMessage } from "@/lib/utils/documentOpenErrors";
 
 const MIN_ZOOM = 0.7;
 const MAX_ZOOM = 1.6;
@@ -52,7 +53,7 @@ function PdfPreviewDrawerContent({ subpoena, onClose }) {
       })
       .catch((err) => {
         if (active) {
-          setPdfError(err.message || "Failed to load PDF preview.");
+          setPdfError(getDocumentOpenErrorMessage(err, "subpoena PDF"));
           setPdfUrl("");
         }
       })
@@ -230,7 +231,9 @@ function PdfPreviewDrawerContent({ subpoena, onClose }) {
           )}
 
           {!loadingPdf && pdfError && (
-            <p className="py-8 text-center text-[13px] text-red-500">{pdfError}</p>
+            <div className="mx-auto my-8 max-w-[420px] rounded-[8px] border border-red-200 bg-[#FEF2F2] px-4 py-6 text-center text-[13px] font-medium text-red-600">
+              {pdfError}
+            </div>
           )}
 
           {!loadingPdf && pdfUrl && (

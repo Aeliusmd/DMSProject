@@ -1290,7 +1290,7 @@ function getSubpoenaFile(orderId, companyUserId, { employeeId = null } = {}) {
   }).then(
     (order) => {
       if (!order?.subpoena_storage_path || order.status === "Draft") {
-        throw new ApiError(404, "Subpoena file not found");
+        throw new ApiError(404, "This order does not have a subpoena PDF to open.");
       }
 
       const absolutePath = fileStorage.resolveAbsolutePath(
@@ -1298,7 +1298,10 @@ function getSubpoenaFile(orderId, companyUserId, { employeeId = null } = {}) {
       );
 
       if (!fs.existsSync(absolutePath)) {
-        throw new ApiError(404, "Subpoena file not found on disk");
+        throw new ApiError(
+          404,
+          "This subpoena PDF could not be opened. The file may have been moved or deleted."
+        );
       }
 
       return {

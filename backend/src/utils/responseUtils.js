@@ -12,7 +12,12 @@ function sendFileResponse(res, filePath, options = {}) {
     res.sendFile(absolutePath, options, (error) => {
       if (error) {
         if (error.code === "ENOENT") {
-          reject(new ApiError(404, "The requested file was not found."));
+          reject(
+            new ApiError(
+              404,
+              "This file could not be opened. It may have been moved or deleted."
+            )
+          );
           return;
         }
 

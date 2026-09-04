@@ -220,14 +220,20 @@ async function processBatchScan(file, uploadedBy, options = {}) {
     throw new ApiError(400, "Invalid uploadedBy — employee not found or terminated");
   }
 
-  const chosenFacilityId = Number(options.chosenFacilityId);
-  if (!chosenFacilityId) {
+  // Facility dropdown applies to Batch Scan only. New Order single-subpoena
+  // upload resolves facility from extraction / the order form instead.
+  const requireChosenFacility = !options.singleSubpoena;
+  const chosenFacilityId = Number(options.chosenFacilityId) || null;
+  if (requireChosenFacility && !chosenFacilityId) {
     throw new ApiError(400, "Facility selection is required");
   }
 
-  const chosenFacility = await Facility.findById(chosenFacilityId);
-  if (!chosenFacility) {
-    throw new ApiError(400, "Selected facility does not exist");
+  let chosenFacility = null;
+  if (chosenFacilityId) {
+    chosenFacility = await Facility.findById(chosenFacilityId);
+    if (!chosenFacility) {
+      throw new ApiError(400, "Selected facility does not exist");
+    }
   }
 
   const originalName = file.originalname || "batch.pdf";
@@ -285,12 +291,14 @@ async function processBatchScan(file, uploadedBy, options = {}) {
     const orderHints = enrichOrderHintsFromRow(mapSchemaToOrderHints(schema), mapped);
     const { extractedFacilityId, extractedFacilityName } =
       await resolveExtractedFacilityMeta(orderHints);
-    const facilityMismatch = resolveFacilityMismatch(
-      chosenFacilityId,
-      extractedFacilityId,
-      chosenFacility.facility_name,
-      extractedFacilityName
-    );
+    const facilityMismatch = chosenFacilityId
+      ? resolveFacilityMismatch(
+          chosenFacilityId,
+          extractedFacilityId,
+          chosenFacility?.facility_name || "",
+          extractedFacilityName
+        )
+      : false;
 
     preparedChildren.push({
       reference_code: buildChildReference(documentId, subpoenaIndex),
@@ -408,7 +416,7 @@ async function processBatchScan(file, uploadedBy, options = {}) {
   return {
     documentId,
     chosenFacilityId,
-    chosenFacilityName: chosenFacility.facility_name,
+    chosenFacilityName: chosenFacility?.facility_name || null,
     parent: {
       id: dbResult.parentId,
       referenceCode: parentReference,
@@ -461,7 +469,10 @@ async function getUnprocessedExtractFile(extractId) {
 
   const absolutePath = fileStorage.resolveAbsolutePath(row.storage_path);
   if (!fs.existsSync(absolutePath)) {
-    throw new ApiError(404, "PDF file not found on disk");
+    throw new ApiError(
+      404,
+      "This subpoena PDF could not be opened. The file may have been moved or deleted."
+    );
   }
 
   return {
