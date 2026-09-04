@@ -916,12 +916,14 @@ export default function OrdersTable({
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
   const [cursorHistory, setCursorHistory] = useState([null]);
   const cursorHistoryRef = useRef([null]);
+  const [isFetching, setIsFetching] = useState(false);
 
   const fetchOrders = useCallback(
     async ({ silent = false, force = false } = {}) => {
       if (silent && !force && Date.now() - lastFetchAtRef.current < 5000) return;
 
       const requestId = (requestIdRef.current += 1);
+      setIsFetching(true);
 
       if (!silent) {
         setLoading(true);
@@ -948,6 +950,22 @@ export default function OrdersTable({
         let paginationMeta = null;
         if (useServerPagination) {
           const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+
+          // Keyset pages > 1 must send a cursor. Without one the API returns page 1
+          // again with hasMore=true, which looks like infinite pages of the same rows.
+          if (currentPage > 1 && cursor == null) {
+            if (requestId !== requestIdRef.current) return;
+            setCurrentPage(1);
+            cursorHistoryRef.current = [null];
+            setCursorHistory([null]);
+            setKeysetPagination({
+              pageSize: ORDERS_PER_PAGE,
+              hasMore: false,
+              nextCursor: null,
+            });
+            return;
+          }
+
           const result = await getOrdersPaginated({
             ...baseFilters,
             pagination: "keyset",
@@ -963,20 +981,23 @@ export default function OrdersTable({
         if (requestId !== requestIdRef.current) return;
         if (useServerPagination) {
           const hasMore = Boolean(paginationMeta?.hasMore);
-          const nextCursor = paginationMeta?.nextCursor ?? null;
+          const nextCursor =
+            hasMore && paginationMeta?.nextCursor != null
+              ? paginationMeta.nextCursor
+              : null;
           setKeysetPagination({
             pageSize: Number(paginationMeta?.pageSize) || ORDERS_PER_PAGE,
-            hasMore,
+            hasMore: Boolean(hasMore && nextCursor != null),
             nextCursor,
           });
           setCursorHistory((prev) => {
             const next = prev.slice(0, currentPage);
             if (hasMore && nextCursor != null) {
               next[currentPage] = nextCursor;
-            }
-            if (!hasMore) {
+            } else {
               next.length = currentPage;
             }
+            cursorHistoryRef.current = next;
             return next;
           });
         }
@@ -991,7 +1012,10 @@ export default function OrdersTable({
         }
       } finally {
         lastFetchAtRef.current = Date.now();
-        if (!silent && requestId === requestIdRef.current) setLoading(false);
+        if (requestId === requestIdRef.current) {
+          setIsFetching(false);
+          if (!silent) setLoading(false);
+        }
       }
     },
     [
@@ -1023,6 +1047,7 @@ export default function OrdersTable({
     if (filterKey === prevFilterKey) return;
     setPrevFilterKey(filterKey);
     setCurrentPage(1);
+    cursorHistoryRef.current = [null];
     setCursorHistory([null]);
     setKeysetPagination({
       pageSize: ORDERS_PER_PAGE,
@@ -1451,14 +1476,22 @@ export default function OrdersTable({
   ]);
 
   const totalPages = useServerPagination
-    ? Math.max(currentPage + (keysetPagination.hasMore ? 1 : 0), 1)
+    ? Math.max(
+        currentPage +
+          (!isFetching && keysetPagination.hasMore && keysetPagination.nextCursor
+            ? 1
+            : 0),
+        1
+      )
     : Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
 
   const safeCurrentPage = Math.min(currentPage, totalPages);
 
-  if (currentPage !== safeCurrentPage) {
-    setCurrentPage(safeCurrentPage);
-  }
+  useEffect(() => {
+    if (currentPage !== safeCurrentPage) {
+      setCurrentPage(safeCurrentPage);
+    }
+  }, [currentPage, safeCurrentPage]);
 
   const currentOrders = useMemo(() => {
     if (useServerPagination) {
@@ -1516,14 +1549,45 @@ export default function OrdersTable({
     });
   };
 
+  const paginationBusy = loading || isFetching;
+  const canGoPreviousPage = !paginationBusy && safeCurrentPage > 1;
+  const canGoNextPage = useServerPagination
+    ? !paginationBusy &&
+      keysetPagination.hasMore &&
+      keysetPagination.nextCursor != null &&
+      currentOrders.length > 0
+    : !paginationBusy &&
+      safeCurrentPage < totalPages &&
+      currentOrders.length > 0;
+
   const goToPreviousPage = () => {
-    if (safeCurrentPage <= 1) return;
+    if (!canGoPreviousPage) return;
     setCurrentPage((page) => Math.max(page - 1, 1));
     scrollToTableTop();
   };
 
   const goToNextPage = () => {
-    if (safeCurrentPage >= totalPages || currentOrders.length === 0) return;
+    if (!canGoNextPage) return;
+
+    if (useServerPagination) {
+      const nextCursor = keysetPagination.nextCursor;
+      // Lock next immediately so slow remote responses cannot be double-advanced.
+      setKeysetPagination((prev) => ({
+        ...prev,
+        hasMore: false,
+        nextCursor: null,
+      }));
+      setCursorHistory((prev) => {
+        const next = prev.slice(0, safeCurrentPage);
+        next[safeCurrentPage] = nextCursor;
+        cursorHistoryRef.current = next;
+        return next;
+      });
+      setCurrentPage(safeCurrentPage + 1);
+      scrollToTableTop();
+      return;
+    }
+
     setCurrentPage((page) => Math.min(page + 1, totalPages));
     scrollToTableTop();
   };
@@ -2466,7 +2530,7 @@ export default function OrdersTable({
             <button
               type="button"
               onClick={goToPreviousPage}
-              disabled={safeCurrentPage === 1}
+              disabled={!canGoPreviousPage}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ‹
@@ -2483,15 +2547,16 @@ export default function OrdersTable({
                     key={page}
                     type="button"
                     onClick={() => {
-                      if (page === safeCurrentPage) return;
+                      if (page === safeCurrentPage || paginationBusy) return;
                       setCurrentPage(page);
                       scrollToTableTop();
                     }}
+                    disabled={paginationBusy}
                     className={`flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] px-2 text-[12px] font-semibold ${
                       safeCurrentPage === page
                         ? "bg-[#111827] text-white"
                         : "border border-[#E2E8F0] bg-white text-[#334155] hover:bg-[#F8FAFC]"
-                    }`}
+                    } disabled:cursor-not-allowed disabled:opacity-40`}
                   >
                     {page}
                   </button>
@@ -2502,9 +2567,7 @@ export default function OrdersTable({
             <button
               type="button"
               onClick={goToNextPage}
-              disabled={
-                safeCurrentPage === totalPages || currentOrders.length === 0
-              }
+              disabled={!canGoNextPage}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ›

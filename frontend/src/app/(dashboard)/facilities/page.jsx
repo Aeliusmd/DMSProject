@@ -32,6 +32,7 @@ export default function FacilitiesPage() {
   const applySearch = () => {
     setAppliedSearch(searchInput.trim());
     setCurrentPage(1);
+    cursorHistoryRef.current = [null];
     setCursorHistory([null]);
     setPagination({
       pageSize: FACILITIES_PER_PAGE,
@@ -44,6 +45,7 @@ export default function FacilitiesPage() {
     setSearchInput("");
     setAppliedSearch("");
     setCurrentPage(1);
+    cursorHistoryRef.current = [null];
     setCursorHistory([null]);
     setPagination({
       pageSize: FACILITIES_PER_PAGE,
@@ -58,6 +60,19 @@ export default function FacilitiesPage() {
 
     try {
       const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+
+      if (currentPage > 1 && cursor == null) {
+        setCurrentPage(1);
+        cursorHistoryRef.current = [null];
+        setCursorHistory([null]);
+        setPagination({
+          pageSize: FACILITIES_PER_PAGE,
+          hasMore: false,
+          nextCursor: null,
+        });
+        return;
+      }
+
       const result = await getFacilitiesPaginated({
         search: appliedSearch,
         pagination: "keyset",
@@ -65,22 +80,25 @@ export default function FacilitiesPage() {
         pageSize: FACILITIES_PER_PAGE,
       });
       const hasMore = Boolean(result.pagination?.hasMore);
-      const nextCursor = result.pagination?.nextCursor ?? null;
+      const nextCursor =
+        hasMore && result.pagination?.nextCursor != null
+          ? result.pagination.nextCursor
+          : null;
 
       setFacilities(result.facilities || []);
       setPagination({
         pageSize: Number(result.pagination?.pageSize) || FACILITIES_PER_PAGE,
-        hasMore,
+        hasMore: Boolean(hasMore && nextCursor != null),
         nextCursor,
       });
       setCursorHistory((prev) => {
         const next = prev.slice(0, currentPage);
         if (hasMore && nextCursor != null) {
           next[currentPage] = nextCursor;
-        }
-        if (!hasMore) {
+        } else {
           next.length = currentPage;
         }
+        cursorHistoryRef.current = next;
         return next;
       });
     } catch (err) {
@@ -110,11 +128,39 @@ export default function FacilitiesPage() {
     }
   };
 
-  const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
   const startRecord = facilities.length
     ? (currentPage - 1) * FACILITIES_PER_PAGE + 1
     : 0;
   const endRecord = startRecord + facilities.length - (facilities.length ? 1 : 0);
+
+  const canGoPreviousPage = !loading && currentPage > 1;
+  const canGoNextPage =
+    !loading &&
+    pagination.hasMore &&
+    pagination.nextCursor != null &&
+    facilities.length > 0;
+
+  const goToPreviousPage = () => {
+    if (!canGoPreviousPage) return;
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    if (!canGoNextPage) return;
+    const nextCursor = pagination.nextCursor;
+    setPagination((prev) => ({
+      ...prev,
+      hasMore: false,
+      nextCursor: null,
+    }));
+    setCursorHistory((prev) => {
+      const next = prev.slice(0, currentPage);
+      next[currentPage] = nextCursor;
+      cursorHistoryRef.current = next;
+      return next;
+    });
+    setCurrentPage(currentPage + 1);
+  };
 
   return (
     <DashboardShell>
@@ -187,8 +233,8 @@ export default function FacilitiesPage() {
           <div className="flex items-center justify-end gap-1">
             <button
               type="button"
-              onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
-              disabled={currentPage === 1}
+              onClick={goToPreviousPage}
+              disabled={!canGoPreviousPage}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ‹
@@ -200,10 +246,8 @@ export default function FacilitiesPage() {
 
             <button
               type="button"
-              onClick={() =>
-                setCurrentPage((page) => Math.min(page + 1, totalPages))
-              }
-              disabled={currentPage >= totalPages || facilities.length === 0}
+              onClick={goToNextPage}
+              disabled={!canGoNextPage}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ›

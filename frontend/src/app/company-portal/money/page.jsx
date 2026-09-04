@@ -77,6 +77,7 @@ function MoneyManagementClient() {
           if (pageMeta.hasMore && pageMeta.nextCursor) {
             next[page] = pageMeta.nextCursor;
           }
+          cursorHistoryRef.current = next;
           return next;
         });
       } catch (err) {
@@ -230,11 +231,20 @@ function MoneyManagementClient() {
   };
 
   const goNext = () => {
-    if (!pagination.hasMore || txLoading) return;
+    if (!pagination.hasMore || txLoading || pagination.nextCursor == null) return;
     const nextPage = currentPage + 1;
-    const cursor =
-      pagination.nextCursor || cursorHistoryRef.current[currentPage] || null;
-    if (!cursor) return;
+    const cursor = pagination.nextCursor;
+    setPagination((prev) => ({
+      ...prev,
+      hasMore: false,
+      nextCursor: null,
+    }));
+    setCursorHistory((prev) => {
+      const next = prev.slice(0, currentPage);
+      next[currentPage] = cursor;
+      cursorHistoryRef.current = next;
+      return next;
+    });
     loadTransactionsPage({ page: nextPage, cursor });
   };
 
@@ -437,7 +447,11 @@ function MoneyManagementClient() {
               <button
                 type="button"
                 onClick={goNext}
-                disabled={!pagination.hasMore || txLoading}
+                disabled={
+                  !pagination.hasMore ||
+                  pagination.nextCursor == null ||
+                  txLoading
+                }
                 className="inline-flex h-8 items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Next

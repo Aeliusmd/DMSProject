@@ -52,6 +52,11 @@ export default function DashboardFinancialSummary() {
         color: "text-[#EA580C]",
       },
       {
+        label: "Write Off",
+        value: financial.writeOffDisplay,
+        color: "text-[#7C3AED]",
+      },
+      {
         label: "Overdue Invoices",
         value: String(financial.overdueInvoices ?? 0),
         color: "text-red-500",
@@ -99,6 +104,7 @@ const PLACEHOLDER_ITEMS = [
   { label: "Total Invoiced", color: "text-[#111827]" },
   { label: "Total Paid", color: "text-[#059669]" },
   { label: "Outstanding", color: "text-[#EA580C]" },
+  { label: "Write Off", color: "text-[#7C3AED]" },
   { label: "Overdue Invoices", color: "text-red-500" },
   { label: "Needs Resend", color: "text-[#EA580C]" },
 ];

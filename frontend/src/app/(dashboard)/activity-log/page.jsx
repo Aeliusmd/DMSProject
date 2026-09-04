@@ -150,10 +150,10 @@ export default function ActivityLogPage() {
       setPagination({
         pageSize:
           Number(result.pagination?.pageSize) || ACTIVITY_LOGS_PER_PAGE,
-        hasMore,
-        nextCursor,
+        hasMore: Boolean(hasMore && nextCursor != null),
+        nextCursor: hasMore ? nextCursor : null,
       });
-      nextCursorRef.current = nextCursor;
+      nextCursorRef.current = hasMore ? nextCursor : null;
       setCursorHistory((prev) => {
         const next = prev.slice(0, currentPage);
         if (hasMore && nextCursor != null) {
@@ -387,17 +387,30 @@ export default function ActivityLogPage() {
                       if (
                         logsLoading ||
                         !pagination.hasMore ||
-                        safeCurrentPage >= totalPages ||
+                        pagination.nextCursor == null ||
                         activityLogs.length === 0
                       ) {
                         return;
                       }
-                      setCurrentPage((page) => Math.min(page + 1, totalPages));
+                      const nextCursor = pagination.nextCursor;
+                      setPagination((prev) => ({
+                        ...prev,
+                        hasMore: false,
+                        nextCursor: null,
+                      }));
+                      setCursorHistory((prev) => {
+                        const next = prev.slice(0, safeCurrentPage);
+                        next[safeCurrentPage] = nextCursor;
+                        cursorHistoryRef.current = next;
+                        return next;
+                      });
+                      nextCursorRef.current = nextCursor;
+                      setCurrentPage(safeCurrentPage + 1);
                     }}
                     disabled={
                       logsLoading ||
                       !pagination.hasMore ||
-                      safeCurrentPage >= totalPages ||
+                      pagination.nextCursor == null ||
                       activityLogs.length === 0
                     }
                     className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"

@@ -45,7 +45,7 @@ export default function CompanyPortalTrackEntryPage() {
       const data = response?.data || {};
       const pagination = data.pagination || {};
       setOrders((data.orders || []).map(mapDashboardOrderRow));
-      setHasMore(Boolean(pagination.hasMore));
+      setHasMore(Boolean(pagination.hasMore && pagination.nextCursor));
       setNextCursor(pagination.nextCursor || null);
       setCurrentPage(page);
       setCursorHistory((prev) => {
@@ -159,7 +159,15 @@ export default function CompanyPortalTrackEntryPage() {
           }}
           onNextPage={() => {
             if (!hasMore || ordersLoading || !nextCursor) return;
-            loadOrdersPage(currentPage + 1, nextCursor);
+            const cursor = nextCursor;
+            setHasMore(false);
+            setNextCursor(null);
+            setCursorHistory((prev) => {
+              const next = prev.slice(0, currentPage);
+              next[currentPage] = cursor;
+              return next;
+            });
+            loadOrdersPage(currentPage + 1, cursor);
           }}
         />
       </div>

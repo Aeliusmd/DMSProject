@@ -24,16 +24,27 @@ async function getStandardInvoiceFinancials(pool) {
 
   const [rows] = await pool.execute(
     `SELECT
-      COALESCE(SUM(${invoiceTotalSql}), 0) AS total_invoiced,
       COALESCE(SUM(
-        GREATEST(
-          COALESCE(i.amount_paid, 0),
-          COALESCE(payments.paid_total, 0)
-        )
+        CASE
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+          THEN ${invoiceTotalSql}
+          ELSE 0
+        END
+      ), 0) AS total_invoiced,
+      COALESCE(SUM(
+        CASE
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+          THEN GREATEST(
+            COALESCE(i.amount_paid, 0),
+            COALESCE(payments.paid_total, 0)
+          )
+          ELSE 0
+        END
       ), 0) AS total_paid,
       COALESCE(SUM(
         CASE
-          WHEN i.status NOT IN ('Paid', 'Written Off')
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+            AND i.status NOT IN ('Paid', 'Written Off')
             AND GREATEST(
               0,
               (${invoiceTotalSql})
@@ -49,9 +60,17 @@ async function getStandardInvoiceFinancials(pool) {
           ELSE 0
         END
       ), 0) AS outstanding_total,
+      COALESCE(SUM(
+        CASE
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+          THEN COALESCE(i.writeoff_amount, 0)
+          ELSE 0
+        END
+      ), 0) AS writeoff_total,
       SUM(
         CASE
-          WHEN i.status NOT IN ('Paid', 'Written Off')
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+            AND i.status NOT IN ('Paid', 'Written Off')
             AND GREATEST(
               0,
               (${invoiceTotalSql})
@@ -68,7 +87,8 @@ async function getStandardInvoiceFinancials(pool) {
       ) AS overdue_count,
       SUM(
         CASE
-          WHEN i.status <> 'Paid'
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+            AND i.status <> 'Paid'
             AND GREATEST(
               0,
               (${invoiceTotalSql})
@@ -84,6 +104,7 @@ async function getStandardInvoiceFinancials(pool) {
         END
       ) AS needs_resend_count
     FROM invoices i
+    INNER JOIN orders o ON o.id = i.order_id
     LEFT JOIN (
       SELECT order_id, SUM(amount) AS paid_total
       FROM order_payments
@@ -99,29 +120,56 @@ async function getStandardInvoiceFinancials(pool) {
 async function getXrayInvoiceFinancials(pool) {
   const [rows] = await pool.execute(
     `SELECT
-      COALESCE(SUM(x.payment), 0) AS total_invoiced,
       COALESCE(SUM(
-        GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+        CASE
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+          THEN x.payment
+          ELSE 0
+        END
+      ), 0) AS total_invoiced,
+      COALESCE(SUM(
+        CASE
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+          THEN GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+          ELSE 0
+        END
       ), 0) AS total_paid,
       COALESCE(SUM(
         CASE
-          WHEN GREATEST(
-            0,
-            x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
-          ) > 0
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+            AND x.status NOT IN ('Paid', 'Written Off')
+            AND GREATEST(
+              0,
+              x.payment
+                - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+                - COALESCE(x.writeoff_amount, 0)
+            ) > 0
           THEN GREATEST(
             0,
-            x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+            x.payment
+              - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+              - COALESCE(x.writeoff_amount, 0)
           )
           ELSE 0
         END
       ), 0) AS outstanding_total,
+      COALESCE(SUM(
+        CASE
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+          THEN COALESCE(x.writeoff_amount, 0)
+          ELSE 0
+        END
+      ), 0) AS writeoff_total,
       SUM(
         CASE
-          WHEN GREATEST(
-            0,
-            x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
-          ) > 0
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+            AND x.status NOT IN ('Paid', 'Written Off')
+            AND GREATEST(
+              0,
+              x.payment
+                - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+                - COALESCE(x.writeoff_amount, 0)
+            ) > 0
             AND DATEDIFF(
               CURDATE(),
               DATE(COALESCE(x.sent_date, x.xray_invoice_date))
@@ -132,10 +180,14 @@ async function getXrayInvoiceFinancials(pool) {
       ) AS overdue_count,
       SUM(
         CASE
-          WHEN x.sent_date IS NOT NULL
+          WHEN o.status NOT IN ('Cancelled', 'Deleted')
+            AND x.sent_date IS NOT NULL
+            AND x.status NOT IN ('Paid', 'Written Off')
             AND GREATEST(
               0,
-              x.payment - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+              x.payment
+                - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+                - COALESCE(x.writeoff_amount, 0)
             ) > 0
           THEN 1
           ELSE 0
@@ -145,8 +197,7 @@ async function getXrayInvoiceFinancials(pool) {
     INNER JOIN orders o ON o.id = x.order_id
     LEFT JOIN order_payments op
       ON op.order_id = x.order_id
-     AND op.payment_type = 'xray'
-    WHERE o.status NOT IN ('Cancelled', 'Deleted', 'Write Offs')`,
+     AND op.payment_type = 'xray'`,
     { overdueDays: OVERDUE_INVOICE_DAYS }
   );
 
@@ -223,6 +274,9 @@ async function getDashboardStats() {
     outstanding_total:
       (Number(standardFinancial?.outstanding_total) || 0) +
       (Number(xrayFinancial?.outstanding_total) || 0),
+    writeoff_total:
+      (Number(standardFinancial?.writeoff_total) || 0) +
+      (Number(xrayFinancial?.writeoff_total) || 0),
     overdue_count:
       (Number(standardFinancial?.overdue_count) || 0) +
       (Number(xrayFinancial?.overdue_count) || 0),
@@ -231,6 +285,7 @@ async function getDashboardStats() {
       (Number(xrayFinancial?.needs_resend_count) || 0),
   };
   const outstanding = Number(financial.outstanding_total) || 0;
+  const writeOff = Number(financial.writeoff_total) || 0;
   const totalInvoiced = Number(financial.total_invoiced) || 0;
   const totalPaid = Number(financial.total_paid) || 0;
 
@@ -240,6 +295,8 @@ async function getDashboardStats() {
     rushOrders: Number(rushCountRows[0]?.rush_orders) || 0,
     outstanding,
     outstandingDisplay: formatMoney(outstanding),
+    writeOff,
+    writeOffDisplay: formatMoney(writeOff),
     unprocessed: Number(unprocessedRows[0]?.unprocessed_count) || 0,
     facilities: Number(facilityRows[0]?.facilities_count) || 0,
     pendingReminders: Number(reminderRows[0]?.pending_reminders) || 0,
@@ -251,6 +308,8 @@ async function getDashboardStats() {
       totalPaidDisplay: formatMoney(totalPaid),
       outstanding,
       outstandingDisplay: formatMoney(outstanding),
+      writeOff,
+      writeOffDisplay: formatMoney(writeOff),
       overdueInvoices: Number(financial.overdue_count) || 0,
       needsResend: Number(financial.needs_resend_count) || 0,
     },

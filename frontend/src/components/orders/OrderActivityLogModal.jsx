@@ -98,8 +98,8 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
         setLogs(result.logs || []);
         setKeysetPagination({
           pageSize: Number(paginationMeta.pageSize) || LOGS_PAGE_SIZE,
-          hasMore,
-          nextCursor,
+          hasMore: Boolean(hasMore && nextCursor != null),
+          nextCursor: hasMore ? nextCursor : null,
         });
         setCursorHistory((prev) => {
           const next = prev.slice(0, page);
@@ -108,6 +108,7 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
           } else {
             next.length = page;
           }
+          cursorHistoryRef.current = next;
           return next;
         });
         setCurrentPage(page);
@@ -359,9 +360,34 @@ export default function OrderActivityLogModal({ isOpen, order, onClose }) {
 
             <button
               type="button"
-              onClick={() => loadLogsPage(currentPage + 1)}
+              onClick={() => {
+                if (
+                  showSkeleton ||
+                  !keysetPagination.hasMore ||
+                  keysetPagination.nextCursor == null ||
+                  logs.length === 0
+                ) {
+                  return;
+                }
+                const nextCursor = keysetPagination.nextCursor;
+                setKeysetPagination((prev) => ({
+                  ...prev,
+                  hasMore: false,
+                  nextCursor: null,
+                }));
+                setCursorHistory((prev) => {
+                  const next = prev.slice(0, currentPage);
+                  next[currentPage] = nextCursor;
+                  cursorHistoryRef.current = next;
+                  return next;
+                });
+                loadLogsPage(currentPage + 1);
+              }}
               disabled={
-                !keysetPagination.hasMore || showSkeleton || logs.length === 0
+                !keysetPagination.hasMore ||
+                keysetPagination.nextCursor == null ||
+                showSkeleton ||
+                logs.length === 0
               }
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Next page"

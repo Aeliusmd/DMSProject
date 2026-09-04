@@ -292,19 +292,26 @@ export default function PaymentsPage() {
   };
 
   const goToNextPage = () => {
+    if (loading) return;
+
     setActiveState((prev) => {
-      if (!prev.pagination.hasMore) return prev;
+      if (!prev.pagination.hasMore || prev.pagination.nextCursor == null) {
+        return prev;
+      }
 
       const nextHistory = prev.cursorHistory.slice(0, prev.currentPage);
-      if (prev.pagination.nextCursor != null) {
-        nextHistory[prev.currentPage] = prev.pagination.nextCursor;
-      }
+      nextHistory[prev.currentPage] = prev.pagination.nextCursor;
       activeCursorHistoryRef.current = nextHistory;
 
       return {
         ...prev,
         cursorHistory: nextHistory,
         currentPage: prev.currentPage + 1,
+        pagination: {
+          ...prev.pagination,
+          hasMore: false,
+          nextCursor: null,
+        },
       };
     });
   };
@@ -434,7 +441,11 @@ export default function PaymentsPage() {
             <button
               type="button"
               onClick={goToNextPage}
-              disabled={loading || !activeState.pagination.hasMore}
+              disabled={
+                loading ||
+                !activeState.pagination.hasMore ||
+                activeState.pagination.nextCursor == null
+              }
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ›

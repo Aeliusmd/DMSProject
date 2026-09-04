@@ -15,6 +15,7 @@ const {
 const { toSqlDateOnly, parseDateOnlyParts } = require("../utils/dateUtils");
 const { likeContains, likePrefix } = require("../utils/sqlSafety");
 const { areAllOrderInvoicesPaid } = require("../utils/orderInvoicePayment");
+const { toMysqlUtcDateTime } = require("../utils/timezoneUtils");
 
 function toSqlDateTimeStart(value) {
   const dateOnly = toSqlDateOnly(value);
@@ -352,8 +353,10 @@ function resolveListSort(filters = {}) {
 
 function encodeCreatedCursor(createdAt, id) {
   if (!createdAt || !id) return null;
+  // MySQL DATETIME compare format (UTC) — avoids ISO Z/T mismatches across TZs.
   const dateValue =
-    createdAt instanceof Date ? createdAt.toISOString() : String(createdAt);
+    toMysqlUtcDateTime(createdAt) ||
+    (createdAt instanceof Date ? createdAt.toISOString() : String(createdAt));
   return `${dateValue}|${id}`;
 }
 

@@ -302,15 +302,30 @@ export default function InvoiceReportTable({
       group
     );
 
-    if (companyState.loading || !group.pagination?.hasMore) return;
+    if (
+      companyState.loading ||
+      !group.pagination?.hasMore ||
+      group.pagination?.nextCursor == null ||
+      group.rows.length === 0
+    ) {
+      return;
+    }
 
     const currentPage = companyState.currentPage || 1;
-    const totalPages = Math.max(
-      currentPage + (group.pagination?.hasMore ? 1 : 0),
-      1
-    );
+    const nextCursor = group.pagination.nextCursor;
 
-    if (currentPage >= totalPages || group.rows.length === 0) return;
+    setCompanyPageState((prev) => {
+      const current = resolveCompanyPageState(prev, companyGroupKey, group);
+      const history = (current.cursorHistory || [null]).slice(0, currentPage);
+      history[currentPage] = nextCursor;
+      return {
+        ...prev,
+        [companyGroupKey]: {
+          ...current,
+          cursorHistory: history,
+        },
+      };
+    });
 
     loadCompanyGroupPage(group, currentPage + 1);
   };
@@ -857,7 +872,11 @@ function InvoiceGroup({
                 <button
                   type="button"
                   onClick={onCompanyNext}
-                  disabled={companyLoading || !group.pagination?.hasMore}
+                  disabled={
+                    companyLoading ||
+                    !group.pagination?.hasMore ||
+                    group.pagination?.nextCursor == null
+                  }
                   className="inline-flex h-[28px] items-center justify-center rounded-[6px] border border-[#0097B2] bg-[#0097B2] px-3 text-[11px] font-semibold text-white hover:bg-[#0086A0] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Next

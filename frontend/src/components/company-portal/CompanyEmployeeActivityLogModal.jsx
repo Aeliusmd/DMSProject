@@ -80,6 +80,7 @@ export default function CompanyEmployeeActivityLogModal({
           if (pageMeta.hasMore && pageMeta.nextCursor) {
             next[page] = pageMeta.nextCursor;
           }
+          cursorHistoryRef.current = next;
           return next;
         });
       } catch (err) {
@@ -167,7 +168,19 @@ export default function CompanyEmployeeActivityLogModal({
 
   const goNext = () => {
     if (!pagination.hasMore || loading || !pagination.nextCursor) return;
-    loadPage({ page: currentPage + 1, cursor: pagination.nextCursor });
+    const cursor = pagination.nextCursor;
+    setPagination((prev) => ({
+      ...prev,
+      hasMore: false,
+      nextCursor: null,
+    }));
+    setCursorHistory((prev) => {
+      const next = prev.slice(0, currentPage);
+      next[currentPage] = cursor;
+      cursorHistoryRef.current = next;
+      return next;
+    });
+    loadPage({ page: currentPage + 1, cursor });
   };
 
   const startRecord = logs.length
@@ -291,7 +304,11 @@ export default function CompanyEmployeeActivityLogModal({
                   <button
                     type="button"
                     onClick={goNext}
-                    disabled={loading || !pagination.hasMore}
+                    disabled={
+                      loading ||
+                      !pagination.hasMore ||
+                      pagination.nextCursor == null
+                    }
                     className="inline-flex h-8 items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Next

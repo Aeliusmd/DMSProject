@@ -102,6 +102,7 @@ export default function CompanyInvoiceDetailsPage() {
 
   const resetPagination = useCallback(() => {
     setCurrentPage(1);
+    cursorHistoryRef.current = [null];
     setCursorHistory([null]);
     setPagination({
       pageSize: COMPANY_INVOICES_PER_PAGE,
@@ -115,6 +116,19 @@ export default function CompanyInvoiceDetailsPage() {
 
     try {
       const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+
+      if (currentPage > 1 && cursor == null) {
+        setCurrentPage(1);
+        cursorHistoryRef.current = [null];
+        setCursorHistory([null]);
+        setPagination({
+          pageSize: COMPANY_INVOICES_PER_PAGE,
+          hasMore: false,
+          nextCursor: null,
+        });
+        return;
+      }
+
       const data = await getCompanyInvoicesPaginated(companyId, {
         dateFrom: appliedFilters.fromDate || undefined,
         dateTo: appliedFilters.toDate || undefined,
@@ -124,7 +138,10 @@ export default function CompanyInvoiceDetailsPage() {
       });
 
       const hasMore = Boolean(data.pagination?.hasMore);
-      const nextCursor = data.pagination?.nextCursor ?? null;
+      const nextCursor =
+        hasMore && data.pagination?.nextCursor != null
+          ? data.pagination.nextCursor
+          : null;
 
       if (!data.invoices?.length && currentPage > 1) {
         setPagination((prev) => ({
@@ -132,7 +149,11 @@ export default function CompanyInvoiceDetailsPage() {
           hasMore: false,
           nextCursor: null,
         }));
-        setCursorHistory((prev) => prev.slice(0, currentPage - 1));
+        setCursorHistory((prev) => {
+          const next = prev.slice(0, currentPage - 1);
+          cursorHistoryRef.current = next;
+          return next;
+        });
         setCurrentPage((page) => Math.max(page - 1, 1));
         return;
       }
@@ -143,15 +164,14 @@ export default function CompanyInvoiceDetailsPage() {
       setPagination({
         pageSize:
           Number(data.pagination?.pageSize) || COMPANY_INVOICES_PER_PAGE,
-        hasMore,
+        hasMore: Boolean(hasMore && nextCursor != null),
         nextCursor,
       });
       setCursorHistory((prev) => {
         const next = prev.slice(0, currentPage);
         if (hasMore && nextCursor != null) {
           next[currentPage] = nextCursor;
-        }
-        if (!hasMore) {
+        } else {
           next.length = currentPage;
         }
         cursorHistoryRef.current = next;
@@ -521,12 +541,24 @@ export default function CompanyInvoiceDetailsPage() {
             if (
               loading ||
               !pagination.hasMore ||
-              safeCurrentPage >= totalPages ||
+              pagination.nextCursor == null ||
               invoices.length === 0
             ) {
               return;
             }
-            setCurrentPage((page) => Math.min(page + 1, totalPages));
+            const nextCursor = pagination.nextCursor;
+            setPagination((prev) => ({
+              ...prev,
+              hasMore: false,
+              nextCursor: null,
+            }));
+            setCursorHistory((prev) => {
+              const next = prev.slice(0, safeCurrentPage);
+              next[safeCurrentPage] = nextCursor;
+              cursorHistoryRef.current = next;
+              return next;
+            });
+            setCurrentPage(safeCurrentPage + 1);
           }}
         />
       </div>

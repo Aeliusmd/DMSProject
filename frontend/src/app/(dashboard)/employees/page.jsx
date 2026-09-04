@@ -71,6 +71,7 @@ export default function EmployeesPage() {
   const applySearch = () => {
     setAppliedSearch(searchInput.trim());
     setCurrentPage(1);
+    cursorHistoryRef.current = [null];
     setCursorHistory([null]);
     setPagination({
       pageSize: EMPLOYEES_PER_PAGE,
@@ -83,6 +84,7 @@ export default function EmployeesPage() {
     setSearchInput("");
     setAppliedSearch("");
     setCurrentPage(1);
+    cursorHistoryRef.current = [null];
     setCursorHistory([null]);
     setPagination({
       pageSize: EMPLOYEES_PER_PAGE,
@@ -99,6 +101,19 @@ export default function EmployeesPage() {
 
     try {
       const cursor = cursorHistoryRef.current[currentPage - 1] ?? null;
+
+      if (currentPage > 1 && cursor == null) {
+        setCurrentPage(1);
+        cursorHistoryRef.current = [null];
+        setCursorHistory([null]);
+        setPagination({
+          pageSize: EMPLOYEES_PER_PAGE,
+          hasMore: false,
+          nextCursor: null,
+        });
+        return;
+      }
+
       const result = await getEmployeesPaginated({
         search: appliedSearch,
         pagination: "keyset",
@@ -106,7 +121,10 @@ export default function EmployeesPage() {
         pageSize: EMPLOYEES_PER_PAGE,
       });
       const hasMore = Boolean(result.pagination?.hasMore);
-      const nextCursor = result.pagination?.nextCursor ?? null;
+      const nextCursor =
+        hasMore && result.pagination?.nextCursor != null
+          ? result.pagination.nextCursor
+          : null;
       const nextEmployees = result.employees || [];
 
       setEmployees((previous) =>
@@ -114,17 +132,17 @@ export default function EmployeesPage() {
       );
       setPagination({
         pageSize: Number(result.pagination?.pageSize) || EMPLOYEES_PER_PAGE,
-        hasMore,
+        hasMore: Boolean(hasMore && nextCursor != null),
         nextCursor,
       });
       setCursorHistory((prev) => {
         const next = prev.slice(0, currentPage);
         if (hasMore && nextCursor != null) {
           next[currentPage] = nextCursor;
-        }
-        if (!hasMore) {
+        } else {
           next.length = currentPage;
         }
+        cursorHistoryRef.current = next;
         return next;
       });
     } catch (error) {
@@ -268,11 +286,39 @@ export default function EmployeesPage() {
     });
   };
 
-  const totalPages = Math.max(currentPage + (pagination.hasMore ? 1 : 0), 1);
   const startRecord = employees.length
     ? (currentPage - 1) * EMPLOYEES_PER_PAGE + 1
     : 0;
   const endRecord = startRecord + employees.length - (employees.length ? 1 : 0);
+
+  const canGoPreviousPage = !isLoading && currentPage > 1;
+  const canGoNextPage =
+    !isLoading &&
+    pagination.hasMore &&
+    pagination.nextCursor != null &&
+    employees.length > 0;
+
+  const goToPreviousPage = () => {
+    if (!canGoPreviousPage) return;
+    setCurrentPage((page) => Math.max(page - 1, 1));
+  };
+
+  const goToNextPage = () => {
+    if (!canGoNextPage) return;
+    const nextCursor = pagination.nextCursor;
+    setPagination((prev) => ({
+      ...prev,
+      hasMore: false,
+      nextCursor: null,
+    }));
+    setCursorHistory((prev) => {
+      const next = prev.slice(0, currentPage);
+      next[currentPage] = nextCursor;
+      cursorHistoryRef.current = next;
+      return next;
+    });
+    setCurrentPage(currentPage + 1);
+  };
 
   return (
     <DashboardShell>
@@ -353,8 +399,8 @@ export default function EmployeesPage() {
           <div className="flex items-center justify-end gap-1">
             <button
               type="button"
-              onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}
-              disabled={currentPage === 1}
+              onClick={goToPreviousPage}
+              disabled={!canGoPreviousPage}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ‹
@@ -366,10 +412,8 @@ export default function EmployeesPage() {
 
             <button
               type="button"
-              onClick={() =>
-                setCurrentPage((page) => Math.min(page + 1, totalPages))
-              }
-              disabled={currentPage >= totalPages || employees.length === 0}
+              onClick={goToNextPage}
+              disabled={!canGoNextPage}
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
             >
               ›

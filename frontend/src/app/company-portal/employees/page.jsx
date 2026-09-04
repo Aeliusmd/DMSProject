@@ -73,7 +73,7 @@ export default function CompanyEmployeesPage() {
         setEmployees(data.employees || []);
         setPagination({
           pageSize: Number(pageMeta.pageSize) || EMPLOYEES_PAGE_SIZE,
-          hasMore: Boolean(pageMeta.hasMore),
+          hasMore: Boolean(pageMeta.hasMore && pageMeta.nextCursor),
           nextCursor: pageMeta.nextCursor || null,
         });
         setCurrentPage(page);
@@ -83,6 +83,7 @@ export default function CompanyEmployeesPage() {
           if (pageMeta.hasMore && pageMeta.nextCursor) {
             next[page] = pageMeta.nextCursor;
           }
+          cursorHistoryRef.current = next;
           return next;
         });
       } catch (err) {
@@ -207,11 +208,20 @@ export default function CompanyEmployeesPage() {
   };
 
   const goNext = () => {
-    if (!pagination.hasMore || loading) return;
+    if (!pagination.hasMore || loading || pagination.nextCursor == null) return;
     const nextPage = currentPage + 1;
-    const cursor =
-      pagination.nextCursor || cursorHistoryRef.current[currentPage] || null;
-    if (!cursor) return;
+    const cursor = pagination.nextCursor;
+    setPagination((prev) => ({
+      ...prev,
+      hasMore: false,
+      nextCursor: null,
+    }));
+    setCursorHistory((prev) => {
+      const next = prev.slice(0, currentPage);
+      next[currentPage] = cursor;
+      cursorHistoryRef.current = next;
+      return next;
+    });
     loadEmployeesPage({ page: nextPage, cursor, search: appliedSearch });
   };
 
@@ -395,7 +405,11 @@ export default function CompanyEmployeesPage() {
               <button
                 type="button"
                 onClick={goNext}
-                disabled={!pagination.hasMore || loading}
+                disabled={
+                  !pagination.hasMore ||
+                  pagination.nextCursor == null ||
+                  loading
+                }
                 className="inline-flex h-8 items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-3 text-[12px] font-medium text-[#334155] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Next

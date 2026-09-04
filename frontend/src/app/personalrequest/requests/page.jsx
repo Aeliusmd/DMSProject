@@ -93,8 +93,8 @@ export default function PersonalRequestsListPage() {
         setRequests(response?.data?.requests || []);
         setKeysetPagination({
           pageSize: Number(paginationMeta.pageSize) || REQUESTS_PER_PAGE,
-          hasMore,
-          nextCursor,
+          hasMore: Boolean(hasMore && nextCursor != null),
+          nextCursor: hasMore ? nextCursor : null,
         });
         setCursorHistory((prev) => {
           const next = prev.slice(0, page);
@@ -103,6 +103,7 @@ export default function PersonalRequestsListPage() {
           } else {
             next.length = page;
           }
+          cursorHistoryRef.current = next;
           return next;
         });
         setCurrentPage(page);
@@ -336,8 +337,35 @@ export default function PersonalRequestsListPage() {
 
             <button
               type="button"
-              onClick={() => loadRequests(currentPage + 1)}
-              disabled={!keysetPagination.hasMore || loading || requests.length === 0}
+              onClick={() => {
+                if (
+                  loading ||
+                  !keysetPagination.hasMore ||
+                  keysetPagination.nextCursor == null ||
+                  requests.length === 0
+                ) {
+                  return;
+                }
+                const nextCursor = keysetPagination.nextCursor;
+                setKeysetPagination((prev) => ({
+                  ...prev,
+                  hasMore: false,
+                  nextCursor: null,
+                }));
+                setCursorHistory((prev) => {
+                  const next = prev.slice(0, currentPage);
+                  next[currentPage] = nextCursor;
+                  cursorHistoryRef.current = next;
+                  return next;
+                });
+                loadRequests(currentPage + 1);
+              }}
+              disabled={
+                !keysetPagination.hasMore ||
+                keysetPagination.nextCursor == null ||
+                loading ||
+                requests.length === 0
+              }
               className="flex h-[28px] min-w-[28px] items-center justify-center rounded-[6px] border border-[#E2E8F0] bg-white px-2 text-[12px] text-[#64748B] hover:bg-[#F8FAFC] disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Next page"
             >
