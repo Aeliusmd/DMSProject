@@ -75,13 +75,13 @@ function resolveFacilityEmailForStorage(data = {}) {
     return "";
   }
 
-  if (data.email === "") {
+  if (data.email === "" || data.email == null) {
     return "";
   }
 
-  const trimmed = data.email?.trim() || null;
+  const trimmed = `${data.email}`.trim();
   if (!trimmed) {
-    return null;
+    return "";
   }
 
   if (isPlaceholderFacilityEmail(trimmed)) {
@@ -534,16 +534,8 @@ async function updateFacility(id, data, actorId) {
   }
 
   const facilityPayload = buildFacilityDbPayload(data);
-
-  if (
-    Number(facility.is_auto_created) &&
-    `${facilityPayload.email || ""}`.trim() &&
-    !isPlaceholderFacilityEmail(facilityPayload.email)
-  ) {
-    facilityPayload.isAutoCreated = 0;
-  } else {
-    facilityPayload.isAutoCreated = Number(facility.is_auto_created) || 0;
-  }
+  // Any staff save completes an auto-created / incomplete profile. Email optional.
+  facilityPayload.isAutoCreated = 0;
 
   await Facility.update(id, facilityPayload);
 

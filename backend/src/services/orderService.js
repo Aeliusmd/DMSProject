@@ -2878,27 +2878,60 @@ async function createOrderFromExtract(extractId, actorId, options = {}) {
       throw new ApiError(400, "Selected facility does not exist");
     }
 
-    const useExtractedFacility = Boolean(facilityMismatch && extractedFacilityId);
+    let resolvedExtractedFacilityId = extractedFacilityId;
+
+    // PDF facility differs from Batch Scan selection — ensure we have/create
+    // that facility (email not required) instead of silently using the chosen one.
+    if (
+      facilityMismatch &&
+      !resolvedExtractedFacilityId &&
+      (orderHints.customer || extractedFacilityName)
+    ) {
+      const { facility } = await facilityService.resolveFacilityFromHints(
+        orderHints.customer
+          ? orderHints
+          : { ...orderHints, customer: extractedFacilityName },
+        null,
+        { allowCreate: true }
+      );
+      if (facility?.id) {
+        resolvedExtractedFacilityId = Number(facility.id);
+      }
+    }
+
+    const useExtractedFacility = Boolean(
+      facilityMismatch &&
+        resolvedExtractedFacilityId &&
+        Number(resolvedExtractedFacilityId) !== Number(chosenFacilityId)
+    );
     let orderFacility = chosenFacility;
 
     if (useExtractedFacility) {
-      const extractedFacility = await Facility.findById(extractedFacilityId);
+      const extractedFacility = await Facility.findById(
+        resolvedExtractedFacilityId
+      );
       if (extractedFacility) {
         orderFacility = extractedFacility;
       }
     }
 
-    payload.facility = String(useExtractedFacility ? extractedFacilityId : chosenFacilityId);
+    payload.facility = String(
+      useExtractedFacility ? resolvedExtractedFacilityId : chosenFacilityId
+    );
     payload.facilityName =
       orderFacility.facility_name ||
       extractedFacilityName ||
       chosenFacility.facility_name ||
       "";
     payload.batchChosenFacilityId = String(chosenFacilityId);
-    payload.extractedFacilityId = extractedFacilityId
-      ? String(extractedFacilityId)
+    payload.extractedFacilityId = resolvedExtractedFacilityId
+      ? String(resolvedExtractedFacilityId)
       : "";
-    payload.facilityMismatch = facilityMismatch;
+    payload.facilityMismatch = Boolean(
+      facilityMismatch &&
+        resolvedExtractedFacilityId &&
+        Number(resolvedExtractedFacilityId) !== Number(chosenFacilityId)
+    );
   } else if (orderHints.customer) {
     const { facility } = await facilityService.resolveFacilityFromHints(
       orderHints,

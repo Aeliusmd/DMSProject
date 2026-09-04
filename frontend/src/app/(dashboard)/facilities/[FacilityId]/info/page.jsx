@@ -2197,7 +2197,8 @@ function validateFacilityForm(data) {
 function validateFacilityField(field, value) {
   if (!value?.trim()) {
     if (field === "facilityName") return "Facility name is required";
-    if (field === "email") return "Email is required";
+    // Email is optional for facilities (including batch-scan auto-created).
+    return "";
   }
 
   const contactNameField = CONTACT_NAME_FIELDS.find(
