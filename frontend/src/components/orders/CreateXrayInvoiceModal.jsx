@@ -133,7 +133,12 @@ export default function CreateXrayInvoiceModal({
   }, [formData.views, formData.perViewAmount]);
 
   const totalInvoiced = useMemo(() => {
-    return viewsAmount - toNumber(formData.xrayPaidEarlier);
+    // Do not credit more than the invoice views total.
+    const paidEarlier = Math.min(
+      viewsAmount,
+      Math.max(0, toNumber(formData.xrayPaidEarlier))
+    );
+    return Math.max(0, viewsAmount - paidEarlier);
   }, [viewsAmount, formData.xrayPaidEarlier]);
 
   const balanceDue = useMemo(() => {

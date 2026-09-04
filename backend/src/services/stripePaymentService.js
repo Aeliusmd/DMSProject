@@ -102,7 +102,9 @@ function buildXrayInvoiceNumber(order = {}, xrayRow = {}) {
 function mapPublicInvoiceItem(type, row, order) {
   if (type === "regular") {
     const total = toNumber(row.total_amount);
-    const amountDue = toNumber(row.amount_due);
+    const writeoff = toNumber(row.writeoff_amount);
+    const amountPaid = Math.min(toNumber(row.amount_paid), total);
+    const amountDue = Math.max(0, total - amountPaid - writeoff);
     const isPaid = row.status === "Paid" || amountDue <= 0;
 
     return {
@@ -120,7 +122,7 @@ function mapPublicInvoiceItem(type, row, order) {
   }
 
   const total = toNumber(row.payment);
-  const amountPaid = toNumber(row.amount_paid);
+  const amountPaid = Math.min(toNumber(row.amount_paid), total);
   const writeoff = toNumber(row.writeoff_amount);
   const amountDue = Math.max(0, total - amountPaid - writeoff);
   const isPaid = amountDue <= 0 && total > 0;
@@ -721,6 +723,9 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
     if (!invoice) return;
 
     const total = toNumber(invoice.total_amount);
+    const writeoff = toNumber(invoice.writeoff_amount);
+    const amountPaid = Math.max(0, total - writeoff);
+
     if (invoice.status === "Paid" && toNumber(invoice.amount_due) <= 0) {
       return;
     }
@@ -737,7 +742,7 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
        WHERE id = :id`,
       {
         id: invoice.id,
-        amountPaid: total,
+        amountPaid,
         paymentDate: calendarTodayInTimezone(config.businessTimezone),
       }
     );
@@ -748,7 +753,12 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
   if (!xray) return;
 
   const total = toNumber(xray.payment);
-  if (toNumber(xray.amount_paid) >= total) return;
+  const writeoff = toNumber(xray.writeoff_amount);
+  const currentPaid = Math.min(toNumber(xray.amount_paid), total);
+  const amountDue = Math.max(0, total - currentPaid - writeoff);
+  const amountPaid = Math.max(0, total - writeoff);
+
+  if (amountDue <= 0) return;
 
   await connection.execute(
     `UPDATE invoice_xray_details
@@ -761,7 +771,7 @@ async function fulfillInvoicePayment(connection, orderId, invoiceType) {
      WHERE order_id = :orderId`,
     {
       orderId,
-      amountPaid: total,
+      amountPaid,
       paymentDate: calendarTodayInTimezone(config.businessTimezone),
     }
   );

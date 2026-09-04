@@ -85,7 +85,9 @@ function buildXrayInvoiceNumber(order = {}, xrayRow = {}) {
 function mapInvoiceSearchItem(type, row, order) {
   if (type === "regular") {
     const total = toNumber(row.total_amount);
-    const amountDue = toNumber(row.amount_due);
+    const writeoff = toNumber(row.writeoff_amount);
+    const amountPaid = Math.min(toNumber(row.amount_paid), total);
+    const amountDue = Math.max(0, total - amountPaid - writeoff);
     const isPaid = row.status === "Paid" || amountDue <= 0;
 
     return {
@@ -103,8 +105,9 @@ function mapInvoiceSearchItem(type, row, order) {
   }
 
   const total = toNumber(row.payment);
-  const amountPaid = toNumber(row.amount_paid);
-  const amountDue = Math.max(0, total - amountPaid);
+  const amountPaid = Math.min(toNumber(row.amount_paid), total);
+  const writeoff = toNumber(row.writeoff_amount);
+  const amountDue = Math.max(0, total - amountPaid - writeoff);
   const isPaid = amountDue <= 0 && total > 0;
 
   return {
@@ -113,7 +116,7 @@ function mapInvoiceSearchItem(type, row, order) {
     invoiceNumber: buildXrayInvoiceNumber(order, row),
     amount: total,
     amountDue,
-    status: isPaid ? "Paid" : "Unpaid",
+    status: isPaid ? "Paid" : row.status || "Unpaid",
     isPaid,
     paymentMethod: row.payment_method || null,
     paymentCheckNumber: row.payment_check_number || "",
@@ -222,11 +225,17 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
       }
 
       const total = toNumber(invoice.total_amount);
+      const writeoff = toNumber(invoice.writeoff_amount);
+      const currentPaid = Math.min(toNumber(invoice.amount_paid), total);
+      const amountDue = Math.max(0, total - currentPaid - writeoff);
+      // Never record paid above invoice total (write-off already covers the rest).
+      const amountPaid = Math.max(0, total - writeoff);
+
       if (total <= 0) {
         throw new ApiError(400, "Invoice total must be greater than zero");
       }
 
-      if (invoice.status === "Paid" || toNumber(invoice.amount_due) <= 0) {
+      if (invoice.status === "Paid" || amountDue <= 0) {
         throw new ApiError(400, "This invoice is already paid");
       }
 
@@ -245,7 +254,7 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
          WHERE id = :id`,
         {
           id: invoice.id,
-          amountPaid: total,
+          amountPaid,
           checkNumber,
           paymentDate: sqlPaymentDate,
           note,
@@ -259,11 +268,20 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
       }
 
       const total = toNumber(xray.payment);
+      const writeoff = toNumber(xray.writeoff_amount);
+      const currentPaid = Math.min(toNumber(xray.amount_paid), total);
+      const amountDue = Math.max(0, total - currentPaid - writeoff);
+      const amountPaid = Math.max(0, total - writeoff);
+
       if (total <= 0) {
         throw new ApiError(400, "X-Ray invoice total must be greater than zero");
       }
 
-      if (toNumber(xray.amount_paid) >= total) {
+      if (xray.status === "Written Off") {
+        throw new ApiError(400, "This X-Ray invoice is written off");
+      }
+
+      if (amountDue <= 0) {
         throw new ApiError(400, "This X-Ray invoice is already paid");
       }
 
@@ -281,7 +299,7 @@ async function recordManualInvoicePayment(body = {}, userId = null) {
          WHERE order_id = :orderId`,
         {
           orderId,
-          amountPaid: total,
+          amountPaid,
           checkNumber,
           paymentDate: sqlPaymentDate,
           note,

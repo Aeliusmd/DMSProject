@@ -278,6 +278,13 @@ function resolvePersonalPortalPrepaymentCredit(orderPayments, lineItemsTotal) {
   return Math.min(prepaymentPaid, Math.max(0, toNumber(lineItemsTotal)));
 }
 
+/** Never apply more paid than the invoice total (ignore overpayment). */
+function capPaidToInvoiceTotal(amountPaid, totalAmount) {
+  const total = Math.max(0, toNumber(totalAmount));
+  const paid = Math.max(0, toNumber(amountPaid));
+  return Math.min(paid, total);
+}
+
 function resolveAmountPaid(orderPayments, existing = null, invoiceShape = null, options = {}) {
   const fromOrderPayments =
     orderPayments !== undefined
@@ -286,55 +293,52 @@ function resolveAmountPaid(orderPayments, existing = null, invoiceShape = null, 
   const fromExisting = existing ? toNumber(existing.amount_paid) : 0;
   const shape = invoiceShape || existing;
   const personalPortal = Boolean(options.personalPortalOrder);
+  const invoiceTotal =
+    options.totalAmount != null
+      ? toNumber(options.totalAmount)
+      : shape
+        ? splitLineItemsAndFacility(shape).totalAmount
+        : null;
+
+  let resolved;
 
   if (
     existing &&
     (existing.payment_method === "manual" || existing.payment_method === "online") &&
     existing.status === "Paid"
   ) {
-    return fromExisting;
-  }
-
-  // Personal portal: credit prepayment against line items only — facility fee
-  // is always due in full (not offset by the $35 processing fee).
-  if (personalPortal && shape) {
+    resolved = fromExisting;
+  } else if (personalPortal && shape) {
+    // Personal portal: credit prepayment against line items only — facility fee
+    // is always due in full (not offset by the $35 processing fee).
     if (
       existing &&
       (existing.payment_method === "manual" || existing.payment_method === "online")
     ) {
-      return fromExisting;
+      resolved = fromExisting;
+    } else {
+      const { lineItemsTotal } = splitLineItemsAndFacility(shape);
+      resolved = resolvePersonalPortalPrepaymentCredit(
+        orderPayments || [],
+        lineItemsTotal
+      );
     }
-
-    const { lineItemsTotal } = splitLineItemsAndFacility(shape);
-    return resolvePersonalPortalPrepaymentCredit(
-      orderPayments || [],
-      lineItemsTotal
-    );
+  } else if (shape && isQuickRecordsFeeInvoice(shape)) {
+    // Flat $20 records-fee invoices do not credit the separate $15 prepayment.
+    resolved = existing ? fromExisting : 0;
+  } else if (fromOrderPayments !== null) {
+    resolved = fromOrderPayments;
+  } else if (existing) {
+    resolved = fromExisting;
+  } else {
+    resolved = 0;
   }
 
-  // Flat $20 records-fee invoices do not credit the separate $15 prepayment.
-  if (shape && isQuickRecordsFeeInvoice(shape)) {
-    return existing ? fromExisting : 0;
+  if (invoiceTotal == null) {
+    return resolved;
   }
 
-  // Preserve manually/online recorded full payments when invoice fee fields are edited.
-  if (
-    existing &&
-    (existing.payment_method === "manual" || existing.payment_method === "online") &&
-    existing.status === "Paid"
-  ) {
-    return Math.max(fromExisting, fromOrderPayments ?? 0);
-  }
-
-  if (fromOrderPayments !== null) {
-    return fromOrderPayments;
-  }
-
-  if (existing) {
-    return fromExisting;
-  }
-
-  return 0;
+  return capPaidToInvoiceTotal(resolved, invoiceTotal);
 }
 
 function resolveInvoiceStatusForSave(existing, totalAmount, amountPaid, derivedStatus) {
@@ -372,13 +376,27 @@ async function syncInvoiceAmountPaidFromOrder(connection, orderId) {
   }
 
   // Manual/online full payments are owned by the Payments page and must not
-  // be overwritten by order_payments sync.
+  // be overwritten by order_payments sync — but still clamp overpayment.
   if (
     (invoice.payment_method === "manual" || invoice.payment_method === "online") &&
     invoice.status === "Paid"
   ) {
+    const totalAmount = toNumber(invoice.total_amount);
+    const cappedPaid = capPaidToInvoiceTotal(invoice.amount_paid, totalAmount);
+
+    if (cappedPaid < toNumber(invoice.amount_paid) - 0.0001) {
+      await db.execute(
+        `UPDATE invoices
+         SET amount_paid = :amountPaid,
+             amount_due = 0,
+             updated_at = NOW()
+         WHERE id = :id`,
+        { id: invoice.id, amountPaid: cappedPaid }
+      );
+    }
+
     return {
-      amountPaid: toNumber(invoice.amount_paid),
+      amountPaid: cappedPaid,
       amountDue: 0,
       status: "Paid",
     };
@@ -972,6 +990,8 @@ function resolveRowFinancials(row, orderPayments = [], options = {}) {
           : fromInvoice;
   }
 
+  amountPaid = capPaidToInvoiceTotal(amountPaid, totalAmount);
+
   const writeoffAmount = toNumber(row.writeoff_amount);
   const { amountDue } = resolveInvoiceAmounts(
     totalAmount,
@@ -1053,13 +1073,15 @@ function deriveInvoiceStatus(totalAmount, amountPaid, writeoffAmount = 0) {
 
 function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 0) {
   const total = toNumber(totalAmount);
-  const paid = toNumber(amountPaid);
+  const rawPaid = toNumber(amountPaid);
+  const paid = capPaidToInvoiceTotal(rawPaid, total);
   const writeoff = toNumber(writeoffAmount);
   const amountDue = Math.max(0, total - paid - writeoff);
-  const overpayment = Math.max(0, paid - total);
+  const overpayment = Math.max(0, rawPaid - total);
   const status = deriveInvoiceStatus(total, paid, writeoff);
 
   return {
+    amountPaid: paid,
     amountDue,
     overpayment,
     status,
@@ -1613,6 +1635,21 @@ async function syncOrderPaymentDuesFromInvoice(connection, orderId, _options = {
 
   if (xrayRow) {
     const financials = resolveXrayRowFinancials(xrayRow, payments);
+
+    if (toNumber(xrayRow.amount_paid) > financials.totalAmount + 0.0001) {
+      await connection.execute(
+        `UPDATE invoice_xray_details
+         SET amount_paid = :amountPaid,
+             updated_at = NOW()
+         WHERE order_id = :orderId`,
+        {
+          orderId,
+          amountPaid: financials.amountPaid,
+        }
+      );
+      xrayRow.amount_paid = financials.amountPaid;
+    }
+
     const existing = payments.find((row) => row.payment_type === "xray");
     const nextAmount =
       financials.amountPaid > 0
@@ -1813,12 +1850,13 @@ function resolveXrayRowFinancials(xrayRow, orderPayments = []) {
   const totalAmount = getXrayPayment(xrayRow);
   const fromOrderPayments = getOrderPaymentAmount(orderPayments, "xray");
   const fromInvoice = toNumber(xrayRow?.amount_paid);
-  const amountPaid =
+  let amountPaid =
     xrayRow?.payment_method === "manual" || xrayRow?.payment_method === "online"
       ? Math.max(fromInvoice, fromOrderPayments)
       : orderPayments.length
         ? fromOrderPayments
         : fromInvoice;
+  amountPaid = capPaidToInvoiceTotal(amountPaid, totalAmount);
   const writeoffAmount = toNumber(xrayRow?.writeoff_amount);
   const amountDue = Math.max(0, totalAmount - amountPaid - writeoffAmount);
 
@@ -2150,15 +2188,21 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     invoiceShape,
     {
       personalPortalOrder: Boolean(options.personalPortalOrder),
+      totalAmount: totals.totalAmount,
     }
   );
   const writeoffAmount = existing ? toNumber(existing.writeoff_amount) : 0;
-  const { amountDue, status: derivedStatus } = resolveInvoiceAmounts(
+  const {
+    amountPaid: cappedPaid,
+    amountDue,
+    status: derivedStatus,
+  } = resolveInvoiceAmounts(totals.totalAmount, amountPaid, writeoffAmount);
+  const status = resolveInvoiceStatusForSave(
+    existing,
     totals.totalAmount,
-    amountPaid,
-    writeoffAmount
+    cappedPaid,
+    derivedStatus
   );
-  const status = resolveInvoiceStatusForSave(existing, totals.totalAmount, amountPaid, derivedStatus);
 
   return {
     status,
@@ -2171,7 +2215,7 @@ function buildInvoicePayload(body = {}, existing = null, options = {}) {
     shippingHandling: totals.shippingHandling,
     storageFee: totals.storageFee,
     totalAmount: totals.totalAmount,
-    amountPaid,
+    amountPaid: cappedPaid,
     amountDue,
     notes: trimOrNull(body.notes, { maxLength: FIELD_LIMITS.TEXT }),
     sendOrderDetails: boolToInt(body.sendOrderDetails),

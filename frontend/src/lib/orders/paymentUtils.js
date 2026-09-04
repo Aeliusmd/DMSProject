@@ -319,7 +319,8 @@ export function deriveInvoiceStatusLabel(totalAmount, amountPaid, writeoffAmount
 
 export function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 0) {
   const total = parsePaymentAmount(totalAmount);
-  const paid = parsePaymentAmount(amountPaid);
+  const rawPaid = parsePaymentAmount(amountPaid);
+  const paid = Math.min(Math.max(0, rawPaid), Math.max(0, total));
   const writeoff = parsePaymentAmount(writeoffAmount);
   const amountDue = Math.max(0, total - paid - writeoff);
 
@@ -331,7 +332,7 @@ export function resolveInvoiceAmounts(totalAmount, amountPaid, writeoffAmount = 
     writeoffAmount: writeoff,
     amountDue,
     status,
-    overpayment: Math.max(0, paid - total),
+    overpayment: Math.max(0, rawPaid - total),
   };
 }
 

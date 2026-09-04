@@ -21,6 +21,14 @@ const STANDARD_INVOICE_TOTAL_SQL = `
 
 async function getStandardInvoiceFinancials(pool) {
   const invoiceTotalSql = STANDARD_INVOICE_TOTAL_SQL;
+  // Cap applied paid at invoice total so overpayments are ignored.
+  const paidUsedSql = `LEAST(
+    (${invoiceTotalSql}),
+    GREATEST(
+      COALESCE(i.amount_paid, 0),
+      COALESCE(payments.paid_total, 0)
+    )
+  )`;
 
   const [rows] = await pool.execute(
     `SELECT
@@ -34,10 +42,7 @@ async function getStandardInvoiceFinancials(pool) {
       COALESCE(SUM(
         CASE
           WHEN o.status NOT IN ('Cancelled', 'Deleted')
-          THEN GREATEST(
-            COALESCE(i.amount_paid, 0),
-            COALESCE(payments.paid_total, 0)
-          )
+          THEN ${paidUsedSql}
           ELSE 0
         END
       ), 0) AS total_paid,
@@ -48,13 +53,13 @@ async function getStandardInvoiceFinancials(pool) {
             AND GREATEST(
               0,
               (${invoiceTotalSql})
-                - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+                - ${paidUsedSql}
                 - COALESCE(i.writeoff_amount, 0)
             ) > 0
           THEN GREATEST(
             0,
             (${invoiceTotalSql})
-              - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+              - ${paidUsedSql}
               - COALESCE(i.writeoff_amount, 0)
           )
           ELSE 0
@@ -74,7 +79,7 @@ async function getStandardInvoiceFinancials(pool) {
             AND GREATEST(
               0,
               (${invoiceTotalSql})
-                - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+                - ${paidUsedSql}
                 - COALESCE(i.writeoff_amount, 0)
             ) > 0
             AND DATEDIFF(
@@ -92,7 +97,7 @@ async function getStandardInvoiceFinancials(pool) {
             AND GREATEST(
               0,
               (${invoiceTotalSql})
-                - GREATEST(COALESCE(i.amount_paid, 0), COALESCE(payments.paid_total, 0))
+                - ${paidUsedSql}
                 - COALESCE(i.writeoff_amount, 0)
             ) > 0
             AND (
@@ -118,6 +123,11 @@ async function getStandardInvoiceFinancials(pool) {
 }
 
 async function getXrayInvoiceFinancials(pool) {
+  const paidUsedSql = `LEAST(
+    COALESCE(x.payment, 0),
+    GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+  )`;
+
   const [rows] = await pool.execute(
     `SELECT
       COALESCE(SUM(
@@ -130,7 +140,7 @@ async function getXrayInvoiceFinancials(pool) {
       COALESCE(SUM(
         CASE
           WHEN o.status NOT IN ('Cancelled', 'Deleted')
-          THEN GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+          THEN ${paidUsedSql}
           ELSE 0
         END
       ), 0) AS total_paid,
@@ -141,13 +151,13 @@ async function getXrayInvoiceFinancials(pool) {
             AND GREATEST(
               0,
               x.payment
-                - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+                - ${paidUsedSql}
                 - COALESCE(x.writeoff_amount, 0)
             ) > 0
           THEN GREATEST(
             0,
             x.payment
-              - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+              - ${paidUsedSql}
               - COALESCE(x.writeoff_amount, 0)
           )
           ELSE 0
@@ -167,7 +177,7 @@ async function getXrayInvoiceFinancials(pool) {
             AND GREATEST(
               0,
               x.payment
-                - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+                - ${paidUsedSql}
                 - COALESCE(x.writeoff_amount, 0)
             ) > 0
             AND DATEDIFF(
@@ -186,7 +196,7 @@ async function getXrayInvoiceFinancials(pool) {
             AND GREATEST(
               0,
               x.payment
-                - GREATEST(COALESCE(x.amount_paid, 0), COALESCE(op.amount, 0))
+                - ${paidUsedSql}
                 - COALESCE(x.writeoff_amount, 0)
             ) > 0
           THEN 1

@@ -733,10 +733,31 @@ async function ensurePrepaymentPayment(connection, orderId, data) {
 }
 
 async function syncOrderPayments(connection, orderId, data) {
+  const xrayRow = await InvoiceXray.findByOrderId(orderId, connection);
+  const xrayTotal = xrayRow ? Number(xrayRow.payment) || 0 : null;
+
   for (const prefix of PAYMENT_PREFIXES) {
     const payment = buildPaymentPayload(data, prefix);
 
     if (payment) {
+      if (
+        prefix === "xray" &&
+        xrayTotal != null &&
+        payment.amount != null &&
+        Number.isFinite(xrayTotal)
+      ) {
+        payment.amount = Math.min(
+          Math.max(0, xrayTotal),
+          Math.max(0, Number(payment.amount) || 0)
+        );
+        if (payment.dueAmount != null) {
+          payment.dueAmount = Math.max(
+            0,
+            Math.min(xrayTotal, Number(payment.dueAmount) || 0)
+          );
+        }
+      }
+
       await Order.upsertPayment(connection, { ...payment, orderId });
     } else {
       await Order.deletePaymentByType(connection, orderId, prefix);
@@ -806,18 +827,20 @@ function enrichPaymentDueFields(paymentForm, invoiceRow, xrayRow, payments = [])
   ).toFixed(2);
 
   if (invoiceFees.hasXrayInvoice) {
+    const xrayFee = Math.max(0, Number(invoiceFees.xrayFee) || 0);
     const fromInvoicePaid = Number(invoiceFees.xrayPaid) || 0;
     const fromFormPaid = parsePaymentAmount(paymentForm.xrayPaid);
-    const paid = Math.max(fromInvoicePaid, fromFormPaid);
+    // Never apply X-ray paid above the X-ray invoice total.
+    const paid = Math.min(xrayFee, Math.max(fromInvoicePaid, fromFormPaid));
 
-    if (paid > 0) {
+    if (paid > 0 || fromFormPaid > 0) {
       paymentForm.xrayPaid = paid.toFixed(2);
     }
 
     paymentForm.xrayDue = (
       Number.isFinite(Number(invoiceFees.xrayDue))
         ? Math.max(0, Number(invoiceFees.xrayDue))
-        : Math.max(0, (Number(invoiceFees.xrayFee) || 0) - paid)
+        : Math.max(0, xrayFee - paid)
     ).toFixed(2);
 
     // Manual/online X-ray payment stores check on invoice_xray_details;
