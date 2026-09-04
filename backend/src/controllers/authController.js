@@ -7,7 +7,7 @@ const {
   buildAuthPayload,
   clearDeviceTrustCookie,
   clearPortalAuthCookies,
-  getDeviceTrustTokenFromRequest,
+  getDeviceTrustTokensFromRequest,
   getRefreshTokenFromRequest,
   setDeviceTrustCookie,
   setPortalAuthCookies,
@@ -40,7 +40,7 @@ exports.login = asyncHandler(async (req, res) => {
   const result = await authService.login({
     identifier: validation.identifier,
     password: req.body.password,
-    deviceTrustToken: getDeviceTrustTokenFromRequest(req),
+    deviceTrustTokens: getDeviceTrustTokensFromRequest(req),
     ...getRequestMeta(req),
   });
 

@@ -36,8 +36,15 @@ export default function TwoFactorAuthModal({
   const [isResending, setIsResending] = useState(false);
 
   const inputRefs = useRef([]);
+  const trustDeviceRef = useRef(false);
   const openSession = isOpen ? sessionToken || "open" : null;
   const [prevOpenSession, setPrevOpenSession] = useState(null);
+
+  // When trust-device is shown, require an explicit Verify click so the checkbox
+  // is not skipped by OTP auto-submit (paste / typing the 6th digit).
+  const requireExplicitVerify = showTrustDevice;
+  const otpCode = otp.join("");
+  const canVerify = otpCode.length === 6 && !isVerifying;
 
   if (openSession !== prevOpenSession) {
     setPrevOpenSession(openSession);
@@ -46,6 +53,7 @@ export default function TwoFactorAuthModal({
       setOtp(["", "", "", "", "", ""]);
       setCountdown(TWO_FACTOR_AUTH_COUNTDOWN_SECONDS);
       setTrustDevice(false);
+      trustDeviceRef.current = false;
       setError("");
       setIsVerifying(false);
       setIsResending(false);
@@ -75,6 +83,10 @@ export default function TwoFactorAuthModal({
 
   if (!isOpen) return null;
 
+  const trustLabel =
+    trustDeviceLabel ||
+    `Trust this device for ${trustedDeviceDays} days — skip the verification code on your next sign-ins from this browser`;
+
   const submitCode = async (code) => {
     if (!sessionToken || isVerifying) return;
 
@@ -85,7 +97,8 @@ export default function TwoFactorAuthModal({
       const response = await verifyFn({
         sessionToken,
         code,
-        trustDevice,
+        // Read from ref so the value is current even if auto-submit races a click.
+        trustDevice: trustDeviceRef.current,
       });
 
       const payload = response?.data || {};
@@ -121,6 +134,13 @@ export default function TwoFactorAuthModal({
     }
   };
 
+  const maybeAutoSubmit = (code) => {
+    if (requireExplicitVerify) return;
+    if (code.length === 6) {
+      submitCode(code);
+    }
+  };
+
   const handleOtpChange = (index, value) => {
     if (isVerifying) return;
 
@@ -142,16 +162,17 @@ export default function TwoFactorAuthModal({
       inputRefs.current[index + 1]?.focus();
     }
 
-    const finalOtp = updatedOtp.join("");
-
-    if (finalOtp.length === 6) {
-      submitCode(finalOtp);
-    }
+    maybeAutoSubmit(updatedOtp.join(""));
   };
 
   const handleKeyDown = (index, e) => {
     if (e.key === "Backspace" && !otp[index] && index > 0) {
       inputRefs.current[index - 1]?.focus();
+    }
+
+    if (e.key === "Enter" && canVerify) {
+      e.preventDefault();
+      submitCode(otpCode);
     }
 
     if (e.key === "Escape") {
@@ -183,9 +204,7 @@ export default function TwoFactorAuthModal({
     const nextIndex = pastedValue.length >= 6 ? 5 : pastedValue.length;
     inputRefs.current[nextIndex]?.focus();
 
-    if (pastedValue.length === 6) {
-      submitCode(pastedValue);
-    }
+    maybeAutoSubmit(pastedValue);
   };
 
   const handleResendCode = async () => {
@@ -228,9 +247,7 @@ export default function TwoFactorAuthModal({
             />
           </div>
 
-          <p className="text-[12px] text-[#64748B]">
-            {subtitle}
-          </p>
+          <p className="text-[12px] text-[#64748B]">{subtitle}</p>
         </div>
 
         <section className="rounded-[9px] border border-[#E2E8F0] bg-white px-[44px] py-[34px] text-center shadow-sm">
@@ -238,9 +255,7 @@ export default function TwoFactorAuthModal({
             <ShieldIcon />
           </div>
 
-          <h2 className="text-[17px] font-semibold text-[#111827]">
-            {title}
-          </h2>
+          <h2 className="text-[17px] font-semibold text-[#111827]">{title}</h2>
 
           <p className="mt-[8px] text-[13px] text-[#64748B]">
             {description || (
@@ -250,6 +265,27 @@ export default function TwoFactorAuthModal({
               </>
             )}
           </p>
+
+          {showTrustDevice ? (
+            <div className="mt-[22px] flex items-start justify-center gap-[8px] text-left text-[13px] text-[#475569]">
+              <input
+                type="checkbox"
+                checked={trustDevice}
+                disabled={isVerifying}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  trustDeviceRef.current = checked;
+                  setTrustDevice(checked);
+                }}
+                aria-label={
+                  trustDeviceLabel ||
+                  `Trust this device for ${trustedDeviceDays} days`
+                }
+                className="mt-[2px] h-[13px] w-[13px] shrink-0 cursor-pointer rounded border-[#CBD5E1] accent-[#0097B2] disabled:cursor-not-allowed"
+              />
+              <span>{trustLabel}</span>
+            </div>
+          ) : null}
 
           <div className="mt-[22px] flex justify-center gap-[10px]">
             {otp.map((digit, index) => (
@@ -279,33 +315,23 @@ export default function TwoFactorAuthModal({
             <p className="mt-4 text-[12px] text-[#64748B]">Verifying code...</p>
           )}
 
-          {showTrustDevice ? (
-          <div className="mt-[22px] flex items-center justify-center gap-[8px] text-[13px] text-[#475569]">
-            <input
-              type="checkbox"
-              checked={trustDevice}
-              disabled={isVerifying}
-              onChange={(e) => setTrustDevice(e.target.checked)}
-              aria-label={
-                trustDeviceLabel ||
-                `Trust this device for ${trustedDeviceDays} days`
-              }
-              className="h-[13px] w-[13px] shrink-0 cursor-pointer rounded border-[#CBD5E1] accent-[#0097B2] disabled:cursor-not-allowed"
-            />
-            <span className="text-left">
-              {trustDeviceLabel ||
-                `Trust this device for ${trustedDeviceDays} days — skip the verification code on your next sign-ins from this browser`}
-            </span>
-          </div>
+          {requireExplicitVerify ? (
+            <div className="mx-auto mt-[20px] w-full max-w-[180px]">
+              <PrimaryButton
+                type="button"
+                disabled={!canVerify}
+                onClick={() => submitCode(otpCode)}
+              >
+                {isVerifying ? "Verifying..." : "Verify"}
+              </PrimaryButton>
+            </div>
           ) : null}
 
           <div className="mt-[20px] text-[13px]">
             {countdown > 0 ? (
               <p className="text-[#94A3B8]">
                 Resend code in{" "}
-                <span className="font-medium text-[#64748B]">
-                  {countdown}s
-                </span>
+                <span className="font-medium text-[#64748B]">{countdown}s</span>
               </p>
             ) : (
               <div className="mx-auto w-full max-w-[160px]">

@@ -109,6 +109,7 @@ async function login({
   ipAddress,
   userAgent,
   deviceTrustToken = null,
+  deviceTrustTokens = null,
 }) {
   const employee = await Employee.findByEmailOrLogonForAuth(identifier.trim());
 
@@ -151,9 +152,30 @@ async function login({
     }
   }
 
-  const trustedDevice = await AuthTrustedDevice.findValidByToken(deviceTrustToken);
+  const candidateTokens = [
+    ...new Set(
+      [
+        ...(Array.isArray(deviceTrustTokens) ? deviceTrustTokens : []),
+        deviceTrustToken,
+      ]
+        .map((token) => `${token || ""}`.trim())
+        .filter(Boolean)
+    ),
+  ];
 
-  if (trustedDevice && Number(trustedDevice.employee_id) === Number(employee.id)) {
+  let matchedToken = null;
+  let trustedDevice = null;
+
+  for (const token of candidateTokens) {
+    const candidate = await AuthTrustedDevice.findValidByToken(token);
+    if (candidate && Number(candidate.employee_id) === Number(employee.id)) {
+      matchedToken = token;
+      trustedDevice = candidate;
+      break;
+    }
+  }
+
+  if (trustedDevice && matchedToken) {
     const sessionToken = tokenService.generateSessionToken();
     const expiresAt = tokenService.getSessionExpiryDate(false);
 
@@ -169,21 +191,30 @@ async function login({
 
     await Employee.updateLastLogin(employee.id);
 
+    // Drop any other stale trust tokens presented on this request.
+    for (const token of candidateTokens) {
+      if (token !== matchedToken) {
+        await AuthTrustedDevice.deleteByToken(token);
+      }
+    }
+
     return issueAuthTokens({
       employee,
       session,
       sessionToken,
       trustDevice: true,
-      deviceTrustToken,
+      deviceTrustToken: matchedToken,
       deviceTrustExpiresAt: trustedDevice.expires_at,
       ipAddress,
       userAgent,
     });
   }
 
-  if (deviceTrustToken) {
-    // Stale / wrong-account trust token — drop it from DB if present.
-    await AuthTrustedDevice.deleteByToken(deviceTrustToken);
+  if (candidateTokens.length) {
+    // Stale / wrong-account trust tokens — drop them from DB if present.
+    for (const token of candidateTokens) {
+      await AuthTrustedDevice.deleteByToken(token);
+    }
   }
 
   const sessionToken = tokenService.generateSessionToken();
@@ -215,7 +246,7 @@ async function login({
     email: tokenService.maskEmail(employee.email),
     expiresInMinutes: config.twoFactor.expiresMinutes,
     trustedDeviceDays: config.session.trustedDeviceDays,
-    clearDeviceTrust: Boolean(deviceTrustToken),
+    clearDeviceTrust: candidateTokens.length > 0,
     devCodeLogged: emailResult.devLogged === true,
   };
 }

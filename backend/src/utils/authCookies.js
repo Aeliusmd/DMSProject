@@ -134,24 +134,41 @@ function clearPortalAuthCookies(res, portal) {
 }
 
 function getDeviceTrustTokenFromRequest(req) {
-  const cookieToken = req.cookies?.[PORTAL_COOKIES.internal.deviceTrust] || "";
+  const tokens = getDeviceTrustTokensFromRequest(req);
+  return tokens[0] || null;
+}
+
+/**
+ * Collect unique device-trust tokens from body + cookie.
+ * Callers should try each until one matches the signed-in employee —
+ * a stale localStorage token must not hide a still-valid cookie.
+ */
+function getDeviceTrustTokensFromRequest(req) {
+  const cookieToken = `${
+    req.cookies?.[PORTAL_COOKIES.internal.deviceTrust] || ""
+  }`.trim();
   const bodyToken =
     typeof req.body?.deviceTrustToken === "string"
       ? req.body.deviceTrustToken.trim()
       : "";
 
-  return bodyToken || cookieToken || null;
+  const tokens = [];
+  for (const token of [bodyToken, cookieToken]) {
+    if (token && !tokens.includes(token)) {
+      tokens.push(token);
+    }
+  }
+  return tokens;
 }
 
 function setDeviceTrustCookie(res, deviceTrustToken, expiresAt) {
   if (!deviceTrustToken) return;
 
-  const maxAge = Math.max(
-    0,
-    new Date(expiresAt).getTime() - Date.now()
-  );
+  const expiresMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiresMs)) return;
 
-  if (!maxAge) return;
+  const maxAge = Math.max(0, expiresMs - Date.now());
+  if (maxAge < 1000) return;
 
   res.cookie(PORTAL_COOKIES.internal.deviceTrust, deviceTrustToken, {
     ...getCookieBaseOptions(),
@@ -198,6 +215,7 @@ module.exports = {
   setPortalAuthCookies,
   clearPortalAuthCookies,
   getDeviceTrustTokenFromRequest,
+  getDeviceTrustTokensFromRequest,
   setDeviceTrustCookie,
   clearDeviceTrustCookie,
   getAccessTokenFromRequest,
