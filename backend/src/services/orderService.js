@@ -2516,6 +2516,13 @@ async function resolveFacilityId(connection, data, options = {}) {
   const { allowCreate = true } = options;
   const facilityId = Number(data.facility);
   const facilityName = trimOrNull(data.facilityName);
+  const matchPayload = {
+    facilityName,
+    address: data.facilityAddress || "",
+    city: data.facilityCity || "",
+    state: data.facilityState || "",
+    zipCode: sanitizeZip(data.facilityZip || ""),
+  };
 
   if (Number.isFinite(facilityId) && facilityId > 0) {
     const selected = await Facility.findById(facilityId, connection);
@@ -2528,6 +2535,12 @@ async function resolveFacilityId(connection, data, options = {}) {
       ) {
         return selected.id;
       }
+
+      // Form ID and typed name disagree — prefer an existing name match when found,
+      // otherwise keep the explicitly selected facility id.
+      const byName = await Facility.findBestMatch(matchPayload, connection);
+      if (byName?.id) return byName.id;
+      return selected.id;
     }
   }
 
@@ -2535,18 +2548,10 @@ async function resolveFacilityId(connection, data, options = {}) {
     return Number.isFinite(facilityId) && facilityId > 0 ? facilityId : null;
   }
 
+  const existing = await Facility.findBestMatch(matchPayload, connection);
+  if (existing?.id) return existing.id;
+
   if (!allowCreate) {
-    const existing = await Facility.findBestMatch(
-      {
-        facilityName,
-        address: data.facilityAddress || "",
-        city: data.facilityCity || "",
-        state: data.facilityState || "",
-        zipCode: sanitizeZip(data.facilityZip || ""),
-      },
-      connection
-    );
-    if (existing?.id) return existing.id;
     throw new ApiError(
       400,
       "Cannot create a new facility for this ended personal order. Restore it to In Process first, or select an existing facility."
@@ -3065,14 +3070,21 @@ async function updateOrderFacility(id, data, actorId) {
       assertFacilityProfileComplete(facility);
     }
 
+    const mismatchState = resolveOrderFacilityMismatchOnUpdate(existing);
+
     await connection.execute(
       `UPDATE orders
        SET facility_id = :facilityId,
+           facility_mismatch = :facilityMismatch,
            specific_doctor = NULL,
            specific_doctor_is_default = 0,
            updated_at = NOW()
        WHERE id = :orderId`,
-      { facilityId: resolvedFacilityId, orderId: existing.id }
+      {
+        facilityId: resolvedFacilityId,
+        facilityMismatch: mismatchState.facilityMismatch,
+        orderId: existing.id,
+      }
     );
 
     await connection.commit();
@@ -3087,27 +3099,13 @@ async function updateOrderFacility(id, data, actorId) {
   }
 }
 
-function resolveOrderFacilityMismatchOnUpdate(existing, resolvedFacilityId) {
-  const batchChosenFacilityId = existing.batch_chosen_facility_id || null;
-  const extractedFacilityId = existing.extracted_facility_id || null;
-
-  if (!Number(existing.facility_mismatch)) {
-    return {
-      batchChosenFacilityId,
-      extractedFacilityId,
-      facilityMismatch: 0,
-    };
-  }
-
-  const currentId = Number(resolvedFacilityId);
-  const extractedId = Number(extractedFacilityId);
-  const facilityMismatch =
-    extractedId && currentId === extractedId ? 0 : Number(existing.facility_mismatch);
-
+function resolveOrderFacilityMismatchOnUpdate(existing) {
+  // Staff save confirms the selected facility as source of truth.
+  // Keep extracted/batch IDs for history, but stop overriding display via mismatch.
   return {
-    batchChosenFacilityId,
-    extractedFacilityId,
-    facilityMismatch,
+    batchChosenFacilityId: existing.batch_chosen_facility_id || null,
+    extractedFacilityId: existing.extracted_facility_id || null,
+    facilityMismatch: 0,
   };
 }
 
@@ -3191,10 +3189,7 @@ async function updateOrder(id, data, actorId, files) {
     }
     const hasSubpoenaFile = Boolean(subpoenaStoragePath);
     const orderFlags = resolveOrderFlags(data, hasSubpoenaFile);
-    const mismatchState = resolveOrderFacilityMismatchOnUpdate(
-      existing,
-      resolvedFacilityId
-    );
+    const mismatchState = resolveOrderFacilityMismatchOnUpdate(existing);
 
     await Order.update(connection, existing.id, {
       ...payload,
