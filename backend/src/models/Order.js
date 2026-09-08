@@ -430,6 +430,18 @@ function buildFindAllWhere(filters = {}) {
     conditions.push(`NOT ${ORDER_HAS_AMOUNT_DUE}`);
   }
 
+  // Special status-dropdown filters (not orders.status ENUM values).
+  if (filters.noSubpoenaFilter) {
+    conditions.push(`(
+      COALESCE(o.has_subpoena, 0) = 0
+      AND (o.subpoena_storage_path IS NULL OR TRIM(o.subpoena_storage_path) = '')
+    )`);
+  }
+
+  if (filters.noRecordsFilter) {
+    conditions.push("COALESCE(o.certificate_no_records, 0) = 1");
+  }
+
   if (filters.excludeCompleted) {
     conditions.push("o.status <> 'Completed'");
   }

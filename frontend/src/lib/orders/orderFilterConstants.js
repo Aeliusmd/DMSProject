@@ -33,6 +33,8 @@ export const INTERNAL_ORDER_STATUS_OPTIONS = [
   { value: "ready_pickup", label: "Ready to Pickup" },
   { value: "completed", label: "Completed" },
   { value: "writeoffs", label: "Write Offs" },
+  { value: "no_subpoena", label: "No Subpoena" },
+  { value: "no_records", label: "No Records" },
   { value: "unpaid", label: "Unpaid" },
   { value: "paid", label: "Paid" },
   { value: "cancelled", label: "Cancelled" },

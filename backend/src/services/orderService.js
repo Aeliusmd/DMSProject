@@ -1570,6 +1570,12 @@ async function getAllOrders(query = {}) {
   } else if (statusKey === "unpaid" || statusKey === "paid") {
     // Invoice due-amount filters — not orders.status values.
     filters.paymentDueFilter = statusKey;
+  } else if (statusKey === "no_subpoena") {
+    // Flag/file filter — not an orders.status ENUM value.
+    filters.noSubpoenaFilter = true;
+  } else if (statusKey === "no_records") {
+    // Certificate of No Records flag — not an orders.status ENUM value.
+    filters.noRecordsFilter = true;
   } else if (query.status && STATUS_FILTER_MAP[query.status]) {
     filters.status = STATUS_FILTER_MAP[query.status];
   }
