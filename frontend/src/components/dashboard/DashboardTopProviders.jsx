@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTopProviders } from "@/lib/dashboard/dashboardApi";
 
-export default function DashboardTopProviders() {
+export default function DashboardTopProviders({ fillHeight = false }) {
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -33,8 +33,12 @@ export default function DashboardTopProviders() {
   }, []);
 
   return (
-    <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <section
+      className={`flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm ${
+        fillHeight ? "xl:h-full" : ""
+      }`}
+    >
+      <div className="mb-4 flex shrink-0 items-center justify-between">
         <h2 className="text-[13px] font-semibold text-[#111827]">
           Top Providers
         </h2>
@@ -48,10 +52,16 @@ export default function DashboardTopProviders() {
       </div>
 
       {error && (
-        <p className="mb-3 text-[12px] font-medium text-red-500">{error}</p>
+        <p className="mb-3 shrink-0 text-[12px] font-medium text-red-500">
+          {error}
+        </p>
       )}
 
-      <div className="space-y-4">
+      <div
+        className={`min-h-0 space-y-4 overflow-auto ${
+          fillHeight ? "flex-1" : "max-h-[260px]"
+        }`}
+      >
         {loading &&
           Array.from({ length: 3 }).map((_, index) => (
             <div

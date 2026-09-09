@@ -75,13 +75,19 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        <div className="grid min-h-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
-          <DashboardRecentOrders />
+        <div
+          className={`grid min-h-0 grid-cols-1 gap-4 ${
+            showFinancialWidgets
+              ? "xl:h-[min(560px,calc(100vh-260px))] xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:items-stretch"
+              : ""
+          }`}
+        >
+          <DashboardRecentOrders fillHeight={showFinancialWidgets} />
 
           {showFinancialWidgets && (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-rows-[auto_minmax(0,1fr)]">
               <DashboardFinancialSummary />
-              <DashboardTopProviders />
+              <DashboardTopProviders fillHeight />
             </div>
           )}
         </div>

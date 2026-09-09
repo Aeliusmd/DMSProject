@@ -8,7 +8,7 @@ import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils"
 
 const RECENT_LIMIT = 8;
 
-export default function DashboardRecentOrders() {
+export default function DashboardRecentOrders({ fillHeight = false }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -36,8 +36,12 @@ export default function DashboardRecentOrders() {
   }, []);
 
   return (
-    <section className="min-h-0 w-full self-start overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
-      <div className="flex flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+    <section
+      className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
+        fillHeight ? "xl:h-full" : ""
+      }`}
+    >
+      <div className="flex shrink-0 flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-[13px] font-semibold text-[#111827]">
             Recent Orders
@@ -61,7 +65,11 @@ export default function DashboardRecentOrders() {
         </div>
       </div>
 
-      <div className="overflow-auto">
+      <div
+        className={`min-h-0 overflow-auto ${
+          fillHeight ? "flex-1" : "max-h-[430px]"
+        }`}
+      >
         <table className="w-full min-w-[860px] border-collapse">
           <thead className="sticky top-0 z-10 bg-white">
             <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
