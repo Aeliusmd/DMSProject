@@ -8,7 +8,7 @@ exports.getStats = asyncHandler(async (_req, res) => {
 });
 
 exports.getTopProviders = asyncHandler(async (req, res) => {
-  const limit = req.query.limit ? Number(req.query.limit) : 5;
+  const limit = req.query.limit ? Number(req.query.limit) : 10;
   const providers = await dashboardService.getTopProviders(limit);
   return ApiResponse.success(res, { providers });
 });

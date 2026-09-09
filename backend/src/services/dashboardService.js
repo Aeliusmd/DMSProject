@@ -326,9 +326,10 @@ async function getDashboardStats() {
   };
 }
 
-async function getTopProviders(limit = 5) {
+async function getTopProviders(limit = 10) {
   const pool = getPool();
-  const safeLimit = Math.min(Math.max(Number(limit) || 5, 1), 20);
+  // Rank: most active cases → highest invoiced → name. Cap at 10 for dashboard.
+  const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 10);
 
   const [rows] = await pool.execute(`
     SELECT

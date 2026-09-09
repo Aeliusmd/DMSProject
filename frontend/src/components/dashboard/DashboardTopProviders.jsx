@@ -6,8 +6,9 @@ import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTopProviders } from "@/lib/dashboard/dashboardApi";
 
 const VISIBLE_PROVIDER_COUNT = 5;
-const FETCH_PROVIDER_LIMIT = 20;
-/** Exactly 5 provider rows visible; more scroll inside this card only. */
+/** Top N by active case volume (then invoiced $); viewport shows 5, rest scroll. */
+const FETCH_PROVIDER_LIMIT = 10;
+/** Exactly 5 provider rows visible; remaining top providers scroll inside this card. */
 const PROVIDER_LIST_HEIGHT =
   "h-[calc(5*2.75rem+4*0.75rem)] max-h-[calc(5*2.75rem+4*0.75rem)]";
 

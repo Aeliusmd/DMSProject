@@ -5,7 +5,7 @@ export async function getDashboardStats() {
   return data?.data?.stats || null;
 }
 
-export async function getTopProviders(limit = 5) {
+export async function getTopProviders(limit = 10) {
   const data = await request(`/dashboard/top-providers?limit=${limit}`, {
     auth: true,
   });
