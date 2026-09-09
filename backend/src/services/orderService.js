@@ -1617,8 +1617,9 @@ async function getAllOrders(query = {}) {
     }
   }
 
-  const useKeysetPagination =
-    String(query.pagination || "").toLowerCase() === "keyset";
+  const paginationMode = String(query.pagination || "").toLowerCase();
+  const useKeysetPagination = paginationMode === "keyset";
+  const useOffsetPagination = paginationMode === "offset";
   const pageSize = parseReportPageSize(query.pageSize || filters.limit);
   const cursorValue = parseOptionalCursor(query.cursor);
   const cursorRaw = Number(cursorValue);
@@ -1639,6 +1640,27 @@ async function getAllOrders(query = {}) {
       pageSize: keysetResult.pageSize,
       hasMore: keysetResult.hasMore,
       nextCursor: keysetResult.nextCursor,
+    };
+  } else if (useOffsetPagination) {
+    // Additive page/offset mode for numbered navigation (e.g. facility Orders modal).
+    // Does not change keyset or legacy unpaginated callers.
+    const pageRaw = Number(query.page || 1);
+    const page =
+      Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
+    filters.limit = pageSize;
+    filters.offset = (page - 1) * pageSize;
+
+    const [pageRows, total] = await Promise.all([
+      Order.findAll(filters),
+      Order.countAll(filters),
+    ]);
+    rows = pageRows;
+    pagination = {
+      type: "offset",
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize) || 1),
     };
   } else {
     rows = await Order.findAll(filters);
@@ -1858,7 +1880,7 @@ async function getAllOrders(query = {}) {
     // Non-blocking
   }
 
-  if (!useKeysetPagination) {
+  if (!useKeysetPagination && !useOffsetPagination) {
     return mappedOrders;
   }
 

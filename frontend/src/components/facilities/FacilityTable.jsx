@@ -6,6 +6,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import AlertModal from "@/components/ui/AlertModal";
 import UploadDocumentsModal from "@/components/ui/UploadDocumentsModal";
 import FacilityAddNoteModal from "@/components/facilities/FacilityAddNoteModal";
+import FacilityOrdersModal from "@/components/facilities/FacilityOrdersModal";
 import { uploadFacilityDocument } from "@/lib/facilities/facilityApi";
 
 export default function FacilitiesTable({
@@ -23,6 +24,10 @@ export default function FacilitiesTable({
     facility: null,
   });
   const [noteModal, setNoteModal] = useState({
+    open: false,
+    facility: null,
+  });
+  const [ordersModal, setOrdersModal] = useState({
     open: false,
     facility: null,
   });
@@ -88,6 +93,20 @@ export default function FacilitiesTable({
     });
   };
 
+  const openOrdersModal = (facility) => {
+    setOrdersModal({
+      open: true,
+      facility,
+    });
+  };
+
+  const closeOrdersModal = () => {
+    setOrdersModal({
+      open: false,
+      facility: null,
+    });
+  };
+
   const handleUploadDocuments = async ({ documentType, files }) => {
     if (!uploadModal.facility?.id || !files?.length) return;
 
@@ -136,13 +155,14 @@ export default function FacilitiesTable({
     <>
       <section className="min-h-0 flex-1 overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm">
         <div className="h-full overflow-auto">
-          <table className="w-full min-w-[860px] border-collapse">
+          <table className="w-full min-w-[980px] border-collapse">
             <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-[#E2E8F0] text-left text-[11px] font-semibold text-[#475569]">
                 <th className="w-[60px] px-5 py-3">ID</th>
-                <th className="w-[300px] px-5 py-3">Facility</th>
-                <th className="w-[180px] px-5 py-3">City</th>
-                <th className="w-[110px] px-5 py-3">Zip</th>
+                <th className="w-[280px] px-5 py-3">Facility</th>
+                <th className="w-[160px] px-5 py-3">City</th>
+                <th className="w-[100px] px-5 py-3">Zip</th>
+                <th className="w-[110px] px-5 py-3 text-center">Orders</th>
                 <th className="w-[110px] px-5 py-3 text-center">Notes</th>
                 <th className="w-[110px] px-5 py-3 text-center">Upload</th>
                 {canDelete ? (
@@ -176,6 +196,17 @@ export default function FacilitiesTable({
 
                   <td className="px-5 py-4 text-[12px] text-[#475569]">
                     {facility.zip}
+                  </td>
+
+                  <td className="px-5 py-4 text-center">
+                    <button
+                      type="button"
+                      onClick={() => openOrdersModal(facility)}
+                      className="inline-flex h-[28px] items-center justify-center gap-2 whitespace-nowrap rounded-[6px] border border-[#67D8E8] bg-[#E6F7FA] px-3 text-[11px] font-semibold text-[#007F96] hover:bg-[#DDF6FA]"
+                    >
+                      <OrdersIcon />
+                      Orders
+                    </button>
                   </td>
 
                   <td className="px-5 py-4 text-center">
@@ -218,7 +249,7 @@ export default function FacilitiesTable({
               {facilities.length === 0 && (
                 <tr>
                   <td
-                    colSpan={canDelete ? 7 : 6}
+                    colSpan={canDelete ? 8 : 7}
                     className="px-5 py-12 text-center text-[13px] text-[#94A3B8]"
                   >
                     No facilities found.
@@ -259,6 +290,13 @@ export default function FacilitiesTable({
         onClose={closeNoteModal}
       />
 
+      <FacilityOrdersModal
+        isOpen={ordersModal.open}
+        facilityId={ordersModal.facility?.id || ""}
+        facilityName={ordersModal.facility?.facility || ""}
+        onClose={closeOrdersModal}
+      />
+
       <AlertModal
         open={uploadAlert.open}
         title={uploadAlert.title}
@@ -267,6 +305,20 @@ export default function FacilitiesTable({
         onClose={() => setUploadAlert((prev) => ({ ...prev, open: false }))}
       />
     </>
+  );
+}
+
+function OrdersIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+      <path d="M7 4h10v16H7V4Z" stroke="currentColor" strokeWidth="1.8" />
+      <path
+        d="M10 8h4M10 12h4M10 16h3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
