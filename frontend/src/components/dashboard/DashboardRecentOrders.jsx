@@ -141,8 +141,8 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
 
   return (
     <section
-      className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
-        fillHeight ? "h-full" : ""
+      className={`flex w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
+        fillHeight ? "h-full min-h-0" : "min-h-0"
       }`}
     >
       <div className="flex shrink-0 flex-col gap-2 border-b border-[#F1F5F9] px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
@@ -171,7 +171,9 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
 
       <div
         ref={scrollRef}
-        className={`min-h-0 overflow-y-auto ${fillHeight ? "flex-1" : "max-h-[430px]"}`}
+        className={`overflow-y-auto overscroll-contain ${
+          fillHeight ? "min-h-0 flex-1" : "max-h-[430px]"
+        }`}
       >
         <table className="w-full min-w-[860px] border-collapse">
           <thead className="sticky top-0 z-10 bg-white">

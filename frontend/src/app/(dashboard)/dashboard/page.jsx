@@ -1,5 +1,6 @@
-"use client";
+﻿"use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DashboardShell from "@/components/layout/DashboardShell";
 import DashboardOverview from "@/components/dashboard/DashboardOverview";
@@ -57,12 +58,36 @@ const quickActions = [
 export default function DashboardPage() {
   const user = getStoredUser();
   const showFinancialWidgets = isAdmin(user);
+  const rightColumnRef = useRef(null);
+  const [matchedHeight, setMatchedHeight] = useState(null);
 
   const visibleQuickActions = quickActions.filter(
     (action) =>
       !isUnprocessedSubpoenasNavHidden(action.href) &&
       canAccessNavItem(user, action.href)
   );
+
+  // Recent Orders height = Financial Summary + Top Providers (same top & bottom).
+  // Extra orders scroll inside the Recent Orders card only.
+  useEffect(() => {
+    if (!showFinancialWidgets) {
+      setMatchedHeight(null);
+      return undefined;
+    }
+
+    const column = rightColumnRef.current;
+    if (!column || typeof ResizeObserver === "undefined") return undefined;
+
+    const syncHeight = () => {
+      const nextHeight = Math.ceil(column.getBoundingClientRect().height);
+      setMatchedHeight((prev) => (prev === nextHeight ? prev : nextHeight));
+    };
+
+    syncHeight();
+    const observer = new ResizeObserver(syncHeight);
+    observer.observe(column);
+    return () => observer.disconnect();
+  }, [showFinancialWidgets]);
 
   return (
     <DashboardShell>
@@ -76,13 +101,25 @@ export default function DashboardPage() {
         </div>
 
         {showFinancialWidgets ? (
-          <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-rows-[auto_auto] xl:items-stretch">
-            {/* Spans Financial Summary + Top Providers: same top as summary, same bottom as providers */}
-            <div className="min-h-0 xl:row-span-2 xl:h-full xl:min-h-0">
+          <div className="flex min-h-0 flex-col gap-4 xl:flex-row xl:items-start">
+            <div
+              className="min-h-0 min-w-0 flex-1 overflow-hidden"
+              style={
+                matchedHeight
+                  ? { height: matchedHeight, maxHeight: matchedHeight }
+                  : undefined
+              }
+            >
               <DashboardRecentOrders fillHeight />
             </div>
-            <DashboardFinancialSummary />
-            <DashboardTopProviders />
+
+            <div
+              ref={rightColumnRef}
+              className="flex w-full shrink-0 flex-col gap-4 xl:w-[360px]"
+            >
+              <DashboardFinancialSummary />
+              <DashboardTopProviders />
+            </div>
           </div>
         ) : (
           <DashboardRecentOrders />
