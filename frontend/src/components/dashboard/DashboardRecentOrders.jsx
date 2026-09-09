@@ -1,39 +1,87 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
-import { getOrders } from "@/lib/orders/orderApi";
+import { getOrdersPaginated } from "@/lib/orders/orderApi";
 import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils";
 
-const RECENT_LIMIT = 8;
+const PAGE_SIZE = 5;
+/** Approx. height for 5 order rows so they show without scrolling. */
+const VISIBLE_ROWS_MIN_HEIGHT = "min-h-[320px]";
 
 export default function DashboardRecentOrders({ fillHeight = false }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(null);
+  const scrollRef = useRef(null);
+  const loadingMoreRef = useRef(false);
 
-  useEffect(() => {
-    let active = true;
+  const loadOrders = useCallback(async ({ cursor = null, append = false } = {}) => {
+    if (append) {
+      if (loadingMoreRef.current) return;
+      loadingMoreRef.current = true;
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+      setError("");
+    }
 
-    getOrders({ limit: RECENT_LIMIT })
-      .then((data) => {
-        if (active) setOrders(data);
-      })
-      .catch((err) => {
-        if (active) {
-          setOrders([]);
-          setError(getApiErrorMessage(err, "Failed to load orders"));
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false);
+    try {
+      const { orders: rows, pagination } = await getOrdersPaginated({
+        pagination: "keyset",
+        pageSize: PAGE_SIZE,
+        cursor: cursor || undefined,
       });
 
-    return () => {
-      active = false;
-    };
+      setOrders((prev) => (append ? [...prev, ...(rows || [])] : rows || []));
+      setHasMore(Boolean(pagination?.hasMore));
+      setNextCursor(pagination?.nextCursor || null);
+    } catch (err) {
+      if (!append) {
+        setOrders([]);
+        setHasMore(false);
+        setNextCursor(null);
+      }
+      setError(getApiErrorMessage(err, "Failed to load orders"));
+    } finally {
+      if (append) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      } else {
+        setLoading(false);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    loadOrders({ append: false });
+  }, [loadOrders]);
+
+  // If the first page fits without a scrollbar, keep loading until scroll is needed.
+  useEffect(() => {
+    if (loading || loadingMore || !hasMore || !nextCursor) return;
+
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (el.scrollHeight <= el.clientHeight + 4) {
+      loadOrders({ cursor: nextCursor, append: true });
+    }
+  }, [orders, hasMore, nextCursor, loading, loadingMore, loadOrders]);
+
+  const handleScroll = (event) => {
+    if (!hasMore || loadingMoreRef.current || loading) return;
+
+    const el = event.currentTarget;
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
+    if (nearBottom && nextCursor) {
+      loadOrders({ cursor: nextCursor, append: true });
+    }
+  };
 
   return (
     <section
@@ -47,7 +95,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
             Recent Orders
           </h2>
           <p className="mt-1 text-[11px] text-[#94A3B8]">
-            Last {RECENT_LIMIT} orders from DMS Orders
+            Latest orders from DMS Orders
           </p>
         </div>
 
@@ -66,7 +114,9 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
       </div>
 
       <div
-        className={`min-h-0 overflow-auto ${
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className={`min-h-0 overflow-auto ${VISIBLE_ROWS_MIN_HEIGHT} ${
           fillHeight ? "flex-1" : "max-h-[430px]"
         }`}
       >
@@ -95,7 +145,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
               </tr>
             )}
 
-            {!loading && error && (
+            {!loading && error && orders.length === 0 && (
               <tr>
                 <td
                   colSpan={7}
@@ -107,7 +157,6 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
             )}
 
             {!loading &&
-              !error &&
               orders.map((order) => (
                 <tr
                   key={order.dbId || order.id}
@@ -158,6 +207,28 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
                   className="px-4 py-10 text-center text-[12px] text-[#94A3B8]"
                 >
                   No orders found.
+                </td>
+              </tr>
+            )}
+
+            {loadingMore && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-4 py-3 text-center text-[11px] text-[#94A3B8]"
+                >
+                  Loading more...
+                </td>
+              </tr>
+            )}
+
+            {!loading && !loadingMore && hasMore && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-4 py-2 text-center text-[10px] text-[#CBD5E1]"
+                >
+                  Scroll for more
                 </td>
               </tr>
             )}
