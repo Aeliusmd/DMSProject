@@ -8,15 +8,27 @@ import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils"
 
 const PAGE_SIZE = 5;
 
-export default function DashboardRecentOrders({ fillHeight = false }) {
+export default function DashboardRecentOrders({
+  matchCompanionHeight = false,
+}) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
-  const scrollRef = useRef(null);
+  const sentinelRef = useRef(null);
   const loadingMoreRef = useRef(false);
+  const nextCursorRef = useRef(null);
+  const hasMoreRef = useRef(false);
+
+  useEffect(() => {
+    nextCursorRef.current = nextCursor;
+  }, [nextCursor]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
 
   const loadOrders = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (append) {
@@ -59,32 +71,38 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
     loadOrders({ append: false });
   }, [loadOrders]);
 
-  // If the first page fits without a scrollbar, keep loading until scroll is needed.
+  // Load next page only when the sentinel enters the scroll viewport.
   useEffect(() => {
-    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel || loading) return undefined;
 
-    const el = scrollRef.current;
-    if (!el) return;
+    const root = sentinel.closest("[data-recent-orders-scroll]");
+    if (!root) return undefined;
 
-    if (el.scrollHeight <= el.clientHeight + 4) {
-      loadOrders({ cursor: nextCursor, append: true });
-    }
-  }, [orders, hasMore, nextCursor, loading, loadingMore, loadOrders]);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (!hasMoreRef.current || !nextCursorRef.current) return;
+        if (loadingMoreRef.current) return;
 
-  const handleScroll = (event) => {
-    if (!hasMore || loadingMoreRef.current || loading) return;
+        loadOrders({ cursor: nextCursorRef.current, append: true });
+      },
+      {
+        root,
+        rootMargin: "80px",
+        threshold: 0,
+      }
+    );
 
-    const el = event.currentTarget;
-    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
-    if (nearBottom && nextCursor) {
-      loadOrders({ cursor: nextCursor, append: true });
-    }
-  };
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loading, loadOrders, orders.length, hasMore]);
 
   return (
     <section
       className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
-        fillHeight ? "h-full xl:min-h-0" : ""
+        matchCompanionHeight ? "h-full min-h-[360px]" : ""
       }`}
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
@@ -112,10 +130,9 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
       </div>
 
       <div
-        ref={scrollRef}
-        onScroll={handleScroll}
+        data-recent-orders-scroll
         className={`min-h-0 overflow-auto ${
-          fillHeight ? "flex-1" : "max-h-[430px]"
+          matchCompanionHeight ? "flex-1" : "max-h-[430px]"
         }`}
       >
         <table className="w-full min-w-[860px] border-collapse">
@@ -219,19 +236,16 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
                 </td>
               </tr>
             )}
-
-            {!loading && !loadingMore && hasMore && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="px-4 py-2 text-center text-[10px] text-[#CBD5E1]"
-                >
-                  Scroll for more
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+
+        {!loading && hasMore ? (
+          <div
+            ref={sentinelRef}
+            className="h-4 w-full"
+            aria-hidden="true"
+          />
+        ) : null}
       </div>
     </section>
   );
