@@ -76,18 +76,12 @@ export default function DashboardPage() {
         </div>
 
         {showFinancialWidgets ? (
-          <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-rows-[auto_minmax(360px,auto)]">
-            <div className="xl:col-start-2 xl:row-start-1">
-              <DashboardFinancialSummary />
+          <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-rows-[auto_minmax(0,auto)] xl:items-stretch">
+            <div className="min-h-0 xl:row-span-2 xl:h-full">
+              <DashboardRecentOrders fillHeight />
             </div>
-
-            <div className="min-h-0 xl:col-start-1 xl:row-start-2">
-              <DashboardRecentOrders matchCompanionHeight />
-            </div>
-
-            <div className="min-h-0 xl:col-start-2 xl:row-start-2">
-              <DashboardTopProviders matchCompanionHeight />
-            </div>
+            <DashboardFinancialSummary />
+            <DashboardTopProviders />
           </div>
         ) : (
           <DashboardRecentOrders />

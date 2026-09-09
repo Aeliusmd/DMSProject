@@ -6,39 +6,51 @@ import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getOrdersPaginated } from "@/lib/orders/orderApi";
 import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils";
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 8;
+const MAX_AUTO_FILL_PAGES = 2;
 
-export default function DashboardRecentOrders({
-  matchCompanionHeight = false,
-}) {
+function mergeOrders(existing, incoming) {
+  if (!incoming?.length) return existing;
+  const seen = new Set(existing.map((order) => String(order.dbId || order.id)));
+  const next = [...existing];
+  for (const order of incoming) {
+    const key = String(order.dbId || order.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    next.push(order);
+  }
+  return next;
+}
+
+export default function DashboardRecentOrders({ fillHeight = false }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState(null);
+
+  const scrollRef = useRef(null);
   const sentinelRef = useRef(null);
-  const loadingMoreRef = useRef(false);
   const nextCursorRef = useRef(null);
   const hasMoreRef = useRef(false);
-
-  useEffect(() => {
-    nextCursorRef.current = nextCursor;
-  }, [nextCursor]);
-
-  useEffect(() => {
-    hasMoreRef.current = hasMore;
-  }, [hasMore]);
+  const loadingMoreRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const autoFillPagesRef = useRef(0);
 
   const loadOrders = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (append) {
-      if (loadingMoreRef.current) return;
+      if (loadingMoreRef.current || !hasMoreRef.current) return;
       loadingMoreRef.current = true;
       setLoadingMore(true);
     } else {
+      requestIdRef.current += 1;
+      autoFillPagesRef.current = 0;
       setLoading(true);
       setError("");
     }
+
+    const requestId = requestIdRef.current;
 
     try {
       const { orders: rows, pagination } = await getOrdersPaginated({
@@ -47,17 +59,29 @@ export default function DashboardRecentOrders({
         cursor: cursor || undefined,
       });
 
-      setOrders((prev) => (append ? [...prev, ...(rows || [])] : rows || []));
-      setHasMore(Boolean(pagination?.hasMore));
-      setNextCursor(pagination?.nextCursor || null);
+      if (requestId !== requestIdRef.current) return;
+
+      const pageRows = rows || [];
+      setOrders((prev) => (append ? mergeOrders(prev, pageRows) : pageRows));
+
+      const more = Boolean(pagination?.hasMore);
+      const cursorValue = pagination?.nextCursor || null;
+      hasMoreRef.current = more;
+      nextCursorRef.current = cursorValue;
+      setHasMore(more);
+      setNextCursor(cursorValue);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       if (!append) {
         setOrders([]);
+        hasMoreRef.current = false;
+        nextCursorRef.current = null;
         setHasMore(false);
         setNextCursor(null);
+        setError(getApiErrorMessage(err, "Failed to load orders"));
       }
-      setError(getApiErrorMessage(err, "Failed to load orders"));
     } finally {
+      if (requestId !== requestIdRef.current) return;
       if (append) {
         loadingMoreRef.current = false;
         setLoadingMore(false);
@@ -69,40 +93,52 @@ export default function DashboardRecentOrders({
 
   useEffect(() => {
     loadOrders({ append: false });
+    return () => {
+      requestIdRef.current += 1;
+    };
   }, [loadOrders]);
 
-  // Load next page only when the sentinel enters the scroll viewport.
+  // One-time fill: if the card is taller than the first page, fetch a bit more
+  // so scrolling works — capped to avoid request storms.
   useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || loading) return undefined;
+    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    if (autoFillPagesRef.current >= MAX_AUTO_FILL_PAGES) return;
 
-    const root = sentinel.closest("[data-recent-orders-scroll]");
-    if (!root) return undefined;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    if (el.scrollHeight <= el.clientHeight + 8) {
+      autoFillPagesRef.current += 1;
+      loadOrders({ cursor: nextCursor, append: true });
+    }
+  }, [orders, hasMore, nextCursor, loading, loadingMore, loadOrders]);
+
+  // Efficient infinite scroll via sentinel (no scroll-event thrashing).
+  useEffect(() => {
+    const root = scrollRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel || !hasMore) return undefined;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
         if (!entry?.isIntersecting) return;
-        if (!hasMoreRef.current || !nextCursorRef.current) return;
-        if (loadingMoreRef.current) return;
-
-        loadOrders({ cursor: nextCursorRef.current, append: true });
+        if (loadingMoreRef.current || !hasMoreRef.current) return;
+        const cursor = nextCursorRef.current;
+        if (!cursor) return;
+        loadOrders({ cursor, append: true });
       },
-      {
-        root,
-        rootMargin: "80px",
-        threshold: 0,
-      }
+      { root, rootMargin: "80px 0px", threshold: 0 }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loading, loadOrders, orders.length, hasMore]);
+  }, [hasMore, orders.length, loadOrders]);
 
   return (
     <section
       className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
-        matchCompanionHeight ? "h-full min-h-[360px]" : ""
+        fillHeight ? "h-full" : ""
       }`}
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
@@ -130,10 +166,8 @@ export default function DashboardRecentOrders({
       </div>
 
       <div
-        data-recent-orders-scroll
-        className={`min-h-0 overflow-auto ${
-          matchCompanionHeight ? "flex-1" : "max-h-[430px]"
-        }`}
+        ref={scrollRef}
+        className={`min-h-0 overflow-auto ${fillHeight ? "flex-1" : "max-h-[430px]"}`}
       >
         <table className="w-full min-w-[860px] border-collapse">
           <thead className="sticky top-0 z-10 bg-white">
@@ -239,12 +273,8 @@ export default function DashboardRecentOrders({
           </tbody>
         </table>
 
-        {!loading && hasMore ? (
-          <div
-            ref={sentinelRef}
-            className="h-4 w-full"
-            aria-hidden="true"
-          />
+        {hasMore ? (
+          <div ref={sentinelRef} className="h-4 w-full" aria-hidden="true" />
         ) : null}
       </div>
     </section>
