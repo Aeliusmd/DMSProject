@@ -5,7 +5,12 @@ import Link from "next/link";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTopProviders } from "@/lib/dashboard/dashboardApi";
 
-export default function DashboardTopProviders({ fillHeight = false }) {
+const VISIBLE_PROVIDER_COUNT = 5;
+const FETCH_PROVIDER_LIMIT = 20;
+/** Fixed viewport for ~5 provider rows; extra rows scroll. */
+const PROVIDER_LIST_HEIGHT = "h-[280px]";
+
+export default function DashboardTopProviders() {
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -13,7 +18,7 @@ export default function DashboardTopProviders({ fillHeight = false }) {
   useEffect(() => {
     let active = true;
 
-    getTopProviders(5)
+    getTopProviders(FETCH_PROVIDER_LIMIT)
       .then((data) => {
         if (active) setProviders(data);
       })
@@ -33,11 +38,7 @@ export default function DashboardTopProviders({ fillHeight = false }) {
   }, []);
 
   return (
-    <section
-      className={`flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm ${
-        fillHeight ? "xl:h-full" : ""
-      }`}
-    >
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
       <div className="mb-4 flex shrink-0 items-center justify-between">
         <h2 className="text-[13px] font-semibold text-[#111827]">
           Top Providers
@@ -58,12 +59,10 @@ export default function DashboardTopProviders({ fillHeight = false }) {
       )}
 
       <div
-        className={`min-h-0 space-y-4 overflow-auto ${
-          fillHeight ? "flex-1" : "max-h-[260px]"
-        }`}
+        className={`min-h-0 space-y-4 overflow-y-auto ${PROVIDER_LIST_HEIGHT}`}
       >
         {loading &&
-          Array.from({ length: 3 }).map((_, index) => (
+          Array.from({ length: VISIBLE_PROVIDER_COUNT }).map((_, index) => (
             <div
               key={`loading-${index}`}
               className="flex items-start justify-between gap-4"

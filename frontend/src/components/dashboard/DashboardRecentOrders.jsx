@@ -7,8 +7,6 @@ import { getOrdersPaginated } from "@/lib/orders/orderApi";
 import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils";
 
 const PAGE_SIZE = 5;
-/** Approx. height for 5 order rows so they show without scrolling. */
-const VISIBLE_ROWS_MIN_HEIGHT = "min-h-[320px]";
 
 export default function DashboardRecentOrders({ fillHeight = false }) {
   const [orders, setOrders] = useState([]);
@@ -86,7 +84,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
   return (
     <section
       className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
-        fillHeight ? "xl:h-full" : ""
+        fillHeight ? "h-full xl:min-h-0" : ""
       }`}
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
@@ -116,7 +114,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className={`min-h-0 overflow-auto ${VISIBLE_ROWS_MIN_HEIGHT} ${
+        className={`min-h-0 overflow-auto ${
           fillHeight ? "flex-1" : "max-h-[430px]"
         }`}
       >
