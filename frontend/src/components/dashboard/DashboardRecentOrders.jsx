@@ -1,143 +1,39 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
-import { getOrdersPaginated } from "@/lib/orders/orderApi";
+import { getOrders } from "@/lib/orders/orderApi";
 import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils";
 
-const PAGE_SIZE = 8;
-/** Fill the matched-height card without empty gap; then scroll loads more. */
-const MAX_AUTO_FILL_PAGES = 6;
-
-function mergeOrders(existing, incoming) {
-  if (!incoming?.length) return existing;
-  const seen = new Set(existing.map((order) => String(order.dbId || order.id)));
-  const next = [...existing];
-  for (const order of incoming) {
-    const key = String(order.dbId || order.id);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    next.push(order);
-  }
-  return next;
-}
+const RECENT_LIMIT = 8;
 
 export default function DashboardRecentOrders({ fillHeight = false }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
-  const [hasMore, setHasMore] = useState(false);
 
-  const scrollRef = useRef(null);
-  const sentinelRef = useRef(null);
-  const nextCursorRef = useRef(null);
-  const hasMoreRef = useRef(false);
-  const loadingMoreRef = useRef(false);
-  const requestIdRef = useRef(0);
-  const autoFillPagesRef = useRef(0);
+  useEffect(() => {
+    let active = true;
 
-  const loadOrders = useCallback(async ({ cursor = null, append = false } = {}) => {
-    if (append) {
-      if (loadingMoreRef.current || !hasMoreRef.current) return false;
-      loadingMoreRef.current = true;
-      setLoadingMore(true);
-    } else {
-      requestIdRef.current += 1;
-      autoFillPagesRef.current = 0;
-      setLoading(true);
-      setError("");
-    }
-
-    const requestId = requestIdRef.current;
-
-    try {
-      const { orders: rows, pagination } = await getOrdersPaginated({
-        pagination: "keyset",
-        pageSize: PAGE_SIZE,
-        cursor: cursor || undefined,
+    getOrders({ limit: RECENT_LIMIT })
+      .then((data) => {
+        if (!active) return;
+        setOrders(Array.isArray(data) ? data.slice(0, RECENT_LIMIT) : []);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setOrders([]);
+        setError(getApiErrorMessage(err, "Failed to load orders"));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
 
-      if (requestId !== requestIdRef.current) return false;
-
-      const pageRows = rows || [];
-      setOrders((prev) => (append ? mergeOrders(prev, pageRows) : pageRows));
-
-      const more = Boolean(pagination?.hasMore);
-      const cursorValue = pagination?.nextCursor || null;
-      hasMoreRef.current = more;
-      nextCursorRef.current = cursorValue;
-      setHasMore(more);
-      return more && Boolean(cursorValue);
-    } catch (err) {
-      if (requestId !== requestIdRef.current) return false;
-      if (!append) {
-        setOrders([]);
-        hasMoreRef.current = false;
-        nextCursorRef.current = null;
-        setHasMore(false);
-        setError(getApiErrorMessage(err, "Failed to load orders"));
-      }
-      return false;
-    } finally {
-      if (requestId === requestIdRef.current) {
-        if (append) {
-          loadingMoreRef.current = false;
-          setLoadingMore(false);
-        } else {
-          setLoading(false);
-        }
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    loadOrders({ append: false });
     return () => {
-      requestIdRef.current += 1;
+      active = false;
     };
-  }, [loadOrders]);
-
-  // Fill visible card height with rows (no empty gap), then stop until user scrolls.
-  useEffect(() => {
-    if (loading || loadingMore) return;
-    if (!hasMoreRef.current || !nextCursorRef.current) return;
-    if (autoFillPagesRef.current >= MAX_AUTO_FILL_PAGES) return;
-
-    const el = scrollRef.current;
-    if (!el) return;
-
-    // Need a real overflow before we stop auto-filling.
-    if (el.scrollHeight > el.clientHeight + 4) return;
-
-    autoFillPagesRef.current += 1;
-    const cursor = nextCursorRef.current;
-    if (cursor) {
-      loadOrders({ cursor, append: true });
-    }
-  }, [orders, loading, loadingMore, hasMore, loadOrders]);
-
-  useEffect(() => {
-    const root = scrollRef.current;
-    const sentinel = sentinelRef.current;
-    if (!root || !sentinel || !hasMore) return undefined;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (!entry?.isIntersecting) return;
-        if (loadingMoreRef.current || !hasMoreRef.current) return;
-        const cursor = nextCursorRef.current;
-        if (!cursor) return;
-        loadOrders({ cursor, append: true });
-      },
-      { root, rootMargin: "64px 0px", threshold: 0 }
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, orders.length, loadOrders]);
+  }, []);
 
   return (
     <section
@@ -170,7 +66,6 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
       </div>
 
       <div
-        ref={scrollRef}
         className={`overflow-y-auto overscroll-contain ${
           fillHeight ? "min-h-0 flex-1" : "max-h-[430px]"
         }`}
@@ -265,23 +160,8 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
                 </td>
               </tr>
             )}
-
-            {loadingMore && (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="px-4 py-2.5 text-center text-[11px] text-[#94A3B8]"
-                >
-                  Loading more...
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
-
-        {hasMore ? (
-          <div ref={sentinelRef} className="h-3 w-full" aria-hidden="true" />
-        ) : null}
       </div>
     </section>
   );
