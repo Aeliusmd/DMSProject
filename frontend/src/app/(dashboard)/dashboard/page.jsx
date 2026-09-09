@@ -76,15 +76,13 @@ export default function DashboardPage() {
         </div>
 
         {showFinancialWidgets ? (
-          <div className="flex min-h-0 flex-col gap-4 xl:flex-row xl:items-stretch">
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] xl:grid-rows-[auto_auto] xl:items-stretch">
+            {/* Spans Financial Summary + Top Providers: same top as summary, same bottom as providers */}
+            <div className="min-h-0 xl:row-span-2 xl:h-full xl:min-h-0">
               <DashboardRecentOrders fillHeight />
             </div>
-
-            <div className="flex w-full shrink-0 flex-col gap-4 xl:w-[360px]">
-              <DashboardFinancialSummary />
-              <DashboardTopProviders />
-            </div>
+            <DashboardFinancialSummary />
+            <DashboardTopProviders />
           </div>
         ) : (
           <DashboardRecentOrders />

@@ -5,13 +5,13 @@ import Link from "next/link";
 import { getApiErrorMessage } from "@/lib/apiErrorUtils";
 import { getTopProviders } from "@/lib/dashboard/dashboardApi";
 
-const VISIBLE_COUNT = 5;
-const FETCH_LIMIT = 20;
+const VISIBLE_PROVIDER_COUNT = 5;
+const FETCH_PROVIDER_LIMIT = 20;
 /**
- * Viewport for exactly 5 provider rows:
- * row ~40px + gap 16px between rows → 5*40 + 4*16 = 264px
+ * Fits ~5 provider rows (row + gap). Content shorter than 5 shrinks;
+ * more than 5 scrolls inside the card.
  */
-const LIST_VIEWPORT_CLASS = "h-[264px]";
+const PROVIDER_LIST_MAX_HEIGHT = "max-h-[260px]";
 
 export default function DashboardTopProviders() {
   const [providers, setProviders] = useState([]);
@@ -21,7 +21,7 @@ export default function DashboardTopProviders() {
   useEffect(() => {
     let active = true;
 
-    getTopProviders(FETCH_LIMIT)
+    getTopProviders(FETCH_PROVIDER_LIMIT)
       .then((data) => {
         if (active) setProviders(Array.isArray(data) ? data : []);
       })
@@ -40,11 +40,9 @@ export default function DashboardTopProviders() {
     };
   }, []);
 
-  const canScroll = !loading && providers.length > VISIBLE_COUNT;
-
   return (
-    <section className="flex shrink-0 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
-      <div className="mb-4 flex shrink-0 items-center justify-between">
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
+      <div className="mb-3 flex shrink-0 items-center justify-between">
         <h2 className="text-[13px] font-semibold text-[#111827]">
           Top Providers
         </h2>
@@ -58,69 +56,65 @@ export default function DashboardTopProviders() {
       </div>
 
       {error ? (
-        <p className="mb-3 shrink-0 text-[12px] font-medium text-red-500">
-          {error}
-        </p>
+        <p className="shrink-0 text-[12px] font-medium text-red-500">{error}</p>
       ) : null}
 
       <div
-        className={`min-h-0 space-y-4 overflow-x-hidden ${LIST_VIEWPORT_CLASS} ${
-          canScroll ? "overflow-y-auto" : "overflow-y-hidden"
+        className={`min-h-0 overflow-y-auto ${PROVIDER_LIST_MAX_HEIGHT} ${
+          error ? "mt-3" : ""
         }`}
       >
-        {loading
-          ? Array.from({ length: VISIBLE_COUNT }).map((_, index) => (
-              <ProviderRowSkeleton key={`loading-${index}`} />
-            ))
-          : null}
-
-        {!loading &&
-          providers.map((provider) => (
-            <div
-              key={provider.name}
-              className="flex h-10 items-start justify-between gap-4"
-            >
-              <div className="min-w-0">
-                <h3 className="truncate text-[12px] font-semibold leading-4 text-[#334155]">
-                  {provider.name}
-                </h3>
-                <p className="mt-1 text-[10px] leading-3 text-[#94A3B8]">
-                  {provider.casesLabel}
-                </p>
+        <div className="space-y-3">
+          {loading &&
+            Array.from({ length: VISIBLE_PROVIDER_COUNT }).map((_, index) => (
+              <div
+                key={`loading-${index}`}
+                className="flex items-start justify-between gap-4"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="h-3 w-32 animate-pulse rounded bg-[#E2E8F0]" />
+                  <div className="mt-2 h-2 w-16 animate-pulse rounded bg-[#F1F5F9]" />
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="h-3 w-20 animate-pulse rounded bg-[#E2E8F0]" />
+                  <div className="mt-2 h-2 w-16 animate-pulse rounded bg-[#F1F5F9]" />
+                </div>
               </div>
+            ))}
 
-              <div className="shrink-0 text-right">
-                <p className="text-[12px] font-semibold leading-4 text-[#334155]">
-                  {provider.invoiced}
-                </p>
-                <p className="mt-1 text-[10px] font-semibold leading-3 text-[#059669]">
-                  {provider.paid}
-                </p>
+          {!loading &&
+            providers.map((provider) => (
+              <div
+                key={provider.name}
+                className="flex items-start justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <h3 className="truncate text-[12px] font-semibold text-[#334155]">
+                    {provider.name}
+                  </h3>
+                  <p className="mt-1 text-[10px] text-[#94A3B8]">
+                    {provider.casesLabel}
+                  </p>
+                </div>
+
+                <div className="shrink-0 text-right">
+                  <p className="text-[12px] font-semibold text-[#334155]">
+                    {provider.invoiced}
+                  </p>
+                  <p className="mt-1 text-[10px] font-semibold text-[#059669]">
+                    {provider.paid}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-        {!loading && !error && providers.length === 0 ? (
-          <p className="text-center text-[12px] text-[#94A3B8]">
-            No provider data found.
-          </p>
-        ) : null}
+          {!loading && !error && providers.length === 0 && (
+            <p className="py-2 text-center text-[12px] text-[#94A3B8]">
+              No provider data found.
+            </p>
+          )}
+        </div>
       </div>
     </section>
-  );
-}
-
-function ProviderRowSkeleton() {
-  return (
-    <div className="flex h-10 items-start justify-between gap-4">
-      <div className="min-w-0 flex-1">
-        <div className="h-3 w-32 animate-pulse rounded bg-[#E2E8F0]" />
-        <div className="mt-2 h-2 w-16 animate-pulse rounded bg-[#F1F5F9]" />
-      </div>
-      <div className="shrink-0 text-right">
-        <div className="ml-auto h-3 w-20 animate-pulse rounded bg-[#E2E8F0]" />
-        <div className="ml-auto mt-2 h-2 w-16 animate-pulse rounded bg-[#F1F5F9]" />
-      </div>
-    </div>
   );
 }

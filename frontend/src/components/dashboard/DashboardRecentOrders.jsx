@@ -7,7 +7,8 @@ import { getOrdersPaginated } from "@/lib/orders/orderApi";
 import { resolveRushLabel, buildRushBadgeTooltip } from "@/lib/orders/rushUtils";
 
 const PAGE_SIZE = 8;
-const MAX_AUTO_FILL_PAGES = 2;
+/** Fill the matched-height card without empty gap; then scroll loads more. */
+const MAX_AUTO_FILL_PAGES = 6;
 
 function mergeOrders(existing, incoming) {
   if (!incoming?.length) return existing;
@@ -28,7 +29,6 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState(null);
 
   const scrollRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -40,7 +40,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
 
   const loadOrders = useCallback(async ({ cursor = null, append = false } = {}) => {
     if (append) {
-      if (loadingMoreRef.current || !hasMoreRef.current) return;
+      if (loadingMoreRef.current || !hasMoreRef.current) return false;
       loadingMoreRef.current = true;
       setLoadingMore(true);
     } else {
@@ -59,7 +59,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
         cursor: cursor || undefined,
       });
 
-      if (requestId !== requestIdRef.current) return;
+      if (requestId !== requestIdRef.current) return false;
 
       const pageRows = rows || [];
       setOrders((prev) => (append ? mergeOrders(prev, pageRows) : pageRows));
@@ -69,24 +69,25 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
       hasMoreRef.current = more;
       nextCursorRef.current = cursorValue;
       setHasMore(more);
-      setNextCursor(cursorValue);
+      return more && Boolean(cursorValue);
     } catch (err) {
-      if (requestId !== requestIdRef.current) return;
+      if (requestId !== requestIdRef.current) return false;
       if (!append) {
         setOrders([]);
         hasMoreRef.current = false;
         nextCursorRef.current = null;
         setHasMore(false);
-        setNextCursor(null);
         setError(getApiErrorMessage(err, "Failed to load orders"));
       }
+      return false;
     } finally {
-      if (requestId !== requestIdRef.current) return;
-      if (append) {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      } else {
-        setLoading(false);
+      if (requestId === requestIdRef.current) {
+        if (append) {
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+        } else {
+          setLoading(false);
+        }
       }
     }
   }, []);
@@ -98,22 +99,25 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
     };
   }, [loadOrders]);
 
-  // One-time fill: if the card is taller than the first page, fetch a bit more
-  // so scrolling works — capped to avoid request storms.
+  // Fill visible card height with rows (no empty gap), then stop until user scrolls.
   useEffect(() => {
-    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    if (loading || loadingMore) return;
+    if (!hasMoreRef.current || !nextCursorRef.current) return;
     if (autoFillPagesRef.current >= MAX_AUTO_FILL_PAGES) return;
 
     const el = scrollRef.current;
     if (!el) return;
 
-    if (el.scrollHeight <= el.clientHeight + 8) {
-      autoFillPagesRef.current += 1;
-      loadOrders({ cursor: nextCursor, append: true });
-    }
-  }, [orders, hasMore, nextCursor, loading, loadingMore, loadOrders]);
+    // Need a real overflow before we stop auto-filling.
+    if (el.scrollHeight > el.clientHeight + 4) return;
 
-  // Efficient infinite scroll via sentinel (no scroll-event thrashing).
+    autoFillPagesRef.current += 1;
+    const cursor = nextCursorRef.current;
+    if (cursor) {
+      loadOrders({ cursor, append: true });
+    }
+  }, [orders, loading, loadingMore, hasMore, loadOrders]);
+
   useEffect(() => {
     const root = scrollRef.current;
     const sentinel = sentinelRef.current;
@@ -128,7 +132,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
         if (!cursor) return;
         loadOrders({ cursor, append: true });
       },
-      { root, rootMargin: "80px 0px", threshold: 0 }
+      { root, rootMargin: "64px 0px", threshold: 0 }
     );
 
     observer.observe(sentinel);
@@ -138,15 +142,15 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
   return (
     <section
       className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
-        fillHeight ? "h-full flex-1" : ""
+        fillHeight ? "h-full" : ""
       }`}
     >
-      <div className="flex shrink-0 flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex shrink-0 flex-col gap-2 border-b border-[#F1F5F9] px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h2 className="text-[13px] font-semibold text-[#111827]">
             Recent Orders
           </h2>
-          <p className="mt-1 text-[11px] text-[#94A3B8]">
+          <p className="mt-0.5 text-[11px] text-[#94A3B8]">
             Latest orders from DMS Orders
           </p>
         </div>
@@ -167,18 +171,18 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
 
       <div
         ref={scrollRef}
-        className={`min-h-0 overflow-auto ${fillHeight ? "flex-1" : "max-h-[430px]"}`}
+        className={`min-h-0 overflow-y-auto ${fillHeight ? "flex-1" : "max-h-[430px]"}`}
       >
         <table className="w-full min-w-[860px] border-collapse">
           <thead className="sticky top-0 z-10 bg-white">
             <tr className="border-b border-[#F1F5F9] text-left text-[11px] font-semibold text-[#64748B]">
-              <th className="px-4 py-3">Order #</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Applicant</th>
-              <th className="px-4 py-3">Provider</th>
-              <th className="px-4 py-3">Subpoena Date</th>
-              <th className="px-4 py-3">Rush</th>
-              <th className="px-4 py-3">Invoice</th>
+              <th className="px-4 py-2.5">Order #</th>
+              <th className="px-4 py-2.5">Status</th>
+              <th className="px-4 py-2.5">Applicant</th>
+              <th className="px-4 py-2.5">Provider</th>
+              <th className="px-4 py-2.5">Subpoena Date</th>
+              <th className="px-4 py-2.5">Rush</th>
+              <th className="px-4 py-2.5">Invoice</th>
             </tr>
           </thead>
 
@@ -187,7 +191,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
               <tr>
                 <td
                   colSpan={7}
-                  className="px-4 py-10 text-center text-[12px] text-[#94A3B8]"
+                  className="px-4 py-8 text-center text-[12px] text-[#94A3B8]"
                 >
                   Loading orders...
                 </td>
@@ -198,7 +202,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
               <tr>
                 <td
                   colSpan={7}
-                  className="px-4 py-10 text-center text-[12px] font-medium text-red-500"
+                  className="px-4 py-8 text-center text-[12px] font-medium text-red-500"
                 >
                   {error}
                 </td>
@@ -211,7 +215,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
                   key={order.dbId || order.id}
                   className="border-b border-[#F8FAFC] last:border-b-0 hover:bg-[#F8FBFC]"
                 >
-                  <td className="px-4 py-3 align-middle">
+                  <td className="px-4 py-2.5 align-middle">
                     <Link
                       href={`/orders/new?mode=edit&orderId=${encodeURIComponent(order.dbId)}`}
                       className="inline-flex rounded-[4px] bg-[#E6F7FA] px-2 py-1 text-[11px] font-semibold text-[#007F96] hover:underline"
@@ -223,27 +227,27 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
                     </p>
                   </td>
 
-                  <td className="px-4 py-3 align-middle">
+                  <td className="px-4 py-2.5 align-middle">
                     <StatusBadge status={order.status} />
                   </td>
 
-                  <td className="px-4 py-3 text-[12px] text-[#334155]">
+                  <td className="px-4 py-2.5 text-[12px] text-[#334155]">
                     {order.applicant || "—"}
                   </td>
 
-                  <td className="max-w-[160px] truncate px-4 py-3 text-[12px] text-[#334155]">
+                  <td className="max-w-[160px] truncate px-4 py-2.5 text-[12px] text-[#334155]">
                     {order.providerName || order.company?.name || "—"}
                   </td>
 
-                  <td className="px-4 py-3 text-[12px] text-[#334155]">
+                  <td className="px-4 py-2.5 text-[12px] text-[#334155]">
                     {order.subpoenaDateDisplay || order.subpoenaDate || "—"}
                   </td>
 
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-2.5">
                     <RushBadge rush={resolveRushLabel(order)} order={order} />
                   </td>
 
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-2.5">
                     <InvoiceBadge status={order.invoiceStatus} />
                   </td>
                 </tr>
@@ -253,7 +257,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
               <tr>
                 <td
                   colSpan={7}
-                  className="px-4 py-10 text-center text-[12px] text-[#94A3B8]"
+                  className="px-4 py-8 text-center text-[12px] text-[#94A3B8]"
                 >
                   No orders found.
                 </td>
@@ -264,7 +268,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
               <tr>
                 <td
                   colSpan={7}
-                  className="px-4 py-3 text-center text-[11px] text-[#94A3B8]"
+                  className="px-4 py-2.5 text-center text-[11px] text-[#94A3B8]"
                 >
                   Loading more...
                 </td>
@@ -274,7 +278,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
         </table>
 
         {hasMore ? (
-          <div ref={sentinelRef} className="h-4 w-full" aria-hidden="true" />
+          <div ref={sentinelRef} className="h-3 w-full" aria-hidden="true" />
         ) : null}
       </div>
     </section>
