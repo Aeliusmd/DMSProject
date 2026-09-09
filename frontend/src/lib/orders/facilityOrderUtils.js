@@ -298,12 +298,9 @@ export async function resolvePendingFacility({
   };
 }
 
-export function shouldUseBatchExtractedFacilityForEdit(order = {}) {
-  return (
-    order.creationSource === "auto" &&
-    Boolean(order.facilityMismatch) &&
-    Boolean(`${order.extractedFacilityId || ""}`.trim())
-  );
+export function shouldUseBatchExtractedFacilityForEdit(_order = {}) {
+  // Batch-scan orders keep the selected facility; extracted is informational only.
+  return false;
 }
 
 export async function resolveBatchMismatchFacilityForEdit(order = {}) {

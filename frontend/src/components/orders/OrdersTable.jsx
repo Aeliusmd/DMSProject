@@ -1914,8 +1914,8 @@ export default function OrdersTable({
                               className="flex w-full items-start gap-1 rounded-[6px] border border-amber-200 bg-amber-50 px-1.5 py-1"
                               title={
                                 order.extractedFacilityName
-                                  ? `Extracted facility: ${order.extractedFacilityName}`
-                                  : "Extracted facility differs from batch selection"
+                                  ? `The batchscan extracted facility is ${order.extractedFacilityName}`
+                                  : "The batchscan extracted facility differs from your selection"
                               }
                             >
                               <span
@@ -1925,10 +1925,9 @@ export default function OrdersTable({
                                 !
                               </span>
                               <p className="min-w-0 flex-1 text-[10px] font-medium leading-snug text-amber-700">
-                                Facility differs from chosen
                                 {order.extractedFacilityName
-                                  ? `: ${order.extractedFacilityName}`
-                                  : ""}
+                                  ? `The batchscan extracted facility is ${order.extractedFacilityName}`
+                                  : "The batchscan extracted facility differs from your selection"}
                               </p>
                             </div>
                           </div>

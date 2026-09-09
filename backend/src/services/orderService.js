@@ -1040,27 +1040,14 @@ function mapOrderListRow(
 
   const rush = calculateOrderRushLevel(row.subpoena_date || row.created_at);
   const writeOffState = resolveOrderWriteOffState(row, invoiceRow, xrayRow);
-  const hasBatchFacilityMismatch = Boolean(Number(row.facility_mismatch));
-  const displayFacilityId =
-    hasBatchFacilityMismatch && row.extracted_facility_id
-      ? row.extracted_facility_id
-      : row.facility_id;
-  const displayFacilityName =
-    hasBatchFacilityMismatch && row.extracted_facility_name
-      ? row.extracted_facility_name
-      : row.facility_name || "";
 
   const mapped = {
     id: row.order_number,
     dbId: row.id,
-    facility: displayFacilityId ? String(displayFacilityId) : "",
-    facilityName: displayFacilityName,
+    facility: row.facility_id ? String(row.facility_id) : "",
+    facilityName: row.facility_name || "",
     doctor: row.specific_doctor || "",
-    facilityInfo: buildFacilityBlock({
-      ...row,
-      facility_id: displayFacilityId,
-      facility_name: displayFacilityName,
-    }),
+    facilityInfo: buildFacilityBlock(row),
     year: orderYear,
     orderDateDisplay,
     status: writeOffState.status,
@@ -1343,15 +1330,6 @@ function mapOrderDetail(
   const primaryUploaded = mappedRecords.find((record) => record.hasFile);
   const rush = calculateOrderRushLevel(row.subpoena_date || row.created_at);
   const writeOffState = resolveOrderWriteOffState(row, invoiceRow, xrayRow);
-  const hasBatchFacilityMismatch = Boolean(Number(row.facility_mismatch));
-  const displayFacilityId =
-    hasBatchFacilityMismatch && row.extracted_facility_id
-      ? row.extracted_facility_id
-      : row.facility_id;
-  const displayFacilityName =
-    hasBatchFacilityMismatch && row.extracted_facility_name
-      ? row.extracted_facility_name
-      : row.facility_name || "";
 
   const mapped = {
     id: row.id,
@@ -1368,11 +1346,11 @@ function mapOrderDetail(
     isWriteOffs: writeOffState.isWriteOffs,
     workflowStages: workflowStages.map(mapWorkflowStage),
     notes: notes.map(mapNote),
-    facility: displayFacilityId ? String(displayFacilityId) : "",
-    facilityName: displayFacilityName,
+    facility: row.facility_id ? String(row.facility_id) : "",
+    facilityName: row.facility_name || "",
     facilityIsAutoCreated: Boolean(Number(row.facility_is_auto_created)),
     facilityProfileIncomplete: isFacilityProfileIncomplete({
-      facility_name: displayFacilityName || row.facility_name || "",
+      facility_name: row.facility_name || "",
       is_auto_created: row.facility_is_auto_created,
       email: row.facility_email,
     }),
@@ -2911,30 +2889,10 @@ async function createOrderFromExtract(extractId, actorId, options = {}) {
       }
     }
 
-    const useExtractedFacility = Boolean(
-      facilityMismatch &&
-        resolvedExtractedFacilityId &&
-        Number(resolvedExtractedFacilityId) !== Number(chosenFacilityId)
-    );
-    let orderFacility = chosenFacility;
-
-    if (useExtractedFacility) {
-      const extractedFacility = await Facility.findById(
-        resolvedExtractedFacilityId
-      );
-      if (extractedFacility) {
-        orderFacility = extractedFacility;
-      }
-    }
-
-    payload.facility = String(
-      useExtractedFacility ? resolvedExtractedFacilityId : chosenFacilityId
-    );
-    payload.facilityName =
-      orderFacility.facility_name ||
-      extractedFacilityName ||
-      chosenFacility.facility_name ||
-      "";
+    // Always assign the batch-selected facility. Extracted facility is stored
+    // only for mismatch messaging in the orders table.
+    payload.facility = String(chosenFacilityId);
+    payload.facilityName = chosenFacility.facility_name || "";
     payload.batchChosenFacilityId = String(chosenFacilityId);
     payload.extractedFacilityId = resolvedExtractedFacilityId
       ? String(resolvedExtractedFacilityId)
