@@ -138,7 +138,7 @@ export default function DashboardRecentOrders({ fillHeight = false }) {
   return (
     <section
       className={`flex min-h-0 w-full flex-col overflow-hidden rounded-[10px] border border-[#E2E8F0] bg-white shadow-sm ${
-        fillHeight ? "h-full" : ""
+        fillHeight ? "h-full flex-1" : ""
       }`}
     >
       <div className="flex shrink-0 flex-col gap-3 border-b border-[#F1F5F9] px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
