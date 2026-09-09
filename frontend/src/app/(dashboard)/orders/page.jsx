@@ -36,6 +36,7 @@ export default function OrdersPage() {
     let message = "";
     let failedCount = 0;
     let duplicateCount = 0;
+    let noExtractionCount = 0;
     let shownAt = Date.now();
 
     try {
@@ -45,6 +46,7 @@ export default function OrdersPage() {
         message = `${parsed?.message || ""}`.trim();
         failedCount = Number(parsed?.failedCount) || 0;
         duplicateCount = Number(parsed?.duplicateCount) || 0;
+        noExtractionCount = Number(parsed?.noExtractionCount) || 0;
         shownAt = Number(parsed?.at) || Date.now();
       }
     } catch {
@@ -59,7 +61,12 @@ export default function OrdersPage() {
       return undefined;
     }
 
-    setBatchScanFlash({ message, failedCount, duplicateCount });
+    setBatchScanFlash({
+      message,
+      failedCount,
+      duplicateCount,
+      noExtractionCount,
+    });
     const timer = window.setTimeout(() => {
       window.sessionStorage.removeItem(BATCH_SCAN_FLASH_KEY);
       setBatchScanFlash(null);
@@ -75,7 +82,8 @@ export default function OrdersPage() {
           <div
             className={`rounded-[8px] border px-3 py-2.5 text-[12px] font-medium shadow-sm ${
               batchScanFlash.failedCount > 0
-                ? batchScanFlash.duplicateCount > 0
+                ? batchScanFlash.duplicateCount > 0 ||
+                  batchScanFlash.noExtractionCount > 0
                   ? "border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]"
                   : "border-[#FDE68A] bg-[#FFFBEB] text-[#92400E]"
                 : "border-[#A7F3D0] bg-[#ECFDF5] text-[#047857]"

@@ -156,8 +156,15 @@ export default function BatchScanPage() {
           item?.reason === "duplicate_order_number" ||
           /already exists|duplicate/i.test(`${item?.message || ""}`)
       );
+      const noExtractionFailures = failed.filter(
+        (item) =>
+          item?.reason === "no_extraction" ||
+          /no details were extracted/i.test(`${item?.message || ""}`)
+      );
       const otherFailures = failed.filter(
-        (item) => !duplicateFailures.includes(item)
+        (item) =>
+          !duplicateFailures.includes(item) &&
+          !noExtractionFailures.includes(item)
       );
       const duplicateNumbers = [
         ...new Set(
@@ -191,6 +198,12 @@ export default function BatchScanPage() {
         message += " — order number already exists.";
       }
 
+      if (noExtractionFailures.length > 0) {
+        message += ` ${noExtractionFailures.length} subpoena${
+          noExtractionFailures.length === 1 ? "" : "s"
+        } skipped — no details were extracted.`;
+      }
+
       if (otherFailures.length > 0) {
         const otherMessages = otherFailures
           .map((item) => item?.message)
@@ -213,6 +226,7 @@ export default function BatchScanPage() {
             createdCount,
             failedCount,
             duplicateCount: duplicateFailures.length,
+            noExtractionCount: noExtractionFailures.length,
             mismatchCount,
             at: Date.now(),
           })

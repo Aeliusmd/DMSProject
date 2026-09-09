@@ -2821,6 +2821,55 @@ function resolveCustomerFacilityNameForMismatch(orderHints = {}, extract = {}) {
   );
 }
 
+/** True when batch OCR produced at least one usable order field. */
+function hasUsableBatchExtraction(extract = {}, orderHints = {}) {
+  const values = [
+    orderHints.applicantName,
+    orderHints.caseName,
+    orderHints.orderNumber,
+    orderHints.recNumber,
+    orderHints.ssn,
+    orderHints.dateOfBirth,
+    orderHints.dateOfInjury,
+    orderHints.dateOfInjuryText,
+    orderHints.customer,
+    orderHints.companyName,
+    orderHints.companyAddress,
+    orderHints.specificDoctor,
+    orderHints.doctorAddress,
+    orderHints.recordType,
+    orderHints.requestedRecord,
+    orderHints.subpoenaDate,
+    orderHints.dateRequested,
+    orderHints.depoDueDate,
+    orderHints.amount,
+    orderHints.chequeDate,
+    orderHints.chequeNumber,
+    extract.applicant_name,
+    extract.case_name,
+    extract.order_number,
+    extract.rec_number,
+    extract.ssn,
+    extract.date_of_birth,
+    extract.date_of_injury,
+    extract.customer,
+    extract.company_name,
+    extract.company_address,
+    extract.specific_doctor,
+    extract.doctor_address,
+    extract.record_type,
+    extract.requested_record,
+    extract.subpoena_date,
+    extract.date_requested,
+    extract.depo_due_date,
+    extract.amount,
+    extract.cheque_date,
+    extract.cheque_number,
+  ];
+
+  return values.some((value) => `${value ?? ""}`.trim() !== "");
+}
+
 async function createOrderFromExtract(extractId, actorId, options = {}) {
   const extract = await batchScanRepository.getExtractById(extractId);
 
@@ -2857,6 +2906,13 @@ async function createOrderFromExtract(extractId, actorId, options = {}) {
     mapSchemaToOrderHints(resolveExtractionSchema(rawExtraction)),
     extract
   );
+
+  if (!hasUsableBatchExtraction(extract, orderHints)) {
+    const err = new ApiError(422, "No details were extracted from this subpoena");
+    err.reason = "no_extraction";
+    throw err;
+  }
+
   const providerResolution = await resolveProviderFromHints(orderHints);
   orderHints = providerResolution.orderHints;
 
@@ -2982,16 +3038,20 @@ async function autoCreateOrdersFromBatch({ childIds = [], actorId, chosenFacilit
       });
     } catch (error) {
       const message = error.message || "Failed to auto-create order";
+      const isNoExtraction =
+        error.reason === "no_extraction" ||
+        /no details were extracted/i.test(message);
       const isDuplicate =
-        error.statusCode === 409 ||
-        /already exists/i.test(message) ||
-        /already processed/i.test(message);
+        !isNoExtraction &&
+        (error.statusCode === 409 ||
+          /already exists/i.test(message) ||
+          /already processed/i.test(message));
 
       let orderNumber = "";
       const orderNumberMatch = message.match(/\(([^)]+)\)\s*$/);
       if (orderNumberMatch?.[1]) {
         orderNumber = orderNumberMatch[1].trim();
-      } else {
+      } else if (!isNoExtraction) {
         try {
           const extract = await batchScanRepository.getExtractById(extractId);
           orderNumber = `${extract?.order_number || ""}`.trim();
@@ -3003,18 +3063,30 @@ async function autoCreateOrdersFromBatch({ childIds = [], actorId, chosenFacilit
       failed.push({
         extractId,
         orderNumber,
-        reason: isDuplicate ? "duplicate_order_number" : "create_failed",
-        message: isDuplicate
-          ? orderNumber
-            ? `Duplicate order number ${orderNumber} — order already exists`
-            : "Duplicate order — order number already exists"
-          : message,
+        reason: isNoExtraction
+          ? "no_extraction"
+          : isDuplicate
+            ? "duplicate_order_number"
+            : "create_failed",
+        message: isNoExtraction
+          ? "No details were extracted from this subpoena"
+          : isDuplicate
+            ? orderNumber
+              ? `Duplicate order number ${orderNumber} — order already exists`
+              : "Duplicate order — order number already exists"
+            : message,
       });
-      logger.error("Auto order creation failed", {
-        extractId,
-        orderNumber: orderNumber || undefined,
-        error: message,
-      });
+      if (isNoExtraction) {
+        logger.warn("Auto order creation skipped — empty extraction", {
+          extractId,
+        });
+      } else {
+        logger.error("Auto order creation failed", {
+          extractId,
+          orderNumber: orderNumber || undefined,
+          error: message,
+        });
+      }
     }
   }
 
