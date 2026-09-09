@@ -75,7 +75,7 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+        <div className="grid min-h-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
           <DashboardRecentOrders />
 
           {showFinancialWidgets && (
