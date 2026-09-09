@@ -70,20 +70,20 @@ export default function DashboardFinancialSummary() {
   }, [financial]);
 
   return (
-    <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-sm">
-      <h2 className="mb-4 text-[13px] font-semibold text-[#111827]">
+    <section className="rounded-[10px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-sm">
+      <h2 className="mb-2.5 text-[13px] font-semibold text-[#111827]">
         Financial Summary
       </h2>
 
-      {error && (
-        <p className="mb-3 text-[12px] font-medium text-red-500">{error}</p>
-      )}
+      {error ? (
+        <p className="mb-2 text-[12px] font-medium text-red-500">{error}</p>
+      ) : null}
 
-      <div className="space-y-4">
+      <div className="space-y-2">
         {(loading ? PLACEHOLDER_ITEMS : items).map((item) => (
-          <div key={item.label} className="flex items-center justify-between">
-            <span className="text-[12px] text-[#64748B]">{item.label}</span>
-            <span className={`text-[13px] font-semibold ${item.color}`}>
+          <div key={item.label} className="flex items-center justify-between gap-3">
+            <span className="text-[12px] leading-5 text-[#64748B]">{item.label}</span>
+            <span className={`text-[13px] font-semibold leading-5 ${item.color}`}>
               {loading ? "…" : item.value}
             </span>
           </div>
@@ -92,7 +92,7 @@ export default function DashboardFinancialSummary() {
 
       <Link
         href="/invoices"
-        className="mt-4 block text-center text-[12px] font-semibold text-[#0097B2] hover:underline"
+        className="mt-2.5 block text-center text-[12px] font-semibold text-[#0097B2] hover:underline"
       >
         View Outstanding Invoices
       </Link>

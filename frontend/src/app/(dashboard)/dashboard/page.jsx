@@ -91,7 +91,7 @@ export default function DashboardPage() {
 
   return (
     <DashboardShell>
-      <div className="flex min-h-0 min-w-0 flex-col gap-5">
+      <div className="flex min-h-0 min-w-0 flex-col gap-4">
         <DashboardOverview />
 
         <div className="flex flex-wrap items-center gap-3">
@@ -101,7 +101,7 @@ export default function DashboardPage() {
         </div>
 
         {showFinancialWidgets ? (
-          <div className="flex min-h-0 flex-col gap-4 xl:flex-row xl:items-start">
+          <div className="flex min-h-0 flex-col gap-3 xl:flex-row xl:items-start">
             <div
               className="min-h-0 min-w-0 flex-1 overflow-hidden"
               style={
@@ -115,7 +115,7 @@ export default function DashboardPage() {
 
             <div
               ref={rightColumnRef}
-              className="flex w-full shrink-0 flex-col gap-4 xl:w-[360px]"
+              className="flex w-full shrink-0 flex-col gap-3 xl:w-[360px]"
             >
               <DashboardFinancialSummary />
               <DashboardTopProviders />
