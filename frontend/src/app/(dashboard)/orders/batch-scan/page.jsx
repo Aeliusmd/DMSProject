@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardShell from "@/components/layout/DashboardShell";
 import SubpoenaExtractionOverlay from "@/components/orders/new-order/SubpoenaExtractionOverlay";
+import FilterSelect from "@/components/ui/FilterSelect";
 import { getFacilities } from "@/lib/facilities/facilityApi";
 import { uploadBatchScan } from "@/lib/orders/orderApi";
 
@@ -128,9 +129,8 @@ export default function BatchScanPage() {
     validateAndSetFile(file);
   };
 
-  const handleFacilityChange = (event) => {
-    const nextFacilityId = event.target.value;
-    setSelectedFacilityId(nextFacilityId);
+  const handleFacilityChange = (nextFacilityId) => {
+    setSelectedFacilityId(nextFacilityId || "");
     setSelectedFile(null);
     clearFileInput();
     setError("");
@@ -237,6 +237,14 @@ export default function BatchScanPage() {
   );
   const selectedFacilityName =
     selectedFacility?.facility || selectedFacility?.facilityName || "";
+  const facilityOptions = useMemo(
+    () =>
+      facilities.map((facility) => ({
+        value: String(facility.id),
+        label: facility.facility || facility.facilityName || `Facility #${facility.id}`,
+      })),
+    [facilities]
+  );
 
   return (
     <DashboardShell>
@@ -265,7 +273,7 @@ export default function BatchScanPage() {
               </p>
             </div>
 
-            <div className="mt-6 rounded-[10px] border border-[#E2E8F0] bg-white p-4 shadow-sm">
+            <div className="relative z-10 mt-6 overflow-visible rounded-[10px] border border-[#E2E8F0] bg-white p-4 shadow-sm">
               <label
                 htmlFor="batch-scan-facility"
                 className="mb-[6px] block text-[11px] font-medium text-[#475569]"
@@ -273,24 +281,21 @@ export default function BatchScanPage() {
                 Facility <span className="text-red-500">*</span>
               </label>
 
-              <select
+              <FilterSelect
                 id="batch-scan-facility"
-                value={selectedFacilityId}
+                value={selectedFacilityId ? String(selectedFacilityId) : ""}
                 onChange={handleFacilityChange}
-                disabled={facilitiesLoading || uploading}
-                className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]"
-              >
-                <option value="">
-                  {facilitiesLoading
+                options={facilityOptions}
+                placeholder={
+                  facilitiesLoading
                     ? "Loading facilities..."
-                    : "Select a facility"}
-                </option>
-                {facilities.map((facility) => (
-                  <option key={facility.id} value={facility.id}>
-                    {facility.facility || facility.facilityName}
-                  </option>
-                ))}
-              </select>
+                    : "Select a facility"
+                }
+                disabled={facilitiesLoading || uploading}
+                aria-label="Facility"
+                className="h-[38px] w-full rounded-[6px] border border-[#CBD5E1] bg-white px-3 text-[12px] text-[#111827] outline-none hover:border-[#94A3B8] focus:border-[#0097B2] focus:ring-2 focus:ring-[#0097B2]/10 disabled:cursor-not-allowed disabled:bg-[#F8FAFC] disabled:text-[#94A3B8]"
+                listClassName="max-h-64"
+              />
 
               {facilitiesError ? (
                 <p className="mt-2 text-[11px] font-medium text-red-500">

@@ -26,11 +26,16 @@ function ChevronIcon({ open }) {
 /**
  * Filter dropdown that always opens downward (never flips upward).
  * Replaces native <select>, which the browser may open upward when space is tight.
+ *
+ * Optional `placeholder` shows when value is empty and is not listed as a
+ * selectable option. Options may set `disabled: true` to render non-clickable.
  */
 export default function FilterSelect({
+  id,
   value,
   onChange,
   options = [],
+  placeholder = "",
   disabled = false,
   "aria-label": ariaLabel,
   className = "",
@@ -41,7 +46,9 @@ export default function FilterSelect({
   const listboxId = useId();
 
   const selected = options.find((option) => option.value === value);
-  const displayLabel = selected?.label ?? options[0]?.label ?? "";
+  const displayLabel =
+    selected?.label ??
+    (placeholder || options.find((option) => !option.disabled)?.label || "");
 
   useEffect(() => {
     if (!open) return undefined;
@@ -73,6 +80,7 @@ export default function FilterSelect({
   return (
     <div ref={containerRef} className="relative min-w-0">
       <button
+        id={id}
         type="button"
         disabled={disabled}
         aria-label={ariaLabel}
@@ -84,7 +92,13 @@ export default function FilterSelect({
         }}
         className={`flex w-full min-w-0 items-center justify-between gap-2 text-left ${className}`}
       >
-        <span className="min-w-0 truncate">{displayLabel}</span>
+        <span
+          className={`min-w-0 truncate ${
+            selected ? "" : "text-[#94A3B8]"
+          }`}
+        >
+          {displayLabel}
+        </span>
         <ChevronIcon open={open} />
       </button>
 
@@ -97,20 +111,30 @@ export default function FilterSelect({
         >
           {options.map((option) => {
             const isSelected = option.value === value;
+            const isOptionDisabled = Boolean(option.disabled);
+
             return (
-              <li key={`${option.value || "empty"}-${option.label}`} role="presentation">
+              <li
+                key={`${option.value || "empty"}-${option.label}`}
+                role="presentation"
+              >
                 <button
                   type="button"
                   role="option"
                   aria-selected={isSelected}
+                  aria-disabled={isOptionDisabled}
+                  disabled={isOptionDisabled}
                   onClick={() => {
+                    if (isOptionDisabled) return;
                     onChange?.(option.value);
                     setOpen(false);
                   }}
-                  className={`flex w-full px-3 py-2 text-left text-[12px] hover:bg-[#F1F5F9] ${
-                    isSelected
-                      ? "bg-[#E0F7FA] font-medium text-[#0097B2]"
-                      : "text-[#64748B]"
+                  className={`flex w-full px-3 py-2 text-left text-[12px] ${
+                    isOptionDisabled
+                      ? "cursor-not-allowed text-[#94A3B8]"
+                      : isSelected
+                        ? "bg-[#E0F7FA] font-medium text-[#0097B2] hover:bg-[#F1F5F9]"
+                        : "text-[#64748B] hover:bg-[#F1F5F9]"
                   }`}
                 >
                   <span className="truncate">{option.label}</span>
