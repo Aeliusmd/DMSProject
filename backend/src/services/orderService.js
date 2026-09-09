@@ -1028,11 +1028,8 @@ function mapOrderListRow(
   orderRecords = [],
   extras = {}
 ) {
-  const orderYear = extractYear(row.subpoena_date) || extractYear(row.created_at) || "";
-  const orderDateDisplay =
-    formatDobDisplay(row.subpoena_date) ||
-    formatDobDisplay(row.created_at) ||
-    "";
+  const orderYear = extractYear(row.created_at) || extractYear(row.subpoena_date) || "";
+  const orderDateDisplay = formatDobDisplay(row.created_at) || "";
   const dob = formatDobDisplay(row.dob);
   const ssn = formatSsnLastFourDisplay(row.ssn_last_four);
   const doiDisplay = formatDoiDisplay(row);

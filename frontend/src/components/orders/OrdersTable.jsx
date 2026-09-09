@@ -584,9 +584,7 @@ function formatFullDate(dateValue) {
 
 function getOrderIdColumnDate(order) {
   return (
-    order.orderDateDisplay ||
-    formatFullDate(order.subpoenaDate) ||
-    formatFullDate(order.createdAt) ||
+    formatFullDate(order.createdAt || order.created_at) ||
     ""
   );
 }
@@ -626,7 +624,7 @@ function ReportCaseCell({ order, onOpenSubpoena }) {
           </button>
           {subpoenaDate ? (
             <p className="mt-1 text-[10px] font-medium text-[#64748B]">
-              Subp: {subpoenaDate}
+              {subpoenaDate}
             </p>
           ) : null}
         </div>
@@ -2053,13 +2051,21 @@ export default function OrdersTable({
                           </p>
 
                           {order.hasSubpoenaFile && (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedSubpoenaOrder(order)}
-                              className="mt-2 block text-left text-[10px] font-semibold text-[#059669] hover:underline"
-                            >
-                              ✓ Subpoena
-                            </button>
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSubpoenaOrder(order)}
+                                className="block text-left text-[10px] font-semibold text-[#059669] hover:underline"
+                              >
+                                ✓ Subpoena
+                              </button>
+                              {order.subpoenaDateDisplay || order.subpoenaDate ? (
+                                <p className="mt-1 text-[10px] font-medium text-[#64748B]">
+                                  {order.subpoenaDateDisplay ||
+                                    formatShortDate(order.subpoenaDate)}
+                                </p>
+                              ) : null}
+                            </div>
                           )}
 
                           {order.court && (
