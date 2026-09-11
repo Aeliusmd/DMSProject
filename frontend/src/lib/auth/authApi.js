@@ -12,11 +12,13 @@ import {
   getAccessToken,
   getBrowserStaffOwner,
   getDeviceTrustToken,
+  getDeviceTrustTokens,
   getRefreshToken,
   getStaffBrowserUser,
   getStoredUser,
   isImpersonating,
   isSameStaffUser,
+  removeDeviceTrustTokens,
   setAuth,
   setBrowserStaffOwner,
   setDeviceTrustToken,
@@ -484,23 +486,33 @@ export async function request(
 export async function login({ email, password }) {
   await assertStaffSignInAllowed({ email: email.trim() });
 
+  const deviceTrustTokens = getDeviceTrustTokens();
+
   const data = await request("/auth/login", {
     method: "POST",
     body: {
       email,
       password,
+      deviceTrustTokens: deviceTrustTokens.length ? deviceTrustTokens : undefined,
       deviceTrustToken: getDeviceTrustToken() || undefined,
     },
   });
 
   const payload = data?.data || {};
 
+  if (Array.isArray(payload.invalidDeviceTrustTokens)) {
+    removeDeviceTrustTokens(payload.invalidDeviceTrustTokens);
+  }
+
   if (payload.clearDeviceTrust) {
     clearDeviceTrustToken();
   }
 
   if (payload.deviceTrustToken) {
-    setDeviceTrustToken(payload.deviceTrustToken);
+    setDeviceTrustToken(payload.deviceTrustToken, {
+      employeeId: payload.user?.id,
+      expiresAt: payload.deviceTrustExpiresAt,
+    });
   }
 
   if (!payload.requiresTwoFactor && payload.accessToken) {
@@ -528,10 +540,12 @@ export async function verifyTwoFactor({ sessionToken, code, trustDevice }) {
   const payload = data?.data || {};
 
   if (trustDevice && payload.deviceTrustToken) {
-    setDeviceTrustToken(payload.deviceTrustToken);
-  } else if (!trustDevice) {
-    clearDeviceTrustToken();
+    setDeviceTrustToken(payload.deviceTrustToken, {
+      employeeId: payload.user?.id,
+      expiresAt: payload.deviceTrustExpiresAt,
+    });
   }
+  // Do not clear other accounts' trust tokens when this login skips "trust device".
 
   return data;
 }

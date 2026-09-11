@@ -142,6 +142,7 @@ function getDeviceTrustTokenFromRequest(req) {
  * Collect unique device-trust tokens from body + cookie.
  * Callers should try each until one matches the signed-in employee —
  * a stale localStorage token must not hide a still-valid cookie.
+ * Supports multi-account trust on one browser via body.deviceTrustTokens[].
  */
 function getDeviceTrustTokensFromRequest(req) {
   const cookieToken = `${
@@ -151,9 +152,14 @@ function getDeviceTrustTokensFromRequest(req) {
     typeof req.body?.deviceTrustToken === "string"
       ? req.body.deviceTrustToken.trim()
       : "";
+  const bodyTokens = Array.isArray(req.body?.deviceTrustTokens)
+    ? req.body.deviceTrustTokens
+        .map((token) => `${token || ""}`.trim())
+        .filter(Boolean)
+    : [];
 
   const tokens = [];
-  for (const token of [bodyToken, cookieToken]) {
+  for (const token of [...bodyTokens, bodyToken, cookieToken]) {
     if (token && !tokens.includes(token)) {
       tokens.push(token);
     }

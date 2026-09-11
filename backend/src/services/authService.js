@@ -191,29 +191,41 @@ async function login({
 
     await Employee.updateLastLogin(employee.id);
 
-    // Drop any other stale trust tokens presented on this request.
+    // Only prune tokens that are expired/unknown — keep other accounts'
+    // valid trusted-device rows on this browser.
+    const invalidDeviceTrustTokens = [];
     for (const token of candidateTokens) {
-      if (token !== matchedToken) {
+      if (token === matchedToken) continue;
+      const candidate = await AuthTrustedDevice.findValidByToken(token);
+      if (!candidate) {
         await AuthTrustedDevice.deleteByToken(token);
+        invalidDeviceTrustTokens.push(token);
       }
     }
 
-    return issueAuthTokens({
-      employee,
-      session,
-      sessionToken,
-      trustDevice: true,
-      deviceTrustToken: matchedToken,
-      deviceTrustExpiresAt: trustedDevice.expires_at,
-      ipAddress,
-      userAgent,
-    });
+    return {
+      ...(await issueAuthTokens({
+        employee,
+        session,
+        sessionToken,
+        trustDevice: true,
+        deviceTrustToken: matchedToken,
+        deviceTrustExpiresAt: trustedDevice.expires_at,
+        ipAddress,
+        userAgent,
+      })),
+      invalidDeviceTrustTokens,
+    };
   }
 
-  if (candidateTokens.length) {
-    // Stale / wrong-account trust tokens — drop them from DB if present.
-    for (const token of candidateTokens) {
+  // No match for this employee. Keep other accounts' valid trust rows;
+  // only remove expired/unknown tokens from DB + tell the client to drop them.
+  const invalidDeviceTrustTokens = [];
+  for (const token of candidateTokens) {
+    const candidate = await AuthTrustedDevice.findValidByToken(token);
+    if (!candidate) {
       await AuthTrustedDevice.deleteByToken(token);
+      invalidDeviceTrustTokens.push(token);
     }
   }
 
@@ -246,7 +258,8 @@ async function login({
     email: tokenService.maskEmail(employee.email),
     expiresInMinutes: config.twoFactor.expiresMinutes,
     trustedDeviceDays: config.session.trustedDeviceDays,
-    clearDeviceTrust: candidateTokens.length > 0,
+    invalidDeviceTrustTokens,
+    clearDeviceTrust: false,
     devCodeLogged: emailResult.devLogged === true,
   };
 }

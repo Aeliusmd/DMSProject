@@ -6,11 +6,79 @@ const USER_KEY = "dms_user";
 const ACCESS_EXPIRES_KEY = "dms_access_expires_at";
 const IMPERSONATION_FLAG_KEY = "dms_impersonating";
 const SESSION_USER_KEY = "dms_session_user";
-const DEVICE_TRUST_TOKEN_KEY = "dms_device_trust_token";
+const DEVICE_TRUST_TOKEN_KEY = "dms_device_trust_token"; // legacy single token
+const DEVICE_TRUST_TOKENS_KEY = "dms_device_trust_tokens"; // multi-account list
 const BROWSER_STAFF_OWNER_KEY = "dms_browser_staff_owner";
 
 function isBrowser() {
   return typeof window !== "undefined";
+}
+
+function readDeviceTrustEntries() {
+  if (!isBrowser()) return [];
+
+  try {
+    const raw = localStorage.getItem(DEVICE_TRUST_TOKENS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((entry) => {
+            if (typeof entry === "string" && entry.trim()) {
+              return { employeeId: null, token: entry.trim(), expiresAt: null };
+            }
+            const token = `${entry?.token || ""}`.trim();
+            if (!token) return null;
+            const employeeId =
+              entry?.employeeId == null || entry?.employeeId === ""
+                ? null
+                : Number(entry.employeeId);
+            return {
+              employeeId: Number.isFinite(employeeId) ? employeeId : null,
+              token,
+              expiresAt: entry?.expiresAt || null,
+            };
+          })
+          .filter(Boolean);
+      }
+    }
+
+    // Migrate legacy single-token key.
+    const legacy = localStorage.getItem(DEVICE_TRUST_TOKEN_KEY);
+    if (legacy && legacy.trim()) {
+      return [{ employeeId: null, token: legacy.trim(), expiresAt: null }];
+    }
+  } catch {
+    // Ignore storage failures.
+  }
+
+  return [];
+}
+
+function writeDeviceTrustEntries(entries) {
+  if (!isBrowser()) return;
+  try {
+    const cleaned = (Array.isArray(entries) ? entries : [])
+      .map((entry) => ({
+        employeeId:
+          entry?.employeeId == null || !Number.isFinite(Number(entry.employeeId))
+            ? null
+            : Number(entry.employeeId),
+        token: `${entry?.token || ""}`.trim(),
+        expiresAt: entry?.expiresAt || null,
+      }))
+      .filter((entry) => entry.token);
+
+    localStorage.setItem(DEVICE_TRUST_TOKENS_KEY, JSON.stringify(cleaned));
+    // Keep legacy key in sync with the most recent token for older code paths.
+    if (cleaned.length) {
+      localStorage.setItem(DEVICE_TRUST_TOKEN_KEY, cleaned[cleaned.length - 1].token);
+    } else {
+      localStorage.removeItem(DEVICE_TRUST_TOKEN_KEY);
+    }
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function clearLegacyLocalTokenStorage() {
@@ -244,29 +312,73 @@ export function clearAuth() {
 }
 
 export function getDeviceTrustToken() {
-  if (!isBrowser()) return null;
-  try {
-    return localStorage.getItem(DEVICE_TRUST_TOKEN_KEY) || null;
-  } catch {
-    return null;
-  }
+  const tokens = getDeviceTrustTokens();
+  return tokens.length ? tokens[tokens.length - 1] : null;
 }
 
-export function setDeviceTrustToken(token) {
-  if (!isBrowser()) return;
-  try {
-    if (typeof token === "string" && token) {
-      localStorage.setItem(DEVICE_TRUST_TOKEN_KEY, token);
-    }
-  } catch {
-    // Ignore storage failures.
+export function getDeviceTrustTokens() {
+  const now = Date.now();
+  const entries = readDeviceTrustEntries();
+  const validEntries = entries.filter((entry) => {
+    if (!entry.expiresAt) return true;
+    const expiresMs = new Date(entry.expiresAt).getTime();
+    return !Number.isFinite(expiresMs) || expiresMs > now;
+  });
+
+  if (validEntries.length !== entries.length) {
+    writeDeviceTrustEntries(validEntries);
   }
+
+  return [...new Set(validEntries.map((entry) => entry.token))];
+}
+
+export function setDeviceTrustToken(token, { employeeId = null, expiresAt = null } = {}) {
+  if (!isBrowser()) return;
+  const nextToken = typeof token === "string" ? token.trim() : "";
+  if (!nextToken) return;
+
+  const normalizedEmployeeId =
+    employeeId == null || employeeId === ""
+      ? null
+      : Number(employeeId);
+  const hasEmployeeId = Number.isFinite(normalizedEmployeeId);
+
+  let entries = readDeviceTrustEntries().filter((entry) => entry.token !== nextToken);
+
+  if (hasEmployeeId) {
+    entries = entries.filter(
+      (entry) => Number(entry.employeeId) !== normalizedEmployeeId
+    );
+  }
+
+  entries.push({
+    employeeId: hasEmployeeId ? normalizedEmployeeId : null,
+    token: nextToken,
+    expiresAt: expiresAt || null,
+  });
+
+  writeDeviceTrustEntries(entries);
+}
+
+export function removeDeviceTrustTokens(tokens = []) {
+  if (!isBrowser()) return;
+  const removeSet = new Set(
+    (Array.isArray(tokens) ? tokens : [])
+      .map((token) => `${token || ""}`.trim())
+      .filter(Boolean)
+  );
+  if (!removeSet.size) return;
+
+  writeDeviceTrustEntries(
+    readDeviceTrustEntries().filter((entry) => !removeSet.has(entry.token))
+  );
 }
 
 export function clearDeviceTrustToken() {
   if (!isBrowser()) return;
   try {
     localStorage.removeItem(DEVICE_TRUST_TOKEN_KEY);
+    localStorage.removeItem(DEVICE_TRUST_TOKENS_KEY);
   } catch {
     // Ignore storage failures.
   }

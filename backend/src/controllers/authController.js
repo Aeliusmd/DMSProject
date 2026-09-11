@@ -9,6 +9,7 @@ const {
   clearPortalAuthCookies,
   getDeviceTrustTokensFromRequest,
   getRefreshTokenFromRequest,
+  PORTAL_COOKIES,
   setDeviceTrustCookie,
   setPortalAuthCookies,
 } = require("../utils/authCookies");
@@ -44,7 +45,19 @@ exports.login = asyncHandler(async (req, res) => {
     ...getRequestMeta(req),
   });
 
-  if (result.clearDeviceTrust) {
+  const invalidTokens = Array.isArray(result.invalidDeviceTrustTokens)
+    ? result.invalidDeviceTrustTokens
+    : [];
+  const cookieToken = `${
+    req.cookies?.[PORTAL_COOKIES.internal.deviceTrust] || ""
+  }`.trim();
+
+  // Only clear the single cookie slot when that cookie token itself is invalid.
+  // Do not wipe trust for other accounts on this browser.
+  if (
+    result.clearDeviceTrust ||
+    (cookieToken && invalidTokens.includes(cookieToken))
+  ) {
     clearDeviceTrustCookie(res);
   }
 
@@ -111,9 +124,9 @@ exports.verifyTwoFactor = asyncHandler(async (req, res) => {
       result.deviceTrustToken,
       result.deviceTrustExpiresAt
     );
-  } else {
-    clearDeviceTrustCookie(res);
   }
+  // Do not clear the device-trust cookie when trustDevice is false —
+  // another account on this browser may still have a valid trust token.
 
   return ApiResponse.success(res, buildAuthPayload(result), "Authentication successful");
 });
